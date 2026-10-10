@@ -2142,7 +2142,7 @@ function rowKeyActions($: EngineInterface, r: RowView, isAllShown: boolean): { k
     } else if (p.action === 'done') {
       keys.push({ ...base, key: `done-${id}`, hotkey: 'd', isMain: true })
     } else if (p.action === 'address' && finding) {
-      keys.push({ ...base, key: `address-${id}`, hotkey: 'a', isMain: true, icon: '→' })
+      keys.push({ ...base, key: `address-${id}`, hotkey: 'a', isMain: true })
     } else if (p.action === 'type') {
       // The press opens the field; sending from it is what records the reply.
       more.push({
@@ -3071,7 +3071,6 @@ export const register: Register = on => {
           {
             key: `address-${t.id}`,
             label: again(id, 'thread-address', 'Address'),
-            icon: '→',
             isMain: true,
             hotkey: 'a',
             kind: 'handoff',
@@ -4326,7 +4325,6 @@ export const register: Register = on => {
               {
                 key: `address-all-${pr.ref}`,
                 label: again(prMarkId(pr.ref), 'pr-address-all', `Address all ${waitingOn.length} threads`),
-                icon: '→',
                 kind: 'handoff' as const,
                 onPress: prPress({ action: 'pr-address-all', ref: pr.ref }),
               },
