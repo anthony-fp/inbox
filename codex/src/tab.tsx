@@ -636,7 +636,8 @@ function rowActions(row: Row): { keys: Key[]; more: Key[] } {
       draw()
     },
   }
-  if (row.fold && !details.has(row.id)) return { keys: [detailsKey], more: [] }
+  // Details only shows more of the row, so it draws as plain text with the follow-ups, never as a main action.
+  if (row.fold && !details.has(row.id)) return { keys: [], more: [detailsKey] }
 
   return row.fold ? { keys: row.keys, more: [...row.more, detailsKey] } : { keys: row.keys, more: row.more }
 }
