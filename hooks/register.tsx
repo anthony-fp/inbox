@@ -2845,6 +2845,8 @@ export const register: Register = on => {
     // it drops the section cards, the tab panels and the blank lines between parts.
     const isInline = e.props.placement === 'inline'
     const blankLine = isInline ? 0 : 1
+    // A desktop row pads the same open, closed or just closed, so its title stays put when it opens.
+    const rowPad = look === 'desktop' ? 2 * DESKTOP_ROW_PAD : blankLine
     const [
       { ledger, prViews: prState, lastActions, notes, stop, view, isDemo, isUnread, now },
       tab,
@@ -3529,7 +3531,7 @@ export const register: Register = on => {
         >
           <Box width={1} flexShrink={0} />
           {tree ? <Box width={3} flexShrink={0} /> : null}
-          <Box width={tree ? 3 : 4} flexShrink={0} paddingLeft={tree ? 0 : 2} paddingY={isSelected ? blankLine : 0}>
+          <Box width={tree ? 3 : 4} flexShrink={0} paddingLeft={tree ? 0 : 2} paddingY={isSelected ? rowPad : 0}>
             {/* Without a Client, desktop's title alone opens the row, so the list draws half as many native buttons. */}
             {row.handleTone ? (
               <Text color={pal.mark[row.handleTone]}>{row.handle}</Text>
@@ -3545,7 +3547,7 @@ export const register: Register = on => {
             )}
           </Box>
           {isSelected ? (
-            <Box flexDirection="column" flexShrink={1} flexGrow={1} paddingRight={1} paddingY={blankLine}>
+            <Box flexDirection="column" flexShrink={1} flexGrow={1} paddingRight={1} paddingY={rowPad}>
               {row.meta}
               <Text wrap="wrap">
                 <Text bold>{row.title}</Text>
@@ -4095,7 +4097,6 @@ export const register: Register = on => {
         ) : null}
       </Box>
     )
-    const settledPad = look === 'desktop' ? 2 * DESKTOP_ROW_PAD : 0
     const settledRow = ({ settled: r, state }: Extract<Entry, { settled: RowView }>, pos?: TreePos) => {
       const undo = r.actions.find(a => a.press.action === 'undo')?.press ?? null
       const content = settledContent(r.title, state.label, state.at, undo, pos ? 7 : 5, state.isQueued, state.isLapsed)
@@ -4103,7 +4104,7 @@ export const register: Register = on => {
       const mark = state.isQueued ? <Text> </Text> : <Text color={state.isLapsed ? pal.muted : pal.mark.done}>✓</Text>
       // In a group's tree, or flat as Findings lists its rows. On desktop it pads itself as a closed row does.
       return pos ? (
-        <Box key={`settled-${r.id}`} flexDirection="column" paddingY={settledPad}>
+        <Box key={`settled-${r.id}`} flexDirection="column" paddingY={look === 'desktop' ? rowPad : 0}>
           {treeRow(pos, mark, content)}
         </Box>
       ) : (
@@ -4112,7 +4113,7 @@ export const register: Register = on => {
           flexDirection="row"
           alignItems="flex-start"
           overflow="hidden"
-          paddingY={settledPad}
+          paddingY={look === 'desktop' ? rowPad : 0}
         >
           <Box width={1} flexShrink={0} />
           <Box width={4} flexShrink={0} paddingLeft={2}>
