@@ -866,11 +866,6 @@ function Panel({ row, isClosing }: { row: Row; isClosing: boolean }) {
   )
 }
 
-/**
- * A row that just closed, on one line as tall as any other row: a ✓, how it closed, then what it was. After the
- * person's own Done or Dismiss, Undo sits at the right, its fill emptying from the right as Undo's time runs
- * out. While Undo's press is out, the fill stops and the row stays.
- */
 function SettledView({ settled: r }: Extract<Entry, { settled: RowView }>) {
   const { state } = r
   if (state.is !== 'settled') return null
@@ -886,10 +881,9 @@ function SettledView({ settled: r }: Extract<Entry, { settled: RowView }>) {
       <span class={isGood ? 'mark done' : 'mark'}>{state.isQueued ? '' : '✓'}</span>
       {/* An error wraps, so none of it is cut. */}
       <div class={error ? 'settled-line wraps' : 'settled-line'}>
-        <span class={isGood ? 'outcome-label tone-done' : 'outcome-label'}>
-          {state.isQueued ? `Queued: ${state.label}` : state.label}
-        </span>
-        {error ? <span class="tone-error"> · {error}</span> : <span class="what"> · {r.title}</span>}
+        <span class="what">{r.title}</span>
+        <span class="outcome-label"> · {state.isQueued ? `Queued: ${state.label}` : state.label}</span>
+        {error ? <span class="tone-error"> · {error}</span> : null}
       </div>
       {state.canUndo ? (
         <button type="button" class="key undo" disabled={isUndoing} onClick={() => void undo(r)}>

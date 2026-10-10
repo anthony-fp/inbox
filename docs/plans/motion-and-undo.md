@@ -53,8 +53,8 @@ After a press in a list, closed rows and the fold show no hover fill until the p
 The settled row in the Codex tab is one line, as tall as an open row's closed line, so the list keeps its rhythm:
 
 - **Mark:** ✓ in green for Done and answers. For Dismissed, Expired and closes by Codex, a muted ✓, matching how the Closed fold draws them.
-- **Outcome first:** "Done" or "Dismissed" in weight 500, green for Done and answers. The person just caused it, so it reads first.
-- **Then the title:** muted, after " · ", cut with an ellipsis.
+- **Title first:** primary text, so the person can identify the row before reading its result. Long titles end in an ellipsis.
+- **Then the outcome:** the selected option, "Done" or "Dismissed", in muted text after " · ". It keeps space beside the title and takes at most half the text area.
 - **Undo:** a gray pill with the undo icon at the row's right. It shows only when the person's own Done or Dismiss closed the row.
 - **Countdown:** Undo's fill is the time it has left. It empties from the right over 5.12 s, over a fainter track, so the time left sits on the button it limits. A row with no Undo has no countdown, and simply leaves when its time is up.
 
@@ -62,7 +62,7 @@ Pressing Undo:
 
 - The button reads "Undoing…" and takes no second press. The fill stops, and the row does not leave while the press is out.
 - On success, the row grows back to its open form in place, with "✓ Undo" under its title for 5.12 s, as every other press shows its result.
-- On failure, the error replaces the title, in the error color, while the row has time left. It wraps, so none of it is cut. If the row's time is up, the row leaves and the error shows under the tab row.
+- On failure, the error follows the title and outcome, in the error color, while the row has time left. It wraps, so none of it is cut. If the row's time is up, the row leaves and the error shows under the tab row.
 
 ## The Claude app pane
 
