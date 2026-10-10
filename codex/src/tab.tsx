@@ -40,7 +40,6 @@ type Key = { hotkey?: string; label: string; isPrimary?: boolean; icon?: IconNam
  */
 const ICONS = {
   check: 'M20 6 9 17l-5-5',
-  arrow: 'M5 12h14M13 6l6 6-6 6',
   play: 'M7 4.5v15l12-7.5z',
   copy: 'M9 9h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1zM5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1',
   open: 'M7 17 17 7M8 7h9v9',
@@ -428,7 +427,7 @@ function rowKeys(r: RowView): { keys: Key[]; more: Key[] } {
       const icon = stepIcon(step)
       keys.push({ ...lettered(), label, ...(icon ? { icon } : {}), run: () => void act(id, p, undefined, pending) })
     } else if (p.action === 'done') keys.push({ hotkey: 'd', label, icon: 'check', run: () => void act(id, p) })
-    else if (p.action === 'address') keys.push({ hotkey: 'a', label, icon: 'arrow', run: () => void act(id, p) })
+    else if (p.action === 'address') keys.push({ hotkey: 'a', label, run: () => void act(id, p) })
     else if (p.action === 'type') more.push({ hotkey: 't', label, icon: 'pencil', run: () => startTyping(id) })
     else if (p.action === 'explain' || p.action === 'discuss')
       more.push({ hotkey: 'e', label, icon: 'talk', run: () => void act(id, p) })
