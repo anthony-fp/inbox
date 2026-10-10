@@ -246,12 +246,13 @@
         display: flex;
         flex-direction: column;
       }
-      /* Its space above is padding, not a gap, so the row's height grows smoothly when the panel mounts. */
+      /* Its space above is padding, not a gap, so the row's height grows smoothly when the panel mounts. Its 2px below,
+         with the row's 6px, matches the 8px from the row's top edge to its title's text. */
       .panel {
         display: flex;
         flex-direction: column;
         gap: 8px;
-        padding: 8px 0 6px;
+        padding: 8px 0 2px;
       }
       .content > .tight,
       .content.tight {
@@ -464,6 +465,7 @@
         align-items: center;
       }
       .settled-line {
+        display: flex;
         flex: 1;
         min-width: 0;
         overflow: hidden;
@@ -471,13 +473,24 @@
         white-space: nowrap;
       }
       .settled-line.wraps {
+        display: block;
         white-space: normal;
       }
-      .settled .outcome-label {
-        font-weight: 500;
-      }
       .settled .what {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .settled .outcome-label {
+        flex: none;
+        max-width: 50%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: pre;
         color: var(--muted);
+      }
+      .settled-line.wraps .outcome-label {
+        white-space: normal;
       }
       /* Undo's fill is the time it has left. The pill keeps the line's height, so the row does not grow. */
       .key.undo {
