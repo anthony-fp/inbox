@@ -3944,8 +3944,16 @@ export const register: Register = on => {
         </Text>
       </Box>
     )
+    // On desktop an invisible border rounds the card's corners. It pads the content by half a line, which
+    // stands in for the card's own padding.
+    const isRoundedCard = look === 'desktop' && !isInline
     const section = (children: JSX.Element | JSX.Element[]) => (
-      <Box flexDirection="column" paddingY={blankLine} backgroundColor={isInline ? undefined : pal.card}>
+      <Box
+        flexDirection="column"
+        paddingY={isRoundedCard ? 0 : blankLine}
+        backgroundColor={isInline ? undefined : pal.card}
+        {...(isRoundedCard ? { borderStyle: 'single', borderColor: '#0000' } : {})}
+      >
         {children}
       </Box>
     )
