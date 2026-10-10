@@ -1,7 +1,8 @@
 // The MCP server's entry point, bundled as dist/server.mjs. One JSON-RPC
 // message per line on stdin and stdout.
 
-import { dirname } from 'node:path'
+import { readFile, stat } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 
@@ -19,12 +20,33 @@ async function appCli(): Promise<string> {
   return r.code === 0 && /(^|\/)codex$/.test(path) ? path : 'codex'
 }
 
+/**
+ * Reads the page that `npm --prefix codex run dev` keeps built. It writes dev.json, naming the page, into
+ * this data folder while it runs. The page is read again only when its file changes.
+ */
+function devPageIn(dir: string): () => Promise<string | null> {
+  let cached: { path: string; mtimeMs: number; html: string } | null = null
+  return async () => {
+    try {
+      const { tab } = JSON.parse(await readFile(join(dir, 'dev.json'), 'utf8')) as { tab: string }
+      const { mtimeMs } = await stat(tab)
+      if (cached?.path !== tab || cached.mtimeMs !== mtimeMs)
+        cached = { path: tab, mtimeMs, html: await readFile(tab, 'utf8') }
+      return cached.html
+    } catch {
+      return null
+    }
+  }
+}
+
+const dir = dataDir(process.env, dirname(dirname(fileURLToPath(import.meta.url))))
 const handle = makeServer({
-  dir: dataDir(process.env, dirname(dirname(fileURLToPath(import.meta.url)))),
+  dir,
   now: Date.now,
   exec: run,
   tabHtml: TAB_HTML,
   fallbackCli: appCli,
+  devPage: devPageIn(dir),
 })
 
 createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', line => {

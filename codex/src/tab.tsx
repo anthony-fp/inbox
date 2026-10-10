@@ -261,7 +261,9 @@ const READ_TIMEOUT_MS = 3 * POLL_MS
 async function read() {
   const seq = ++requested
   try {
-    applyView(await callTool<View>('inbox_view', { demo: isDemo }, READ_TIMEOUT_MS), seq)
+    const next = await callTool<View>('inbox_view', { demo: isDemo }, READ_TIMEOUT_MS)
+    if (next.devPage && next.devPage !== PAGE) void swapPage()
+    applyView(next, seq)
   } catch (err) {
     if (view) pollFailures++
     else readError = failureText(err)
@@ -285,6 +287,28 @@ function failureText(err: unknown): string {
     ) || 'No reason given'
 
   return capitalized(/[.!?…]$/.test(reason) ? reason : `${reason}.`)
+}
+
+/** This page's address, which the server stamps into each page it serves. */
+const PAGE = (window as { __inboxPage?: string }).__inboxPage
+let isSwapping = false
+
+/** Replaces this page with the one the dev build has ready. The new page connects to Codex again. */
+async function swapPage() {
+  if (isSwapping) return
+  isSwapping = true
+  try {
+    const { html } = await callTool<{ html: string }>('inbox_tab_page', {}, READ_TIMEOUT_MS)
+    // document.open keeps this window's timers, so the old page's polls and redraws would run beside the new
+    // page's. Timer ids count up from 1, so clearing every id up to a new one stops them all.
+    const last = window.setTimeout(() => undefined, 0)
+    for (let i = 1; i <= last; i++) clearTimeout(i)
+    document.open()
+    document.write(html)
+    document.close()
+  } catch {
+    isSwapping = false
+  }
 }
 
 async function poll() {

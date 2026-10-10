@@ -56,6 +56,16 @@ npm run build    # after changing src/ or the shared modules
 npm test
 ```
 
+A change shows in Codex after `npm run build`, a reinstall with
+`codex plugin add inbox@inbox`, and a new chat. Each build gives the tab's
+page a new address, so Codex does not reuse its saved copy.
+
+To change the tab while you watch it, run `npm run dev`. It rebuilds the
+tab's page on each save and points the installed plugin's server at it. An
+open Inbox tab swaps to the new page within a few seconds. The tab can swap
+only if its own page came from a build that has this feature. Changes to the
+server or the hooks still need a build and a reinstall.
+
 `../scripts/check.sh` checks the bundles are current, the types and the
 tests. The design and what was measured are in
 [docs/plans/codex-plugin.md](../docs/plans/codex-plugin.md).

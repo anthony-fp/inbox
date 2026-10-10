@@ -63,7 +63,21 @@ const toolsFor = (uri: string) => [
     },
     _meta: APP_ONLY,
   },
+  {
+    name: 'inbox_tab_page',
+    description: 'The tab page the dev build keeps built.',
+    inputSchema: { type: 'object', properties: {} },
+    _meta: APP_ONLY,
+  },
 ]
+
+/** The page with its own build's address stamped in, so a tab can tell when the dev build has a newer one. */
+function stamped(tabHtml: string): string {
+  return tabHtml.replace(
+    '</head>',
+    () => `<script>window.__inboxPage = ${JSON.stringify(tabUri(tabHtml))}</script></head>`,
+  )
+}
 
 export type ServerDeps = {
   dir: string
@@ -72,6 +86,8 @@ export type ServerDeps = {
   tabHtml: string
   /** The codex binary to run `queue` with when no hook has named one yet. */
   fallbackCli: () => Promise<string>
+  /** The tab page `npm --prefix codex run dev` keeps built, while it runs. */
+  devPage?: () => Promise<string | null>
 }
 
 type Message = { jsonrpc: '2.0'; id?: number | string; method?: string; params?: Record<string, unknown> }
@@ -288,9 +304,17 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
         return text(inboxToolText(viewOf(s, now())))
       }
       case 'inbox_view': {
-        if (args.demo === true) return { ...text('Inbox demo'), structuredContent: served(demoOf(id), id) }
+        const devPage = await deps.devPage?.()
+        const dev = devPage ? { devPage: tabUri(devPage) } : {}
+        if (args.demo === true)
+          return { ...text('Inbox demo'), structuredContent: { ...served(demoOf(id), id), ...dev } }
         const s = await updateState(dir, id, s => ({ ...s, tabSeenAt: now() }))
-        return { ...text('Inbox view'), structuredContent: served(s, id) }
+        return { ...text('Inbox view'), structuredContent: { ...served(s, id), ...dev } }
+      }
+      case 'inbox_tab_page': {
+        const devPage = await deps.devPage?.()
+        if (!devPage) return { ...text('Not done: no dev build is running.'), isError: true }
+        return { ...text('Tab page'), structuredContent: { html: stamped(devPage) } }
       }
       case 'inbox_press': {
         const p = args.press as RowPress
@@ -328,7 +352,7 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
       case 'resources/templates/list':
         return ok({ resourceTemplates: [] })
       case 'resources/read':
-        return ok({ contents: [{ uri, mimeType: TAB_MIME, text: deps.tabHtml }] })
+        return ok({ contents: [{ uri, mimeType: TAB_MIME, text: stamped(deps.tabHtml) }] })
       case 'ping':
         return ok({})
     }

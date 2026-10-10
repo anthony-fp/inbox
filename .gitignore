@@ -7,3 +7,6 @@
 # The Codex plugin's tools and test bundles; its plugin/dist bundles are committed
 codex/node_modules/
 codex/test-dist/
+
+# The tab page `npm --prefix codex run dev` keeps built
+codex/.dev/

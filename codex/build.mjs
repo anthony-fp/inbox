@@ -8,8 +8,11 @@
 //   node build.mjs --check  exits 1 when plugin/dist differs from a fresh build
 //   node build.mjs --tests  bundles tests/*.spec.ts into test-dist for `node --test`. They aren't
 //                          *.test.ts, which `claude plugin test` would run as the mod's.
+//   node build.mjs --dev    rebuilds the tab's page into .dev/tab.html on each save, and points the
+//                          installed plugin's server at it, so an open Inbox tab swaps to it.
 
-import { readdirSync, readFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync, rmSync, watch, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -18,31 +21,41 @@ import * as esbuild from 'esbuild'
 const here = dirname(fileURLToPath(import.meta.url))
 const mode = process.argv[2] ?? ''
 
-const tab = await esbuild.build({
-  absWorkingDir: here,
-  entryPoints: ['src/tab.tsx'],
-  bundle: true,
-  platform: 'browser',
-  format: 'iife',
-  target: 'chrome120',
-  jsx: 'automatic',
-  jsxImportSource: 'preact',
-  minify: true,
-  legalComments: 'none',
-  logLevel: 'warning',
-  write: false,
-})
-const tabScript = tab.outputFiles[0].text
-// The script sits inside a <script> element, which the first "</script" in it would end.
-if (/<\/script/i.test(tabScript))
-  throw new Error('The tab script contains "</script", which would end its element early.')
+/** The tab's script, bundled for the browser. */
+async function buildTabScript() {
+  const tab = await esbuild.build({
+    absWorkingDir: here,
+    entryPoints: ['src/tab.tsx'],
+    bundle: true,
+    platform: 'browser',
+    format: 'iife',
+    target: 'chrome120',
+    jsx: 'automatic',
+    jsxImportSource: 'preact',
+    minify: true,
+    legalComments: 'none',
+    logLevel: 'warning',
+    write: false,
+  })
+  const script = tab.outputFiles[0].text
+  // The script sits inside a <script> element, which the first "</script" in it would end.
+  if (/<\/script/i.test(script))
+    throw new Error('The tab script contains "</script", which would end its element early.')
+
+  return script
+}
+
+/** tab.html with its script inlined. */
+const tabPage = (html, script) => html.replace('/*TAB_SCRIPT*/', () => script)
+
+const tabScript = mode === '--dev' ? '' : await buildTabScript()
 
 /** Loads tab.html with the tab's script inlined. */
 const inlineTab = {
   name: 'inline-tab',
   setup(build) {
     build.onLoad({ filter: /[/\\]tab\.html$/ }, args => ({
-      contents: readFileSync(args.path, 'utf8').replace('/*TAB_SCRIPT*/', () => tabScript),
+      contents: tabPage(readFileSync(args.path, 'utf8'), tabScript),
       loader: 'text',
     }))
   },
@@ -65,7 +78,42 @@ const entries = {
   update: 'src/update-main.ts',
 }
 
-if (mode === '--tests') {
+if (mode === '--dev') {
+  const page = join(here, '.dev', 'tab.html')
+  // The data folder Codex gives the installed plugin, as dataDir in src/state.ts maps it.
+  const pointer = join(
+    process.env.CODEX_HOME || join(homedir(), '.codex'),
+    'plugins',
+    'data',
+    'inbox-inbox',
+    'dev.json',
+  )
+  const write = async () => {
+    try {
+      writeFileSync(page, tabPage(readFileSync(join(here, 'src', 'tab.html'), 'utf8'), await buildTabScript()))
+      console.log(`${new Date().toLocaleTimeString()} Built the tab page`)
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : err)
+    }
+  }
+  mkdirSync(dirname(page), { recursive: true })
+  mkdirSync(dirname(pointer), { recursive: true })
+  await write()
+  writeFileSync(pointer, JSON.stringify({ tab: page }))
+  const stop = () => {
+    rmSync(pointer, { force: true })
+    process.exit(0)
+  }
+  process.on('SIGINT', stop)
+  process.on('SIGTERM', stop)
+  let timer
+  for (const dir of [join(here, 'src'), join(here, '..', 'hooks')])
+    watch(dir, { recursive: true }, () => {
+      clearTimeout(timer)
+      timer = setTimeout(write, 100)
+    })
+  console.log('Watching codex/src and hooks. Open Inbox tabs update after each save. Ctrl-C stops.')
+} else if (mode === '--tests') {
   const tests = readdirSync(join(here, 'tests')).filter(f => f.endsWith('.spec.ts'))
   await esbuild.build({
     ...common,

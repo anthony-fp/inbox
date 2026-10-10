@@ -14,10 +14,10 @@ Codex also keeps its own copy of the page, keyed by the page's address, `ui://in
 
 ## The design
 
-1. **Dev build.** `npm --prefix codex run dev` rebuilds on every save. It also writes the finished page to `plugin/dist/tab.html`.
+1. **Dev build.** `npm --prefix codex run dev` (`build.mjs --dev`) rebuilds the page on every save into `codex/.dev/tab.html`, which Git ignores.
 2. **Pointer file.** While it runs, the dev script writes `dev.json` into the plugin's data folder, `~/.codex/plugins/data/inbox-inbox/`. The file holds the path to that `tab.html`. The script deletes it on exit.
-3. **Server.** On each call from the tab, the server checks for `dev.json`. When it exists, the server adds the page file's modified time to the view as `tabVersion`. A new app-only tool, `inbox_tab_page`, returns the page's text. With no `dev.json`, nothing changes.
-4. **Tab.** The server stamps the page with its own version when it serves it. When a poll brings a different `tabVersion`, the tab fetches the page through `inbox_tab_page` and replaces its own document.
+3. **Server.** On each call from the tab, the server checks for `dev.json`. When it exists, the server adds the dev page's address, a hash of the page, to the view as `devPage`. It reads the page again only when the file changes. A new app-only tool, `inbox_tab_page`, returns the page's text. With no `dev.json`, nothing changes.
+4. **Tab.** The server stamps each page it serves with its address, as `window.__inboxPage`. When a poll brings a different `devPage`, the tab fetches the page through `inbox_tab_page` and replaces its own document.
 
 The installed server reads the worktree's files only while `dev.json` exists, and only the one path it names.
 
@@ -30,4 +30,4 @@ With the per-build address, a rebuild and a reinstall show in the next new chat'
 - **Codex keeps the page by its address.** Under the old address, a new chat's tab drew the old page. Under a new address it drew the test build. Done: the address now carries a hash of the page (`tabUri` in `codex/src/server.ts`). After a reinstall, a new chat shows the new page with no app restart.
 - **The tab can replace its own document.** The test tab fetched a page through a tool and wrote it over its own document. The new page's `ui/initialize` was answered, and its polls worked. A press after the swap was not tried. Polls and presses both go through `tools/call`.
 
-So the design above works as written. What remains is building steps 1 to 4.
+So the design above works as written, and it is built.
