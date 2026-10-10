@@ -1233,6 +1233,15 @@ without the model calling it. The Inbox tab is a thread entrypoint.
   granted; use JS feature detection as fallback." (APPSPEC:L169-171)
 - "Treat the resource URI as a cache key. When you make a breaking change to
   the HTML, JavaScript, or CSS, publish a new URI". (D/build/chatgpt-ui#embed-the-component-in-the-server-response)
+- **Live, Codex keeps a tab's page by its URI across server restarts**
+  [live 2026-10-10]. A test build ran in the server Codex started for a new
+  chat, and that chat's tab drew the old page. Under a new URI, a new chat's
+  tab drew the test build. The inbox's URI now carries a hash of the page
+  (`tabUri`, codex/src/server.ts).
+- **Live, a tab can replace its own document** [live 2026-10-10]. A tab that
+  fetched a page through `tools/call` and ran `document.open`, `write` and
+  `close` drew the new page. Its script sent `ui/initialize` again, Codex
+  answered, and the new page's polls worked.
 - "Bundle or inline the CSS in your app's HTML. The default iframe CSP can
   block external stylesheets." (TSR:L96)
 - The inbox resource sets no `_meta.ui` (codex/src/server.ts:214-215), so the
@@ -1326,7 +1335,7 @@ without the model calling it. The Inbox tab is a thread entrypoint.
 - Neither lists Codex or Claude Code. Whether Claude Code or the Claude
   desktop app's Code mode renders MCP Apps is not answered here.
 - [inference] Of the inbox's MCP surface, only `_meta["openai/ui"].entrypoints`
-  is OpenAI-specific (codex/src/server.ts:38). The same `ui://inbox/tab`
+  is OpenAI-specific (codex/src/server.ts:38). The same `ui://inbox/tab-…`
   resource could render in other MCP Apps hosts, opened by the model and
   inline.
 

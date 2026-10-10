@@ -2,6 +2,7 @@
 // the Inbox tab with the app-only tools it calls. It speaks MCP over stdio by
 // hand, since it needs only a few message shapes.
 
+import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
 
@@ -24,13 +25,19 @@ import { CODEX, INBOX_DESCRIPTION, inboxToolText, VIEW_DESCRIPTION } from './tex
 import type { Run } from './run'
 import type { LocalResult, RowNote } from '../../types'
 
-export const TAB_URI = 'ui://inbox/tab'
+/**
+ * The tab's address for one build of its page. Codex keeps a tab's page by its address, even across server
+ * restarts, so a page changed under the same address would not show until Codex restarts.
+ */
+export function tabUri(tabHtml: string): string {
+  return `ui://inbox/tab-${createHash('sha256').update(tabHtml).digest('hex').slice(0, 12)}`
+}
 const TAB_MIME = 'text/html;profile=mcp-app'
 
 const APP_ONLY = { ui: { visibility: ['app'] } }
 const MAX_SENT = 20
 
-const TOOLS = [
+const toolsFor = (uri: string) => [
   { name: 'record_finding', description: findingDescription(CODEX), inputSchema: FINDING_SCHEMA },
   { name: 'close', description: CLOSE_DESCRIPTION, inputSchema: CLOSE_SCHEMA },
   // No resourceUri: Codex mounts every model-called MCP App inline in the transcript.
@@ -42,7 +49,7 @@ const TOOLS = [
     description: VIEW_DESCRIPTION,
     inputSchema: { type: 'object', properties: { demo: { type: 'boolean' } } },
     _meta: {
-      ui: { resourceUri: TAB_URI, visibility: ['app'] },
+      ui: { resourceUri: uri, visibility: ['app'] },
       'openai/ui': { entrypoints: [{ type: 'thread' }] },
     },
   },
@@ -111,6 +118,8 @@ export type PressReply = {
 
 export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<string, unknown> | null> {
   const { dir, now } = deps
+  const uri = tabUri(deps.tabHtml)
+  const tools = toolsFor(uri)
 
   /**
    * Sends a message into the session as the person's own: it runs after any
@@ -304,7 +313,7 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
           serverInfo: { name: 'inbox', version: '0.1.0' },
         })
       case 'tools/list':
-        return ok({ tools: TOOLS })
+        return ok({ tools })
       case 'tools/call': {
         const name = String(params?.name ?? '')
         const args = (params?.arguments ?? {}) as Record<string, unknown>
@@ -315,11 +324,11 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
         }
       }
       case 'resources/list':
-        return ok({ resources: [{ uri: TAB_URI, name: 'Inbox', mimeType: TAB_MIME }] })
+        return ok({ resources: [{ uri, name: 'Inbox', mimeType: TAB_MIME }] })
       case 'resources/templates/list':
         return ok({ resourceTemplates: [] })
       case 'resources/read':
-        return ok({ contents: [{ uri: TAB_URI, mimeType: TAB_MIME, text: deps.tabHtml }] })
+        return ok({ contents: [{ uri, mimeType: TAB_MIME, text: deps.tabHtml }] })
       case 'ping':
         return ok({})
     }

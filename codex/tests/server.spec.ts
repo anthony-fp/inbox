@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import type { Feedback } from '../../hooks/view'
 import { noteHook, notePrompt, viewOf } from '../src/core'
 import type { View } from '../src/core'
-import { makeServer } from '../src/server'
+import { makeServer, tabUri } from '../src/server'
 import { PRESS_TIMEOUT_MS } from '../src/settle'
 import { readState, updateState } from '../src/state'
 import { fakeRunner, tempDir } from './helpers'
@@ -180,9 +180,15 @@ test('the tab opens from the app-only inbox_view tool, and the model’s inbox t
   assert.equal(tool('inbox')?._meta, undefined)
   assert.equal(tool('inbox_view')?.title, 'Inbox')
   assert.deepEqual(tool('inbox_view')?._meta, {
-    ui: { resourceUri: 'ui://inbox/tab', visibility: ['app'] },
+    ui: { resourceUri: tabUri('<html></html>'), visibility: ['app'] },
     'openai/ui': { entrypoints: [{ type: 'thread' }] },
   })
+  // Codex keeps a page by its address, so a changed page needs a new one.
+  assert.notEqual(tabUri('<html></html>'), tabUri('<html>changed</html>'))
+  const read = (await handle({ jsonrpc: '2.0', id: 2, method: 'resources/read' })) as {
+    result: { contents: { uri: string }[] }
+  }
+  assert.equal(read.result.contents[0]?.uri, tabUri('<html></html>'))
 })
 
 test('the inbox tool answers in text: the count, each row that waits, and where to act on them', async () => {

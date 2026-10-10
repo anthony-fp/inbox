@@ -10,7 +10,7 @@ Three copies of the tab's page sit between a saved file and the screen:
 2. **The install.** `codex plugin add` copies `plugin/` into `~/.codex/plugins/cache/inbox/inbox/0.1.0/`, and Codex runs the server from there.
 3. **The running server.** Codex starts a server process and keeps it running. That process holds the page from its start in memory. Live on 2026-10-10, two servers started at 13:21 were still running after a 13:25 reinstall. The open tab kept drawing the old buttons.
 
-The page also stays in the open tab. The MCP Apps docs tell hosts to treat a resource's URI as a cache key, so a reopened tab may get Codex's cached copy too.
+Codex also keeps its own copy of the page, keyed by the page's address, `ui://inbox/tab`. Live on 2026-10-10, a test build ran in a server started for a new chat, and the new chat's tab still drew the old page. The OpenAI docs say to treat the resource URI as a cache key and publish a new URI when the page changes.
 
 ## The design
 
@@ -21,13 +21,13 @@ The page also stays in the open tab. The MCP Apps docs tell hosts to treat a res
 
 The installed server reads the worktree's files only while `dev.json` exists, and only the one path it names.
 
-## Simpler options, and why they fall short
+## The simpler path, and why it falls short
 
-- **One command that rebuilds and reinstalls.** Running servers keep the old page in memory. You would still need a new chat or a restart, and the tab reopened.
-- **The server reads the page from its install folder on every request.** This drops the restart, but only if Codex asks the server again when a tab reopens. Codex may serve its cached copy instead. You would still reinstall and reopen.
+With the per-build address, a rebuild and a reinstall show in the next new chat's tab. Running servers keep the old page in memory, so a tab that is already open stays old. Live reload is for changing the page while you watch it.
 
-## What must be tested first
+## Test results, 2026-10-10
 
-**Can the tab replace its own document and keep working?** The new page's script starts again and must reconnect to Codex: the MCP Apps `ui/initialize` handshake. Codex may refuse a second handshake from the same frame. The MCP Apps spec gives a view no way to ask the host to reload it (`docs/reference/mcp-apps.md`, the message table). If Codex refuses, step 4 changes: the tab shows "A new build is ready. Reopen the tab." That still removes the reinstall and the new chat, as long as Codex asks the server again when the tab reopens.
+- **Codex keeps the page by its address.** Under the old address, a new chat's tab drew the old page. Under a new address it drew the test build. Done: the address now carries a hash of the page (`tabUri` in `codex/src/server.ts`). After a reinstall, a new chat shows the new page with no app restart.
+- **The tab can replace its own document.** The test tab fetched a page through a tool and wrote it over its own document. The new page's `ui/initialize` was answered, and its polls worked. A press after the swap was not tried. Polls and presses both go through `tools/call`.
 
-**Test:** install a test build whose tab replaces its document 10 seconds after it loads, then draws a marker. Pete starts a new chat, opens the Inbox tab, and waits 10 seconds. A screenshot shows whether the marker drew and whether a press still works.
+So the design above works as written. What remains is building steps 1 to 4.
