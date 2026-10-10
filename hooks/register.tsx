@@ -2847,6 +2847,8 @@ export const register: Register = on => {
     const blankLine = isInline ? 0 : 1
     // A desktop row pads the same open, closed or just closed, so its title stays put when it opens.
     const rowPad = look === 'desktop' ? 2 * DESKTOP_ROW_PAD : blankLine
+    // Desktop's buttons draw their own padding, so a narrower gap than the terminal's two cells keeps a row together.
+    const buttonGap = look === 'desktop' ? 1 : 2
     const [
       { ledger, prViews: prState, lastActions, notes, stop, view, isDemo, isUnread, now },
       tab,
@@ -3189,7 +3191,7 @@ export const register: Register = on => {
         )
     // The open row's actions. In the terminal its other actions can follow its main ones after a muted dot.
     const keyRow = (rowId: string, keys: KeyAction[], more: KeyAction[] = []) => (
-      <Box flexDirection="row" flexWrap="wrap" columnGap={2} rowGap={look === 'desktop' ? 1 : 0}>
+      <Box flexDirection="row" flexWrap="wrap" columnGap={buttonGap} rowGap={look === 'desktop' ? 1 : 0}>
         {keys.map(keyedButton(rowId))}
         {keys.length > 0 && more.length > 0 ? <Text color={pal.muted}>·</Text> : null}
         {more.map(keyedButton(rowId))}
@@ -3581,7 +3583,7 @@ export const register: Register = on => {
                             <Box
                               flexDirection="row"
                               alignItems="center"
-                              columnGap={2}
+                              columnGap={buttonGap}
                               marginTop={desktopGroups.length > 0 ? 1 : 0}
                             >
                               <Box flexShrink={1}>{field}</Box>
@@ -4408,7 +4410,7 @@ export const register: Register = on => {
             <Box
               flexDirection="row"
               flexWrap="wrap"
-              columnGap={2}
+              columnGap={buttonGap}
               rowGap={look === 'desktop' ? 1 : 0}
               marginTop={blankLine}
             >
