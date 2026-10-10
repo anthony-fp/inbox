@@ -4316,7 +4316,6 @@ export const register: Register = on => {
               {
                 key: `resolve-${pr.ref}`,
                 label: again(prMarkId(pr.ref), 'pr-conflicts', 'Resolve conflicts'),
-                icon: '→',
                 kind: 'handoff' as const,
                 onPress: prPress({ action: 'pr-conflicts', ref: pr.ref }),
               },
