@@ -391,29 +391,35 @@
         align-items: center;
         gap: 6px;
       }
+      /* Codex's own fields: its border color, a 10px radius, and a heavier gray border on focus, not a colored ring. */
       input {
         flex: 1;
         min-width: 0;
-        min-height: 26px;
+        min-height: 28px;
         font: inherit;
         color: inherit;
-        background: var(--bg);
-        border: 1px solid color-mix(in oklab, var(--text) 16%, transparent);
-        border-radius: 999px;
-        padding: 2px 11px;
+        background: transparent;
+        border: 1px solid color-mix(in oklab, var(--text) 15%, transparent);
+        border-radius: 10px;
+        padding: 4px 10px;
       }
-      input:focus {
+      input::placeholder {
+        color: var(--muted);
+      }
+      /* The radius again, since :focus-visible sets 4px. */
+      input:focus,
+      textarea:focus {
         outline: none;
-        border-color: var(--key);
-        border-radius: 999px;
+        border-color: color-mix(in oklab, var(--text) 32%, transparent);
+        border-radius: 10px;
       }
       textarea {
         width: 100%;
         font: 12px var(--mono);
         color: inherit;
-        background: var(--bg);
-        border: 1px solid color-mix(in oklab, var(--text) 16%, transparent);
-        border-radius: 6px;
+        background: transparent;
+        border: 1px solid color-mix(in oklab, var(--text) 15%, transparent);
+        border-radius: 10px;
       }
 
       .empty-line {
