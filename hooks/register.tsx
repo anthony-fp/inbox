@@ -2930,7 +2930,8 @@ export const register: Register = on => {
 
       return {
         id: item.id,
-        handle: isHandedOff ? '✓' : r.handle,
+        // "?" marks a question no typed number reaches. Desktop draws a task's bullet, since "?" reads as "unknown" there.
+        handle: isHandedOff ? '✓' : look === 'desktop' && r.handle === '?' ? '•' : r.handle,
         handleTone: isHandedOff ? 'done' : undefined,
         ...(isHandedOff ? { fold: {} } : {}),
         title: item.ask,
