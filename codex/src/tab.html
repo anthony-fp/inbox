@@ -23,7 +23,6 @@
         --card: color-mix(in srgb, var(--text) 4.5%, var(--bg));
         --raised: color-mix(in srgb, var(--text) 9%, var(--bg));
         --selected: color-mix(in srgb, #4c9aff 20%, var(--card));
-        --divider: color-mix(in srgb, var(--text) 9%, var(--bg));
         --hover: color-mix(in srgb, var(--key) 14%, transparent);
         /* Codex's gray button fills: the foreground at 8% and 12% in light, 12% and 16% in dark. */
         --soft: color-mix(in oklab, var(--text) 8%, transparent);
@@ -51,7 +50,6 @@
           --card: color-mix(in srgb, var(--text) 5.5%, var(--bg));
           --raised: color-mix(in srgb, var(--text) 11%, var(--bg));
           --selected: color-mix(in srgb, #7fa6d9 15%, var(--card));
-          --divider: color-mix(in srgb, var(--text) 8%, var(--bg));
           --soft: color-mix(in oklab, var(--text) 12%, transparent);
           --soft-hover: color-mix(in oklab, var(--text) 16%, transparent);
         }
@@ -67,7 +65,6 @@
         --card: color-mix(in srgb, var(--text) 5.5%, var(--bg));
         --raised: color-mix(in srgb, var(--text) 11%, var(--bg));
         --selected: color-mix(in srgb, #7fa6d9 15%, var(--card));
-        --divider: color-mix(in srgb, var(--text) 8%, var(--bg));
         --soft: color-mix(in oklab, var(--text) 12%, transparent);
         --soft-hover: color-mix(in oklab, var(--text) 16%, transparent);
       }
@@ -179,16 +176,10 @@
         margin-left: 6px;
       }
 
-      /* Rows. A divider runs from the text column to the edge. */
+      /* Rows. */
       .row {
         display: flex;
         padding: 6px 14px 6px var(--mark-x);
-      }
-      .entry + .entry > .row {
-        background-image: linear-gradient(var(--divider), var(--divider));
-        background-repeat: no-repeat;
-        background-size: calc(100% - var(--text-x)) 1px;
-        background-position: right top;
       }
       /* An open row keeps a closed row's padding, so its line does not move as it opens. */
       .row.selected {
@@ -449,9 +440,6 @@
         --mark-x: 34px;
         --text-x: 60px;
         padding-top: 4px;
-      }
-      .closed-list .entry + .entry > .row {
-        background-image: none;
       }
       .outcome {
         font-weight: 600;

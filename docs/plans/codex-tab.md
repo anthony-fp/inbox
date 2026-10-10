@@ -86,7 +86,7 @@ The tab shows the pane's content with Codex's own controls, spacing and type, so
 | A tree of `├─` and `└─` hanging from each group's title | A flat list under each group's title | Codex's lists are flat. Tree lines read as terminal art there. |
 | A raised tab panel with a line of `▔` in the tab's tone | A raised tab, with its count in the tab's tone | Codex marks the shown tab with a fill alone. |
 | Keys drawn as text, as `a: Fix` | Codex's pill buttons, as `desktop-polish.md` rule 5 sets | They are the host's own controls. |
-| A divider from the text column to the edge | A hairline from the text column | Same shape and meaning. |
+| A divider from the text column to the edge | None. Rows sit flush. | The rows' padding and hover fill already separate them. |
 | A leave bar that loses half a cell per step | Undo's fill, emptying, as `motion-and-undo.md` sets | A page can animate a fill, and the time left sits on the button it limits. |
 | A drawer listing the keys | Nothing. Keys work, with no key text | Keys are an optional extra, as UI plan 2.9 sets. |
 

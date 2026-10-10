@@ -751,11 +751,11 @@ function ListRow({
 }) {
   const bar = isNew(row.id) ? ` new tone-bar-${tone}` : ''
   // A number a typed reply reaches, as "1)", draws as a badge holding the number. A question no typed number
-  // reaches, "?", draws the same badge empty: a ? would read as a missing number.
+  // reaches, "?", draws a task's bullet: a ? or an empty badge reads as a missing number.
   const number = /^(\d+)\)$/.exec(row.handle)?.[1]
   const handle = (
     <span class={`mark ${row.handleTone ?? row.kind ?? ''}`}>
-      {number ? <span class="number">{number}</span> : row.handle === '?' ? <span class="number" /> : row.handle}
+      {number ? <span class="number">{number}</span> : row.handle === '?' ? '•' : row.handle}
     </span>
   )
 
