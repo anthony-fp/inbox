@@ -73,6 +73,7 @@ function howFromOutcome(outcome) {
   return "update";
 }
 var NEEDS_PERSON = /(?:^|[\s;&|])(?:login|logout|signin|sign-in|sudo|passwd|ssh-add|ssh-keygen)(?=[\s:]|$)|\binit --interactive\b/i;
+var PERSON_ONLY_REASON = /credential|password|passphrase|secret|\btoken|\b2fa\b|\bmfa\b|\bdevice\b|phone|android|tablet|account|sign(?:ed)?[- ]?in|log(?:ged)?[- ]?in|only you|you hold|your (?:mac|machine|laptop|computer|keychain)|\bsudo\b/i;
 function systemText(host) {
   const band = host.band ? ` They always see how many items are in <open> and <findings> in ${host.band}.` : "";
   return `You keep a short ledger for a person who works with a coding agent across many parallel sessions. They glance at your ledger between tasks, or after time away, to see where this session stands. You read one exchange and update the ledger.
@@ -146,7 +147,7 @@ function readHelp(kind, value, name, blocks, source) {
   if (kind === "run" || kind === "terminal") {
     const command = commandText(quoted);
     const isUsable = command !== "" && command.length <= 4e3 && isFromReply(command);
-    const isTheirs = kind === "terminal" || NEEDS_PERSON.test(command);
+    const isTheirs = NEEDS_PERSON.test(command) || kind === "terminal" && (source === null || PERSON_ONLY_REASON.test(source));
     return isUsable ? { kind: isTheirs ? "terminal" : "run", command, name } : null;
   }
   if (kind === "link") {
