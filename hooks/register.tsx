@@ -3261,9 +3261,7 @@ export const register: Register = on => {
       const halves = Math.ceil((Math.max(0, SETTLED_MS - (now - at)) / SETTLED_MS) * LEAVE_BAR_STEPS)
 
       return halves > 0 ? (
-        <Text color={isLapsed ? pal.muted : pal.mark.done}>
-          {'─'.repeat(Math.floor(halves / 2)) + (halves % 2 ? '╴' : '')}
-        </Text>
+        <Text color={pal.muted}>{'─'.repeat(Math.floor(halves / 2)) + (halves % 2 ? '╴' : '')}</Text>
       ) : null
     }
     // The selected row's keys, for both the key row it draws and the hidden bindings.
@@ -4009,7 +4007,7 @@ export const register: Register = on => {
     const closedRow = (d: ClosedLine, pos: TreePos) =>
       treeRow(
         pos,
-        <Text color={closedState(d) === 'handled' ? pal.mark.done : pal.muted}>{CLOSED_MARKS[closedState(d)]}</Text>,
+        <Text color={pal.muted}>{CLOSED_MARKS[closedState(d)]}</Text>,
         <Box flexDirection="column">
           <Text wrap="wrap" color={pal.muted}>
             {d.ask}
@@ -4069,17 +4067,8 @@ export const register: Register = on => {
           `fold-row-${kind}`,
         )
       )
-    // Each closed item is two lines, so a blank line of their tree sets each apart.
-    const closedGap = () =>
-      isInline
-        ? []
-        : look === 'desktop'
-          ? [<Box paddingTop={1} />]
-          : [
-              <Box paddingLeft={4}>
-                <Text color={pal.line}>│</Text>
-              </Box>,
-            ]
+    // On desktop a row's padding sets each two-line closed item apart. The terminal has no gap smaller than a line.
+    const closedGap = () => (look === 'desktop' && !isInline ? [<Box paddingTop={DESKTOP_ROW_PAD} />] : [])
     // The fold row and, unfolded, the closed items under it; nothing when none closed.
     const closedFold = (kind: Item['kind'] | 'finding', closed: ClosedLine[], isUnfolded: boolean) =>
       closed.length === 0
@@ -4152,7 +4141,7 @@ export const register: Register = on => {
         state.isLapsed,
       )
       // The ✓ waits for the answer to reach Claude; the blank keeps the row's text in line.
-      const mark = state.isQueued ? <Text> </Text> : <Text color={state.isLapsed ? pal.muted : pal.mark.done}>✓</Text>
+      const mark = state.isQueued ? <Text> </Text> : <Text color={pal.muted}>✓</Text>
       // In a group's tree, or flat as Findings lists its rows. On desktop it pads itself as a closed row does.
       return pos ? (
         <Box key={`settled-${r.id}`} flexDirection="column" paddingY={space.settledPad}>

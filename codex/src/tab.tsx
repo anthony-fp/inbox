@@ -931,15 +931,13 @@ function SettledView({ settled: r, panel }: { settled: RowView; panel: Row | und
   if (state.is !== 'settled') return null
   const start = seen.get(r.id) ?? Date.now()
   const isUndoing = undoing.has(r.id)
-  // Green only for what the person got: Done and answers. Dismissed, expired and agent closes are muted.
-  const isGood = !state.isLapsed && !state.isQueued
   const error = errors.get(r.id)
 
   // Laid out as an open row is, so the panel it keeps stays where the open row drew it.
   return (
     <div class={panel ? 'row settled was-open' : 'row settled'}>
       {/* The ✓ waits for an answer's message to reach Codex. */}
-      <span class={isGood ? 'mark done' : 'mark'}>{state.isQueued ? '' : '✓'}</span>
+      <span class="mark">{state.isQueued ? '' : '✓'}</span>
       <div class="content">
         <div class="settled-head">
           {/* An error wraps, so none of it is cut. */}
@@ -1091,7 +1089,7 @@ function ClosedFold({ group, closed, now }: { group: Group; closed: ClosedLine[]
           {closed.map(d => (
             <div class="entry" key={`closed-${d.id}`}>
               <div class="row">
-                <span class={d.state === 'handled' ? 'mark done' : 'mark'}>{CLOSED_MARKS[d.state]}</span>
+                <span class="mark">{CLOSED_MARKS[d.state]}</span>
                 <div class="content tight">
                   <div class="muted">{d.ask}</div>
                   <div>
