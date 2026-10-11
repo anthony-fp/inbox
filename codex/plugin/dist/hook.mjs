@@ -64,6 +64,23 @@ function howFromOutcome(outcome) {
   if (outcome.startsWith(CLOSED_BY_CLAUDE)) return "claude";
   return "update";
 }
+function guidanceText(host) {
+  return `# Inbox
+${host.intro}
+
+A finding is something you noticed that deserves the user's attention but is outside the current task: a bug, a risk, missing tests, tech debt, or a chance to improve something. Record it with mcp__inbox__record_finding the moment you notice it, then go on with the task; fixing it waits until the user asks. Record one too at two moments that are easy to pass over while focused on the task:
+- You work around a problem instead of fixing it, such as copying files by hand because a tool does not reach them.
+- Part of your change could not be tested or verified.
+State those two in your reply as well. Mention any other finding only when it bears on what the user asked.
+
+The latest "inbox:" text beside the user's prompt is the current state. It lists every open item and finding with its id, such as [i35] or [f12], and anything it does not list is closed. Check it before telling the user that something is open or waits on them.
+
+Close with mcp__inbox__close:
+- When the user's message answers an open item, close it first, before other work, with their answer.
+- When an item or finding is done or no longer applies, close it with a short reason, without waiting to be asked.
+The answer to a question is the user's to give. Close a question with their answer, or once it no longer applies, and never with an answer of your own.`;
+}
+var START_TITLE = 'inbox: where this session stands, as of the last reply. An "inbox:" text beside a later prompt replaces this.';
 function toolActivity(tool, input) {
   const text = (key) => typeof input[key] === "string" ? input[key] : "";
   switch (tool) {
@@ -282,23 +299,9 @@ var CODEX = {
   agent: "Codex",
   surface: "the Inbox tab",
   band: null,
-  findingsIn: "the Findings section of the Inbox tab"
+  findingsIn: "the Findings section of the Inbox tab",
+  intro: "The inbox plugin shows the user what waits on them: your open questions and the tasks only they can do, and your findings, in the Inbox tab beside the conversation."
 };
-var GUIDANCE = `# Inbox
-The inbox plugin shows the user what waits on them: your open questions and the tasks only they can do, and your findings, in the Inbox tab beside the conversation.
-
-A finding is something you noticed that deserves the user's attention but is outside the current task: a bug, a risk, missing tests, tech debt, or a chance to improve something. Record it with mcp__inbox__record_finding the moment you notice it, then go on with the task; fixing it waits until the user asks. Record one too at two moments that are easy to pass over while focused on the task:
-- You work around a problem instead of fixing it, such as copying files by hand because a tool does not reach them.
-- Part of your change could not be tested or verified.
-State those two in your reply as well. Mention any other finding only when it bears on what the user asked.
-
-The latest "inbox:" text beside the user's prompt is the current state. It lists every open item and finding with its id, such as [i35] or [f12], and anything it does not list is closed. Check it before telling the user that something is open or waits on them.
-
-Close with mcp__inbox__close:
-- When the user's message answers an open item, close it first, before other work, with their answer.
-- When an item or finding is done or no longer applies, close it with a short reason, without waiting to be asked.
-The answer to a question is the user's to give. Close a question with their answer, or once it no longer applies, and never with an answer of your own.`;
-var START_TITLE = 'inbox: where this session stands, as of the last reply. An "inbox:" text beside a later prompt replaces this.';
 
 // src/core.ts
 var TAB_OPEN_MS = 15e3;
@@ -308,7 +311,7 @@ function isTabOpen(s, now) {
 }
 function startContext(s, source) {
   const carried = carryText(s.ledger, START_TITLE, true);
-  const parts = [source === "resume" ? null : GUIDANCE, carried].filter((x) => x !== null);
+  const parts = [source === "resume" ? null : guidanceText(CODEX), carried].filter((x) => x !== null);
   return parts.length > 0 ? parts.join("\n\n") : null;
 }
 function cleared(s) {
