@@ -185,7 +185,8 @@ Actions keep one order on every row: the main action, then the action that finis
 | | Draft reply | Always | Talk |
 | | Open | Always | Local |
 | | Discuss | Always | Talk |
-| PR block | Resolve conflicts | The PR is open and conflicts with its base | Hand-off |
+| PR block | Merge | The PR reads Ready to merge. It asks Claude to check the PR is still mergeable and merge it with the repo's usual method, and to stop if merging needs a bypass or a force | Hand-off |
+| | Resolve conflicts | The PR is open and conflicts with its base | Hand-off |
 | | Address all N threads | More than one thread waits on the person | Hand-off |
 | | Open PR | Always | Local |
 | | Dismiss | Never on the current branch's PR (`hooks/register.tsx:3622`) | Mark |
@@ -198,7 +199,7 @@ Three rows have no Dismiss:
 
 "Address it" on a finding becomes "Address", the same word as on a thread.
 
-**PR readiness.** The block's status line is one of: `Ready to merge: approved, checks pass, no threads waiting on you`, `Blocked: <reasons>`, a draft (`Blocked: draft, …`, gray), `Merged` or `Closed`.
+**PR readiness.** The block's status line is one of: `Ready to merge: approved, checks pass, no threads waiting on you`, `Blocked: <reasons>`, a draft (`Blocked: draft, …`, gray), `Waiting: <reasons>` (gray), `Merged` or `Closed`. `Blocked` names only what waits on the person: a draft, conflicts, failing checks, requested changes and threads waiting on them. The rows under the block list each check and thread. `Waiting` shows once none of those is left, and names what waits on others: threads sent to Claude or on changed lines, a needed approval, running checks.
 
 **Every option draws.** Today `CHOICE_KEYS` in `hooks/register.tsx:1549` cuts a question at 9 lettered options and steps. Under this plan every option has a button. In the terminal only the first 9 get letters.
 

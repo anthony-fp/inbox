@@ -1312,8 +1312,10 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   await clock.settle()
   expect(await pane.find({ text: /Add a greeting CLI/ })).toBeDefined()
   expect(
-    await pane.find({ text: /Blocked: conflicts with main, 1 failing check, 1 thread waiting on you, needs approval/ }),
+    await pane.find({ text: /Blocked: conflicts with main, 1 failing check, 1 thread waiting on you$/ }),
   ).toBeDefined()
+  // A blocked PR offers no Merge.
+  expect(await pane.find({ key: 'merge-acme/greet#12' })).toBeUndefined()
 
   // A press that sends says so where it was pressed, and the button then reads "again".
   await pane.press({ key: 'resolve-acme/greet#12' })
@@ -1439,9 +1441,11 @@ test('opening the PRs tab while another PR fetch runs still finds the branch’s
   expect(await pane.find({ text: /Branch work/ })).toBeDefined()
 })
 
-test('a PR’s Dismiss settles its block with Undo, which brings it back, and a fetch keeps a Dismiss made while it ran, and the branch PR when its lookup fails', async ($, on) => {
+test('a PR’s Dismiss settles its block with Undo, which brings it back, a ready PR’s Merge asks Claude unless it stopped being ready, and a fetch keeps a Dismiss made while it ran, and the branch PR when its lookup fails', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])
+  // The review decision GitHub reports for every PR.
+  let decision = 'APPROVED'
   const view = (number: number, title: string) =>
     JSON.stringify({
       number,
@@ -1451,10 +1455,17 @@ test('a PR’s Dismiss settles its block with Undo, which brings it back, and a 
       state: 'OPEN',
       baseRefName: 'main',
       mergeable: 'MERGEABLE',
-      reviewDecision: 'APPROVED',
+      reviewDecision: decision,
       statusCheckRollup: [],
     })
   const noThreads = JSON.stringify({ data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } } })
+  // Runs once each PR fetch has saved what it found.
+  let onFetched: (() => void) | undefined
+  on('state.set', { plugin: 'inbox', key: 'prViews' } as const, async ($, e, next) => {
+    const r = await next(e)
+    if (!e.value.isFetching) onFetched?.()
+    return r
+  })
   let isSlow = false
   let branchFails: string | undefined
   let branchHold = false
@@ -1462,7 +1473,9 @@ test('a PR’s Dismiss settles its block with Undo, which brings it back, and a 
   ghAnswers.push(
     {
       match: argv => argv.includes('view') && argv.includes('12'),
-      stdout: view(12, 'Linked work'),
+      get stdout() {
+        return view(12, 'Linked work')
+      },
       hold: () => (isSlow ? clock.sleep(5000) : Promise.resolve()),
     },
     {
@@ -1503,6 +1516,27 @@ test('a PR’s Dismiss settles its block with Undo, which brings it back, and a 
   expect(await pane.find({ key: 'open-acme/greet#12' })).toBeDefined()
   expect(linked()).toEqual(['acme/greet#12'])
   await clock.advance(3000)
+
+  // A ready PR offers Merge. Pressing it hands the merge to Claude and says so.
+  expect(await pane.find({ key: 'merge-acme/greet#12' })).toBeDefined()
+  await pane.press({ key: 'merge-acme/greet#12' })
+  expect(sent.at(-1)).toContain('Merge PR #12 (https://github.com/acme/greet/pull/12) into main.')
+  await clock.settle()
+  expect(await pane.find({ text: /✓ Asked to merge\u2002·/ })).toBeDefined()
+  expect((await pane.find({ key: 'merge-acme/greet#12' }))?.props.label).toBe('Merge again')
+  // The PR stops being ready after the pane drew it and before Merge lands: nothing is sent.
+  const merges = sent.length
+  await clock.advance(PRESS_GUARD_MS)
+  beforeAct = async () => {
+    decision = 'CHANGES_REQUESTED'
+    const fetched = new Promise<void>(resolve => (onFetched = resolve))
+    await $.command.run({ command: 'inbox', args: '' } as never)
+    await fetched
+  }
+  await pane.press({ key: 'merge-acme/greet#12' })
+  expect(sent.length).toBe(merges)
+  expect(await pane.find({ text: /^This changed before your press\. Nothing was sent\.$/ })).toBeDefined()
+  decision = 'APPROVED'
 
   // Showing the tab again looks up the branch's PR, which fails, and holds on the linked PR.
   branchFails = 'HTTP 502'

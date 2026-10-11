@@ -213,15 +213,16 @@ function threadsWaiting(count: number): string {
 }
 
 /** Where a PR stands. A draft is open and not ready, whatever else blocks it. */
-export type PrStatus = 'ready' | 'blocked' | 'draft' | 'merged' | 'closed'
+export type PrStatus = 'ready' | 'blocked' | 'waiting' | 'draft' | 'merged' | 'closed'
 
 function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`
 }
 
 /**
- * What stands between the PR and merging, or that it is ready. A thread sent
- * to Claude or on changed lines still blocks, as it is still open on GitHub.
+ * What stands between the PR and merging, or that it is ready. "Blocked" names only what waits on the person,
+ * since the rows under the block list each check and thread. Once nothing does, "Waiting" names what waits on
+ * others: a thread sent to Claude or on changed lines, which is still open on GitHub, an approval, a running check.
  * `text` is the whole line. `head` is its status words, as "Blocked", and `reasons` the rest, or ''.
  */
 export function readiness(
@@ -241,21 +242,23 @@ export function readiness(
   const open = threadsOnYou(pr, isSent).length
   const sent = waiting.filter(t => isSent(pr, t)).length
   const changed = waiting.filter(t => t.isLinesChanged && !isSent(pr, t)).length
-  const blockers = [
+  const isPresent = (b: string | null): b is string => b !== null
+  const onYou = [
     pr.isDraft ? 'draft' : null,
     pr.mergeable === 'CONFLICTING' ? `conflicts with ${pr.base}` : null,
     failing > 0 ? plural(failing, 'failing check', 'failing checks') : null,
     pr.reviewDecision === 'CHANGES_REQUESTED' ? 'changes requested' : null,
     open > 0 ? threadsWaiting(open) : null,
+  ].filter(isPresent)
+  const onOthers = [
     sent > 0 ? `${plural(sent, 'thread', 'threads')} sent to Claude` : null,
     changed > 0 ? `${plural(changed, 'thread', 'threads')} on changed lines` : null,
     pr.reviewDecision === 'REVIEW_REQUIRED' ? 'needs approval' : null,
     pending > 0 ? `${pending} ${pending === 1 ? 'check' : 'checks'} running` : null,
-  ].filter((b): b is string => b !== null)
+  ].filter(isPresent)
 
-  if (blockers.length > 0) {
-    return result(pr.isDraft ? 'draft' : 'blocked', 'Blocked', blockers.join(', '))
-  }
+  if (onYou.length > 0) return result(pr.isDraft ? 'draft' : 'blocked', 'Blocked', onYou.join(', '))
+  if (onOthers.length > 0) return result('waiting', 'Waiting', onOthers.join(', '))
   const isApproved = pr.reviewDecision === 'APPROVED'
 
   return result(
@@ -332,6 +335,12 @@ export const prompts = {
       `Draft a reply to this review comment on PR #${pr.number} (${pr.url}) for me to review. Don't post it.`,
       '',
       threadText(t),
+    ].join(NL),
+  merge: (pr: PrView) =>
+    [
+      `Merge PR #${pr.number} (${pr.url}) into ${pr.base}. When I pressed this, its checks passed and no review threads waited on me.`,
+      "Check that it is still mergeable, merge it with the repo's usual merge method, and tell me the result.",
+      'If it is not mergeable, or merging would need a bypass or a force, stop and tell me instead.',
     ].join(NL),
   discuss: (pr: PrView, t: PrThread) =>
     [

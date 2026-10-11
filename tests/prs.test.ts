@@ -146,7 +146,7 @@ describe('prs', () => {
       ['T3', true, true, 9, 0],
     ])
     expect(readiness({ ...view, threads, fetchedAt: 0, error: null }).text).toBe(
-      'Blocked: 1 failing check, changes requested, 1 thread waiting on you, 1 thread on changed lines, 1 check running',
+      'Blocked: 1 failing check, changes requested, 1 thread waiting on you',
     )
   })
 
@@ -185,13 +185,22 @@ describe('prs', () => {
     expect(readThreads(outdated('2026-10-08T13:00:00Z'))[0]?.isLinesChanged).toBe(false)
   })
 
-  test('a thread sent to Claude stops waiting on the person and still blocks; a failing check always waits', () => {
+  test('a thread sent to Claude stops waiting on the person and waits on others; a failing check always waits', () => {
     const view = readView('acme/greet#12', VIEW)!
     const pr = { ...view, threads: readThreads(THREADS).slice(0, 1), fetchedAt: 0, error: null }
     const sent = () => true
     expect(prNeedsYou(pr, sent)).toBe(true)
-    expect(readiness(pr, sent).text).toBe(
-      'Blocked: 1 failing check, changes requested, 1 thread sent to Claude, 1 check running',
-    )
+    expect(readiness(pr, sent).text).toBe('Blocked: 1 failing check, changes requested')
+    const onOthers = { ...pr, checks: pr.checks.filter(c => c.bucket !== 'fail'), reviewDecision: 'APPROVED' }
+    expect(readiness(onOthers, sent)).toMatchObject({
+      status: 'waiting',
+      text: 'Waiting: 1 thread sent to Claude, 1 check running',
+    })
+    // A required review waits on others too. With nothing left on anyone, the PR is ready, which shows Merge.
+    expect(readiness({ ...onOthers, checks: [], reviewDecision: 'REVIEW_REQUIRED' }, sent)).toMatchObject({
+      status: 'waiting',
+      text: 'Waiting: 1 thread sent to Claude, needs approval',
+    })
+    expect(readiness({ ...onOthers, checks: [], threads: [] }, sent).status).toBe('ready')
   })
 })

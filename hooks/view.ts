@@ -216,6 +216,7 @@ const DONE_LABELS: Record<string, (text: string) => string> = {
   'thread-discuss': () => 'Discussed',
   'thread-draft': () => 'Drafted a reply',
   'pr-conflicts': () => 'Asked to resolve conflicts',
+  'pr-merge': () => 'Asked to merge',
   // "Address all 3 threads"
   'pr-address-all': text => text.replace(/^Address\b/, 'Addressed'),
 }

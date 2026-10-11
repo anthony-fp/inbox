@@ -139,6 +139,7 @@ export type PrActionId =
   | 'thread-discuss'
   | 'pr-conflicts'
   | 'pr-address-all'
+  | 'pr-merge'
   | 'pr-open'
   | 'pr-dismiss'
   | 'log'

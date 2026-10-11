@@ -34,7 +34,6 @@ import type { IsThreadSent, PrStatus } from './prs'
 import {
   THREADS_QUERY,
   VIEW_FIELDS,
-  checkCounts,
   commentLine,
   failingChecks,
   parseRef,
@@ -1689,7 +1688,7 @@ function leavePr($: EngineInterface, ref: string, at: number) {
 /** A press on a PR block, one of its review threads, or a failing check's row. Only the mod has PRs. */
 type PrPress =
   | { action: 'thread-address' | 'thread-draft' | 'thread-discuss' | 'thread-open'; ref: string; thread: string }
-  | { action: 'pr-conflicts' | 'pr-address-all' | 'pr-open' | 'pr-dismiss' | 'pr-undo'; ref: string }
+  | { action: 'pr-conflicts' | 'pr-address-all' | 'pr-merge' | 'pr-open' | 'pr-dismiss' | 'pr-undo'; ref: string }
   | { action: 'log'; ref: string; check: string }
 
 /**
@@ -1726,7 +1725,7 @@ function prRetryOf(
   const a = last.action
   if (thread !== null && (a === 'thread-address' || a === 'thread-draft' || a === 'thread-discuss'))
     return { press: { action: a, ref, thread }, kind: last.kind }
-  if (thread === null && (a === 'pr-conflicts' || a === 'pr-address-all'))
+  if (thread === null && (a === 'pr-conflicts' || a === 'pr-address-all' || a === 'pr-merge'))
     return { press: { action: a, ref }, kind: last.kind }
 
   return null
@@ -1811,6 +1810,9 @@ function applyPrPress(
         effects: [send(prompts.address(pr, waiting))],
       })
     }
+    case 'pr-merge':
+      if (readiness(pr, threadSentIn(lastActions)).status !== 'ready') return stale
+      return applied({ lasts: { [markId]: record('handoff', p.action, 'Merge') }, effects: [send(prompts.merge(pr))] })
     case 'pr-open':
       return open(markId, 'Open PR', pr.url, `PR #${pr.number}`)
     case 'pr-dismiss':
@@ -2183,11 +2185,13 @@ function outcomeText(d: Pick<Closed, 'outcome'>): string {
 
 /**
  * A PR's status line: a mark, and GitHub's colors, green ready, purple merged,
- * red closed and a gray draft. Blocked is amber, the color of what waits on someone.
+ * red closed and a gray draft. Blocked is amber, the color of what waits on the person,
+ * and Waiting gray, since it waits on others.
  */
 const PR_STATUSES: Record<PrStatus, { mark: string; tone: Tone | null }> = {
   ready: { mark: '✓', tone: 'done' },
   blocked: { mark: '◇', tone: 'needsYou' },
+  waiting: { mark: '◇', tone: null },
   draft: { mark: '◇', tone: null },
   merged: { mark: '◇', tone: 'findings' },
   closed: { mark: '◇', tone: 'error' },
@@ -4317,7 +4321,6 @@ export const register: Register = on => {
       const { status, text: statusText, head: statusHead, reasons: statusReasons } = readiness(pr, isThreadSent)
       const { mark, tone } = PR_STATUSES[status]
       const hasRows = prRows.length > 0
-      const counts = checkCounts(pr)
       const waitingOn = threadsOnYou(pr, isThreadSent)
       // A Dismiss left on a PR that is tracked again, as one a later reply links, is over.
       const prLast = lastActions[prMarkId(pr.ref)]?.action === 'pr-dismiss' ? null : lastActionText(prMarkId(pr.ref))
@@ -4331,6 +4334,16 @@ export const register: Register = on => {
                 icon: '↻',
                 kind: retry.kind,
                 onPress: prPress(retry.press),
+              },
+            ]
+          : []),
+        ...(status === 'ready'
+          ? [
+              {
+                key: `merge-${pr.ref}`,
+                label: again(prMarkId(pr.ref), 'pr-merge', 'Merge'),
+                kind: 'handoff' as const,
+                onPress: prPress({ action: 'pr-merge', ref: pr.ref }),
               },
             ]
           : []),
@@ -4372,14 +4385,6 @@ export const register: Register = on => {
             ]
           : []),
       ]
-      // The viewer replied last. Their own notes with no reply wait on no one, so they don't count.
-      const answered = pr.threads.filter(t => !t.isWaiting && t.reply !== null).length
-      // The headline already names a draft and failing or running checks; this line adds only what it leaves out.
-      const checksPass = (status === 'blocked' || status === 'draft') && counts.fail === 0 && counts.pending === 0
-      const facts = [
-        checksPass && counts.pass > 0 ? `${counts.pass} ${counts.pass === 1 ? 'check passes' : 'checks pass'}` : null,
-        answered > 0 ? `${answered} open ${answered === 1 ? 'thread' : 'threads'} you answered` : null,
-      ].filter(Boolean)
 
       // On desktop the status words carry its color and its reasons are muted, so the
       // title stays the loudest line; the words say the status, so it needs no mark.
@@ -4412,11 +4417,6 @@ export const register: Register = on => {
                 {statusText}
               </Text>
             )}
-            {facts.length > 0 ? (
-              <Text color={pal.muted} wrap="wrap">
-                {facts.join(DOT)}
-              </Text>
-            ) : null}
             {/* The next poll is minutes away, and desktop has no key to refresh with. */}
             {pr.error ? (
               <Box flexDirection="column">
