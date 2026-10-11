@@ -344,7 +344,7 @@ function actionsOf(
       }),
     ),
     ...stepActions,
-    action({ action: 'type', id, text: '' }, 'Type an answer', 'mark'),
+    action({ action: 'type', id, text: '' }, 'Reply', 'mark'),
     action({ action: 'explain', id }, 'Explain', 'talk'),
     action({ action: 'dismiss', id }, 'Dismiss', 'mark'),
   ]

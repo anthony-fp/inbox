@@ -300,7 +300,7 @@ test('a question lists every option, folds those past the fourth of 7, marks the
       ['Indigo', 'mark', false, true],
       ['Violet', 'mark', false, true],
       ['Run a script', 'handoff', false, false],
-      ['Type an answer', 'mark', false, false],
+      ['Reply', 'mark', false, false],
       ['Explain', 'talk', false, false],
       ['Dismiss', 'mark', false, false],
     ],

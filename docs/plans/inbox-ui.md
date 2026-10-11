@@ -169,7 +169,7 @@ Actions keep one order on every row: the main action, then the action that finis
 | Row | Action | Shows when | Kind |
 |---|---|---|---|
 | Question | each option | Always. With 5 or fewer options, all show. With more, the first 4 and [All 7 options]. | Mark and send |
-| | Type an answer | A text field draws (2.5) | Mark and send |
+| | Reply | A text field draws (2.5) | Mark and send |
 | | Explain | Always | Talk |
 | | Dismiss | Always | Mark |
 | Task | each help step | One per step the item carries | Local; a Run step is a Hand-off |
@@ -206,8 +206,8 @@ Three rows have no Dismiss:
 
 The field opens under the open row with [Send] and [Cancel]. Each row keeps its own draft, so opening another row does not throw the words away.
 
-- **Type an answer** is on questions. Send closes the question with the typed words.
-- **Type a reply** is on tasks and findings. Send hands the row off and keeps it. For findings this depends on decision 1; today a typed reply removes the finding (`sendTypedForFinding`).
+- **Reply** on a question opens a field for an answer. Send closes the question with the typed words.
+- **Reply** on a task or finding hands the row off with the typed words and keeps it. For findings this depends on decision 1; today a typed reply removes the finding (`sendTypedForFinding`).
 
 The two labels differ because the presses differ: one closes the row and one does not.
 
@@ -308,7 +308,7 @@ The band falls back to the engine default when the mod is off, a survey shows, o
  1) Use --dry-run or --preview for the flag?       2m ago
     Both work. --dry-run matches git.
     a: --dry-run   b: --preview
-    t: Type an answer   e: Explain   x: Dismiss
+    t: Reply   e: Explain   x: Dismiss
  2) Merge now or wait for review? · 5m ago
  Tasks
  • Sign in to npm · ✓ Explain 1m ago
@@ -340,7 +340,7 @@ Questions
    accounts before the
    migration runs?
    [Yes, rename (recommended)]
-   [No, keep users] [✎ Type an answer]
+   [No, keep users] [Reply]
    [Explain] [Dismiss]
 ? Keep the old endpoint for…
 Tasks
@@ -355,7 +355,7 @@ Below 50 columns, a closed row drops its age; the open form still shows it. At 5
 1) Rename the table to accou…
    ✓ Explain · just now
    [Yes, rename (recommended)]
-   [No, keep users] [✎ Type an answer]
+   [No, keep users] [Reply]
    [Explain again] [Dismiss]
 ```
 
@@ -486,7 +486,7 @@ The split is chosen over a compact inline layout because the tab is already wher
  Questions
  1) Use "inbox" or "attention" for the name?     2m ago
     [inbox] [attention]
-    [Type an answer] [Explain] [Dismiss]
+    [Reply] [Explain] [Dismiss]
  Tasks
  • Add API key to .env · 5m ago
  ──────────────────────────────────────────────────────
