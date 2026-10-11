@@ -106,6 +106,7 @@ import type { Effect, HelpStep, PrActionId, RowPress } from './presses'
 import {
   CHOICE_KEYS,
   closedShown,
+  DOT,
   FINDING_BADGES,
   feedbackOf,
   feedbackText,
@@ -130,6 +131,7 @@ import {
 } from './tools'
 import type { CountdownProps } from './countdown-client'
 import type { FoldProps } from './fold-client'
+import type { LinksProps } from './links-client'
 import type { RowProps } from './row-client'
 import { TAB_HEIGHT, type TabsProps } from './tabs-client'
 
@@ -211,10 +213,10 @@ const DESKTOP_CHARS_PER_CELL = 1.25
 const DESKTOP_CLIP_CHARS_PER_CELL = 1.1
 const DESKTOP_TAB_PAD = '\u00a0'.repeat(3)
 /**
- * A closed desktop row's padding above and below its text, in a Client's lines, so the row is 1.5 lines
+ * A closed desktop row's padding above and below its text, in a Client's lines, so the row is 2 lines
  * tall and the rows sit flush. A Box in the hooks tree counts padding in half lines, so it pads twice this.
  */
-const DESKTOP_ROW_PAD = 0.25
+const DESKTOP_ROW_PAD = 0.5
 // Theme keys, so the colors follow the person's Claude Code theme.
 const NEEDS_YOU = 'warning'
 // A child's place under its section: a middle child, the last, or a block the tree passes.
@@ -270,6 +272,11 @@ type Palette = {
   selection?: string
   /** Secondary text: ages, counts, labels and closed items. */
   muted: string
+  /**
+   * A closed row's age on its card, dimmer than `muted`. It meets 4.5:1 on `card` alone, so a row under the
+   * pointer or selected draws its age in `muted`. Without one, ages are `muted`.
+   */
+  age?: string
   /** The letters of a selected row's keys. */
   key: string
   /** The tree's lines. */
@@ -306,6 +313,7 @@ const DARK_PALETTE: Palette = {
   raised: '#4c4c4c',
   selection: '#3b4654',
   muted: '#bdbdbd',
+  age: '#a3a3a3',
   key: '#b1b9f9',
   line: '#505050',
   divider: '#444444',
@@ -319,6 +327,7 @@ const LIGHT_PALETTE: Palette = {
   raised: '#d0d0d0',
   selection: '#b4d5ff',
   muted: '#595959',
+  age: '#666666',
   key: '#243bf5',
   line: '#afafaf',
   divider: '#c8c8c8',
@@ -370,6 +379,7 @@ const PALETTES: Record<string, Palette> = {
     tab: '#dcdcdc',
     raised: '#c8c8c8',
     muted: '#545454',
+    age: '#5e5e5e',
     key: '#003ae8',
     divider: '#c0c0c0',
     tone: LIGHT_DALTONIZED_TONES,
@@ -404,22 +414,15 @@ const DESKTOP_KEY_PALETTE: Palette = {
   selection: 'rgba(76, 154, 255, 0.2)',
 }
 const HEX_THEMES = new Set(['dark', 'dark-daltonized', 'light', 'light-daltonized'])
+/** The palette for a Claude Code theme, drawn in the terminal or the desktop app. */
+function paletteFor(theme: string, look: 'terminal' | 'desktop'): Palette {
+  return look === 'desktop' && !HEX_THEMES.has(theme) ? DESKTOP_KEY_PALETTE : (PALETTES[theme] ?? THEME_KEY_PALETTE)
+}
 const TABS: { id: Tab; label: string; hotkey: string }[] = [
   { id: 'needsYou', label: 'Needs you', hotkey: '1' },
   { id: 'findings', label: 'Findings', hotkey: '2' },
   { id: 'prs', label: 'PRs', hotkey: '3' },
 ]
-// Below this many columns, the desktop pane puts its status under the tabs: the width of the tabs with
-// two-digit counts, the gap and the longest status, counted at 1 cell per character, side by side. It is
-// fixed, so the status does not move when a count or an age changes.
-const DESKTOP_STATUS_BESIDE_AT = (() => {
-  const { widths, gap } = desktopTabSizes(
-    TABS.map(t => ({ label: t.label, count: 99 })),
-    Infinity,
-  )
-
-  return widths.reduce((sum, w) => sum + w, 0) + gap * (widths.length - 1) + 3 + 'PRs checked just now'.length + 2
-})()
 // The blank columns on each side of a docked tab's name, which a click there also selects.
 const TAB_PAD = '  '
 // The Needs you tab lists questions first, because each takes one key.
@@ -491,6 +494,21 @@ let focusedKey: string | null = null
  * press names its text field, which takes the focus once a drawing has it, though the Button stays.
  */
 let focusHint: string | null = null
+/** The pressed key's `focusHint`. */
+function focusHintFor(element: string): string | null {
+  const id = element.split('-')[1]
+
+  return /^(answer|done|dismiss|drop)-/.test(element)
+    ? `undo-${id}`
+    : element.startsWith('typekey-')
+      ? `type-${id}`
+      : null
+}
+/**
+ * The desktop follow-ups' presses by key, from the latest drawing. Their Client posts the clicked key,
+ * which runs the press its Button would have.
+ */
+const followUpPresses = new Map<string, (press: UiPressArgument) => void>()
 /** Which look the pane last drew in, for the redraws a timer runs. */
 let paneLook: 'terminal' | 'desktop' = 'terminal'
 
@@ -2146,7 +2164,6 @@ function rowKeyActions($: EngineInterface, r: RowView, isAllShown: boolean): { k
       // The press opens the field; sending from it is what records the reply.
       more.push({
         label: a.label,
-        icon: '✎',
         kind: 'view',
         key: `typekey-${id}`,
         hotkey: 't',
@@ -2713,25 +2730,32 @@ export const register: Register = on => {
   on('ui.press', async ($, e, next) => {
     if (e.requestId === PANE && e.surface === 'desktop') {
       focusedKey = e.element
-      const id = e.element.split('-')[1]
-      focusHint = /^(answer|done|dismiss|drop)-/.test(e.element)
-        ? `undo-${id}`
-        : e.element.startsWith('typekey-')
-          ? `type-${id}`
-          : null
+      focusHint = focusHintFor(e.element)
     }
     return next(e)
   })
 
   // The desktop tab bar's Client posts the tab a click landed on, a closed row's Client a click on the row,
-  // and a Closed fold's Client the fold state the click asks for.
+  // a Closed fold's Client the fold state the click asks for, and an open row's follow-ups the key clicked.
   on('ui.message', async ($, e, next) => {
     const r = await next(e)
     if (e.requestId !== PANE) return r
-    const data = e.data as { tab?: unknown; isUnfolded?: unknown } | null
+    const data = e.data as { tab?: unknown; isUnfolded?: unknown; key?: unknown } | null
     const shown = TABS.find(t => t.id === data?.tab)
+    const followUp = typeof data?.key === 'string' ? followUpPresses.get(data.key) : undefined
     if (e.element === 'tabs' && shown) await showTab($, shown.id)
-    else if (e.element.startsWith('select-')) await selectClicked($, e.element.slice('select-'.length))
+    else if (e.element.startsWith('links-') && followUp && typeof data?.key === 'string') {
+      // The Client is not a focusable key, so the next drawing moves the focus, to the hint first.
+      focusedKey = e.element
+      focusHint = focusHintFor(data.key)
+      followUp({
+        plugin: 'inbox',
+        element: data.key,
+        component: e.component,
+        requestId: e.requestId,
+        surface: e.surface,
+      })
+    } else if (e.element.startsWith('select-')) await selectClicked($, e.element.slice('select-'.length))
     else if (e.element.startsWith('fold-')) await setFold($, e.element.slice('fold-'.length), data?.isUnfolded)
 
     return r
@@ -2748,18 +2772,18 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (!isOn || e.props.hasSurvey) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
-    const { ledger, stop, view, isDemo, now } = await drawnState($)
+    const [{ ledger, stop, view, isDemo, now }, theme] = await Promise.all([drawnState($), read($, THEME)])
     if (!stop && !ledger.card && ledger.items.length === 0 && ledger.findings.length === 0) return next(e)
-    const { count: waiting } = view.needsYou
-    const { count: findings } = view.findings
-    const counts = [
-      waiting > 0 ? (
-        <Text color={NEEDS_YOU}>
-          {waiting} {waiting === 1 ? 'needs' : 'need'} you
+    const pal = paletteFor(theme, e.surface === 'desktop' ? 'desktop' : 'terminal')
+    // Each count as its tab reads: the tab's name, muted, then the count in the tab's color.
+    const counts = (['needsYou', 'findings'] as const)
+      .filter(id => view[id].count > 0)
+      .map(id => (
+        <Text>
+          <Text dimColor>{TABS.find(t => t.id === id)!.label} </Text>
+          <Text color={pal.tone[id] ?? pal.mark[id]}>{view[id].count}</Text>
         </Text>
-      ) : null,
-      findings > 0 ? <Text dimColor>{findings === 1 ? '1 finding' : `${findings} findings`}</Text> : null,
-    ].filter(p => p !== null)
+      ))
 
     // Line 1: the counts, then [Open inbox] at the right end. On desktop a native button is taller than
     // a line of text, so the text sits level with its top. Sample counts could pass for real ones, so the demo says so.
@@ -2769,7 +2793,7 @@ export const register: Register = on => {
           <Text wrap="truncate-end">
             {isDemo ? <Text dimColor>Demo: </Text> : null}
             {counts.length > 0 ? (
-              counts.flatMap((p, n) => (n === 0 ? [p] : [<Text dimColor> · </Text>, p]))
+              counts.flatMap((p, n) => (n === 0 ? [p] : [<Text dimColor>{DOT}</Text>, p]))
             ) : (
               <Text dimColor>Nothing needs you</Text>
             )}
@@ -2827,6 +2851,7 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const elements = $.ui.resolve(e)
     const { Box, Button, Markdown, Text } = elements
+    followUpPresses.clear()
     // Desktop draws every Button as a native button, and only clicks reach the pane: no letters, key hints or hidden hotkeys.
     const look = e.surface === 'desktop' ? 'desktop' : 'terminal'
     paneLook = look
@@ -2836,9 +2861,10 @@ export const register: Register = on => {
     const Input = 'Input' in elements && (look === 'terminal' || DESKTOP_TYPING) ? elements.Input : null
     // Narrow, the desktop pane puts its status under the tabs and drops closed rows' ages.
     const isNarrowDesktop = look === 'desktop' && e.props.bodyColumns < DESKTOP_WIDE_AT
-    const isStatusBelow = look === 'desktop' && e.props.bodyColumns < DESKTOP_STATUS_BESIDE_AT
-    // Desktop wraps " · 12m ago" as one unit after a title, not as "12m" and "ago" on two lines.
-    const unbroken = (after: string) => (look === 'desktop' ? ` ${after.trimStart().replaceAll(' ', ' ')}` : after)
+    // Desktop wraps " · 12m ago" as one unit after a title, not as "12m" and "ago" on two lines: past its first
+    // character, a space becomes a no-break space and an en space a figure space, about as wide and unbreakable.
+    const unbroken = (after: string) =>
+      look === 'desktop' ? after.replace(/(?<=.)[ \u2002]/gs, c => (c === ' ' ? '\u00a0' : '\u2007')) : after
     // Inline above the prompt, the pane takes its room from the conversation, so
     // it drops the section cards, the tab panels and the blank lines between parts.
     const isInline = e.props.placement === 'inline'
@@ -2872,8 +2898,7 @@ export const register: Register = on => {
     if (typing !== null && !fieldSeeds.has(typing)) fieldSeeds.set(typing, (await read($, DRAFTS))[typing] ?? '')
     const shownPrs = drawnPrs(prState, ledger.prs, lastActions, now)
     const prViews = shownPrs.map(x => x.pr)
-    const pal =
-      look === 'desktop' && !HEX_THEMES.has(theme) ? DESKTOP_KEY_PALETTE : (PALETTES[theme] ?? THEME_KEY_PALETTE)
+    const pal = paletteFor(theme, look)
     // `inverse: false` keeps the engine from inverting the line under the pointer inside the panel.
     const raise = {
       dimColor: false,
@@ -2917,7 +2942,7 @@ export const register: Register = on => {
     // An item's group header says whether it is a question or a task, so the row
     // needs no context line. The recommended answer is marked on its key.
     const itemRow = (r: RowView, item: Item): Row => {
-      const asked = item.at === null ? undefined : ` · ${ago(now - item.at)}`
+      const asked = item.at === null ? undefined : `${DOT}${ago(now - item.at)}`
       // A task handed to Claude folds, as an answered question closes, until Claude's reply leaves it open.
       const isHandedOff = r.state.is === 'handedOff'
 
@@ -2948,10 +2973,13 @@ export const register: Register = on => {
       meta: (
         <Text wrap="truncate-end">
           <Text color={pal.tone[FINDING_BADGES[finding.kind].tone]}>{FINDING_BADGES[finding.kind].label}</Text>
-          <Text color={pal.muted}> · {ago(now - finding.at)}</Text>
+          <Text color={pal.muted}>
+            {DOT}
+            {ago(now - finding.at)}
+          </Text>
         </Text>
       ),
-      line: { text: finding.title, age: ` · ${ago(now - finding.at)}` },
+      line: { text: finding.title, age: `${DOT}${ago(now - finding.at)}` },
       body: (
         <Box flexDirection="column" rowGap={blankLine}>
           <Text wrap="wrap">{finding.detail}</Text>
@@ -2985,7 +3013,7 @@ export const register: Register = on => {
         </Text>
       ),
       title: c.name,
-      line: { text: c.name, after: ' · failing check', afterTone: 'error' },
+      line: { text: c.name, after: `${DOT}failing check`, afterTone: 'error' },
       body: null,
       keys: () => [
         {
@@ -3024,7 +3052,7 @@ export const register: Register = on => {
         handle: isSent ? '✓' : '◦',
         handleTone: isSent ? 'done' : undefined,
         ...(isSent || isChanged
-          ? { fold: t.isLinesChanged ? { note: 'Lines changed since this comment · still open on GitHub' } : {} }
+          ? { fold: t.isLinesChanged ? { note: `Lines changed since this comment${DOT}still open on GitHub` } : {} }
           : {}),
         meta: (
           <Text wrap="truncate-end">
@@ -3033,8 +3061,8 @@ export const register: Register = on => {
             </Text>
             <Text color={pal.muted}>
               {t.at === null ? '' : ` ${ago(now - t.at)}`}
-              {t.replies > 0 ? ` · ${t.replies + 1} comments` : ''}
-              {t.isOutdated ? ' · outdated' : ''}
+              {t.replies > 0 ? `${DOT}${t.replies + 1} comments` : ''}
+              {t.isOutdated ? `${DOT}outdated` : ''}
             </Text>
           </Text>
         ),
@@ -3042,7 +3070,7 @@ export const register: Register = on => {
         line: {
           before: `${threadWhere(t, baseName(t.path))} `,
           text: commentLine(latest.body),
-          ...(isChanged ? { after: ' · lines changed' } : t.at === null ? {} : { age: ` · ${ago(now - t.at)}` }),
+          ...(isChanged ? { after: `${DOT}lines changed` } : t.at === null ? {} : { age: `${DOT}${ago(now - t.at)}` }),
         },
         body: comment,
         keys: () => [
@@ -3179,12 +3207,34 @@ export const register: Register = on => {
             />
           </Box>
         )
+    // On desktop, the follow-ups as plain text in a Client, which posts the key clicked.
+    const followUpLinks = (rowId: string, more: KeyAction[]) => {
+      if (!hasClient) return null
+      for (const a of more) followUpPresses.set(a.key, press => unlessGuarded($, rowId, press, a.onPress))
+      const props: LinksProps = {
+        links: more.map(a => {
+          const label = desktopLabel(a)
+          return { key: a.key, label, width: Math.ceil(label.length / DESKTOP_CHARS_PER_CELL) + 1 }
+        }),
+        gap: 1,
+        isGuarded: isOpenGuarded,
+        colors: { muted: pal.muted, hover: null },
+      }
+
+      return <elements.Client key={`links-${rowId}`} module="./links-client.tsx" props={props} />
+    }
     // The open row's actions. In the terminal its other actions can follow its main ones after a muted dot.
     const keyRow = (rowId: string, keys: KeyAction[], more: KeyAction[] = []) => (
-      <Box flexDirection="row" flexWrap="wrap" columnGap={buttonGap} rowGap={look === 'desktop' ? 1 : 0}>
+      <Box
+        flexDirection="row"
+        flexWrap="wrap"
+        alignItems="center"
+        columnGap={buttonGap}
+        rowGap={look === 'desktop' ? 1 : 0}
+      >
         {keys.map(keyedButton(rowId))}
         {look === 'terminal' && keys.length > 0 && more.length > 0 ? <Text color={pal.muted}>·</Text> : null}
-        {more.map(keyedButton(rowId, true))}
+        {hasClient && more.length > 0 ? followUpLinks(rowId, more) : more.map(keyedButton(rowId, true))}
       </Box>
     )
     // The Buttons that take the pane's keys, drawn in a hidden Box.
@@ -3220,10 +3270,14 @@ export const register: Register = on => {
       ) : null
     }
     // The selected row's keys, for both the key row it draws and the hidden bindings.
-    const rowActions = (row: Row): { keys: KeyAction[]; more: KeyAction[] } => ({
-      keys: pressable(row.keys()),
-      more: pressable(row.moreKeys?.() ?? []),
-    })
+    const rowActions = (row: Row): { keys: KeyAction[]; more: KeyAction[] } => {
+      if (Input && row.typeHint && typing === row.id) return { keys: [], more: [] }
+
+      return {
+        keys: pressable(row.keys()),
+        more: pressable(row.moreKeys?.() ?? []),
+      }
+    }
     // Under the open field: Send sends the row's draft, and Cancel closes the field and keeps the draft.
     const fieldActions = (row: Row): KeyAction[] => [
       {
@@ -3256,7 +3310,7 @@ export const register: Register = on => {
     const lastActionText = (id: string, row?: Row) => {
       const f = feedbackLabel(id, row)
 
-      return f ? { text: [f.text, f.age].filter(Boolean).join(' · '), isFailure: f.isFailure } : null
+      return f ? { text: [f.text, f.age].filter(Boolean).join(DOT), isFailure: f.isFailure } : null
     }
     // A section's children hang from its title like a directory listing. A
     // child's row has a 1-column bar, 3 columns for the tree, 3 for its marker,
@@ -3350,7 +3404,7 @@ export const register: Register = on => {
       return f
         ? {
             ...plain,
-            after: ` · ${[f.text, isNarrowDesktop ? '' : f.age].filter(Boolean).join(' ')}`,
+            after: `${DOT}${[f.text, isNarrowDesktop ? '' : f.age].filter(Boolean).join(' ')}`,
             afterTone: f.isFailure ? ('error' as const) : undefined,
           }
         : { ...plain, after: [plain.after, isNarrowDesktop ? '' : plain.age].filter(Boolean).join('') || undefined }
@@ -3435,7 +3489,8 @@ export const register: Register = on => {
         colors: {
           handle: row.handleTone ? pal.mark[row.handleTone] : null,
           muted: pal.muted,
-          after: line.afterTone ? (pal.tone[line.afterTone] ?? null) : pal.muted,
+          after: line.afterTone ? (pal.tone[line.afterTone] ?? null) : (pal.age ?? pal.muted),
+          afterHover: line.afterTone ? (pal.tone[line.afterTone] ?? null) : pal.muted,
           hover: pal.raised,
           hoverText: pal.raisedText ?? null,
           pressed: pal.selection ?? pal.raised,
@@ -3474,10 +3529,6 @@ export const register: Register = on => {
             onSubmit={(value: string, e) => sendTyped($, row.id, value, e.surface)}
           />
         ) : null
-      // On desktop the actions take one line, main ones first. The open field replaces the follow-ups,
-      // and the field's own submit button is its Send.
-      const desktopMore = isTyping ? [] : more
-      const hasDesktopKeys = keys.length + desktopMore.length > 0
       const lastText = lastActionText(row.id, row)
       const status = [
         ...(row.fold?.note ? [{ text: row.fold.note, color: pal.muted }] : []),
@@ -3535,34 +3586,25 @@ export const register: Register = on => {
                 </Box>
               ) : null}
               <Box flexDirection="column" marginTop={blankLine}>
-                {look === 'desktop'
-                  ? [
-                      ...(hasDesktopKeys ? [keyRow(row.id, keys, desktopMore)] : []),
-                      ...(isTyping
-                        ? [
-                            <Box
-                              flexDirection="row"
-                              alignItems="center"
-                              columnGap={buttonGap}
-                              marginTop={hasDesktopKeys ? 1 : 0}
-                            >
-                              <Box flexShrink={1}>{field}</Box>
-                              {keyRow(
-                                row.id,
-                                fieldActions(row).filter(a => !a.key.startsWith('send-')),
-                              )}
-                            </Box>,
-                          ]
-                        : []),
-                    ]
-                  : keys.length === 0
-                    ? keyRow(row.id, more)
-                    : keysWidth(keys, more) <= e.props.bodyColumns - 3 - (tree ? 7 : 5)
-                      ? keyRow(row.id, keys, more)
-                      : [keyRow(row.id, keys), keyRow(row.id, more)]}
+                {isTyping ? (
+                  look === 'desktop' ? (
+                    <Box flexDirection="row" alignItems="center" columnGap={buttonGap}>
+                      <Box flexShrink={1}>{field}</Box>
+                      {/* The desktop Input supplies its own Send button. */}
+                      {keyRow(
+                        row.id,
+                        fieldActions(row).filter(a => !a.key.startsWith('send-')),
+                      )}
+                    </Box>
+                  ) : (
+                    [field, keyRow(row.id, fieldActions(row))]
+                  )
+                ) : look === 'desktop' || keysWidth(keys, more) <= e.props.bodyColumns - 3 - (tree ? 7 : 5) ? (
+                  keyRow(row.id, keys, more)
+                ) : (
+                  [keyRow(row.id, keys), keyRow(row.id, more)]
+                )}
               </Box>
-              {isTyping && look === 'terminal' ? <Box marginTop={blankLine}>{field}</Box> : null}
-              {isTyping && look === 'terminal' ? keyRow(row.id, fieldActions(row)) : null}
             </Box>
           ) : (
             <Box flexShrink={1} flexGrow={1} paddingRight={1}>
@@ -3688,14 +3730,17 @@ export const register: Register = on => {
     // The tab bar is drawn on the pane's own background, as part of the pane's
     // title bar, with when the inbox last updated at its right end, or under the
     // tabs when the pane is too narrow. Inline, its names line up with the group titles.
-    // A desktop pane narrower than DESKTOP_STATUS_BESIDE_AT puts the status under the tabs, one part per line,
+    // When the status does not fit beside the tabs, a desktop pane puts it under them, one part per line,
     // half a line below them, so it does not read as the first tab's caption.
     // Desktop draws the tabs in a Client, whose region takes the pointer over each whole tab.
-    // The tabs Box pads the bar by 1 column on each side.
+    // The tabs Box pads the bar by 1 column on each side, and puts 3 between the tabs and the status.
     const tabSizes = desktopTabSizes(
       TABS.map(({ id, label }) => ({ label, count: tabCounts[id] })),
       e.props.bodyColumns - 2,
     )
+    const tabsWidth = tabSizes.widths.reduce((sum, w) => sum + w, 0) + tabSizes.gap * (tabSizes.widths.length - 1)
+    const isStatusBelow =
+      look === 'desktop' && tabsWidth + 3 + Math.ceil(status.length / DESKTOP_CHARS_PER_CELL) + 2 > e.props.bodyColumns
     const tabProps: TabsProps | null = hasClient
       ? {
           tabs: TABS.map(({ id, label }, n) => ({
@@ -3949,7 +3994,7 @@ export const register: Register = on => {
             <Text bold={!isLapsed(d)} color={isLapsed(d) ? pal.muted : undefined}>
               {outcomeText(d)}
             </Text>
-            <Text color={pal.muted}>{unbroken(` · ${ago(now - d.at)}`)}</Text>
+            <Text color={pal.age ?? pal.muted}>{unbroken(`${DOT}${ago(now - d.at)}`)}</Text>
           </Text>
         </Box>,
         `closed-${d.id}`,
@@ -4153,7 +4198,10 @@ export const register: Register = on => {
                   <Text color={pal.tone.error} bold>
                     Stopped
                   </Text>
-                  <Text color={pal.muted}> · {ago(now - stop.at)}</Text>
+                  <Text color={pal.muted}>
+                    {DOT}
+                    {ago(now - stop.at)}
+                  </Text>
                 </Text>
                 {stop.kind === 'api-error' ? (
                   <Box flexDirection="column">
@@ -4354,7 +4402,7 @@ export const register: Register = on => {
             )}
             {facts.length > 0 ? (
               <Text color={pal.muted} wrap="wrap">
-                {facts.join(' · ')}
+                {facts.join(DOT)}
               </Text>
             ) : null}
             {/* The next poll is minutes away, and desktop has no key to refresh with. */}

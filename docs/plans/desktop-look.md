@@ -255,7 +255,7 @@ Each section gives four things:
   - **Extra lines.** The error, the refused text and the note each take a full-width line under the tab row.
   - **Gap under the tabs.** When the status sits under the tabs, add a 1-cell gap above it, so it does not read as the first tab's caption.
   - **Fallback.** Without a Client, placement keeps `DESKTOP_WIDE_AT` (50).
-- **Status:** built. `DESKTOP_STATUS_BESIDE_AT` is 66 columns.
+- **Status:** built. It stays beside the tabs while the tabs and the status text, at 1.25 characters per column, fit the pane.
 
 ### 6. Pane stop block
 

@@ -34,6 +34,8 @@ export type RowProps = {
     handle: string | null
     muted: string | null
     after: string | null
+    /** `after` on a row under the pointer or pressed. */
+    afterHover: string | null
     hover: string | null
     hoverText: string | null
     pressed: string | null
@@ -123,7 +125,9 @@ const Row: ClientModule<RowProps, State> = (props, surface) => {
           children: [
             ...(props.before ? [Text({ ...colored(props.colors.muted), children: props.before })] : []),
             line.title,
-            ...(line.after ? [Text({ ...colored(props.colors.after), children: line.after })] : []),
+            ...(line.after
+              ? [Text({ ...colored(background ? props.colors.afterHover : props.colors.after), children: line.after })]
+              : []),
           ],
         }),
       }),

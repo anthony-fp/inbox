@@ -12,6 +12,7 @@ import {
   allRows,
   CHOICE_KEYS,
   closedShown,
+  DOT,
   FINDING_BADGES,
   feedbackText,
   hasAge,
@@ -43,9 +44,6 @@ const ICONS = {
   play: 'M7 4.5v15l12-7.5z',
   copy: 'M9 9h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1zM5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1',
   open: 'M7 17 17 7M8 7h9v9',
-  pencil: 'M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z',
-  talk: 'M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.9A8 8 0 1 1 21 12z',
-  dismiss: 'M18 6 6 18M6 6l12 12',
   retry: 'M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5',
   undo: 'M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11',
   right: 'm9 18 6-6-6-6',
@@ -85,7 +83,7 @@ type Row = {
   handleTone?: Tone
   /** A finding's kind, which sets its handle's color and size. */
   kind?: Finding['kind']
-  /** Open, a line above the title, as a finding's kind and age. It carries the age, so the title line drops it. */
+  /** A line above the title, as a finding's kind and age, drawn open and closed. */
   meta?: JSX.Element
   title: string
   /** Muted text after the title, such as an age. */
@@ -428,10 +426,10 @@ function rowKeys(r: RowView): { keys: Key[]; more: Key[] } {
       keys.push({ ...lettered(), label, ...(icon ? { icon } : {}), run: () => void act(id, p, undefined, pending) })
     } else if (p.action === 'done') keys.push({ hotkey: 'd', label, icon: 'check', run: () => void act(id, p) })
     else if (p.action === 'address') keys.push({ hotkey: 'a', label, run: () => void act(id, p) })
-    else if (p.action === 'type') more.push({ hotkey: 't', label, icon: 'pencil', run: () => startTyping(id) })
+    else if (p.action === 'type') more.push({ hotkey: 't', label, run: () => startTyping(id) })
     else if (p.action === 'explain' || p.action === 'discuss')
-      more.push({ hotkey: 'e', label, icon: 'talk', run: () => void act(id, p) })
-    else if (p.action === 'dismiss') more.push({ hotkey: 'x', label, icon: 'dismiss', run: () => void act(id, p) })
+      more.push({ hotkey: 'e', label, run: () => void act(id, p) })
+    else if (p.action === 'dismiss') more.push({ hotkey: 'x', label, run: () => void act(id, p) })
   }
 
   return { keys, more }
@@ -448,7 +446,7 @@ function itemRow(v: View, r: RowView, item: Item): Row {
     handleTone: isHandedOff ? 'done' : undefined,
     ...(isHandedOff ? { fold: {} } : {}),
     title: item.ask,
-    titleAfter: item.at === null ? undefined : ` · ${ago(v.at - item.at)}`,
+    titleAfter: item.at === null ? undefined : `${DOT}${ago(v.at - item.at)}`,
     hasSecondLine: isQuestion,
     ...rowKeys(r),
     typing: {
@@ -475,10 +473,13 @@ function findingRow(v: View, r: RowView, f: Finding): Row {
     meta: (
       <>
         <span class={`tone-${badge.tone}`}>{badge.label}</span>
-        <span class="muted"> · {ago(v.at - f.at)}</span>
+        <span class="muted age">
+          {DOT}
+          {ago(v.at - f.at)}
+        </span>
       </>
     ),
-    line: { text: f.title, after: ` · ${ago(v.at - f.at)}` },
+    line: { text: f.title },
     body: (
       <div>
         <p>{f.detail}</p>
@@ -630,6 +631,8 @@ function isOpenGuarded(): boolean {
 
 /** The selected row's keys. */
 function rowActions(row: Row): { keys: Key[]; more: Key[] } {
+  if (row.typing && typing === row.id) return { keys: [], more: [] }
+
   return { keys: row.keys, more: row.more }
 }
 
@@ -704,7 +707,7 @@ function lastText(row: Row, now: number): string | null {
   const f = row.feedback
   if (!f) return null
 
-  return hasAge(f) ? `${feedbackLabel(row)} · ${ago(now - f.at)}` : feedbackLabel(row)
+  return hasAge(f) ? `${feedbackLabel(row)}${DOT}${ago(now - f.at)}` : feedbackLabel(row)
 }
 
 /** A row's note while it shows. */
@@ -754,10 +757,8 @@ function ListRow({
   // A row's last action takes the place of its age, as "✓ Discuss 1m ago". It is muted unless it failed: a done row's ✓ is already green.
   const last = isFeedbackShown(row) ? lastText(row, now) : null
   const line = last
-    ? { ...plain, after: ` · ${last}`, afterTone: isFailure(row.feedback) ? ('error' as const) : undefined }
-    : isSelected && row.meta
-      ? { ...plain, after: undefined }
-      : plain
+    ? { ...plain, after: `${DOT}${last}`, afterTone: isFailure(row.feedback) ? ('error' as const) : undefined }
+    : plain
   // A closed row keeps its panel drawn while it collapses, so the panel can fade out.
   const isClosing = !isSelected && closingRows.has(row.id)
 
@@ -770,7 +771,7 @@ function ListRow({
     >
       {handle}
       <div class="content">
-        {isSelected && row.meta ? <div class="meta">{row.meta}</div> : null}
+        {row.meta ? <div class="meta">{row.meta}</div> : null}
         {/* Open, the line does nothing, so it leaves the focus order. */}
         <button
           type="button"
@@ -805,11 +806,9 @@ function Panel({ row, isClosing }: { row: Row; isClosing: boolean }) {
     <div class={isClosing ? 'panel closing' : 'panel'} inert={isClosing}>
       {row.body ? <div class="body">{row.body}</div> : null}
       {notes.length > 0 ? <div class="tight">{notes}</div> : null}
-      {/* The row's answers and main action, then its follow-ups, on one line that wraps. An open field replaces the
-          follow-ups, on its own line. */}
       <div class="actions">
         {/* Each group wraps as a whole: the follow-ups move to the next line together, never split across two. */}
-        {keys.length > 0 || (more.length > 0 && !isTyping) ? (
+        {keys.length > 0 || more.length > 0 ? (
           <div class="key-groups">
             {keys.length > 0 ? (
               <div class="keys">
@@ -818,7 +817,7 @@ function Panel({ row, isClosing }: { row: Row; isClosing: boolean }) {
                 ))}
               </div>
             ) : null}
-            {more.length > 0 && !isTyping ? (
+            {more.length > 0 ? (
               <div class="keys follow-ups">
                 {more.map(k => (
                   <KeyButton k={k} isGhost />
@@ -865,8 +864,16 @@ function SettledView({ settled: r }: Extract<Entry, { settled: RowView }>) {
       {/* An error wraps, so none of it is cut. */}
       <div class={error ? 'settled-line wraps' : 'settled-line'}>
         <span class="what">{r.title}</span>
-        <span class="outcome-label"> · {state.isQueued ? `Queued: ${state.label}` : state.label}</span>
-        {error ? <span class="tone-error"> · {error}</span> : null}
+        <span class="outcome-label">
+          {DOT}
+          {state.isQueued ? `Queued: ${state.label}` : state.label}
+        </span>
+        {error ? (
+          <span class="tone-error">
+            {DOT}
+            {error}
+          </span>
+        ) : null}
       </div>
       {state.canUndo ? (
         <button type="button" class="key undo" disabled={isUndoing} onClick={() => void undo(r)}>
@@ -1016,7 +1023,10 @@ function ClosedFold({ group, closed, now }: { group: Group; closed: ClosedLine[]
                   <div class="muted">{d.ask}</div>
                   <div>
                     <span class={d.isLapsed ? 'outcome lapsed' : 'outcome'}>{capitalized(d.outcome)}</span>
-                    <span class="muted"> · {ago(now - d.at)}</span>
+                    <span class="muted age">
+                      {DOT}
+                      {ago(now - d.at)}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1126,7 +1136,10 @@ function TabBar({ v, now }: { v: View; now: number }) {
   const sinceRead = Date.now() - readAt
   const status =
     pollFailures >= 2 ? (
-      <span class={sinceRead > LATE_READ_MS ? 'tone-error' : undefined}>Last read {ago(sinceRead)} · retrying</span>
+      <span class={sinceRead > LATE_READ_MS ? 'tone-error' : undefined}>
+        Last read {ago(sinceRead)}
+        {DOT}retrying
+      </span>
     ) : isUpdating ? (
       'Updating…'
     ) : changedAt !== null ? (
@@ -1372,18 +1385,6 @@ function toggleFold(group: Group) {
   }, EXIT_MS)
 }
 
-/**
- * Marks a follow-up group that starts its own line, so its first label lines up with the row's text, as a
- * leading ghost button does in Codex. Only layout shows whether the group wrapped.
- */
-function alignFollowUps() {
-  for (const group of document.querySelectorAll<HTMLElement>('.follow-ups')) {
-    const first = group.previousElementSibling as HTMLElement | null
-    group.classList.toggle('starts-line', !first || group.offsetTop > first.offsetTop + 2)
-  }
-}
-window.addEventListener('resize', alignFollowUps)
-
 /** Brings the open row into view, and again once its height has moved, since a row still growing is clipped. */
 function revealSelected() {
   document.querySelector('.row.selected')?.scrollIntoView({ block: 'nearest' })
@@ -1406,7 +1407,6 @@ function draw() {
   }
   const before = measure()
   render(<App />, root)
-  alignFollowUps()
   animateDraw(before)
   if (focusTyping && typing) {
     focusTyping = false

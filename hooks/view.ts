@@ -25,6 +25,8 @@ const OPTIONS_FOLD_AT = 5
 // question letters them. The digits switch tabs, and the letters left out are the
 // keys of a Needs you row's other actions and of moving the selection.
 export const CHOICE_KEYS = [...'abcfghilm']
+/** The dot between parts of a drawn line, as "title · 3m ago". En spaces, wider than a space, set it apart. */
+export const DOT = '\u2002·\u2002'
 
 /** A finding's kind as the Findings tab draws it: a mark before its name, both in the kind's tone. */
 export const FINDING_BADGES: Record<Finding['kind'], { label: string; mark: string; tone: 'needsYou' | 'done' }> = {
@@ -222,12 +224,12 @@ function localText(r: LocalResult, look: Look): string {
   const isPrs =
     r.parts.length > 1 && r.parts.every(p => p.kind === 'open' && p.error === null && /^PR #\d+$/.test(p.name))
   const parts = isPrs ? [{ ...r.parts[0]!, name: `${r.parts.length} PRs` }] : r.parts
-  if (r.state === 'pending') return `${parts.map(p => `${VERBS[p.kind].pending} ${p.name}`).join(' · ')}…`
+  if (r.state === 'pending') return `${parts.map(p => `${VERBS[p.kind].pending} ${p.name}`).join(DOT)}…`
   const text = parts
     .map(p =>
       p.error === null ? `${VERBS[p.kind].done} ${p.name}` : `Could not ${VERBS[p.kind].failed} ${p.name}: ${p.error}`,
     )
-    .join(' · ')
+    .join(DOT)
   if (r.state === 'failed') return text
   const isCommand = parts.some(p => p.kind === 'copy' && p.isCommand)
 
@@ -286,14 +288,14 @@ function actionsOf(
     return [
       action({ action: 'address', id }, 'Address', 'handoff'),
       action({ action: 'discuss', id }, 'Discuss', 'talk'),
-      action({ action: 'type', id, text: '' }, 'Type a reply', 'handoff'),
+      action({ action: 'type', id, text: '' }, 'Reply', 'handoff'),
       action({ action: 'dismiss', id }, 'Dismiss', 'mark'),
     ]
   if (item.kind === 'task')
     return [
       ...stepActions,
       action({ action: 'done', id }, 'Done', 'mark'),
-      action({ action: 'type', id, text: '' }, 'Type a reply', 'handoff'),
+      action({ action: 'type', id, text: '' }, 'Reply', 'handoff'),
       action({ action: 'explain', id }, 'Explain', 'talk'),
     ]
   const isFolding = item.options.length > OPTIONS_FOLD_AT
