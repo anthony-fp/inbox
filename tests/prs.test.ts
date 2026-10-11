@@ -5,6 +5,7 @@ import {
   commentLine,
   prRefs,
   prNeedsYou,
+  prompts,
   readThreads,
   readView,
   readableComment,
@@ -126,6 +127,16 @@ describe('prs', () => {
       '**P1  Guard the empty list**\n\nAn empty `Array<string>` reaches [the parser](https://example.com/parser).',
     )
     expect(commentLine(body)).toBe('P1 Guard the empty list An empty Array<string> reaches the parser.')
+  })
+
+  test('a PR press quotes each review comment line and clips a long comment', () => {
+    const view = readView('acme/greet#12', VIEW)!
+    const [thread] = readThreads(THREADS)
+    const long = { ...thread!, body: `First line\nSecond line ${'x'.repeat(3000)}`, reply: null }
+    const message = prompts.address({ ...view, threads: [], fetchedAt: 0, error: null }, [long])
+    expect(message).toContain('> First line\n> Second line')
+    expect(message).toContain('…[cut]')
+    expect(message).not.toContain('x'.repeat(2100))
   })
 
   test('finds PR links once each', () => {

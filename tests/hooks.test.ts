@@ -1374,7 +1374,7 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'address-T1' })
   expect(sent.at(-1)).toContain('Address this review comment on PR #12')
-  expect(sent.at(-1)).toContain('bin/greet:4, from @sam:\nQuote the name.')
+  expect(sent.at(-1)).toContain('bin/greet:4, from @sam:\n> Quote the name.')
   await clock.settle()
   expect(await pane.find({ text: 'Not sent: a hook refused it' })).toBeDefined()
   expect((await pane.find({ key: 'address-T1-key' }))?.props.label).toBe('Address')
