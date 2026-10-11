@@ -41,13 +41,13 @@ At each draw the tab works out the form each row should have now, its target:
 
 Rules that hold in every state:
 
-- **A panel is never removed while it shows.** A track that draws the panel keeps drawing it through `closing`, `settling` and `leaving`, so its content is clipped by the shrinking height instead of vanishing. A row that never drew a panel does not gain one when it settles.
+- **A panel is never removed while it shows.** A track that draws the panel keeps drawing it through `closing`, `settling` and `leaving`, so its content is clipped by the shrinking height instead of vanishing. A row that settles from closed shows only its settled line.
 - **The settled line shows as soon as the reply arrives.** It shows the outcome and Undo while the panel shrinks under it, so the press's result is visible at once.
 - **A settling row is laid out as an open row is.** The settled line and the panel share one column, so the panel stays exactly where the open row drew it. The row's fill fades out over the same 200 ms as its height.
 - **Nothing under the line moves while a press is out.** "Sending…" shows in the line's age slot, where the press's result will show.
 - **A row's parts do not fade in.** When a row settles or is undone, its line, panel and Undo swap in place. A fade from nothing there reads as a flicker. A row that arrives still fades in as a whole.
-- **Time ends a move, not the animation.** Each move into a moving state schedules a draw for when it is due to end, and that draw brings the row to rest. An animation that never reports its end cannot hold a row.
-- **A move starts from the drawn height.** A row turned around mid-move starts the new animation from where it is.
+- **Time ends a move, not the animation.** After each draw, the tab schedules one more draw for when the first moving row's move is due to end. That draw brings the row to rest, so an animation that never reports its end cannot hold a row.
+- **A move starts from the drawn height and opacity.** A row turned around mid-move, or closed while it still grows in, starts the new animation from where it is drawn.
 - **A row's end height is its content's height.** The tab adds up the heights of the row's children, which no animation of the row changes.
 - **A leaving row keeps its place.** The tab draws it where it last drew it until it is removed.
 - **Rows of a tab not shown are forgotten.** They show their form at once when their tab shows.
@@ -63,5 +63,5 @@ Rules that hold in every state:
 ## Checks
 
 - Tests in `codex/tests/press.spec.ts`: every state reaches every target, a row drawing its panel never drops it except through `closing`, `settling` or `leaving`, a row turned around mid-move, and reduced motion.
-- In the harness, each row's height and panel, frame by frame: Dismiss with a slow reply, an answer with an instant reply, Undo, a failing Undo, a settled row leaving, a row arriving, switching rows, and reopening a row mid-close.
+- In the harness, each row's height, opacity and panel, frame by frame, on both tabs: Dismiss with a slow reply, an answer with an instant reply, Undo, a failing Undo, a settled row leaving, a row arriving, a row arriving open and closed while it grows in, switching rows, reopening a row mid-close, and the Closed fold.
 - `./scripts/check.sh`.

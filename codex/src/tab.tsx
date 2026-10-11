@@ -1390,10 +1390,10 @@ function startState(el: HTMLElement, state: RowState, from: () => number): boole
       return true
     case 'closing':
     case 'settling':
-      collapse(el, from())
+      collapse(el, drawnLook(el, from))
       return true
     case 'leaving': {
-      const look = { height: from(), opacity: Number(getComputedStyle(el).opacity) }
+      const look = drawnLook(el, from)
       for (const a of el.getAnimations()) a.cancel()
       tween(el, look, { height: 0, opacity: 0 }, EXIT)
       return true
@@ -1405,11 +1405,17 @@ function startState(el: HTMLElement, state: RowState, from: () => number): boole
   }
 }
 
+/** The element's height and opacity as drawn now, mid-animation included, read before its animations are cancelled. */
+function drawnLook(el: HTMLElement, height: () => number): Look {
+  return { height: height(), opacity: Number(getComputedStyle(el).opacity) }
+}
+
 /**
- * Shrinks a closing or settling row over the panel it keeps, to the height it has without it. The animation holds
- * that end until the draw that removes the panel cancels it, so the panel never shows again for a frame.
+ * Shrinks a closing or settling row over the panel it keeps, to the height it has without it, and finishes any fade
+ * in it was in. The animation holds that end until the draw that removes the panel cancels it, so the panel never
+ * shows again for a frame.
  */
-function collapse(el: HTMLElement, from: number) {
+function collapse(el: HTMLElement, from: Look) {
   const panel = el.querySelector<HTMLElement>('.panel.closing')
   // A closing row keeps its open line until the panel goes, so its end height is measured as it will draw then.
   const row = el.querySelector<HTMLElement>('.row.closing')
@@ -1419,7 +1425,7 @@ function collapse(el: HTMLElement, from: number) {
   if (panel) panel.style.display = ''
   row?.classList.add('closing')
   for (const a of el.getAnimations()) a.cancel()
-  run(el, [{ height: `${from}px` }, { height: `${target}px` }], { ...MOVE, fill: 'forwards' }, target)
+  tween(el, from, { height: target, opacity: 1 }, { ...MOVE, fill: 'forwards' })
 }
 
 /**
