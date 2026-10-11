@@ -39,7 +39,7 @@ import { ENTER_MS, EXIT_MS, isMoving, MOVE_MS, ROW_STATE_MS, stepRow } from './r
 import type { RowState, RowTarget, RowTrack } from './rows'
 import { drawnSettled, POLL_MS, PRESS_TIMEOUT_MS, settledIds, settledSeen } from './settle'
 
-type Tone = 'needsYou' | 'findings' | 'done' | 'error'
+type Tone = 'needsYou' | 'issue' | 'findings' | 'done' | 'error'
 
 /** One of a row's actions, with the key that presses it while the tab has focus, if it has one. */
 type Key = { hotkey?: string; label: string; isPrimary?: boolean; icon?: IconName; run: () => void }

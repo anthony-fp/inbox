@@ -30,8 +30,8 @@ export const CHOICE_KEYS = [...'abcfghilm']
 export const DOT = '\u2002·\u2002'
 
 /** A finding's kind as the Findings tab draws it: a mark before its name, both in the kind's tone. */
-export const FINDING_BADGES: Record<Finding['kind'], { label: string; mark: string; tone: 'needsYou' | 'done' }> = {
-  issue: { label: 'Issue', mark: '▲', tone: 'needsYou' },
+export const FINDING_BADGES: Record<Finding['kind'], { label: string; mark: string; tone: 'issue' | 'done' }> = {
+  issue: { label: 'Issue', mark: '▲', tone: 'issue' },
   opportunity: { label: 'Opportunity', mark: '✦', tone: 'done' },
 }
 

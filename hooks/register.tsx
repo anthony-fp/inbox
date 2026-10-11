@@ -270,7 +270,7 @@ const FINDINGS = 'autoAccept'
 const PRS = 'planMode'
 
 // A status color in the pane. Each tab has the tone of its own name.
-type Tone = Tab | 'done' | 'error'
+type Tone = Tab | 'issue' | 'done' | 'error'
 /**
  * The pane's colors in one Claude Code theme. Each text color meets WCAG AA,
  * 4.5:1, on every background the pane draws it on, and each marker meets 3:1.
@@ -314,17 +314,37 @@ type Palette = {
 
 // Hex tuned for one theme, each tone checked against the pane, the cards, the
 // selected tab and the selected row. They hold only for the theme they name.
-const DARK_TONES = { needsYou: '#ffc107', findings: '#cab0ff', prs: '#8cc8c0', done: '#7ecd8f', error: '#ffa3b0' }
+const DARK_AMBER = '#ffc107'
+const DARK_TONES = {
+  needsYou: DARK_AMBER,
+  issue: DARK_AMBER,
+  findings: '#cab0ff',
+  prs: '#8cc8c0',
+  done: '#7ecd8f',
+  error: '#ffa3b0',
+}
+const DARK_DALTONIZED_AMBER = '#ffcc00'
 const DARK_DALTONIZED_TONES = {
-  needsYou: '#ffcc00',
+  needsYou: DARK_DALTONIZED_AMBER,
+  issue: DARK_DALTONIZED_AMBER,
   findings: '#cab0ff',
   prs: '#a3c2c2',
   done: '#82c1ff',
   error: '#ffa3a3',
 }
-const LIGHT_TONES = { needsYou: '#745417', findings: '#7b00e8', prs: '#006363', done: '#25652f', error: '#a5293d' }
+const LIGHT_AMBER = '#745417'
+const LIGHT_TONES = {
+  needsYou: LIGHT_AMBER,
+  issue: LIGHT_AMBER,
+  findings: '#7b00e8',
+  prs: '#006363',
+  done: '#25652f',
+  error: '#a5293d',
+}
+const LIGHT_DALTONIZED_AMBER = '#7a4900'
 const LIGHT_DALTONIZED_TONES = {
-  needsYou: '#7a4900',
+  needsYou: LIGHT_DALTONIZED_AMBER,
+  issue: LIGHT_DALTONIZED_AMBER,
   findings: '#7400db',
   prs: '#2d5a5a',
   done: '#005885',
@@ -374,7 +394,7 @@ const DARK_ANSI_PALETTE: Palette = {
   line: 'userMessageBackground', // bright black
   divider: 'userMessageBackground',
   tone: {},
-  mark: { needsYou: NEEDS_YOU, findings: FINDINGS, prs: PRS, done: DONE, error: 'error' }, // the bright colors
+  mark: { needsYou: NEEDS_YOU, issue: NEEDS_YOU, findings: FINDINGS, prs: PRS, done: DONE, error: 'error' }, // the bright colors
 }
 const LIGHT_ANSI_PALETTE: Palette = {
   body: 'userMessageBackgroundHover', // bright white
@@ -387,7 +407,7 @@ const LIGHT_ANSI_PALETTE: Palette = {
   divider: 'userMessageBackground',
   tone: {},
   // Red, magenta, blue, green and red: the theme's yellow and cyan fall under 3:1 on bright white.
-  mark: { needsYou: 'error', findings: FINDINGS, prs: 'suggestion', done: DONE, error: 'error' },
+  mark: { needsYou: 'error', issue: 'error', findings: FINDINGS, prs: 'suggestion', done: DONE, error: 'error' },
 }
 const PALETTES: Record<string, Palette> = {
   dark: DARK_PALETTE,
@@ -426,7 +446,7 @@ const THEME_KEY_PALETTE: Palette = {
   line: 'subtle',
   divider: 'subtle',
   tone: {},
-  mark: { needsYou: NEEDS_YOU, findings: FINDINGS, prs: PRS, done: DONE, error: 'error' },
+  mark: { needsYou: NEEDS_YOU, issue: NEEDS_YOU, findings: FINDINGS, prs: PRS, done: DONE, error: 'error' },
 }
 // The desktop app resolves theme keys to its own colors, where Auto's tab and raised keys fail contrast and the
 // ANSI palettes' premise does not hold. So on desktop every theme without hex colors above takes translucent

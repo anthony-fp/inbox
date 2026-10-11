@@ -12,7 +12,9 @@
         --text: var(--color-text-primary, #1f1f1f);
         --muted: var(--color-text-secondary, #595959);
         --key: #243bf5;
-        --needs-you: #745417;
+        --amber: #745417;
+        --needs-you: var(--amber);
+        --issue: var(--amber);
         --findings: #7b00e8;
         --done: #25652f;
         --error: #a5293d;
@@ -43,7 +45,7 @@
           --text: var(--color-text-primary, #ececec);
           --muted: var(--color-text-secondary, #a8a8a8);
           --key: #b1b9f9;
-          --needs-you: #ffc107;
+          --amber: #ffc107;
           --findings: #cab0ff;
           --done: #7ecd8f;
           --error: #ffa3b0;
@@ -59,7 +61,7 @@
       :root[data-theme='dark'] {
         color-scheme: dark;
         --key: #b1b9f9;
-        --needs-you: #ffc107;
+        --amber: #ffc107;
         --findings: #cab0ff;
         --done: #7ecd8f;
         --error: #ffa3b0;
@@ -99,6 +101,9 @@
       }
       .tone-needsYou {
         color: var(--needs-you);
+      }
+      .tone-issue {
+        color: var(--issue);
       }
       .tone-findings {
         color: var(--findings);
@@ -210,7 +215,7 @@
         color: var(--done);
       }
       .mark.issue {
-        color: var(--needs-you);
+        color: var(--issue);
       }
       .mark.opportunity {
         color: var(--done);
