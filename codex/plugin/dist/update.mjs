@@ -258,7 +258,9 @@ function parseReply(text, source = null) {
       const [id, target] = value.split("|").map((s) => s.trim());
       if (id && /^f\d+$/.test(id) && target) asks.push({ id, target });
     } else if (key === "NEW") {
-      const [kind, label, ask, ...rest] = value.split("|").map(dash);
+      const fields = value.split("|");
+      const isLabelSkipped = !dash(fields[2]) && /\s/.test((fields[1] ?? "").trim());
+      const [kind, label, ask, ...rest] = (isLabelSkipped ? [fields[0], "-", ...fields.slice(1)] : fields).map(dash);
       const rec = rest.length > 1 ? rest.pop() : null;
       if (!ask) {
         newLines.push(void 0);
@@ -717,6 +719,12 @@ function applied(s, reply, now, promptAt) {
   if (!next) return s;
   const { ex } = next;
   const parsed = reply === null ? null : parseReply(reply, [ex.reply, ...ex.activity].join("\n"));
+  if (!parsed && !next.failed)
+    return {
+      ...s,
+      pending: [{ ...next, failed: true }, ...s.pending.slice(1)],
+      presence: { ...s.presence, ledgerState: "failed" }
+    };
   const explained = ex.press?.action === "explain" ? ex.press.id : null;
   const ledger = parsed ? applyUpdate(
     s.ledger,
@@ -732,7 +740,7 @@ function applied(s, reply, now, promptAt) {
     presence: {
       ...s.presence,
       ledgerState: parsed ? "current" : "failed",
-      // A failed turn counts as summarized too: with no catch-up yet, a task
+      // A turn that failed twice counts as summarized too: with no catch-up yet, a task
       // handed to Codex would otherwise stay folded for good.
       turnsApplied: Math.max(s.presence.turnsApplied, next.turnsStarted)
     }
@@ -775,7 +783,7 @@ async function runUpdates(dir, sessionId, ask, now) {
         if (!next) break;
         const promptAt = now();
         const reply = await ask(buildPrompt(s.ledger, next.ex)).catch(() => null);
-        await updateState(
+        const after = await updateState(
           dir,
           sessionId,
           (x) => (
@@ -783,6 +791,7 @@ async function runUpdates(dir, sessionId, ask, now) {
             x.pending[0]?.turnsStarted === next.turnsStarted && x.pending[0].ex.turn === next.ex.turn ? applied(x, reply, now(), promptAt) : x
           )
         );
+        if (after.pending[0]?.failed && !next.failed) return;
       }
     } finally {
       await updateState(dir, sessionId, (x) => ({ ...x, presence: { ...x.presence, isUpdating: false } }));
