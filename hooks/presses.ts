@@ -663,10 +663,13 @@ export const messages = {
   answer: (item: Item, answer: string) => `Re "${item.ask}": ${answer}`,
   /** Asks what an item is about. The item stays open, since nothing was decided. */
   explain: (item: Item) => {
-    const what = item.kind === 'task' ? 'this task you left for me' : 'this question you asked me'
+    const what =
+      item.kind === 'task'
+        ? 'this task you left for me is about: why it came up, and what each choice would mean'
+        : 'this question you asked me is about: why it came up, what each choice would mean, and which you would pick'
     const options = item.options.length > 0 ? `\nOptions: ${item.options.join(' / ')}` : ''
 
-    return `Remind me what ${what} is about: why it came up, and what each choice would mean. Don't act on it yet.\n"${item.ask}"${options}`
+    return `Remind me what ${what}. Don't act on it yet.\n"${item.ask}"${options}`
   },
   run: (item: Item, command: string) => `For "${item.ask}", run this:\n\`\`\`\n${command}\n\`\`\``,
   taskReply: (item: Item, words: string) => `Re the task you left for me, "${item.ask}": ${words}`,

@@ -115,7 +115,7 @@ export function systemText(host: Host): string {
 
 Input:
 - <card>: the ledger before this exchange (may be empty)
-- <open>: items still waiting on the person, each with an id
+- <open>: items still waiting on the person, as id | kind | label | ask | options | rec
 - <findings>: findings the agent recorded for the person to review later, outside the current task, each with an id
 - <decided>: items the person already settled, and how. Never add one of these again as NEW, even when the reply asks it again.
 - <person>: what the person just sent, and the commands they ran themselves: "$ cmd" for a shell command, with its output, and "/name" for a slash command
@@ -137,8 +137,10 @@ NEW: <kind> | <label> | <ask> | <options> | <rec>
   label: the reply's own number or id for it ("1", "D3"), or "-".
   ask: plain words, readable without the reply, at most 12 words, or up to 16 when 12 would lose meaning. Keep the question's meaning and every alternative it names. Replace any term the reply coined with what it means.
   options: the answers the person can pick, separated by " / ", at most 5 words each; "-" for kind "do". For kind "decide", always at least one, so one press can answer. Use the choices the reply offers, plus the answer it recommends when that is not one of them. When the reply offers none, predict the answers the person would most likely give: the yes and the no for an approval or a yes-or-no question ("Approve / Not yet"); the 1 to 3 likeliest answers to an open question, from the conversation; or, when the conversation suggests no answer, what the person would most likely ask the agent to do instead ("List the choices", "Pick one for me").
-  rec: the option the reply states it recommends for this question ("I'd go with X", "I recommend X"), copied from options, or "-" when it states none for this question.
+  rec: the option the reply states it recommends for this question ("I'd go with X", "I recommend X"), copied from options, or "-" when it states none for this question. A reason the reply gives for one answer is not a recommendation: it must say it recommends or prefers that answer.
   Skip: rhetorical questions; offers to continue ("Want me to start?") when continuing is the obvious default; FYIs; generic "let me know"; invitations to look at, try or check finished work ("Open X to see it", "reload to check") unless the agent waits on the person's verdict before going on; optional suggestions; anything the person already has on screen, per <screen>; questions asking the person to describe what they saw, did or meant, even when the answer would help diagnose a problem ("What happens when you click it?", "Which file did you mean?"). The person answers those by replying.
+UPDATE: <id> | <options> | <rec>
+  For a "decide" item in <open> when the reply now offers it different answers, or states a recommendation for it that <open> does not show. options: the answers the person can now pick, as in NEW, or "-" to keep them. rec: as in NEW, or "-" to keep it. Rewording the question is not a change.
 HELP: <item> | <kind> | <value> | <name>
   A step that does part of an item's work in one press, when the reply or activity already spells it out: the file to edit, the text to paste, the command to run, the page to visit. Not background reading. Up to 3 per item, most useful first.
   item: "new N" for the Nth NEW line in your answer, or an id from <open>.
@@ -301,6 +303,8 @@ export type Update = {
   added: (Omit<Item, 'id' | 'turn' | 'at' | 'helps'> & { helps: Help[] })[]
   /** Helps for items already open. */
   helped: { id: string; help: Help }[]
+  /** New options or a new recommendation for open questions. Null keeps what the question has. */
+  updated: { id: string; options: string[] | null; rec: string | null }[]
 }
 
 const FENCE = /```[^\n]*\n([\s\S]*?)```/g
@@ -405,7 +409,12 @@ function ledgerBlocks(ledger: Ledger): string[] {
         ...ledger.card.running.map(r => `RUNNING: ${r}`),
       ].join(NL)
     : ''
-  const open = ledger.items.map(i => `${i.id} | ${MODEL_KIND[i.kind]} | ${i.label ?? '-'} | ${i.ask}`).join(NL)
+  const open = ledger.items
+    .map(
+      i =>
+        `${i.id} | ${MODEL_KIND[i.kind]} | ${i.label ?? '-'} | ${i.ask} | ${i.options.join(' / ') || '-'} | ${i.rec ?? '-'}`,
+    )
+    .join(NL)
   const findings = ledger.findings.map(f => `${f.id} | ${f.kind}: ${f.title}`).join(NL)
   // An expired item was never answered, so the reply may ask it again.
   const closed = ledger.closed
@@ -533,11 +542,12 @@ export function parseReply(text: string, source: string | null = null): Update |
   const closed: Update['closed'] = []
   const added: Update['added'] = []
   const helped: Update['helped'] = []
+  const updated: Update['updated'] = []
   const helps: { target: string; help: Help }[] = []
   let seen = 0
 
   for (const raw of text.split(NL)) {
-    const m = raw.match(/^\s*[-*]?\s*(GOAL|DONE|NOW|RUNNING|CLOSED|NEW|HELP)\s*:\s*(.*)$/)
+    const m = raw.match(/^\s*[-*]?\s*(GOAL|DONE|NOW|RUNNING|CLOSED|NEW|UPDATE|HELP)\s*:\s*(.*)$/)
     if (!m) continue
     seen += 1
     const key = m[1]
@@ -564,6 +574,11 @@ export function parseReply(text: string, source: string | null = null): Update |
         rec: recommendedOption(options, rec ?? null),
         helps: [],
       })
+    } else if (key === 'UPDATE') {
+      const [target, options, rec] = value.split('|').map(dash)
+      const id = target?.match(/\b(i\d+)\b/)?.[1]
+      if (id)
+        updated.push({ id, options: options ? options.split(/\s+\/\s+/).filter(Boolean) : null, rec: rec ?? null })
     } else if (key === 'HELP') {
       const [target, kind, help, name] = value.split('|').map(s => s.trim())
       const parsed = readHelp(kind ?? '', help ?? '', dash(name), blocks, source)
@@ -580,7 +595,7 @@ export function parseReply(text: string, source: string | null = null): Update |
     else if (!n && id) helped.push({ id, help })
   }
 
-  return seen === 0 ? null : { card: { ...card, done: card.done.slice(-4) }, closed, added, helped }
+  return seen === 0 ? null : { card: { ...card, done: card.done.slice(-4) }, closed, added, helped, updated }
 }
 
 const FILLER = new Set([
@@ -769,7 +784,7 @@ export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number
   for (const item of ledger.items) {
     const outcome = closing.get(item.id)
     const helps = u.helped.filter(h => h.id === item.id).reduce((all, h) => withHelp(all, h.help), item.helps)
-    if (outcome === undefined) items.push({ ...item, helps })
+    if (outcome === undefined) items.push(withUpdate({ ...item, helps }, u.updated))
     else closed.push(closedRecord(item, { outcome, how: 'update' }, now))
   }
 
@@ -808,6 +823,18 @@ export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number
     nextId,
     batchTurn: added > 0 ? turn : ledger.batchTurn,
   }
+}
+
+/**
+ * A question with the options and recommendation an UPDATE line gives it. A recommendation is kept only while it
+ * is one of the options, so new options without a new recommendation drop one that no longer fits.
+ */
+function withUpdate(item: Item, updated: Update['updated']): Item {
+  const change = updated.findLast(c => c.id === item.id)
+  if (!change || item.kind !== 'question') return item
+  const options = change.options ?? item.options
+
+  return { ...item, options, rec: recommendedOption(options, change.rec ?? item.rec) }
 }
 
 /** The items the agent's latest reply added, which "1. yes" answers refer to. */

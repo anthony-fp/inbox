@@ -1,12 +1,12 @@
 # Audit of the texts the models read
 
-Status: proposed. No wording has changed. Each change below needs the A/B run that `AGENTS.md` asks for, or is a code change Pete decides on.
+Status: building. Theme 2's `UPDATE` line, a stricter recommendation rule and the new Explain wording are built and measured. Theme 1 was measured and not kept. The other themes are proposed.
 
 ## Verdict
 
 The texts are careful about the rules they state: when to record a finding, when to close, and not answering for the user. The biggest gaps are in what they leave out.
 
-1. The main agent is never told that the questions in its reply become inbox items. So it does not write them in a form the inbox model can turn into good items. I expect this to be the largest lever for predictive items. The A/B in theme 1 would confirm it.
+1. The main agent is never told that the questions in its reply become inbox items. So it does not write them in a form the inbox model can turn into good items. An A/B run did not show the guidance paragraph improving items, so it was not kept. See Results.
 2. Nothing can change an open item. When the agent sharpens a question or states a recommendation later, the row keeps its first ask, options and recommendation.
 3. A finding the user dismissed disappears without a trace. Neither model hears it was dismissed, so the agent can record it again.
 
@@ -167,13 +167,32 @@ The skeptics refuted 20 findings, for these reasons:
 - **Re-proposed a measured change.** Three proposed rewording the finding-closing rule, which `docs/plans/instructions.md` measured and rejected.
 - **Unproven.** A missing example of the line format, the catch-up prompt's order, and the card's list rules. No failure was shown for any of them.
 
+## Results
+
+Each run used synthetic fixture exchanges, except one real reply that drew the f181 finding. The inbox model ran 8 times per case on Sonnet and 5 times on the Codex model. "Before" is the committed prompt. "After" adds the `UPDATE` line, shows each open item's options and recommendation in `<open>`, and adds one sentence to the `rec` rule: "A reason the reply gives for one answer is not a recommendation: it must say it recommends or prefers that answer."
+
+| Case | Sonnet before | Sonnet after | Codex before | Codex after |
+| --- | --- | --- | --- | --- |
+| An Explain reply's pick reaches the row | 0 of 8 | 8 of 8 | 0 of 5 | 5 of 5 |
+| A narrowed question shows its new options and pick | 6 of 8 | 7 of 8 | not run | not run |
+| A reworded question stays unchanged | 8 of 8 | 8 of 8 | 5 of 5 | 5 of 5 |
+| Unrelated progress changes no open question | 8 of 8 | 8 of 8 | not run | not run |
+| A dismissed question asked again stays closed | 5 of 8 | 8 of 8 | 5 of 5 | 5 of 5 |
+| A stated recommendation is kept | 8 of 8 | 8 of 8 | not run | not run |
+| A reason is not taken as a recommendation | 0 of 8 | 8 of 8 | 5 of 5 | 5 of 5 |
+| The real reply behind f181 gets no invented recommendation | 0 of 8 | 7 of 8 | 5 of 5 | 5 of 5 |
+
+The `UPDATE` line without the stricter sentence fixed the Explain case too, but still invented a recommendation in 5 of 8 runs on the reason-only case.
+
+- **Explain wording:** ten Sonnet agent replies to each Explain message, about a cache question. Asking "and which you would pick" made the agent name a pick in 9 of 10 replies, against 1 of 10. Only the question wording changed. The task wording was not tested and stays.
+- **Theme 1 not kept:** ten Sonnet agent replies per version, in two scenarios. With the paragraph, the agent put commands in code blocks. But the items gained nothing. In the fork scenario, both versions gave a recommendation and a one-press step in 10 of 10 replies. In the migration scenario, the paragraph added approval questions, and slightly fewer tasks got a step: 8 of 18, against 11 of 20.
+- **Limits:** the agent runs used a short preamble in place of Claude Code's full system prompt. The Codex agent was not run.
+
 ## Proposed order
 
-1. Theme 1. It is wording only, it touches only the agent's guidance, and it has the biggest effect on predictive items.
+1. Theme 4. It needs the most careful A/B.
 2. Theme 3 and theme 6's close result. These are code changes with small model-read edits.
-3. Theme 2. It needs a decision on the `UPDATE` line.
-4. Theme 4. It needs the most careful A/B.
-5. Theme 5 waits on Decision 3 in `docs/plans/instructions.md`.
-6. Themes 7 and 8.
+3. Theme 5 waits on Decision 3 in `docs/plans/instructions.md`.
+4. Themes 7 and 8.
 
-Theme 1's wording goes in `guidanceText`, which builds the guidance for both agents. That function comes from step 5 of `docs/plans/three-looks.md`, which is written but not yet committed.
+Theme 2 is built, with the stricter recommendation rule that f181 called for. Theme 1 was measured and not kept. Theme 4 is not started.

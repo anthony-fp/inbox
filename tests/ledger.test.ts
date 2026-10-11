@@ -179,6 +179,19 @@ describe('applyUpdate', () => {
     ])
   })
 
+  test('an UPDATE line gives an open question new options or a recommendation, and leaves tasks alone', () => {
+    const first = applyUpdate(EMPTY, parseReply(REPLY)!, 1, 1)
+    const recommended = applyUpdate(first, parseReply('UPDATE: i1 | - | No')!, 2, 2)
+    expect(recommended.items[0]).toMatchObject({ options: ['Yes', 'No'], rec: 'No' })
+
+    const narrowed = applyUpdate(recommended, parseReply('UPDATE: i1 | Herdr / HerdrKit | -')!, 3, 3)
+    expect(narrowed.items[0]).toMatchObject({ options: ['Herdr', 'HerdrKit'], rec: null })
+
+    const task = applyUpdate(first, parseReply('UPDATE: i3 | Done / Skip | Done')!, 2, 2)
+    expect(task.items[2]).toEqual(first.items[2])
+    expect(applyUpdate(first, parseReply('UPDATE: i9 | A / B | A')!, 2, 2).items).toEqual(first.items)
+  })
+
   test('does not add an item that is already open', () => {
     const first = applyUpdate(EMPTY, parseReply(REPLY)!, 1, 1)
     const again = applyUpdate(first, parseReply('NEW: decide | 1 | rename send.swift to herdr | - | -')!, 2, 2)
