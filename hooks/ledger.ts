@@ -339,7 +339,10 @@ function readHelp(
   const isFromReply = (text: string) => block !== null || isQuoted(text)
   if (kind === 'open') {
     const path = value.replace(/^`|`$/g, '')
-    return path !== '' && path.length <= 300 && !/^[a-z]+:/i.test(path) && isQuoted(path) ? { kind, path } : null
+    // A bare word such as "migrations" can appear in any reply, so a path needs a "/", "." or "~" and must stand alone.
+    const isPath = /[/.~]/.test(path) && !/^[a-z]+:/i.test(path) && path.length <= 300
+    const standsAlone = (text: string) => new RegExp(`(?<![\\w.~-])${escaped(path)}(?![\\w/-])`).test(text)
+    return isPath && (source === null || standsAlone(source)) ? { kind, path } : null
   }
   if (kind === 'copy') {
     return quoted.trim() !== '' && quoted.length <= 8000 && isFromReply(quoted) ? { kind, text: quoted, name } : null
@@ -359,6 +362,22 @@ function readHelp(
   }
 
   return null
+}
+
+/**
+ * A HELP line's value and name, from the fields after its kind. A command can hold "|" itself, so the whole tail
+ * is the value when the reply quotes it so; otherwise the last field is the name and the fields before it the value.
+ */
+function helpFields(tail: string[], source: string | null): { help: string; name: string | null } {
+  const whole = tail.join('|').trim()
+  if (tail.length <= 1 || (source !== null && source.includes(commandText(whole.replace(/^`|`$/g, '')))))
+    return { help: whole, name: null }
+
+  return { help: tail.slice(0, -1).join('|').trim(), name: dash(tail.at(-1)) }
+}
+
+function escaped(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 /** A command as written, without surrounding space or a leading `!`. */
@@ -531,6 +550,8 @@ function dash(value: string | undefined): string | null {
   return v === '' || v === '-' ? null : v
 }
 
+const KEY_LINE = /^\s*[-*]?\s*(GOAL|DONE|NOW|RUNNING|CLOSED|FIXED|NEW|UPDATE|HELP)\s*:\s*(.*)$/
+
 /**
  * Reads the model's line format; null when no known key appears. `source` is
  * the reply followed by the activity: HELP values must appear in it, and
@@ -545,9 +566,15 @@ export function parseReply(text: string, source: string | null = null): Update |
   const updated: Update['updated'] = []
   const helps: { target: string; help: Help }[] = []
   let seen = 0
+  const lines = text.split(NL)
+  // The model sometimes writes an answer, then a correction and a whole second answer. Each answer starts with
+  // GOAL, so only the lines from the last GOAL on are the answer it settled on.
+  const lastGoal = lines.findLastIndex(line => KEY_LINE.exec(line)?.[1] === 'GOAL')
+  // The item each NEW line made, by its place among the NEW lines, as HELP's "new N" counts them.
+  const newLines: (Update['added'][number] | undefined)[] = []
 
-  for (const raw of text.split(NL)) {
-    const m = raw.match(/^\s*[-*]?\s*(GOAL|DONE|NOW|RUNNING|CLOSED|FIXED|NEW|UPDATE|HELP)\s*:\s*(.*)$/)
+  for (const raw of lines.slice(Math.max(lastGoal, 0))) {
+    const m = KEY_LINE.exec(raw)
     if (!m) continue
     seen += 1
     const key = m[1]
@@ -565,25 +592,31 @@ export function parseReply(text: string, source: string | null = null): Update |
       // The recommendation is the last field. The model sometimes writes one answer after "|" instead of " / ".
       const [kind, label, ask, ...rest] = value.split('|').map(dash)
       const rec = rest.length > 1 ? rest.pop() : null
-      if (!ask) continue
+      if (!ask) {
+        newLines.push(undefined)
+        continue
+      }
       const options = rest.flatMap(o => o?.split(/\s+\/\s+/) ?? []).filter(Boolean)
-      added.push({
+      const item = {
         kind: readKind(kind),
         label: label ?? null,
         ask,
         options,
         rec: recommendedOption(options, rec ?? null),
         helps: [],
-      })
+      }
+      added.push(item)
+      newLines.push(item)
     } else if (key === 'UPDATE') {
       const [target, options, rec] = value.split('|').map(dash)
       const id = target?.match(/\b(i\d+)\b/)?.[1]
       if (id)
         updated.push({ id, options: options ? options.split(/\s+\/\s+/).filter(Boolean) : null, rec: rec ?? null })
     } else if (key === 'HELP') {
-      const [target, kind, help, name] = value.split('|').map(s => s.trim())
-      const parsed = readHelp(kind ?? '', help ?? '', dash(name), blocks, source)
-      if (parsed && target) helps.push({ target, help: parsed })
+      const [target, kind, ...tail] = value.split('|')
+      const { help, name } = helpFields(tail, source)
+      const parsed = readHelp((kind ?? '').trim(), help, name, blocks, source)
+      if (parsed && target) helps.push({ target: target.trim(), help: parsed })
     }
   }
   // HELP lines name their item, and may come before or after its NEW line.
@@ -591,7 +624,7 @@ export function parseReply(text: string, source: string | null = null): Update |
     // Lenient about extra words: the model sometimes writes "open i9" for "i9".
     const n = target.match(/\bnew\s*(\d+)\b/i)
     const id = target.match(/\b(i\d+)\b/)?.[1]
-    const item = n ? added[Number(n[1]) - 1] : undefined
+    const item = n ? newLines[Number(n[1]) - 1] : undefined
     if (item) item.helps = withHelp(item.helps, help)
     else if (!n && id) helped.push({ id, help })
   }
@@ -617,8 +650,11 @@ const FILLER = new Set([
   'all',
 ])
 
+/** The words that carry an ask's meaning. Numbers stay whatever their length, since "PR #41" is not "PR #42". */
 function keyWords(text: string): Set<string> {
-  return new Set((text.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter(w => w.length > 2 && !FILLER.has(w)))
+  const words = text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []
+
+  return new Set(words.filter(w => /\p{N}/u.test(w) || (w.length > 2 && !FILLER.has(w))))
 }
 
 /**
@@ -631,18 +667,21 @@ function restates(a: string, b: string): boolean {
   const y = keyWords(b)
   const fewer = Math.min(x.size, y.size)
   const shared = [...x].filter(w => y.has(w)).length
+  const numbers = (words: Set<string>) =>
+    [...words]
+      .filter(w => /\p{N}/u.test(w))
+      .sort()
+      .join(' ')
+  // Asks that name different numbers, such as two PRs, are different questions however alike their words.
+  if (numbers(x) !== '' && numbers(y) !== '' && numbers(x) !== numbers(y)) return false
 
   return fewer >= 2 ? shared / fewer >= 0.7 : sameAsk(a, b)
 }
 
 function sameAsk(a: string, b: string): boolean {
-  const norm = (s: string) =>
-    s
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, ' ')
-      .trim()
+  const norm = (s: string) => (s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).join(' ')
 
-  return norm(a) === norm(b)
+  return norm(a) !== '' && norm(a) === norm(b)
 }
 
 /**
@@ -779,7 +818,9 @@ export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number
     running: u.card.running,
     updatedAt: now,
   }
-  const closing = new Map(u.closed.map(c => [c.id, c.outcome]))
+  // An UPDATE says its question still waits, so it outweighs a CLOSED line for the same question.
+  const stillAsked = new Set(u.updated.filter(c => c.options || c.rec).map(c => c.id))
+  const closing = new Map(u.closed.filter(c => !stillAsked.has(c.id)).map(c => [c.id, c.outcome]))
   const closed = [...ledger.closed]
   const items: Item[] = []
   for (const item of ledger.items) {

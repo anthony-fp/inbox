@@ -109,6 +109,70 @@ describe('parseReply', () => {
     ])
   })
 
+  test('reads only the last answer when the model corrects itself and answers again', () => {
+    const u = parseReply(
+      [
+        'GOAL: Ship the greeting CLI',
+        'DONE: Arg parser fixed',
+        'NEW: do | - | Merge PR #41 | - | -',
+        'Wait: that is not a new item. Corrected answer:',
+        'GOAL: Ship the greeting CLI',
+        'DONE: Arg parser fixed',
+        'NOW: Release build running',
+      ].join('\n'),
+    )
+    expect(u?.card.done).toEqual(['Arg parser fixed'])
+    expect(u?.added).toEqual([])
+  })
+
+  test('a step whose command holds "|" keeps the whole command', () => {
+    const reply = 'Run `npm test | tee out.log` and send me the file.'
+    const named = parseReply(
+      [
+        'NEW: decide | - | Run the tests? | Yes / No | -',
+        'HELP: new 1 | run | npm test | tee out.log | test command',
+      ].join('\n'),
+      reply,
+    )
+    expect(named?.added[0]?.helps).toEqual([{ kind: 'run', command: 'npm test | tee out.log', name: 'test command' }])
+    const unnamed = parseReply(
+      ['NEW: decide | - | Run the tests? | Yes / No | -', 'HELP: new 1 | run | npm test | tee out.log'].join('\n'),
+      reply,
+    )
+    expect(unnamed?.added[0]?.helps).toEqual([{ kind: 'run', command: 'npm test | tee out.log', name: null }])
+  })
+
+  test('an open step needs a path the reply names on its own, not a bare word', () => {
+    const reply = 'The old migrations folder is unused. I left a note in docs/notes.md and the script in tools/run.sh.'
+    const u = parseReply(
+      [
+        'NEW: decide | - | Delete the migrations folder? | Delete it / Keep it | -',
+        'HELP: new 1 | open | migrations | -',
+        'HELP: new 1 | open | docs/notes.md | -',
+        'HELP: new 1 | open | notes.md | -',
+        'HELP: new 1 | open | ols/run.sh | -',
+      ].join('\n'),
+      reply,
+    )
+    expect(u?.added[0]?.helps).toEqual([
+      { kind: 'open', path: 'docs/notes.md' },
+      { kind: 'open', path: 'notes.md' },
+    ])
+  })
+
+  test('HELP "new N" counts every NEW line, including one dropped for having no ask', () => {
+    const reply = 'Open docs/notes.md first.'
+    const u = parseReply(
+      [
+        'NEW: decide | - | - | - | -',
+        'NEW: decide | - | Keep the notes? | Yes / No | -',
+        'HELP: new 2 | open | docs/notes.md | -',
+      ].join('\n'),
+      reply,
+    )
+    expect(u?.added[0]?.helps).toEqual([{ kind: 'open', path: 'docs/notes.md' }])
+  })
+
   test('returns null for prose with no keys', () => {
     expect(parseReply('Sure! Here is the ledger you asked for.')).toBe(null)
   })
@@ -190,6 +254,22 @@ describe('applyUpdate', () => {
     const task = applyUpdate(first, parseReply('UPDATE: i3 | Done / Skip | Done')!, 2, 2)
     expect(task.items[2]).toEqual(first.items[2])
     expect(applyUpdate(first, parseReply('UPDATE: i9 | A / B | A')!, 2, 2).items).toEqual(first.items)
+  })
+
+  test('a question naming a different number, or in another script, is not taken for an open one', () => {
+    const first = applyUpdate(EMPTY, parseReply('NEW: decide | - | Approve the PR #41 merge? | Yes / No | -')!, 1, 1)
+    const second = applyUpdate(first, parseReply('NEW: decide | - | Approve the PR #42 merge? | Yes / No | -')!, 2, 2)
+    expect(second.items.map(i => i.ask)).toEqual(['Approve the PR #41 merge?', 'Approve the PR #42 merge?'])
+
+    const tokyo = applyUpdate(EMPTY, parseReply('NEW: decide | - | 東京に移しますか？ | はい / いいえ | -')!, 1, 1)
+    const osaka = applyUpdate(tokyo, parseReply('NEW: decide | - | 大阪に移しますか？ | はい / いいえ | -')!, 2, 2)
+    expect(osaka.items.length).toBe(2)
+  })
+
+  test('an UPDATE keeps a question that a CLOSED line in the same answer names', () => {
+    const first = applyUpdate(EMPTY, parseReply(REPLY)!, 1, 1)
+    const both = applyUpdate(first, parseReply('CLOSED: i1 | renamed\nUPDATE: i1 | Herdr / HerdrKit | Herdr')!, 2, 2)
+    expect(both.items[0]).toMatchObject({ id: 'i1', options: ['Herdr', 'HerdrKit'], rec: 'Herdr' })
   })
 
   test('does not add an item that is already open', () => {
