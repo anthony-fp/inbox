@@ -131,7 +131,9 @@ function readHelp(kind, value, name, blocks, source) {
   const isFromReply = (text) => block !== null || isQuoted(text);
   if (kind === "open") {
     const path = value.replace(/^`|`$/g, "");
-    return path !== "" && path.length <= 300 && !/^[a-z]+:/i.test(path) && isQuoted(path) ? { kind, path } : null;
+    const isPath = /[/.~]/.test(path) && !/^[a-z]+:/i.test(path) && path.length <= 300;
+    const standsAlone = (text) => new RegExp(`(?<![\\w.~-])${escaped(path)}(?![\\w/-])`).test(text);
+    return isPath && (source === null || standsAlone(source)) ? { kind, path } : null;
   }
   if (kind === "copy") {
     return quoted.trim() !== "" && quoted.length <= 8e3 && isFromReply(quoted) ? { kind, text: quoted, name } : null;
@@ -150,6 +152,15 @@ function readHelp(kind, value, name, blocks, source) {
     }
   }
   return null;
+}
+function helpFields(tail, source) {
+  const whole = tail.join("|").trim();
+  if (tail.length <= 1 || source !== null && source.includes(commandText(whole.replace(/^`|`$/g, ""))))
+    return { help: whole, name: null };
+  return { help: tail.slice(0, -1).join("|").trim(), name: dash(tail.at(-1)) };
+}
+function escaped(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 function commandText(text) {
   return text.trim().replace(/^!\s*/, "");
@@ -209,6 +220,7 @@ function dash(value) {
   const v = (value ?? "").trim();
   return v === "" || v === "-" ? null : v;
 }
+var KEY_LINE = /^\s*[-*]?\s*(GOAL|DONE|NOW|RUNNING|CLOSED|FIXED|NEW|UPDATE|HELP)\s*:\s*(.*)$/;
 function parseReply(text, source = null) {
   const blocks = source === null ? [] : codeBlocks(source);
   const card = { goal: "", done: [], now: "", running: [] };
@@ -218,8 +230,11 @@ function parseReply(text, source = null) {
   const updated = [];
   const helps = [];
   let seen = 0;
-  for (const raw of text.split(NL)) {
-    const m = raw.match(/^\s*[-*]?\s*(GOAL|DONE|NOW|RUNNING|CLOSED|FIXED|NEW|UPDATE|HELP)\s*:\s*(.*)$/);
+  const lines = text.split(NL);
+  const lastGoal = lines.findLastIndex((line) => KEY_LINE.exec(line)?.[1] === "GOAL");
+  const newLines = [];
+  for (const raw of lines.slice(Math.max(lastGoal, 0))) {
+    const m = KEY_LINE.exec(raw);
     if (!m) continue;
     seen += 1;
     const key = m[1];
@@ -234,31 +249,37 @@ function parseReply(text, source = null) {
     } else if (key === "NEW") {
       const [kind, label, ask, ...rest] = value.split("|").map(dash);
       const rec = rest.length > 1 ? rest.pop() : null;
-      if (!ask) continue;
+      if (!ask) {
+        newLines.push(void 0);
+        continue;
+      }
       const options = rest.flatMap((o) => o?.split(/\s+\/\s+/) ?? []).filter(Boolean);
-      added.push({
+      const item = {
         kind: readKind(kind),
         label: label ?? null,
         ask,
         options,
         rec: recommendedOption(options, rec ?? null),
         helps: []
-      });
+      };
+      added.push(item);
+      newLines.push(item);
     } else if (key === "UPDATE") {
       const [target, options, rec] = value.split("|").map(dash);
       const id = target?.match(/\b(i\d+)\b/)?.[1];
       if (id)
         updated.push({ id, options: options ? options.split(/\s+\/\s+/).filter(Boolean) : null, rec: rec ?? null });
     } else if (key === "HELP") {
-      const [target, kind, help, name] = value.split("|").map((s) => s.trim());
-      const parsed = readHelp(kind ?? "", help ?? "", dash(name), blocks, source);
-      if (parsed && target) helps.push({ target, help: parsed });
+      const [target, kind, ...tail] = value.split("|");
+      const { help, name } = helpFields(tail, source);
+      const parsed = readHelp((kind ?? "").trim(), help, name, blocks, source);
+      if (parsed && target) helps.push({ target: target.trim(), help: parsed });
     }
   }
   for (const { target, help } of helps) {
     const n = target.match(/\bnew\s*(\d+)\b/i);
     const id = target.match(/\b(i\d+)\b/)?.[1];
-    const item = n ? added[Number(n[1]) - 1] : void 0;
+    const item = n ? newLines[Number(n[1]) - 1] : void 0;
     if (item) item.helps = withHelp(item.helps, help);
     else if (!n && id) helped.push({ id, help });
   }
@@ -282,18 +303,21 @@ var FILLER = /* @__PURE__ */ new Set([
   "all"
 ]);
 function keyWords(text) {
-  return new Set((text.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter((w) => w.length > 2 && !FILLER.has(w)));
+  const words2 = text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  return new Set(words2.filter((w) => new RegExp("\\p{N}", "u").test(w) || w.length > 2 && !FILLER.has(w)));
 }
 function restates(a, b) {
   const x = keyWords(a);
   const y = keyWords(b);
   const fewer = Math.min(x.size, y.size);
   const shared = [...x].filter((w) => y.has(w)).length;
+  const numbers = (words2) => [...words2].filter((w) => new RegExp("\\p{N}", "u").test(w)).sort().join(" ");
+  if (numbers(x) !== "" && numbers(y) !== "" && numbers(x) !== numbers(y)) return false;
   return fewer >= 2 ? shared / fewer >= 0.7 : sameAsk(a, b);
 }
 function sameAsk(a, b) {
-  const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  return norm(a) === norm(b);
+  const norm = (s) => (s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).join(" ");
+  return norm(a) !== "" && norm(a) === norm(b);
 }
 function matchOpen(items, a) {
   return items.findIndex(
@@ -330,7 +354,8 @@ function applyUpdate(ledger, u, now, turn, promptAt = now) {
     running: u.card.running,
     updatedAt: now
   };
-  const closing = new Map(u.closed.map((c) => [c.id, c.outcome]));
+  const stillAsked = new Set(u.updated.filter((c) => c.options || c.rec).map((c) => c.id));
+  const closing = new Map(u.closed.filter((c) => !stillAsked.has(c.id)).map((c) => [c.id, c.outcome]));
   const closed = [...ledger.closed];
   const items = [];
   for (const item of ledger.items) {
