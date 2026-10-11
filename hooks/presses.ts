@@ -443,6 +443,64 @@ export function reopenOnFailure(ledger: Ledger, id: string, at: number): Ledger 
   return closed?.item && closed.how === 'answered' && closed.at === at ? reopenItem(ledger, id) : ledger
 }
 
+/** What a host does for a press's effects: opens, copies and sends its own way, and saves state. */
+export type EffectHost = {
+  now(): Promise<number> | number
+  /** Opens or copies. Returns why it could not, or null. */
+  perform(e: Exclude<Effect, { kind: 'send' }>): Promise<string | null>
+  /** Sends a message. Returns why it will not enter, or null once it entered or was queued. */
+  send(e: Extract<Effect, { kind: 'send' }>): Promise<string | null>
+  /** Changes the saved last actions, and returns them as changed. */
+  saveLasts(change: (a: Record<string, LastAction>) => Record<string, LastAction>): Promise<Record<string, LastAction>>
+  saveLedger(change: (l: Ledger) => Ledger): Promise<void>
+}
+
+/**
+ * Runs an applied press's opens and copies. When the press is a Local one, `pending` is the result it recorded on
+ * `rowId`, and the result of how they went replaces it. Returns that result, or null for a press with no pending one.
+ */
+export async function runLocalEffects(
+  host: EffectHost,
+  effects: Effect[],
+  rowId: string,
+  pending: LocalResult | undefined,
+): Promise<LocalResult | null> {
+  const errors: (string | null)[] = []
+  for (const e of effects) if (e.kind !== 'send') errors.push(await host.perform(e))
+  if (pending?.state !== 'pending') return null
+  const result = finishedResult(pending, errors, await host.now())
+  await host.saveLasts(a => withResult(a, rowId, pending.at, result))
+
+  return result
+}
+
+/**
+ * Sends an applied press's messages in order. The first that will not enter undoes the press: each row it
+ * recorded at `at` reads why, an answer it made on `rowId` reopens its question, and its later messages stay
+ * unsent. Its earlier messages, opens and copies stand. Returns why, and whether `rowId` still reads this press's
+ * failure, or null when every message went.
+ */
+export async function runSends(
+  host: EffectHost,
+  effects: Effect[],
+  rowId: string,
+  rows: string[],
+  at: number,
+): Promise<{ reason: string; isRowFailed: boolean } | null> {
+  for (const e of effects) {
+    if (e.kind !== 'send') continue
+    const reason = await host.send(e)
+    if (reason === null) continue
+    const last = (await host.saveLasts(a => withFailure(a, rows, at, reason)))[rowId]
+    const isRowFailed = last?.at === at && last.delivery?.state === 'failed'
+    if (isRowFailed && last.kind === 'mark') await host.saveLedger(l => reopenOnFailure(l, rowId, at))
+
+    return { reason, isRowFailed }
+  }
+
+  return null
+}
+
 /**
  * The press [Try again] repeats on a row whose message failed to send, or null.
  * A typed reply has none: its words go back into the row's draft instead.

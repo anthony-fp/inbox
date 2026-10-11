@@ -85,23 +85,21 @@ import {
   baseName,
   capitalized,
   clipLabel,
-  finishedResult,
   localLast,
   localPath,
   openCommands,
   pendingResult,
   prSteps,
   recordPress,
-  reopenOnFailure,
+  runLocalEffects,
+  runSends,
   stepIconKind,
   upgradeLastActions,
   withArrival,
-  withFailure,
   withQueued,
   withRewrite,
-  withResult,
 } from './presses'
-import type { Effect, HelpStep, PrActionId, RowPress } from './presses'
+import type { Effect, EffectHost, HelpStep, PrActionId, RowPress } from './presses'
 import {
   closedShown,
   DOT,
@@ -1911,30 +1909,32 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
     told = { ...told, closed: told.closed.filter(id => id !== p.id) }
     await selectRestored($, p.id)
   }
-  const errors: (string | null)[] = []
-  for (const e of pressed.effects) if (e.kind !== 'send') errors.push(await perform($, e, surface))
-  const pending = pressed.lasts[rowId]?.result
-  if (pending?.state === 'pending') {
-    const result = finishedResult(pending, errors, await $.clock.now())
-    await update($, LAST_ACTIONS, a => withResult(a, rowId, pending.at, result))
-    // A success note clears after SETTLED_MS. A fresh value is what redraws the pane then.
-    if (result.state === 'done')
-      void $.clock
-        .sleep(SETTLED_MS)
-        .then(() => update($, LAST_ACTIONS, a => ({ ...a })))
-        .catch(() => undefined)
+  const rows = Object.keys(pressed.lasts)
+  const host: EffectHost = {
+    now: () => $.clock.now(),
+    perform: e => perform($, e, surface),
+    send: async e => {
+      const sent = await send($, e.text, e.by)
+      if (!('entered' in sent)) return sent.notSent
+      if (sent.entered !== e.text) await awaitRewritten($, rows, now, e.text, sent)
+      return null
+    },
+    saveLasts: change => update($, LAST_ACTIONS, change),
+    saveLedger: change => commitLedger($, change),
   }
-  // A send that will not enter undoes the press, and the press's later sends stay unsent.
-  for (const e of pressed.effects) {
-    if (e.kind !== 'send') continue
-    const sent = await send($, e.text, e.by)
-    if ('entered' in sent) {
-      if (sent.entered !== e.text) await awaitRewritten($, Object.keys(pressed.lasts), now, e.text, sent)
-      continue
-    }
-    await undoUnsent($, p, Object.keys(pressed.lasts), now, sent.notSent)
-    break
-  }
+  const result = await runLocalEffects(host, pressed.effects, rowId, pressed.lasts[rowId]?.result)
+  // A success note clears after SETTLED_MS. A fresh value is what redraws the pane then.
+  if (result?.state === 'done')
+    void $.clock
+      .sleep(SETTLED_MS)
+      .then(() => update($, LAST_ACTIONS, a => ({ ...a })))
+      .catch(() => undefined)
+  const failed = await runSends(host, pressed.effects, rowId, rows, now)
+  if (!failed) return
+  // A typed reply that did not send goes back into its draft.
+  if (failed.isRowFailed && !('ref' in p) && p.action === 'type')
+    await update($, DRAFTS, d => (d[p.id] ? d : { ...d, [p.id]: p.text }))
+  void publishStatus($)
 }
 
 /**
@@ -1953,24 +1953,6 @@ async function awaitRewritten(
 
     return isStoredSince(sent.entered, sent.since) ? withArrival(moved, sent.entered) : moved
   })
-  void publishStatus($)
-}
-
-/**
- * Undoes a press whose message will not reach Claude. Each row it recorded on
- * reads `Not sent: <reason>`, which unfolds a hand-off. An answer's question
- * opens again, and typed words go back into the row's draft unless a newer one
- * is there. Neither happens once a newer press replaced this one on the row, or its message arrived.
- */
-async function undoUnsent($: EngineInterface, p: RowPress | PrPress, rows: string[], at: number, reason: string) {
-  const lasts = await update($, LAST_ACTIONS, a => withFailure(a, rows, at, reason))
-  if (!('ref' in p)) {
-    const last = lasts[p.id]
-    if (last?.at === at && last.delivery?.state === 'failed') {
-      if (last.kind === 'mark') await commitLedger($, l => reopenOnFailure(l, p.id, at))
-      if (p.action === 'type') await update($, DRAFTS, d => (d[p.id] ? d : { ...d, [p.id]: p.text }))
-    }
-  }
   void publishStatus($)
 }
 

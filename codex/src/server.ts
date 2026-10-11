@@ -6,8 +6,8 @@ import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
 
-import { applyPress, finishedResult, localPath, noteText, openCommands, withResult } from '../../hooks/presses'
-import type { Effect, RowPress } from '../../hooks/presses'
+import { applyPress, localPath, noteText, openCommands, runLocalEffects, runSends } from '../../hooks/presses'
+import type { EffectHost, PressResult, RowPress } from '../../hooks/presses'
 import {
   CLOSE_DESCRIPTION,
   CLOSE_SCHEMA,
@@ -23,7 +23,7 @@ import { readState, updateState } from './state'
 import type { SessionState } from './state'
 import { CODEX, INBOX_DESCRIPTION, inboxToolText, VIEW_DESCRIPTION } from './texts'
 import type { Run } from './run'
-import type { LocalResult, RowNote } from '../../types'
+import type { RowNote } from '../../types'
 
 /**
  * The tab's address for one build of its page. Codex keeps a tab's page by its address, even across server
@@ -154,8 +154,8 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     return /Queued message (\S+)/.exec(r.stdout)?.[1] ?? null
   }
 
-  const pressOn = (s: SessionState, p: RowPress) =>
-    applyPress(s.ledger, s.lastActions[p.id], p, { now: now(), turnsStarted: s.presence.turnsStarted, extraSteps: [] })
+  const pressOn = (s: SessionState, p: RowPress, at = now()) =>
+    applyPress(s.ledger, s.lastActions[p.id], p, { now: at, turnsStarted: s.presence.turnsStarted, extraSteps: [] })
 
   /** The view for the tab, with the session it was read for. */
   const served = (s: SessionState, id: string): TabView => ({
@@ -165,21 +165,54 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
   })
 
   /**
-   * Applies a press drawn for `thread` in session `id`'s state. A press drawn
-   * for another session, or for a row that changed, sends nothing and returns a stale note.
+   * Applies a press drawn for `thread` in session `id`'s state, and runs its effects with `runSends` and
+   * `runLocalEffects`. Its messages send under the lock that applies it, so no prompt reads the press before its
+   * message went, and a failed send's undo lands in the same write. Its opens run after, outside the lock. A press
+   * drawn for another session, or for a row that changed, sends nothing and returns a stale note.
    */
   async function onPress(id: string, p: RowPress, thread: unknown): Promise<PressReply> {
     let copy: PressReply['copy'] = null
-    let local = null as { effects: Effect[]; pending: LocalResult } | null
     let error: string | null = null
     let note: PressReply['note'] = thread === id ? null : 'stale'
-    let s = await updateState(dir, id, async s => {
+    // The press as applied under the lock, read once the lock is released.
+    const pressed: { r?: Exclude<PressResult, { stale: true }> } = {}
+    /** The press's effects, saving through `change`: the state a held lock writes, or a fresh lock each time. */
+    const hostFor = (
+      change: (f: (s: SessionState) => SessionState | Promise<SessionState>) => Promise<SessionState>,
+    ): EffectHost => ({
+      now,
+      // The tab copies, and shows the text to copy by hand when its frame has no clipboard.
+      perform: async e => {
+        if (e.kind === 'copy') {
+          copy = { text: e.text, name: e.name }
+          return null
+        }
+        return open(await readState(dir, id), e.target)
+      },
+      send: e =>
+        change(async s => {
+          const queuedId = await queue(s, e.text)
+          const sent = { text: e.text, press: e.by, at: now(), row: p.id, queuedId }
+          return { ...s, sent: [...s.sent, sent].slice(-MAX_SENT) }
+        }).then(
+          () => null,
+          (err: unknown) => (err instanceof Error ? err.message : String(err)),
+        ),
+      saveLasts: async f => (await change(s => ({ ...s, lastActions: f(s.lastActions) }))).lastActions,
+      saveLedger: async f => {
+        await change(s => ({ ...s, ledger: f(s.ledger) }))
+      },
+    })
+    await updateState(dir, id, async s => {
       if (note) return s
-      const r = pressOn(s, p)
+      // Read under the lock, so the press is timed after every write that landed before it.
+      const at = now()
+      const r = pressOn(s, p, at)
       if ('stale' in r) {
         note = 'stale'
         return s
       }
+      pressed.r = r
       let next: SessionState = {
         ...s,
         ledger: r.ledger,
@@ -187,46 +220,23 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
         // Codex was told of the close; with the id out of `told`, a second close of the row is reported too.
         told: p.action === 'undo' ? { ...s.told, closed: s.told.closed.filter(id => id !== p.id) } : s.told,
       }
-      if (r.last?.result?.state === 'pending') local = { effects: r.effects, pending: r.last.result }
-      // Sent while the lock is held, so no other write lands between the press and its undoing.
-      for (const e of r.effects) {
-        if (e.kind === 'send') {
-          try {
-            const queuedId = await queue(next, e.text)
-            next = {
-              ...next,
-              sent: [...next.sent, { text: e.text, press: e.by, at: now(), row: p.id, queuedId }].slice(-MAX_SENT),
-            }
-          } catch (err) {
-            const reason = err instanceof Error ? err.message : String(err)
-            error = `Not sent: ${reason}`
-            copy = null
-            // The press is undone: the state before it, and its row says why.
-            const failed = r.last && { ...r.last, delivery: { state: 'failed' as const, reason } }
-            return failed ? { ...s, lastActions: { ...s.lastActions, [p.id]: failed } } : s
-          }
-        } else if (e.kind === 'copy') copy = { text: e.text, name: e.name }
-      }
+      const held = hostFor(async f => (next = await f(next)))
+      const failed = await runSends(held, r.effects, p.id, r.last ? [p.id] : [], at)
+      if (failed) error = `Not sent: ${failed.reason}`
 
       return next
-    }).catch(async (err: unknown) => {
+    }).catch((err: unknown) => {
       error = `Not sent: ${err instanceof Error ? err.message : String(err)}`
-      return readState(dir, id)
     })
-    // Opens run outside the lock. The tab copies, and shows the text to copy by hand when its frame has no clipboard.
-    const ran = local
-    if (ran) {
-      const errors: (string | null)[] = []
-      for (const e of ran.effects)
-        if (e.kind !== 'send') errors.push(e.kind === 'open' ? await open(s, e.target) : null)
-      const result = finishedResult(ran.pending, errors, now())
-      s = await updateState(dir, id, s => ({
-        ...s,
-        lastActions: withResult(s.lastActions, p.id, ran.pending.at, result),
-      }))
-    }
+    if (pressed.r)
+      await runLocalEffects(
+        hostFor(f => updateState(dir, id, f)),
+        pressed.r.effects,
+        p.id,
+        pressed.r.last?.result,
+      )
 
-    return { view: served(s, id), copy, error, note }
+    return { view: served(await readState(dir, id), id), copy, error, note }
   }
 
   /** Opens a link, or a path as `openCommands` decides. Returns why it could not, or null. */
