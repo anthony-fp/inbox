@@ -471,12 +471,17 @@
         color: var(--muted);
       }
       /* A row that just closed keeps a closed row's height, so the list does not change its rhythm. */
-      .row.settled {
+      .settled-head {
+        display: flex;
         align-items: center;
+        min-width: 0;
       }
-      /* The panel a row kept open while it settles, under the settled line. */
-      .row.settling-panel {
-        padding-top: 0;
+      /* A row that settles while open fades its fill out as its height shrinks over the panel. */
+      .row.settled.was-open {
+        transition: background-color var(--move);
+        @starting-style {
+          background-color: var(--selected);
+        }
       }
       .settled-line {
         display: flex;
@@ -589,7 +594,8 @@
       /*
        * Motion, with the Codex app's own timing, only for what enters or leaves. Hover, press and
        * selection fills change at once. What a draw mounts fades in from @starting-style, and heights
-       * move in the script, around each draw.
+       * move in the script, around each draw. A row's own parts do not fade: a row that settles or is
+       * undone swaps them in place, where a fade from nothing reads as a flicker.
        */
       /* The new-row bar fades out. */
       .row {
@@ -597,9 +603,6 @@
       }
       /* A panel does not fade: it stays opaque, clipped by its row's height, so a row closing and the row
          opening in its place move as one. */
-      .row > .content,
-      .row > .settled-line,
-      .row > .key.undo,
       .status-line,
       .demo-note,
       .empty,

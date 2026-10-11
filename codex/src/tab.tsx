@@ -815,9 +815,15 @@ function ListRow({
 
   const plain = row.line ?? { text: row.title, after: row.titleAfter }
   // A row's last action takes the place of its age, as "✓ Discuss 1m ago". It is muted unless it failed: a done row's ✓ is already green.
-  const last = isFeedbackShown(row) ? lastText(row, now) : null
+  // A press still out reads there too, as "Sending…", so nothing under the line moves while it runs.
+  const pending = sending.get(row.id)
+  const last = pending ?? (isFeedbackShown(row) ? lastText(row, now) : null)
   const line = last
-    ? { ...plain, after: `${DOT}${last}`, afterTone: isFailure(row.feedback) ? ('error' as const) : undefined }
+    ? {
+        ...plain,
+        after: `${DOT}${last}`,
+        afterTone: !pending && isFailure(row.feedback) ? ('error' as const) : undefined,
+      }
     : plain
 
   // The same elements draw the row open and closed, so its line stays put and only the panel under it comes and goes.
@@ -855,7 +861,6 @@ function Panel({ row, isClosing }: { row: Row; isClosing: boolean }) {
   const isTyping = !!row.typing && typing === row.id
   const notes = [
     row.fold?.note ? <div class="muted">{row.fold.note}</div> : null,
-    sending.has(row.id) ? <div class="muted">{sending.get(row.id)}</div> : null,
     note ? <div class="muted">{note}</div> : null,
     errors.has(row.id) ? <div class="tone-error">{errors.get(row.id)}</div> : null,
   ].filter(Boolean)
@@ -918,50 +923,46 @@ function SettledView({ settled: r, rowState }: { settled: RowView; rowState: Row
   const isGood = !state.isLapsed && !state.isQueued
   const error = errors.get(r.id)
 
+  // Laid out as an open row is, so the panel it keeps stays where the open row drew it.
   return (
-    <>
-      <div class="row settled">
-        {/* The ✓ waits for an answer's message to reach Codex. */}
-        <span class={isGood ? 'mark done' : 'mark'}>{state.isQueued ? '' : '✓'}</span>
-        {/* An error wraps, so none of it is cut. */}
-        <div class={error ? 'settled-line wraps' : 'settled-line'}>
-          <span class="what">{r.title}</span>
-          <span class="outcome-label">
-            {DOT}
-            {state.isQueued ? `Queued: ${state.label}` : state.label}
-          </span>
-          {error ? (
-            <span class="tone-error">
+    <div class={panel ? 'row settled was-open' : 'row settled'}>
+      {/* The ✓ waits for an answer's message to reach Codex. */}
+      <span class={isGood ? 'mark done' : 'mark'}>{state.isQueued ? '' : '✓'}</span>
+      <div class="content">
+        <div class="settled-head">
+          {/* An error wraps, so none of it is cut. */}
+          <div class={error ? 'settled-line wraps' : 'settled-line'}>
+            <span class="what">{r.title}</span>
+            <span class="outcome-label">
               {DOT}
-              {error}
+              {state.isQueued ? `Queued: ${state.label}` : state.label}
             </span>
+            {error ? (
+              <span class="tone-error">
+                {DOT}
+                {error}
+              </span>
+            ) : null}
+          </div>
+          {state.canUndo ? (
+            <button type="button" class="key undo" disabled={isUndoing} onClick={() => void undo(r)}>
+              {/* The delay is set once, when it is drawn: the animation keeps its own time after that. */}
+              <span
+                key={start}
+                class={isUndoing ? 'time-left paused' : 'time-left'}
+                style={{ animationDuration: `${SETTLED_MS}ms` }}
+                ref={el => {
+                  if (el && !el.style.animationDelay) el.style.animationDelay = `-${Math.max(0, Date.now() - start)}ms`
+                }}
+              />
+              {isUndoing ? null : <Icon name="undo" />}
+              {isUndoing ? 'Undoing…' : 'Undo'}
+            </button>
           ) : null}
         </div>
-        {state.canUndo ? (
-          <button type="button" class="key undo" disabled={isUndoing} onClick={() => void undo(r)}>
-            {/* The delay is set once, when it is drawn: the animation keeps its own time after that. */}
-            <span
-              key={start}
-              class={isUndoing ? 'time-left paused' : 'time-left'}
-              style={{ animationDuration: `${SETTLED_MS}ms` }}
-              ref={el => {
-                if (el && !el.style.animationDelay) el.style.animationDelay = `-${Math.max(0, Date.now() - start)}ms`
-              }}
-            />
-            {isUndoing ? null : <Icon name="undo" />}
-            {isUndoing ? 'Undoing…' : 'Undo'}
-          </button>
-        ) : null}
+        {panel ? <Panel row={panel} isClosing /> : null}
       </div>
-      {panel ? (
-        <div class="row settling-panel">
-          <span class="mark" />
-          <div class="content">
-            <Panel row={panel} isClosing />
-          </div>
-        </div>
-      ) : null}
-    </>
+    </div>
   )
 }
 
@@ -1421,7 +1422,7 @@ function animateDraw(before: Heights) {
  * that end until the draw that removes the panel cancels it, so the panel never shows again for a frame.
  */
 function collapse(el: HTMLElement, from: number) {
-  const panel = el.querySelector<HTMLElement>('.settling-panel') ?? el.querySelector<HTMLElement>('.panel.closing')
+  const panel = el.querySelector<HTMLElement>('.panel.closing')
   // A closing row keeps its open line until the panel goes, so its end height is measured as it will draw then.
   const row = el.querySelector<HTMLElement>('.row.closing')
   row?.classList.remove('closing')
