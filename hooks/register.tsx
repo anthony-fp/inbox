@@ -3909,32 +3909,19 @@ export const register: Register = on => {
         </Text>
       </Box>
     )
-    // On desktop an invisible border rounds the card's corners. A border also insets its content on the left and
-    // right, so the rounded fill is an absolute Box behind the content, and the rows reach the card's edges.
-    // The content is positioned too, so it paints above the fill.
+    // On desktop an invisible border rounds the card's corners. It also pads the content on the left and right,
+    // by about two thirds of a line, and not above or below.
     const isRoundedCard = look === 'desktop' && !isInline
-    const section = (children: JSX.Element | JSX.Element[]) =>
-      isRoundedCard ? (
-        <Box position="relative" flexDirection="column" paddingY={blankLine}>
-          <Box
-            position="absolute"
-            top={0}
-            left={0}
-            right={0}
-            bottom={0}
-            borderStyle="single"
-            borderColor="#0000"
-            backgroundColor={pal.card}
-          />
-          <Box position="relative" flexDirection="column">
-            {children}
-          </Box>
-        </Box>
-      ) : (
-        <Box flexDirection="column" paddingY={blankLine} backgroundColor={isInline ? undefined : pal.card}>
-          {children}
-        </Box>
-      )
+    const section = (children: JSX.Element | JSX.Element[]) => (
+      <Box
+        flexDirection="column"
+        paddingY={blankLine}
+        backgroundColor={isInline ? undefined : pal.card}
+        {...(isRoundedCard ? { borderStyle: 'single', borderColor: '#0000' } : {})}
+      >
+        {children}
+      </Box>
+    )
     // A blank line in the tree, but for its │: under a title, so the children
     // do not crowd it, and between two-line entries, so they read apart. Inline
     // it is left out, so callers spread what this returns.
