@@ -1,6 +1,6 @@
 # One inbox in three looks
 
-Status: building. Steps 1 to 3 are done. Terms follow `GLOSSARY.md`.
+Status: building. Steps 1 to 4 are done. In step 5, the guidance and start title are built once; the ledger split is not done. Terms follow `GLOSSARY.md`.
 
 Agents build and maintain this product, so the code itself has to tell them two things. First, which rules every look shares, and where each one lives. Second, where the looks differ on purpose, and why. Today the core rules are shared. The rules around that core are copied per look, and nothing says which copies must match. This plan makes each rule live in one place, writes down every deliberate difference next to the code, and adds checks that fail when a look drifts.
 

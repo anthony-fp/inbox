@@ -2,14 +2,14 @@
 // tells Codex, what the tab shows, and how a turn ends.
 // Hooks and the MCP server do the I/O around them.
 
-import { carryText, EMPTY, promptNotes, screenText, toolActivity } from '../../hooks/ledger'
+import { carryText, EMPTY, guidanceText, promptNotes, screenText, START_TITLE, toolActivity } from '../../hooks/ledger'
 import type { Exchange, Press } from '../../hooks/ledger'
 import { inboxView, perTurnStatus } from '../../hooks/view'
 import type { InboxView } from '../../hooks/view'
 import type { LastAction } from '../../types'
 import { PRESS_TIMEOUT_MS, SETTLE_WINDOW_MS } from './settle'
 import type { Heard, SessionState } from './state'
-import { CODEX, GUIDANCE, START_TITLE } from './texts'
+import { CODEX } from './texts'
 
 /** The tab polls every few seconds; a poll this recent means it is open. */
 const TAB_OPEN_MS = 15_000
@@ -26,7 +26,7 @@ export function isTabOpen(s: SessionState, now: number): boolean {
  */
 export function startContext(s: SessionState, source: string | undefined): string | null {
   const carried = carryText(s.ledger, START_TITLE, true)
-  const parts = [source === 'resume' ? null : GUIDANCE, carried].filter((x): x is string => x !== null)
+  const parts = [source === 'resume' ? null : guidanceText(CODEX), carried].filter((x): x is string => x !== null)
 
   return parts.length > 0 ? parts.join('\n\n') : null
 }

@@ -14,8 +14,8 @@ The inbox is drawn in three looks: the Claude Code terminal, the Claude desktop 
 
 Test a change to text a model reads before keeping it. Small rewordings change behavior: a one-word edit to the findings rule in `systemText` made the inbox model re-add questions the user had dismissed.
 
-- Claude reads `GUIDANCE`, the tool descriptions and the tool results in `hooks/register.tsx`, and the `inbox:` texts that `inboxText`, `closedText`, `carryText` and `answerNote` build in `hooks/ledger.ts`.
-- Codex reads its own copy of `GUIDANCE` in `codex/src/texts.ts`. The two copies differ only in their first paragraph. Change both together.
+- Claude and Codex read the guidance `guidanceText` builds, and the `inbox:` texts that `inboxText`, `closedText`, `carryText` and `answerNote` build, all in `hooks/ledger.ts`. Each host's `Host` supplies its names and the guidance's first paragraph, so a change there reaches both agents.
+- Claude reads the tool descriptions and results from `hooks/tools.ts`. Codex reads those too, and its own tool texts in `codex/src/texts.ts`.
 - The inbox model reads `systemText` and the blocks from `buildPrompt` in `hooks/ledger.ts`. In the mod it is a Sonnet call after each reply. In Codex it is `codex exec` with the model in `MODEL` in `codex/src/update.ts`.
 - To compare two versions, print each one's prompt for the same sample exchange. Run each several times with `claude -p --model sonnet --tools "" --system-prompt …`, and for text Codex reads, with `codex exec` and the Codex model. Count the outcomes.
 

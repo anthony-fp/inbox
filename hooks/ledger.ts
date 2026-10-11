@@ -1,5 +1,5 @@
-// The saved ledger and its writes, and the texts the models read: `systemText`, `buildPrompt`, `inboxText`,
-// `carryText`, `closedText`, `answerNote`. Both hosts import it. AGENTS.md's rule for testing model-read text
+// The saved ledger and its writes, and the texts the models read: `guidanceText`, `systemText`, `buildPrompt`,
+// `inboxText`, `carryText`, `closedText`, `answerNote`. Both hosts import it. AGENTS.md's rule for testing model-read text
 // covers those texts.
 //
 // Claude only today: the stop text (`stopText`, `statusLine`), `dialogText`, the command rows (`readCommandRow`),
@@ -152,6 +152,28 @@ HELP: <item> | <kind> | <value> | <name>
 
 Write plainly. No jargon, no filler, no markdown.`
 }
+
+/** What the agent reads at the start of every session: what the inbox shows, and when to record and close. */
+export function guidanceText(host: Host): string {
+  return `# Inbox
+${host.intro}
+
+A finding is something you noticed that deserves the user's attention but is outside the current task: a bug, a risk, missing tests, tech debt, or a chance to improve something. Record it with mcp__inbox__record_finding the moment you notice it, then go on with the task; fixing it waits until the user asks. Record one too at two moments that are easy to pass over while focused on the task:
+- You work around a problem instead of fixing it, such as copying files by hand because a tool does not reach them.
+- Part of your change could not be tested or verified.
+State those two in your reply as well. Mention any other finding only when it bears on what the user asked.
+
+The latest "inbox:" text beside the user's prompt is the current state. It lists every open item and finding with its id, such as [i35] or [f12], and anything it does not list is closed. Check it before telling the user that something is open or waits on them.
+
+Close with mcp__inbox__close:
+- When the user's message answers an open item, close it first, before other work, with their answer.
+- When an item or finding is done or no longer applies, close it with a short reason, without waiting to be asked.
+The answer to a question is the user's to give. Close a question with their answer, or once it no longer applies, and never with an answer of your own.`
+}
+
+/** The title of the block that says where the session stands, at session start and after a compaction. */
+export const START_TITLE =
+  'inbox: where this session stands, as of the last reply. An "inbox:" text beside a later prompt replaces this.'
 
 const CATCH_UP =
   'The ledger below may have missed turns. Close every item in <open> and every finding in <findings> that the conversation shows answered, done, dealt with, or no longer relevant. Add as NEW only what still waits on the user and is not already in <open> or <findings>.'
@@ -420,6 +442,8 @@ export type Host = {
   band: string | null
   /** Where the person sees the findings, within the surface. */
   findingsIn: string
+  /** The first paragraph of `guidanceText`: what the inbox shows the person, and where. */
+  intro: string
 }
 
 export const CLAUDE_CODE: Host = {
@@ -427,6 +451,8 @@ export const CLAUDE_CODE: Host = {
   surface: 'the /inbox pane',
   band: 'a band above their prompt',
   findingsIn: 'the Findings tab of the /inbox pane',
+  intro:
+    "The inbox plugin shows the user what waits on them: your open questions and the tasks only they can do, in the /inbox pane, and your findings, in the pane's Findings tab. A band above their prompt shows only two counts: one for your questions and their tasks together, and one for your findings.",
 }
 
 /** The host's surface at the start of a sentence. */

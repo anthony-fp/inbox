@@ -29,7 +29,7 @@ Shared modules are in `hooks/`. Both hosts import them. They import nothing from
 | `codex/src/rows.ts` | Codex adapter. The motion state machine for rows. |
 | `codex/src/arrivals.ts` | Codex adapter. The tab's rows, tabs and empty-tab rule, built on `hooks/arrivals.ts`. |
 | `codex/src/settle.ts` | Codex adapter. Polling and settle-window timing for the tab. |
-| `codex/src/texts.ts` | Codex adapter. Texts Codex reads, the `CODEX` host, and a hand copy of `GUIDANCE`. |
+| `codex/src/texts.ts` | Codex adapter. Texts only Codex reads, and the `CODEX` host. |
 | `codex/src/core.ts` | Codex host. Session logic as pure functions on the session state. |
 | `codex/src/state.ts` | Codex host. One JSON state file per session, under a lock. |
 | `codex/src/server.ts` | Codex host. The MCP server: tools, presses, open, queue. |
@@ -65,8 +65,7 @@ Change a rule in its owner. Do not change it in a reader.
 | New-row bar length and press guard | `hooks/view.ts:NEW_ROW_MS`, `hooks/view.ts:PRESS_GUARD_MS` | All three looks |
 | Row padding | `hooks/layout.ts:ROW_PAD_PT` | Desktop and Codex |
 | Demo data | `hooks/demo.ts:demoView` | The mod's `/inbox demo` and `codex/src/demo.ts:demoState` |
-| Model-read texts | `hooks/ledger.ts:systemText`, `hooks/ledger.ts:inboxText`, `hooks/ledger.ts:promptNotes`, `hooks/tools.ts:findingDescription` | The mod and Codex, each through its `Host` |
-| `GUIDANCE` | `hooks/register.tsx:GUIDANCE` and `codex/src/texts.ts:GUIDANCE` | These are hand copies until step 5 of `docs/plans/three-looks.md`. Edit both, and test both agents. |
+| Model-read texts | `hooks/ledger.ts:guidanceText`, `hooks/ledger.ts:systemText`, `hooks/ledger.ts:inboxText`, `hooks/ledger.ts:promptNotes`, `hooks/tools.ts:findingDescription` | The mod and Codex, each through its `Host` |
 | Saved state shapes and upgrades | `types/index.d.ts:PluginState`, `hooks/ledger.ts:upgradeLedger`, `hooks/presses.ts:upgradeLastActions` | The mod also uses `hooks/register.tsx:upgradeState`. Codex uses `codex/src/state.ts:upgraded`. |
 | PR readiness and prompts | `hooks/prs.ts:readiness`, `hooks/prs.ts:prompts` | The mod only |
 | PR presses | `hooks/register.tsx:applyPrPress` | The mod only. Moves to its own module in step 10 of `docs/plans/three-looks.md`. |
@@ -113,7 +112,7 @@ State in your change, for each look, whether it applies and what you checked.
 | A row action | `hooks/view.ts:actionsOf`, `hooks/presses.ts:applyPress`, and `hooks/view.ts:DONE_LABELS` for its label | The action appears in terminal, desktop and the Codex tab. Check Undo, failure and key letters. Add the case to `tests/hooks.test.ts` and `codex/tests/press.spec.ts` when the repo's coverage expects it. |
 | A row field | `hooks/view.ts:inboxView` and the `RowView` type, then `itemRow` and `findingRow` in both adapters | Both adapters draw the field. Until step 6, search both for the old field name. |
 | A word on screen | The shared string in `hooks/view.ts` or `hooks/presses.ts`, else both adapters | Run the change through the `refine-prose` skill. Check each look for clipping. |
-| Model-read text | `hooks/ledger.ts` or `hooks/tools.ts`, plus both `GUIDANCE` copies when the change reaches them | A/B test it as `AGENTS.md` says, with Sonnet for Claude and with `codex exec` and the model in `codex/src/update.ts:MODEL` for Codex. |
+| Model-read text | `hooks/ledger.ts` or `hooks/tools.ts`. The guidance and every `inbox:` text reach both agents. | A/B test it as `AGENTS.md` says, with Sonnet for Claude and with `codex exec` and the model in `codex/src/update.ts:MODEL` for Codex. |
 | A saved field | `types/index.d.ts:PluginState`, then `hooks/ledger.ts:upgradeLedger` or `hooks/register.tsx:upgradeState`, and `codex/src/state.ts:upgraded` | Load a state saved by the old build in the mod and in Codex. |
 | A size or timing | `hooks/view.ts` constants or `hooks/layout.ts:ROW_PAD_PT` when both looks share it, else the adapter's own constant | Measure in the terminal, desktop and Codex tab. Add a row to Differences on purpose when the values differ. |
 | A tab | `hooks/view.ts:TABS` and `hooks/view.ts:ROW_TABS` | The mod pane, the Codex tab, `codex/src/arrivals.ts:TAB_IDS` and the empty text in `hooks/view.ts:emptyText`. |

@@ -5,7 +5,7 @@
 //
 // Find a section by searching for:
 //   atoms and constants: `const LEDGER`; palettes: `const PALETTES`; the look of a surface: `function lookOf`
-//   model-read guidance: `const GUIDANCE`; per-reply update: `function runUpdate`, `function queueUpdate`
+//   model-read guidance: `guidanceText` in hooks/ledger.ts; per-reply update: `function runUpdate`, `function queueUpdate`
 //   stop and dialogs: `function setStop`, `function openDialog`; PR fetches: `function fetchPrs`
 //   PR presses: `function applyPrPress`; press runner: `async function runPress`; demo: `runDemoPress`
 //   engine hooks: `export const register`; band: `component: 'AbovePrompt'`; pane: `component: 'Pane'`
@@ -75,12 +75,14 @@ import {
   parseReply,
   catchUpPrompt,
   CLAUDE_CODE,
+  guidanceText,
   isLapsed,
   promptNotes,
   resetTime,
   readCommandRow,
   readKind,
   screenText,
+  START_TITLE,
   statusLine,
   stopFix,
   stopKindOf,
@@ -205,20 +207,6 @@ const PR_POLL_MS = 2 * 60_000
 const MAX_PRS = 6
 
 const FINDING_TOOL = 'mcp__inbox__record_finding'
-const GUIDANCE = `# Inbox
-The inbox plugin shows the user what waits on them: your open questions and the tasks only they can do, in the /inbox pane, and your findings, in the pane's Findings tab. A band above their prompt shows only two counts: one for your questions and their tasks together, and one for your findings.
-
-A finding is something you noticed that deserves the user's attention but is outside the current task: a bug, a risk, missing tests, tech debt, or a chance to improve something. Record it with mcp__inbox__record_finding the moment you notice it, then go on with the task; fixing it waits until the user asks. Record one too at two moments that are easy to pass over while focused on the task:
-- You work around a problem instead of fixing it, such as copying files by hand because a tool does not reach them.
-- Part of your change could not be tested or verified.
-State those two in your reply as well. Mention any other finding only when it bears on what the user asked.
-
-The latest "inbox:" text beside the user's prompt is the current state. It lists every open item and finding with its id, such as [i35] or [f12], and anything it does not list is closed. Check it before telling the user that something is open or waits on them.
-
-Close with mcp__inbox__close:
-- When the user's message answers an open item, close it first, before other work, with their answer.
-- When an item or finding is done or no longer applies, close it with a short reason, without waiting to be asked.
-The answer to a question is the user's to give. Close a question with their answer, or once it no longer applies, and never with an answer of your own.`
 const CLOSE_TOOL = 'mcp__inbox__close'
 
 const PANE = 'inbox'
@@ -2558,7 +2546,7 @@ export const register: Register = on => {
 
     return {
       ...r,
-      sections: [...r.sections, { id: 'inbox:guidance', text: GUIDANCE, scope: 'session' as const }],
+      sections: [...r.sections, { id: 'inbox:guidance', text: guidanceText(CLAUDE_CODE), scope: 'session' as const }],
     }
   })
 
@@ -2677,11 +2665,7 @@ export const register: Register = on => {
   on('prompt.context', async ($, e, next) => {
     const r = await next(e)
     if (!isOn) return r
-    const text = carryText(
-      await read($, LEDGER),
-      'inbox: where this session stands, as of the last reply. An "inbox:" text beside a later prompt replaces this.',
-      true,
-    )
+    const text = carryText(await read($, LEDGER), START_TITLE, true)
 
     return text ? { ...r, blocks: [...r.blocks, { name: 'inbox', text }] } : r
   })
