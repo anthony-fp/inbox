@@ -58,7 +58,7 @@ Deleted in step 1: `hooks/checks.ts`, `hooks/check-tracking.ts`, `hooks/tree.ts`
 
 **Why the reducer goes in `presses.ts`, not a new file.** That file already holds what every host shares about presses (`messages`, `steps`). Codex's `press()` already has the reducer's shape: state and press in, state and effects out. Moving it there replaces the mod's hand-written transitions (`sendAnswer`, `actOnFinding`, `close`, `useStep`, `removeFinding`) instead of keeping two copies that drift.
 
-**Why the drawing stays in `register.tsx`.** Moving the pane into its own file would be a diff of about 1,000 lines that meets no current requirement. The desktop branch touches only leaf helpers. The move can happen later, once the pane closure has shrunk.
+**Why the drawing stays in `register.tsx`.** The pane's drawing reads 74 of the file's module-level values, among them 11 mutable session values and the press runner. In its own file, it would need a host interface almost as wide as the code behind it. A change to how a press works would then span two files, and the tests would still run through the engine. The split worth making later puts terminal and desktop drawing behind one row and section interface, as two adapters. That touches all 49 places that branch on the look, and each needs a live check in both looks.
 
 **Why the band's drawing stays in `register.tsx`.** Only the mod has a band. Its inputs (the stop, the demo and `maxRows`) are mod-only. Shared code is for what more than one host reads.
 
@@ -839,7 +839,7 @@ Every step:
 - Claude mode (UI 6.2(b)). Nothing is built: no `inbox-chat` server, record tools for questions and tasks, card, full view, chat key, or host adapter. Sections 5 and 6.3 keep its seams.
 - The "context skipped" status (UI 2.7), until step 13's live check shows the mod can tell when `prompt.compose` did not run. If it can, building the red status is a follow-up to step 13. Until then an org-guarded session that skips the mod's context shows an inbox Claude cannot see, with no sign.
 - A PRs tab in Codex (UI 3.4).
-- Moving the pane's drawing out of `register.tsx`.
+- Moving the pane's drawing out of `register.tsx`. Section 2 gives the reason.
 
 **Live checks that change a step.**
 - Check 4 (desktop `Input`, `dimColor`, `variant`, `Markdown`, toasts, typed `/inbox demo`) sets the outcomes listed in step 14.

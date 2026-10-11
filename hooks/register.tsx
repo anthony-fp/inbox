@@ -124,7 +124,7 @@ import {
   settledIn,
   settledRowIds,
 } from './view'
-import type { DrawnEntry, InboxView, PlannedKey, RowState, RowView } from './view'
+import type { DrawnEntry, InboxView, PlannedKey, RowView } from './view'
 import {
   CLOSE_DESCRIPTION,
   CLOSE_SCHEMA,
