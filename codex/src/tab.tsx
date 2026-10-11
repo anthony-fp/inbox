@@ -6,7 +6,15 @@ import { render } from 'preact'
 import type { ComponentChildren, JSX } from 'preact'
 
 import { ago, isLapsed } from '../../hooks/ledger'
-import { capitalized, clipLabel, noteText, pendingResult, stepEffects, stepIconKind } from '../../hooks/presses'
+import {
+  baseName,
+  capitalized,
+  clipLabel,
+  noteText,
+  pendingResult,
+  stepEffects,
+  stepIconKind,
+} from '../../hooks/presses'
 import type { HelpStep, RowPress } from '../../hooks/presses'
 import {
   allRows,
@@ -553,7 +561,7 @@ function findingRow(v: View, r: RowView, f: Finding): Row {
           <p>
             <span class="muted">Relevant file: </span>
             <code class="file" title={f.path}>
-              {f.path.split('/').pop()}
+              {baseName(f.path)}
             </code>
           </p>
         ) : null}

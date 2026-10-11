@@ -48,7 +48,7 @@ import type { IsThreadSent, PrStatus } from './prs'
 import {
   THREADS_QUERY,
   VIEW_FIELDS,
-  byPrOrder,
+  inPrOrder,
   commentLine,
   failingChecks,
   parseRef,
@@ -1673,15 +1673,13 @@ function drawnPrs(
   lastActions: Record<string, LastAction>,
   now: number,
 ): { pr: PrView; isSettled: boolean }[] {
-  return Object.values(prState.views)
-    .sort(byPrOrder)
-    .flatMap((pr): { pr: PrView; isSettled: boolean }[] =>
-      isTracked(prState, linked, pr.ref)
-        ? [{ pr, isSettled: false }]
-        : isDismissing(lastActions, pr.ref, now)
-          ? [{ pr, isSettled: true }]
-          : [],
-    )
+  return inPrOrder(Object.values(prState.views)).flatMap((pr): { pr: PrView; isSettled: boolean }[] =>
+    isTracked(prState, linked, pr.ref)
+      ? [{ pr, isSettled: false }]
+      : isDismissing(lastActions, pr.ref, now)
+        ? [{ pr, isSettled: true }]
+        : [],
+  )
 }
 
 /**
@@ -2949,7 +2947,6 @@ export const register: Register = on => {
       /** For a row that takes the person's own words: what its field says while empty. */
       typeHint?: string
       /** What sending those words does: closes a question, or hands a task or finding off. */
-      typeKind?: PressKind
       /** The row no longer waits on the person, so its group's count leaves it out. Selected, it also shows `note`. */
       fold?: { note?: string }
     }
@@ -2973,7 +2970,6 @@ export const register: Register = on => {
         keys: () => rowKeyActions($, r, optionsShown.includes(r.id)).keys,
         moreKeys: () => rowKeyActions($, r, optionsShown.includes(r.id)).more,
         typeHint: item.kind === 'task' ? 'Your reply to Claude' : 'Your answer',
-        typeKind: 'handoff',
       }
     }
     // A finding's handle is its kind's mark, ▲ or ✦. Handed to Claude, it folds, as a task does, until Claude's
@@ -2997,13 +2993,12 @@ export const register: Register = on => {
             <Text wrap="wrap">
               <Text color={pal.muted}>Relevant file: </Text>
               {/* Claude Code's own color for inline code. */}
-              <Text color="permission">{finding.path.split('/').pop()}</Text>
+              <Text color="permission">{baseName(finding.path)}</Text>
             </Text>
           ) : null}
         </Box>
       ),
       typeHint: 'Your reply to Claude',
-      typeKind: 'handoff',
       keys: () => rowKeyActions($, r, true).keys,
       moreKeys: () => rowKeyActions($, r, true).more,
     })
@@ -3283,7 +3278,7 @@ export const register: Register = on => {
       {
         key: `send-${row.id}`,
         label: 'Send',
-        kind: row.typeKind ?? 'handoff',
+        kind: 'handoff',
         onPress: press => sendDraft($, row.id, press.surface),
       },
       {

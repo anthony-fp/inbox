@@ -3,6 +3,7 @@
 // imports, so the Codex bundle includes them.
 
 import type { PrCheck, PrThread, PrView } from '../types'
+import { clip } from './ledger'
 
 const NL = '\n'
 const PR_URL = /https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)/g
@@ -280,12 +281,10 @@ const STATUS_ORDER: Record<PrStatus, number> = { blocked: 0, ready: 1, draft: 2,
  * The PR section's order: by status, then the newest PR first. The status is read without sent threads, so
  * sending a thread to the agent does not move its PR while the press shows; only a fetch from GitHub can.
  */
-export function byPrOrder(a: PrView, b: PrView): number {
-  return (
-    STATUS_ORDER[readiness(a).status] - STATUS_ORDER[readiness(b).status] ||
-    b.number - a.number ||
-    a.ref.localeCompare(b.ref)
-  )
+export function inPrOrder(prs: PrView[]): PrView[] {
+  const rank = new Map(prs.map(pr => [pr, STATUS_ORDER[readiness(pr).status]]))
+
+  return [...prs].sort((a, b) => rank.get(a)! - rank.get(b)! || b.number - a.number || a.ref.localeCompare(b.ref))
 }
 
 /**
@@ -335,7 +334,7 @@ const COMMENT_MAX = 2000
 function threadText(t: PrThread): string {
   const where = threadWhere(t)
   const quoted = (body: string) =>
-    (body.length > COMMENT_MAX ? `${body.slice(0, COMMENT_MAX)} …[cut]` : body)
+    clip(body, COMMENT_MAX)
       .split(NL)
       .map(line => `> ${line}`)
       .join(NL)

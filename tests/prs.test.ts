@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import {
-  byPrOrder,
+  inPrOrder,
   commentLine,
   prRefs,
   prNeedsYou,
@@ -241,6 +241,6 @@ describe('prs', () => {
       pr(15, {}),
       pr(13, { isDraft: true }),
     ]
-    expect(prs.sort(byPrOrder).map(p => p.number)).toEqual([14, 15, 11, 13, 20, 9])
+    expect(inPrOrder(prs).map(p => p.number)).toEqual([14, 15, 11, 13, 20, 9])
   })
 })

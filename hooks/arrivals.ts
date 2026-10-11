@@ -37,5 +37,5 @@ export function followTo<T extends string>(
   isShownEmpty: boolean,
   added: Record<T, string[]>,
 ): T | null {
-  return (isShownEmpty ? tabs.find(t => t !== shown && added[t].length > 0) : undefined) ?? null
+  return isShownEmpty ? (tabs.find(t => t !== shown && added[t].length > 0) ?? null) : null
 }

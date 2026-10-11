@@ -436,7 +436,7 @@ function withHelp(helps: Help[], help: Help): Help[] {
   return isCovered || kept.length >= MAX_HELPS ? kept : [...kept, help]
 }
 
-function clip(text: string, max: number): string {
+export function clip(text: string, max: number): string {
   return text.length <= max ? text : text.slice(0, max) + ' …[cut]'
 }
 
@@ -695,9 +695,7 @@ const FILLER = new Set([
 
 /** The words that carry an ask's meaning. Numbers stay whatever their length, since "PR #41" is not "PR #42". */
 function keyWords(text: string): Set<string> {
-  const words = text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []
-
-  return new Set(words.filter(w => /\p{N}/u.test(w) || (w.length > 2 && !FILLER.has(w))))
+  return new Set(words(text).filter(w => /\p{N}/u.test(w) || (w.length > 2 && !FILLER.has(w))))
 }
 
 /**
@@ -722,7 +720,7 @@ function restates(a: string, b: string): boolean {
 }
 
 function sameAsk(a: string, b: string): boolean {
-  const norm = (s: string) => (s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).join(' ')
+  const norm = (s: string) => words(s).join(' ')
 
   return norm(a) !== '' && norm(a) === norm(b)
 }
@@ -877,6 +875,7 @@ export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number
   let added = 0
   // The open item each NEW line became, by its place in u.added; null for one dropped as recently closed.
   const addedIds: (string | null)[] = []
+  const created = new Set<string>()
   for (const a of u.added) {
     if (repeatsRecentlyClosed(ledger.closed, a, promptAt)) {
       addedIds.push(null)
@@ -891,6 +890,7 @@ export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number
     }
     items.push({ ...a, id: `i${nextId}`, turn, at: now })
     addedIds.push(`i${nextId}`)
+    created.add(`i${nextId}`)
     nextId += 1
     added += 1
   }
@@ -906,9 +906,7 @@ export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number
     const id = typeof a.item === 'number' ? addedIds[a.item] : a.item
     if (id && kept.some(i => i.id === id)) askedBy.set(a.id, id)
   }
-  for (const i of kept.filter(
-    i => i.turn === turn && addedIds.includes(i.id) && !ledger.items.some(o => o.id === i.id),
-  ))
+  for (const i of kept.filter(i => created.has(i.id)))
     for (const f of ledger.findings) if (!askedBy.has(f.id) && restates(f.title, i.ask)) askedBy.set(f.id, i.id)
   const { findings, closedFindings } = ledger.findings.reduce((l, f) => {
     const asker = askedBy.get(f.id)
