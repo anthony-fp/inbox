@@ -283,16 +283,20 @@ describe('reopening', () => {
     expect(reopenFinding(dismissed, 'f1')).toEqual(two)
   })
 
-  test('Claude and the per-turn update close findings with how and outcome', () => {
+  test('Claude and the per-turn update close findings with how and outcome, and the update closes one only as fixed', () => {
     const finding = { kind: 'issue' as const, title: 'Hotkeys vanish', detail: 'In ANSI', path: null, at: 1 }
     const open = addFinding(addFinding(EMPTY, finding).ledger, { ...finding, title: 'Tabs unreadable' }).ledger
     const answered = closeByAgent(CLAUDE_CODE, open, 'f1', { answer: 'leave it' }, 5)
     expect(answered.closed).toBe('finding')
-    const updated = applyUpdate(answered.ledger, parseReply('CLOSED: f2 | fixed in the theme')!, 6, 1)
+    const updated = applyUpdate(answered.ledger, parseReply('FIXED: f2 | fixed in the theme')!, 6, 1)
     expect(updated.findings).toEqual([])
     expect(updated.closedFindings.map(f => [f.id, f.how, f.outcome, f.closedAt])).toEqual([
       ['f1', 'answered', 'leave it', 5],
       ['f2', 'update', 'fixed in the theme', 6],
+    ])
+    expect(applyUpdate(open, parseReply('CLOSED: f2 | set aside for now')!, 6, 1).findings.map(f => f.id)).toEqual([
+      'f1',
+      'f2',
     ])
   })
 })

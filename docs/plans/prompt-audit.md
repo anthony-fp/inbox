@@ -1,6 +1,6 @@
 # Audit of the texts the models read
 
-Status: building. Theme 2's `UPDATE` line, a stricter recommendation rule and the new Explain wording are built and measured. Theme 1 was measured and not kept. The other themes are proposed.
+Status: building. Theme 2's `UPDATE` line, a stricter recommendation rule, the new Explain wording and theme 5's `FIXED` line are built and measured. Theme 1 was measured and not kept. The other themes are proposed.
 
 ## Verdict
 
@@ -184,6 +184,18 @@ Each run used synthetic fixture exchanges, except one real reply that drew the f
 
 The `UPDATE` line without the stricter sentence fixed the Explain case too, but still invented a recommendation in 5 of 8 runs on the reason-only case.
 
+Theme 5 was measured the same way, with its own fixtures. Rewording the finding half of `CLOSED` was not enough on Sonnet. The version kept gives findings their own `FIXED` line, and the code ignores a `CLOSED` line for a finding.
+
+| Case | Sonnet before | Sonnet after | Codex before | Codex after |
+| --- | --- | --- | --- | --- |
+| A finding the person put off stays open | 0 of 8 | 8 of 8 | 5 of 5 | 5 of 5 |
+| A finding the person set aside stays open | 0 of 8 | 7 of 8 | 0 of 5 | 2 of 5 |
+| A finding the agent fixed closes | 8 of 8 | 8 of 8 | 5 of 5 | 5 of 5 |
+| A finding the person fixed closes | 8 of 8 | 8 of 8 | 5 of 5 | 5 of 5 |
+| A dismissed question stays closed | 18 of 24 | 24 of 24 | 5 of 5 | 5 of 5 |
+
+A finding the person sets aside still closes in 3 of 5 Codex runs. The person can dismiss it from the tab either way.
+
 - **Explain wording:** ten Sonnet agent replies to each Explain message, about a cache question. Asking "and which you would pick" made the agent name a pick in 9 of 10 replies, against 1 of 10. Only the question wording changed. The task wording was not tested and stays.
 - **Theme 1 not kept:** ten Sonnet agent replies per version, in two scenarios. With the paragraph, the agent put commands in code blocks. But the items gained nothing. In the fork scenario, both versions gave a recommendation and a one-press step in 10 of 10 replies. In the migration scenario, the paragraph added approval questions, and slightly fewer tasks got a step: 8 of 18, against 11 of 20.
 - **Limits:** the agent runs used a short preamble in place of Claude Code's full system prompt. The Codex agent was not run.
@@ -192,7 +204,6 @@ The `UPDATE` line without the stricter sentence fixed the Explain case too, but 
 
 1. Theme 4. It needs the most careful A/B.
 2. Theme 3 and theme 6's close result. These are code changes with small model-read edits.
-3. Theme 5 waits on Decision 3 in `docs/plans/instructions.md`.
-4. Themes 7 and 8.
+3. Themes 7 and 8.
 
-Theme 2 is built, with the stricter recommendation rule that f181 called for. Theme 1 was measured and not kept. Theme 4 is not started.
+Themes 2 and 5 are built. Theme 2 includes the stricter recommendation rule that f181 called for. Theme 1 was measured and not kept. Theme 4 is not started.

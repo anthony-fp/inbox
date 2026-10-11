@@ -129,8 +129,8 @@ GOAL: what this session is for, at most 12 words. Keep the previous goal unless 
 DONE: one finished outcome, at most 8 words. Up to 4 DONE lines, oldest first, keeping the most recent. Outcomes, not activity: "PR #12 opened", not "ran gh".
 NOW: where the work stands at the end of this reply, at most 12 words. Name what it waits on, if anything. "-" when no work has started.
 RUNNING: something still running that the person may open, as "name: URL or port". Dev servers, simulators, background jobs. Omit anything the agent stopped. Zero or more lines.
-CLOSED: <id> | what was decided, at most 8 words. For each item in <open> the person answered in <person> (including "all recommended", "go", "yes to all", numbered answers), or that the reply or <activity> shows is done or no longer applies. A person asking what an item means has not answered it, and a reply explaining it does not close it. When <person> asks to run an item's command and the reply says it ran, that item is done. So is an item whose command the person ran themselves, per <person>, when its output shows it worked. Also one line for each finding in <findings> that the reply or <activity> shows was fixed, or that the person dealt with or set aside.
-  Putting a finding off ("later", "not now") is not setting it aside: it stays open.
+CLOSED: <id> | what was decided, at most 8 words. For each item in <open> the person answered in <person> (including "all recommended", "go", "yes to all", numbered answers), or that the reply or <activity> shows is done or no longer applies. A person asking what an item means has not answered it, and a reply explaining it does not close it. When <person> asks to run an item's command and the reply says it ran, that item is done. So is an item whose command the person ran themselves, per <person>, when its output shows it worked.
+FIXED: <id> | what fixed it, at most 8 words. One line for each finding in <findings> that the reply, <activity> or <person> shows was fixed. Never for a finding the person puts off or sets aside: it stays open until they dismiss it.
 NEW: <kind> | <label> | <ask> | <options> | <rec>
   One line per thing in <reply> that waits on the person and is not already in <open> or <findings>. A finding the agent recorded is not NEW unless the reply asks the person to decide on it now. When the reply restates, rewords or narrows an item in <open>, it is not new: add HELP lines to that item's id instead.
   kind: "decide" (a choice, approval, or information only the person has, explicitly put to them, without which the agent cannot go on with its task) or "do" (an action only the person can take, without which the agent cannot continue or finish: sign in, run a command needing their password, test on their device, reply to a teammate).
@@ -178,7 +178,7 @@ export const START_TITLE =
   'inbox: where this session stands, as of the last reply. An "inbox:" text beside a later prompt replaces this.'
 
 const CATCH_UP =
-  'The ledger below may have missed turns. Close every item in <open> and every finding in <findings> that the conversation shows answered, done, dealt with, or no longer relevant. Add as NEW only what still waits on the user and is not already in <open> or <findings>.'
+  'The ledger below may have missed turns. Close every item in <open> that the conversation shows answered, done, dealt with, or no longer relevant, and every finding in <findings> that it shows was fixed. Add as NEW only what still waits on the user and is not already in <open> or <findings>.'
 
 /**
  * Asks a fork of the main conversation to bring the ledger up to date at once,
@@ -547,7 +547,7 @@ export function parseReply(text: string, source: string | null = null): Update |
   let seen = 0
 
   for (const raw of text.split(NL)) {
-    const m = raw.match(/^\s*[-*]?\s*(GOAL|DONE|NOW|RUNNING|CLOSED|NEW|UPDATE|HELP)\s*:\s*(.*)$/)
+    const m = raw.match(/^\s*[-*]?\s*(GOAL|DONE|NOW|RUNNING|CLOSED|FIXED|NEW|UPDATE|HELP)\s*:\s*(.*)$/)
     if (!m) continue
     seen += 1
     const key = m[1]
@@ -557,9 +557,10 @@ export function parseReply(text: string, source: string | null = null): Update |
     else if (key === 'NOW') card.now = value
     else if (key === 'DONE' && value) card.done.push(value)
     else if (key === 'RUNNING' && value) card.running.push(value)
-    else if (key === 'CLOSED') {
+    else if (key === 'CLOSED' || key === 'FIXED') {
+      // CLOSED closes items and FIXED closes findings, so a finding the person only put off stays open.
       const [id, outcome] = value.split('|').map(s => s.trim())
-      if (id) closed.push({ id, outcome: outcome ?? '' })
+      if (id && /^f\d/.test(id) === (key === 'FIXED')) closed.push({ id, outcome: outcome ?? '' })
     } else if (key === 'NEW') {
       // The recommendation is the last field. The model sometimes writes one answer after "|" instead of " / ".
       const [kind, label, ask, ...rest] = value.split('|').map(dash)

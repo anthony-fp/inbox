@@ -96,5 +96,5 @@ model re-added a dismissed question in 4 of 5 runs.
 1. Roadmap: drop "Claude's calls replace Findings", or keep it?
 2. Address it and Discuss: keep the finding open until Claude closes it, or
    remove it on press as now?
-3. Inbox model: stop it closing findings, or keep it as a backup closer?
+3. Inbox model: decided. It closes a finding only with a `FIXED` line, when the conversation shows the finding was fixed, and a `CLOSED` line no longer closes one. The measurements are in `docs/plans/prompt-audit.md`.
 4. Turn-end check for unrecorded findings: build it, or leave it out?
