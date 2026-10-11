@@ -478,7 +478,8 @@ function paletteFor(theme: string, look: ModLook): Palette {
 
   return theme.startsWith('dark') ? { ...palette, ...DESKTOP_DARK_FILLS } : palette
 }
-// The blank columns on each side of a docked tab's name, which a click there also selects.
+// The blank columns on each side of a docked tab's name, which a click there also selects. A pane too narrow
+// for the three tabs at this padding draws them with one column each side instead.
 const TAB_PAD = '  '
 // The Needs you tab lists questions first, because each takes one key.
 const NEEDS_YOU_GROUPS: { kind: Item['kind']; title: string; list: 'questions' | 'tasks' }[] = [
@@ -3811,6 +3812,10 @@ export const register: Register = on => {
         </Text>
       ) : null,
     ]
+    const tabText = (id: Tab, label: string) => `${label}${tabCounts[id] > 0 ? ` ${tabCounts[id]}` : ''}`
+    // The terminal tabs' width at full padding, with the 1-column gaps between them and the row's own padding.
+    const terminalTabsWidth = TABS.reduce((sum, t) => sum + tabText(t.id, t.label).length + 2 * TAB_PAD.length + 1, 1)
+    const pad = terminalTabsWidth <= e.props.bodyColumns ? TAB_PAD : ' '
     const tabs = (
       <Box
         paddingLeft={isInline ? 2 : 1}
@@ -3822,11 +3827,7 @@ export const register: Register = on => {
         columnGap={3}
         rowGap={isStatusBelow ? 1 : 0}
       >
-        <Box
-          flexDirection="row"
-          {...(look === 'desktop' ? { flexWrap: 'wrap' as const } : {})}
-          columnGap={isInline ? 3 : look === 'desktop' ? 2 : 1}
-        >
+        <Box flexDirection="row" flexWrap="wrap" columnGap={isInline ? 3 : look === 'desktop' ? 2 : 1}>
           {hasClient && tabProps ? (
             <elements.Client key="tabs" module="./tabs-client.tsx" height={TAB_HEIGHT} props={tabProps} />
           ) : null}
@@ -3854,7 +3855,7 @@ export const register: Register = on => {
                     </Box>
                   )
 
-                const width = `${label}${count > 0 ? ` ${count}` : ''}`.length + 2 * TAB_PAD.length
+                const width = tabText(id, label).length + 2 * pad.length
 
                 // Desktop: every tab is one native button, the shown one the primary. The key stays the
                 // same in every drawing: the app takes the focus off the pane when the element holding
@@ -3878,12 +3879,12 @@ export const register: Register = on => {
                 const edge = since < DRAW_IN_MS ? Math.max(1, Math.ceil((width * since) / DRAW_IN_MS)) : width
                 if (tab === id)
                   return (
-                    <Box flexDirection="column">
+                    <Box flexDirection="column" flexShrink={0}>
                       <Text color={pal.mark[id]} backgroundColor={pal.raised}>
                         {'▔'.repeat(edge) + ' '.repeat(width - edge)}
                       </Text>
                       <Text backgroundColor={pal.raised}>
-                        {TAB_PAD}
+                        {pad}
                         <Text bold color={pal.raisedText} backgroundColor={pal.raised}>
                           {label}
                         </Text>
@@ -3893,7 +3894,7 @@ export const register: Register = on => {
                             {count}
                           </Text>
                         ) : null}
-                        {TAB_PAD}
+                        {pad}
                       </Text>
                       <Text backgroundColor={pal.raised}>{' '.repeat(width)}</Text>
                     </Box>
@@ -3905,10 +3906,10 @@ export const register: Register = on => {
                 const show = () => void showTab($, id)
 
                 return (
-                  <Box key={`tab-block-${id}`} flexDirection="column" backgroundColor={pal.tab}>
+                  <Box key={`tab-block-${id}`} flexDirection="column" flexShrink={0} backgroundColor={pal.tab}>
                     <Button plain key={`tab-${id}-above`} label={' '.repeat(width)} hover={raise} onPress={show} />
                     <Box flexDirection="row">
-                      <Button plain key={`tab-${id}-before`} label={TAB_PAD} hover={raise} onPress={show} />
+                      <Button plain key={`tab-${id}-before`} label={pad} hover={raise} onPress={show} />
                       <Button plain key={`tab-${id}`} label={label} hover={raise} onPress={show} />
                       {count > 0 ? (
                         <Text color={pal.tone[id]} hover={raise}>
@@ -3916,7 +3917,7 @@ export const register: Register = on => {
                           {count}
                         </Text>
                       ) : null}
-                      <Button plain key={`tab-${id}-after`} label={TAB_PAD} hover={raise} onPress={show} />
+                      <Button plain key={`tab-${id}-after`} label={pad} hover={raise} onPress={show} />
                     </Box>
                     <Button plain key={`tab-${id}-below`} label={' '.repeat(width)} hover={raise} onPress={show} />
                   </Box>
