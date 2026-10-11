@@ -224,7 +224,7 @@ A second review read every raw model answer from the A/B runs, the parser, and t
 
 ### The parser does the wrong thing
 
-These are code fixes. None changes what a model reads. Items 1, 3, 4 and 6 are fixed, and so is item 2 for HELP commands. A `|` inside an ask still shifts its fields, because the parser also accepts options written with `|` between them. Item 5 is not changed. A Run step on a task hands the task to the agent by design, as the hook tests show, so making it a copy button is Pete's decision.
+These are code fixes. None changes what a model reads. Items 1, 3, 4 and 6 are fixed, and so is item 2 for HELP commands. A `|` inside an ask still shifts its fields, because the parser also accepts options written with `|` between them. Item 5 is decided: a Run step on a task keeps handing the task to the agent. A command the reply says only the person can run could still become a copy button through the HELP rule, which would need an A/B.
 
 1. **A self-corrected answer is applied twice.** The inbox model sometimes writes an answer, then "Wait: corrected answer", then a second answer. It did this in 7 runs, all on Sonnet. Both drafts are applied, so DONE lines double and a NEW line the model struck still becomes an item. Fix: keep only the lines from the last `GOAL:` line on.
 2. **A `|` inside a value shifts the fields.** A HELP command such as `npm test | tee out.log` runs as `npm test`. An ask with a `|` loses its tail into the options. Fix: split HELP and NEW from both ends, and keep the middle whole.
