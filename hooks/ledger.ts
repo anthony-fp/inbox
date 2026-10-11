@@ -614,7 +614,11 @@ export function parseReply(text: string, source: string | null = null): Update |
       if (id && /^f\d+$/.test(id) && target) asks.push({ id, target })
     } else if (key === 'NEW') {
       // The recommendation is the last field. The model sometimes writes one answer after "|" instead of " / ".
-      const [kind, label, ask, ...rest] = value.split('|').map(dash)
+      const fields = value.split('|')
+      // The model sometimes leaves out the label, as in "NEW: do | Run the migration | - | - | -". A label
+      // field holding a phrase, with no ask after it, is the ask.
+      const isLabelSkipped = !dash(fields[2]) && /\s/.test((fields[1] ?? '').trim())
+      const [kind, label, ask, ...rest] = (isLabelSkipped ? [fields[0], '-', ...fields.slice(1)] : fields).map(dash)
       const rec = rest.length > 1 ? rest.pop() : null
       if (!ask) {
         newLines.push(undefined)

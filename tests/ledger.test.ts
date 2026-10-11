@@ -211,6 +211,21 @@ describe('parseReply', () => {
     expect(u?.added[0]?.helps).toEqual([{ kind: 'open', path: 'docs/notes.md' }])
   })
 
+  test('a NEW line that leaves out the label keeps its ask and its steps', () => {
+    const reply = 'Run this on your phone:\n```\nnpm run ios -- --device\n```'
+    const u = parseReply(
+      [
+        'NEW: do | Run the iPhone command, then tap through the cancel flow | - | - | -',
+        'NEW: decide | D3 | - | - | -',
+        'HELP: new 1 | terminal | block 1 | iPhone run',
+      ].join('\n'),
+      reply,
+    )
+    expect(u?.added.map(a => [a.ask, a.label, a.helps.map(h => h.kind)])).toEqual([
+      ['Run the iPhone command, then tap through the cancel flow', null, ['terminal']],
+    ])
+  })
+
   test('returns null for prose with no keys', () => {
     expect(parseReply('Sure! Here is the ledger you asked for.')).toBe(null)
   })
