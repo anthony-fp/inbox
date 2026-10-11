@@ -85,6 +85,7 @@ import {
   baseName,
   capitalized,
   clipLabel,
+  demoRecord,
   localLast,
   localPath,
   openCommands,
@@ -2011,17 +2012,13 @@ async function runDemoPress($: EngineInterface, p: RowPress | PrPress) {
     const { [rowId]: _replaced, ...notes } = d.notes
     if ('stale' in r) return { ...d, notes: { ...notes, [rowId]: { note: 'stale' as const, at: now } } }
     isClosing = hasNewClose(d.ledger, r.ledger) || ('ref' in p && p.action === 'pr-dismiss')
-    // An open or copy records only its result, and the demo runs none, so its row keeps its last action.
-    // A sample send goes nowhere, so nothing would ever clear its Queued.
-    const lasts = Object.fromEntries(
-      Object.entries(r.lasts).flatMap(([id, { delivery: _unsent, ...l }]) => (l.result === undefined ? [[id, l]] : [])),
-    )
+    const { lasts, isSample } = demoRecord(r.lasts, r.effects)
 
     return {
       ...d,
       ledger: r.ledger,
       lastActions: withLasts(d.lastActions, lasts, r.drop),
-      notes: r.effects.length > 0 ? { ...notes, [rowId]: { note: 'sample' as const, at: now } } : notes,
+      notes: isSample ? { ...notes, [rowId]: { note: 'sample' as const, at: now } } : notes,
     }
   })
   const pressed = applied

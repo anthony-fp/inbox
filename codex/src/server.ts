@@ -6,7 +6,15 @@ import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
 
-import { applyPress, localPath, noteText, openCommands, runLocalEffects, runSends } from '../../hooks/presses'
+import {
+  applyPress,
+  demoRecord,
+  localPath,
+  noteText,
+  openCommands,
+  runLocalEffects,
+  runSends,
+} from '../../hooks/presses'
 import type { EffectHost, PressResult, RowPress } from '../../hooks/presses'
 import {
   CLOSE_DESCRIPTION,
@@ -276,23 +284,11 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     const s = demoOf(id)
     const r = thread === id ? pressOn(s, p) : ({ stale: true } as const)
     if ('stale' in r) return { view: served(s, id), copy: null, error: null, note: 'stale' }
-    // The demo opens nothing, so a Local press records no result there. A sample
-    // send goes nowhere, so nothing would ever clear its Queued.
-    const isLocal = r.last?.result !== undefined
-    let lastActions = s.lastActions
-    if (r.last && !isLocal) {
-      const { delivery: _delivery, ...sample } = r.last
-      lastActions = { ...lastActions, [p.id]: sample }
-    }
-    const next: SessionState = { ...s, ledger: r.ledger, lastActions }
+    const { lasts, isSample } = demoRecord(r.last ? { [p.id]: r.last } : {}, r.effects)
+    const next: SessionState = { ...s, ledger: r.ledger, lastActions: { ...s.lastActions, ...lasts } }
     demos.set(id, next)
 
-    return {
-      view: served(next, id),
-      copy: null,
-      error: null,
-      note: r.effects.length > 0 ? 'sample' : null,
-    }
+    return { view: served(next, id), copy: null, error: null, note: isSample ? 'sample' : null }
   }
 
   async function callTool(

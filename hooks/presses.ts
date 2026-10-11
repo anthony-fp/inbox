@@ -443,6 +443,23 @@ export function reopenOnFailure(ledger: Ledger, id: string, at: number): Ledger 
   return closed?.item && closed.how === 'answered' && closed.at === at ? reopenItem(ledger, id) : ledger
 }
 
+/**
+ * What the demo's copy records for an applied press, by row. A sample message goes nowhere, so a last action keeps
+ * no delivery, which nothing would ever clear. The demo opens and copies nothing, so a Local press records nothing.
+ * `isSample` when the press would have acted, so its row shows the sample note.
+ */
+export function demoRecord(
+  lasts: Record<string, LastAction>,
+  effects: Effect[],
+): { lasts: Record<string, LastAction>; isSample: boolean } {
+  return {
+    lasts: Object.fromEntries(
+      Object.entries(lasts).flatMap(([id, { delivery: _unsent, ...l }]) => (l.result === undefined ? [[id, l]] : [])),
+    ),
+    isSample: effects.length > 0,
+  }
+}
+
 /** What a host does for a press's effects: opens, copies and sends its own way, and saves state. */
 export type EffectHost = {
   now(): Promise<number> | number
