@@ -506,8 +506,6 @@ let sentBack: string[] = []
 // Set in session.start, which a hot reload runs again.
 let sessionId = ''
 let root = ''
-// The repo's top folder; null outside git.
-let top: string | null = null
 // The PR fetches, one at a time, and the next one when it is waiting to start: whether it looks up the branch's PR.
 let fetchingPrs: Promise<void> = Promise.resolve()
 let nextFetchFindsBranchPr: boolean | null = null
@@ -1073,13 +1071,6 @@ async function openPath($: EngineInterface, raw: string): Promise<string | null>
   const retry = r.exitCode !== 0 && fallback ? await $.process.run(fallback) : r
 
   return retry.exitCode === 0 ? null : retry.stderr.trim() || `open exited ${retry.exitCode}`
-}
-
-/** A path inside the repo, relative to its top folder; any other path as given. */
-function repoPath(path: string): string {
-  const base = top ?? root
-
-  return base && path.startsWith(`${base}/`) ? path.slice(base.length + 1) : path
 }
 
 /**
@@ -2345,13 +2336,11 @@ async function loadConversation($: EngineInterface, id: string) {
   isReadingAgain = false
   // A reload stops any update the previous load had running, and state outlives
   // it, so an update in flight at load was cut off: record it as failed.
-  const [git, presence, current, saved] = await Promise.all([
-    $.process.run(['git', 'rev-parse', '--show-toplevel'], { cwd: root, timeoutMs: 5000 }).catch(() => null),
+  const [presence, current, saved] = await Promise.all([
     update($, PRESENCE, p => (p.isUpdating ? { ...p, isUpdating: false, ledgerState: 'failed' as const } : p)),
     upgradeState($),
     readSaved($, id),
   ])
-  top = git?.exitCode === 0 ? git.stdout.trim() || null : null
   // Only a conversation with no turns loaded yet needs its saved copy, so only that load's read decides
   // whether the copy is unreadable. Once turns ran, only [Try again] or another conversation clears UNREADABLE.
   const isFresh = current.turn === 0 && !current.card
@@ -3006,7 +2995,8 @@ export const register: Register = on => {
           {finding.path ? (
             <Text wrap="wrap">
               <Text color={pal.muted}>Relevant file: </Text>
-              {repoPath(finding.path)}
+              {/* Claude Code's own color for inline code. */}
+              <Text color="permission">{finding.path.split('/').pop()}</Text>
             </Text>
           ) : null}
         </Box>

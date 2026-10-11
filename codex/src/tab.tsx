@@ -552,7 +552,9 @@ function findingRow(v: View, r: RowView, f: Finding): Row {
         {f.path ? (
           <p>
             <span class="muted">Relevant file: </span>
-            {f.path}
+            <code class="file" title={f.path}>
+              {f.path.split('/').pop()}
+            </code>
           </p>
         ) : null}
       </div>
