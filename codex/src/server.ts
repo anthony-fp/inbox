@@ -88,6 +88,8 @@ export type ServerDeps = {
   fallbackCli: () => Promise<string>
   /** The tab page `npm --prefix codex run dev` keeps built, while it runs. */
   devPage?: () => Promise<string | null>
+  /** The fingerprint build.mjs stamped into this server, sent with each view. */
+  build?: string
 }
 
 type Message = { jsonrpc: '2.0'; id?: number | string; method?: string; params?: Record<string, unknown> }
@@ -156,7 +158,11 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     applyPress(s.ledger, s.lastActions[p.id], p, { now: now(), turnsStarted: s.presence.turnsStarted, extraSteps: [] })
 
   /** The view for the tab, with the session it was read for. */
-  const served = (s: SessionState, id: string): TabView => ({ ...viewOf(s, now()), thread: id })
+  const served = (s: SessionState, id: string): TabView => ({
+    ...viewOf(s, now()),
+    thread: id,
+    ...(deps.build ? { serverBuild: deps.build } : {}),
+  })
 
   /**
    * Applies a press drawn for `thread` in session `id`'s state. A press drawn

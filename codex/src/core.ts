@@ -188,8 +188,11 @@ export type View = InboxView & {
  * The view as the server sends it to the tab, with the session the call came
  * from. The tab sends `thread` back with each press, which reads as stale in any other session.
  */
-/** `devPage` is the address of the page the dev build has ready, while it runs. */
-export type TabView = View & { thread: string; devPage?: string }
+/**
+ * `devPage` is the address of the page the dev build has ready, while it runs. `serverBuild` is the fingerprint
+ * build.mjs stamped into the running server, which a tab page built from newer server sources does not match.
+ */
+export type TabView = View & { thread: string; devPage?: string; serverBuild?: string }
 
 /**
  * Each row's last press, without a Local result still pending after PRESS_TIMEOUT_MS. The server

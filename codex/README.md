@@ -64,7 +64,9 @@ To change the tab while you watch it, run `npm run dev`. It rebuilds the
 tab's page on each save and points the installed plugin's server at it. An
 open Inbox tab swaps to the new page within a few seconds. The tab can swap
 only if its own page came from a build that has this feature. Changes to the
-server or the hooks still need a build and a reinstall.
+server or the hooks still need a build, a reinstall and a restart of Codex,
+which keeps a plugin's server running across reinstalls and new chats. The tab
+says when its page and the running server come from different builds.
 
 `../scripts/check.sh` checks the bundles are current, the types and the
 tests. The design and what was measured are in

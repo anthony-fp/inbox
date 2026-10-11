@@ -1,6 +1,6 @@
 # Live reload for the Codex tab
 
-**Goal:** while `npm --prefix codex run dev` runs, a saved change to the tab shows in an open Codex Inbox tab within a few seconds. You don't reinstall, reopen the tab, or start a new chat. Changes to the server or hooks still need a reinstall.
+**Goal:** while `npm --prefix codex run dev` runs, a saved change to the tab shows in an open Codex Inbox tab within a few seconds. You don't reinstall, reopen the tab, or start a new chat. Changes to the server or hooks still need a build, a reinstall and a restart of the Codex app.
 
 ## Why a change takes so long to show today
 
@@ -18,6 +18,7 @@ Codex also keeps its own copy of the page, keyed by the page's address, `ui://in
 2. **Pointer file.** While it runs, the dev script writes `dev.json` into the plugin's data folder, `~/.codex/plugins/data/inbox-inbox/`. The file holds the path to that `tab.html`. The script deletes it on exit.
 3. **Server.** On each call from the tab, the server checks for `dev.json`. When it exists, the server adds the dev page's address, a hash of the page, to the view as `devPage`. It reads the page again only when the file changes. A new app-only tool, `inbox_tab_page`, returns the page's text. With no `dev.json`, nothing changes.
 4. **Tab.** The server stamps each page it serves with its address, as `window.__inboxPage`. When a poll brings a different `devPage`, the tab fetches the page through `inbox_tab_page` and replaces its own document.
+5. **Server check.** A swapped-in page can be built from newer server sources than the server Codex is running. On 2026-10-10 the app's inbox servers had run since 16:14, through several reinstalls and new chats. A page that needed a view field added at 17:51 drew every row without its actions. So each build hashes the server's sources and stamps the hash into the server and into the tab page. The server sends it with each view as `serverBuild`. When it differs from the page's own, the tab says to quit and reopen Codex. A server built before this check sends none, which also counts as different.
 
 The installed server reads the worktree's files only while `dev.json` exists, and only the one path it names.
 

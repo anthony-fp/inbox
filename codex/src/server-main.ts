@@ -47,6 +47,7 @@ const handle = makeServer({
   tabHtml: TAB_HTML,
   fallbackCli: appCli,
   devPage: devPageIn(dir),
+  build: SERVER_BUILD,
 })
 
 createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', line => {

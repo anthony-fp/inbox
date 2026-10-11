@@ -11,6 +11,7 @@
 //   node build.mjs --dev    rebuilds the tab's page into .dev/tab.html on each save, and points the
 //                          installed plugin's server at it, so an open Inbox tab swaps to it.
 
+import { createHash } from 'node:crypto'
 import { mkdirSync, readdirSync, readFileSync, rmSync, watch, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -21,10 +22,37 @@ import * as esbuild from 'esbuild'
 const here = dirname(fileURLToPath(import.meta.url))
 const mode = process.argv[2] ?? ''
 
-/** The tab's script, bundled for the browser. */
-async function buildTabScript() {
+/**
+ * A fingerprint of the sources the server is built from, leaving out the tab page it carries. The server sends it
+ * with each view and the tab page holds its own, so a page built from newer server sources than the running
+ * server can say so.
+ */
+async function serverBuild() {
+  const result = await esbuild.build({
+    absWorkingDir: here,
+    entryPoints: ['src/server-main.ts'],
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    loader: { '.html': 'text' },
+    metafile: true,
+    write: false,
+    logLevel: 'silent',
+  })
+  const hash = createHash('sha256')
+  for (const path of Object.keys(result.metafile.inputs)
+    .filter(p => !p.endsWith('tab.html'))
+    .sort())
+    hash.update(path).update(readFileSync(join(here, path)))
+
+  return hash.digest('hex').slice(0, 12)
+}
+
+/** The tab's script, bundled for the browser, holding the fingerprint of the server sources it was built with. */
+async function buildTabScript(build) {
   const tab = await esbuild.build({
     absWorkingDir: here,
+    define: { SERVER_BUILD: JSON.stringify(build) },
     entryPoints: ['src/tab.tsx'],
     bundle: true,
     platform: 'browser',
@@ -48,7 +76,8 @@ async function buildTabScript() {
 /** tab.html with its script inlined. */
 const tabPage = (html, script) => html.replace('/*TAB_SCRIPT*/', () => script)
 
-const tabScript = mode === '--dev' ? '' : await buildTabScript()
+const build = await serverBuild()
+const tabScript = mode === '--dev' ? '' : await buildTabScript(build)
 
 /** Loads tab.html with the tab's script inlined. */
 const inlineTab = {
@@ -67,6 +96,7 @@ const common = {
   format: 'esm',
   target: 'node20',
   loader: { '.html': 'text' },
+  define: { SERVER_BUILD: JSON.stringify(build) },
   plugins: [inlineTab],
   legalComments: 'none',
   logLevel: 'warning',
@@ -90,7 +120,10 @@ if (mode === '--dev') {
   )
   const write = async () => {
     try {
-      writeFileSync(page, tabPage(readFileSync(join(here, 'src', 'tab.html'), 'utf8'), await buildTabScript()))
+      writeFileSync(
+        page,
+        tabPage(readFileSync(join(here, 'src', 'tab.html'), 'utf8'), await buildTabScript(await serverBuild())),
+      )
       console.log(`${new Date().toLocaleTimeString()} Built the tab page`)
     } catch (err) {
       console.error(err instanceof Error ? err.message : err)
