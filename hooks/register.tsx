@@ -227,6 +227,17 @@ const DESKTOP_LINE_PT = 19
  * flush. A Box in the hooks tree counts padding in half lines, so it pads twice this.
  */
 const DESKTOP_ROW_PAD = ROW_PAD_PT / DESKTOP_LINE_PT
+/**
+ * Where a row's handle and its text start, in columns. In a group's tree the tree's │ runs in the lead. A flat row,
+ * as Findings lists them, has a 1-column lead. The open row, the closed row's Client and the settled row all draw at
+ * these columns, so a row's title stays put as it opens, closes or settles.
+ */
+const ROW_COLUMNS = {
+  tree: { lead: 4, handleAt: 4, textAt: 7 },
+  flat: { lead: 1, handleAt: 3, textAt: 5 },
+} as const
+/** A tree row's mark column, which a nested row's lead also steps by. */
+const TREE_MARK_WIDTH = ROW_COLUMNS.tree.textAt - ROW_COLUMNS.tree.lead
 // Theme keys, so the colors follow the person's Claude Code theme.
 const NEEDS_YOU = 'warning'
 // A child's place under its section: a middle child, the last, or a block the tree passes.
@@ -2840,10 +2851,13 @@ export const register: Register = on => {
     // it drops the section cards, the tab panels and the blank lines between parts.
     const isInline = e.props.placement === 'inline'
     const blankLine = isInline ? 0 : 1
-    // A desktop row pads the same open, closed or just closed, so its title stays put when it opens.
-    const rowPad = look === 'desktop' ? 2 * DESKTOP_ROW_PAD : blankLine
-    // Desktop's buttons draw their own padding, so a narrower gap than the terminal's two cells keeps a row together.
-    const buttonGap = look === 'desktop' ? 1 : 2
+    // Row spacing by look. A desktop row pads the same open, closed or just closed, so its title stays put when it
+    // opens, and its rows sit flush with the Closed fold under them. Desktop's buttons draw their own padding, so a
+    // narrower gap than the terminal's two cells keeps a row together.
+    const space =
+      look === 'desktop'
+        ? { rowPad: 2 * DESKTOP_ROW_PAD, settledPad: 2 * DESKTOP_ROW_PAD, buttonGap: 1, isFoldGapped: false }
+        : { rowPad: blankLine, settledPad: 0, buttonGap: 2, isFoldGapped: true }
     const [
       { ledger, prViews: prState, lastActions, notes, stop, view, isDemo, isUnread, now },
       tab,
@@ -3195,7 +3209,7 @@ export const register: Register = on => {
         flexDirection="row"
         flexWrap="wrap"
         alignItems="center"
-        columnGap={buttonGap}
+        columnGap={space.buttonGap}
         rowGap={look === 'desktop' ? 1 : 0}
       >
         {keys.map(keyedButton(rowId))}
@@ -3301,12 +3315,12 @@ export const register: Register = on => {
       content: JSX.Element,
       key?: string,
       depth = 0,
-      lead = 4 + 3 * depth,
+      lead = ROW_COLUMNS.tree.lead + TREE_MARK_WIDTH * depth,
     ) => (
       <Box key={key} flexDirection="row" alignItems="flex-start" overflow="hidden">
         <Box width={lead} flexShrink={0} />
         {marker ? (
-          <Box width={3} flexShrink={0}>
+          <Box width={TREE_MARK_WIDTH} flexShrink={0}>
             {marker}
           </Box>
         ) : null}
@@ -3446,10 +3460,11 @@ export const register: Register = on => {
     // A closed desktop row drawn by its Client, at the columns listRow draws an open row's handle and text.
     const rowClientProps = (row: Row, tree?: TreePos): RowProps => {
       const line = closedLine(row)
+      const columns = tree ? ROW_COLUMNS.tree : ROW_COLUMNS.flat
 
       return {
-        handleAt: tree ? 4 : 3,
-        textAt: tree ? 7 : 5,
+        handleAt: columns.handleAt,
+        textAt: columns.textAt,
         handle: row.handle,
         before: line.before ?? '',
         title: line.text.trim(),
@@ -3477,6 +3492,7 @@ export const register: Register = on => {
     // `tree` places the row as a section's child; without it, as in Findings, the
     // handle sits in the 4 columns after the bar.
     const listRow = (row: Row, tree?: TreePos) => {
+      const columns = tree ? ROW_COLUMNS.tree : ROW_COLUMNS.flat
       const index = indexOf.get(row.id) ?? -1
       const isSelected = index === at
       // On desktop a Client takes a click on every cell of the row, where a Button takes one only on its label.
@@ -3527,8 +3543,13 @@ export const register: Register = on => {
           overflow="hidden"
           backgroundColor={isSelected ? pal.selection : undefined}
         >
-          <Box width={tree ? 4 : 1} flexShrink={0} />
-          <Box width={tree ? 3 : 4} flexShrink={0} paddingLeft={tree ? 0 : 2} paddingY={isSelected ? rowPad : 0}>
+          <Box width={columns.lead} flexShrink={0} />
+          <Box
+            width={columns.textAt - columns.lead}
+            flexShrink={0}
+            paddingLeft={columns.handleAt - columns.lead}
+            paddingY={isSelected ? space.rowPad : 0}
+          >
             {/* Without a Client, desktop's title alone opens the row, so the list draws half as many native buttons. */}
             {row.handleTone ? (
               <Text color={pal.mark[row.handleTone]}>{row.handle}</Text>
@@ -3544,7 +3565,7 @@ export const register: Register = on => {
             )}
           </Box>
           {isSelected ? (
-            <Box flexDirection="column" flexShrink={1} flexGrow={1} paddingRight={1} paddingY={rowPad}>
+            <Box flexDirection="column" flexShrink={1} flexGrow={1} paddingRight={1} paddingY={space.rowPad}>
               {row.head ? headLine(row.head, pal.muted) : null}
               {row.meta}
               <Text wrap="wrap">
@@ -3565,7 +3586,7 @@ export const register: Register = on => {
               <Box flexDirection="column" marginTop={blankLine}>
                 {isTyping ? (
                   look === 'desktop' ? (
-                    <Box flexDirection="row" alignItems="center" columnGap={buttonGap}>
+                    <Box flexDirection="row" alignItems="center" columnGap={space.buttonGap}>
                       <Box flexShrink={1}>{field}</Box>
                       {/* The desktop Input supplies its own Send button. */}
                       {keyRow(
@@ -3576,7 +3597,7 @@ export const register: Register = on => {
                   ) : (
                     [field, keyRow(row.id, fieldActions(row))]
                   )
-                ) : look === 'desktop' || keysWidth(keys, more) <= e.props.bodyColumns - 3 - (tree ? 7 : 5) ? (
+                ) : look === 'desktop' || keysWidth(keys, more) <= e.props.bodyColumns - 3 - columns.textAt ? (
                   keyRow(row.id, keys, more)
                 ) : (
                   [keyRow(row.id, keys), keyRow(row.id, more)]
@@ -3589,7 +3610,7 @@ export const register: Register = on => {
                 row,
                 // Opening the row draws its title as Text, so the title's Button leaves.
                 () => void select($, tab, row.id, index),
-                tree ? 7 : 5,
+                columns.textAt,
               )}
             </Box>
           )}
@@ -4031,8 +4052,7 @@ export const register: Register = on => {
       closed.length === 0
         ? []
         : [
-            // On desktop the fold row sits flush under the rows, as the rows sit flush with each other.
-            ...(look === 'desktop' ? [] : titleGap(false)),
+            ...(space.isFoldGapped ? titleGap(false) : []),
             foldRow(kind, closed.length, isUnfolded),
             ...(isUnfolded ? closed.flatMap((d, n) => [...closedGap(), closedRow(d, childPos(n, closed.length))]) : []),
           ]
@@ -4088,12 +4108,21 @@ export const register: Register = on => {
     )
     const settledRow = ({ settled: r, state }: Extract<Entry, { settled: RowView }>, pos?: TreePos) => {
       const undo = r.actions.find(a => a.press.action === 'undo')?.press ?? null
-      const content = settledContent(r.title, state.label, state.at, undo, pos ? 7 : 5, state.isQueued, state.isLapsed)
+      const columns = pos ? ROW_COLUMNS.tree : ROW_COLUMNS.flat
+      const content = settledContent(
+        r.title,
+        state.label,
+        state.at,
+        undo,
+        columns.textAt,
+        state.isQueued,
+        state.isLapsed,
+      )
       // The ✓ waits for the answer to reach Claude; the blank keeps the row's text in line.
       const mark = state.isQueued ? <Text> </Text> : <Text color={state.isLapsed ? pal.muted : pal.mark.done}>✓</Text>
       // In a group's tree, or flat as Findings lists its rows. On desktop it pads itself as a closed row does.
       return pos ? (
-        <Box key={`settled-${r.id}`} flexDirection="column" paddingY={look === 'desktop' ? rowPad : 0}>
+        <Box key={`settled-${r.id}`} flexDirection="column" paddingY={space.settledPad}>
           {treeRow(pos, mark, content)}
         </Box>
       ) : (
@@ -4102,10 +4131,10 @@ export const register: Register = on => {
           flexDirection="row"
           alignItems="flex-start"
           overflow="hidden"
-          paddingY={look === 'desktop' ? rowPad : 0}
+          paddingY={space.settledPad}
         >
-          <Box width={1} flexShrink={0} />
-          <Box width={4} flexShrink={0} paddingLeft={2}>
+          <Box width={columns.lead} flexShrink={0} />
+          <Box width={columns.textAt - columns.lead} flexShrink={0} paddingLeft={columns.handleAt - columns.lead}>
             {mark}
           </Box>
           <Box flexDirection="column" flexShrink={1} flexGrow={1} paddingRight={1}>
@@ -4389,7 +4418,7 @@ export const register: Register = on => {
             <Box
               flexDirection="row"
               flexWrap="wrap"
-              columnGap={buttonGap}
+              columnGap={space.buttonGap}
               rowGap={look === 'desktop' ? 1 : 0}
               marginTop={blankLine}
             >
