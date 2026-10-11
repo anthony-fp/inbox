@@ -133,6 +133,7 @@ import {
   recordFinding,
 } from './tools'
 import type { CountdownProps } from './countdown-client'
+import { ROW_PAD_PT } from './layout'
 import type { FoldProps } from './fold-client'
 import type { LinksProps } from './links-client'
 import type { RowProps } from './row-client'
@@ -215,11 +216,14 @@ const DESKTOP_CHARS_PER_CELL = 1.25
 // letters such as "n" measured about 1.03.
 const DESKTOP_CLIP_CHARS_PER_CELL = 1.1
 const DESKTOP_TAB_PAD = '\u00a0'.repeat(3)
+// A text line in the Claude app pane, in points: a one-line row padded by half a line above and below
+// measured 37.8 pt (2026-10-10).
+const DESKTOP_LINE_PT = 19
 /**
- * A closed desktop row's padding above and below its text, in a Client's lines, so the row is 1.5 lines
- * tall and the rows sit flush. A Box in the hooks tree counts padding in half lines, so it pads twice this.
+ * A desktop row's padding above and below its text, in a Client's lines: the shared ROW_PAD_PT. The rows sit
+ * flush. A Box in the hooks tree counts padding in half lines, so it pads twice this.
  */
-const DESKTOP_ROW_PAD = 0.25
+const DESKTOP_ROW_PAD = ROW_PAD_PT / DESKTOP_LINE_PT
 // Theme keys, so the colors follow the person's Claude Code theme.
 const NEEDS_YOU = 'warning'
 // A child's place under its section: a middle child, the last, or a block the tree passes.

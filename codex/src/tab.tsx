@@ -24,6 +24,7 @@ import {
   PRESS_GUARD_MS,
   SETTLED_MS,
 } from '../../hooks/view'
+import { ROW_PAD_PT } from '../../hooks/layout'
 import type { Feedback, RowView } from '../../hooks/view'
 import type { Finding, Item, RowNote } from '../../types'
 import { followTo, isShownEmpty, newRows } from './arrivals'
@@ -1477,6 +1478,8 @@ function revealSelected() {
 }
 
 const root = document.getElementById('app')!
+// The row padding the Claude app pane shares, which tab.html's rows read.
+document.documentElement.style.setProperty('--row-pad', `${ROW_PAD_PT}px`)
 
 /** Draws again once `ms` has passed, with slack for the timer to land after the state it waits on expires. */
 function drawIn(ms: number) {

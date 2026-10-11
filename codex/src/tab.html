@@ -182,7 +182,7 @@
       /* Rows. */
       .row {
         display: flex;
-        padding: 12px 14px 12px var(--mark-x);
+        padding: var(--row-pad) 14px var(--row-pad) var(--mark-x);
       }
       /* An open row keeps a closed row's padding, so its line does not move as it opens. */
       .row.selected {
@@ -241,7 +241,7 @@
         flex-direction: column;
       }
       /* Its space above is padding, not a gap, so the row's height grows smoothly when the panel mounts. Its 2px below,
-         with the row's 12px, matches the 14px from the row's top edge to its title's text. */
+         with the row's padding, matches the space from the row's top edge to its title's text. */
       .panel {
         display: flex;
         flex-direction: column;
