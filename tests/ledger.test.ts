@@ -111,6 +111,20 @@ describe('parseReply', () => {
     ])
   })
 
+  test('a terminal step is a command for the person to run, so it copies instead of asking the agent', () => {
+    const reply = 'Only you hold the production credentials, so run `./scripts/migrate --env production` yourself.'
+    const u = parseReply(
+      [
+        'NEW: do | - | Run the production migration | - | -',
+        'HELP: new 1 | terminal | ./scripts/migrate --env production | migration',
+      ].join('\n'),
+      reply,
+    )
+    expect(u?.added[0]?.helps).toEqual([
+      { kind: 'terminal', command: './scripts/migrate --env production', name: 'migration' },
+    ])
+  })
+
   test('reads only the last answer when the model corrects itself and answers again', () => {
     const u = parseReply(
       [
