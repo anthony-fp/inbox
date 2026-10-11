@@ -35,8 +35,11 @@ export type SessionState = {
     ledgerState: 'current' | 'failed'
     isUpdating: boolean
   }
-  /** Exchanges waiting for the inbox model, oldest first, with the turns started when each ended. */
-  pending: { ex: Exchange; turnsStarted: number }[]
+  /**
+   * Exchanges waiting for the inbox model, oldest first, with the turns started when each ended. `failed` marks
+   * one whose first update failed: the next update tries it once more, then drops it.
+   */
+  pending: { ex: Exchange; turnsStarted: number; failed?: true }[]
   /**
    * Messages the tab sent with `codex queue`, so UserPromptSubmit can tell them
    * from the person's own words, and mark the press on `row` arrived. `queuedId`

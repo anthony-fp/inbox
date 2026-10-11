@@ -101,12 +101,21 @@ export function codexAsk(exec: Run, cli: string, dir: string, model = MODEL): As
   }
 }
 
-/** Applies the model's answer for the oldest pending exchange, and drops that exchange. */
+/**
+ * Applies the model's answer for the oldest pending exchange, and drops that exchange. One whose first update
+ * failed stays pending, marked failed, for the next update to try again.
+ */
 export function applied(s: SessionState, reply: string | null, now: number, promptAt: number): SessionState {
   const next = s.pending[0]
   if (!next) return s
   const { ex } = next
   const parsed = reply === null ? null : parseReply(reply, [ex.reply, ...ex.activity].join('\n'))
+  if (!parsed && !next.failed)
+    return {
+      ...s,
+      pending: [{ ...next, failed: true }, ...s.pending.slice(1)],
+      presence: { ...s.presence, ledgerState: 'failed' },
+    }
   // An Explain turn talks about its item without deciding it.
   const explained = ex.press?.action === 'explain' ? ex.press.id : null
   const ledger = parsed
@@ -126,7 +135,7 @@ export function applied(s: SessionState, reply: string | null, now: number, prom
     presence: {
       ...s.presence,
       ledgerState: parsed ? 'current' : 'failed',
-      // A failed turn counts as summarized too: with no catch-up yet, a task
+      // A turn that failed twice counts as summarized too: with no catch-up yet, a task
       // handed to Codex would otherwise stay folded for good.
       turnsApplied: Math.max(s.presence.turnsApplied, next.turnsStarted),
     },
@@ -180,12 +189,14 @@ export async function runUpdates(dir: string, sessionId: string, ask: Ask, now: 
         if (!next) break
         const promptAt = now()
         const reply = await ask(buildPrompt(s.ledger, next.ex)).catch(() => null)
-        await updateState(dir, sessionId, x =>
+        const after = await updateState(dir, sessionId, x =>
           // A cleared conversation dropped the exchange while the model ran.
           x.pending[0]?.turnsStarted === next.turnsStarted && x.pending[0].ex.turn === next.ex.turn
             ? applied(x, reply, now(), promptAt)
             : x,
         )
+        // An exchange kept for another try waits for the next update, rather than failing twice in a row now.
+        if (after.pending[0]?.failed && !next.failed) return
       }
     } finally {
       await updateState(dir, sessionId, x => ({ ...x, presence: { ...x.presence, isUpdating: false } }))

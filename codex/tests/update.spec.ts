@@ -16,7 +16,7 @@ const ex = (turn: number, reply: string): Exchange => ({
   screen: 'The Inbox tab is closed.',
 })
 
-test('pending exchanges reach the ledger in order, and a failed one still counts as summarized', async () => {
+test('pending exchanges reach the ledger in order, a failed one waits for the next update, and a second failure drops it', async () => {
   const dir = tempDir()
   await updateState(dir, 's1', s => ({
     ...s,
@@ -28,20 +28,25 @@ test('pending exchanges reach the ledger in order, and a failed one still counts
   }))
   const prompts: string[] = []
   const answers = ['GOAL: Ship\nNOW: Waiting on deploy\nNEW: decide | - | Deploy now? | Yes / No | Yes', null]
-  await runUpdates(
-    dir,
-    's1',
-    async p => (prompts.push(p), answers.shift() ?? null),
-    () => 5,
-  )
+  const ask = async (p: string) => (prompts.push(p), answers.shift() ?? null)
+  await runUpdates(dir, 's1', ask, () => 5)
 
-  const s = await readState(dir, 's1')
+  const kept = await readState(dir, 's1')
   assert.equal(prompts.length, 2)
   assert.match(prompts[1] ?? '', /i1 \| decide \| - \| Deploy now\?/)
   assert.deepEqual(
-    s.ledger.items.map(i => i.ask),
+    kept.ledger.items.map(i => i.ask),
     ['Deploy now?'],
   )
-  assert.deepEqual(s.pending, [])
-  assert.deepEqual(s.presence, { turnsStarted: 2, turnsApplied: 2, ledgerState: 'failed', isUpdating: false })
+  assert.deepEqual(
+    kept.pending.map(p => [p.ex.turn, p.failed]),
+    [[2, true]],
+  )
+  assert.deepEqual(kept.presence, { turnsStarted: 2, turnsApplied: 1, ledgerState: 'failed', isUpdating: false })
+
+  await runUpdates(dir, 's1', ask, () => 6)
+  const dropped = await readState(dir, 's1')
+  assert.equal(prompts.length, 3)
+  assert.deepEqual(dropped.pending, [])
+  assert.deepEqual(dropped.presence, { turnsStarted: 2, turnsApplied: 2, ledgerState: 'failed', isUpdating: false })
 })
