@@ -6,6 +6,7 @@ import {
   addFinding,
   answerNote,
   applyUpdate,
+  buildPrompt,
   carryText,
   closeByAgent,
   closeFinding,
@@ -551,6 +552,19 @@ describe('questionNumbers', () => {
 
   test('numbers nothing once the batch is a turn old', () => {
     expect(questionNumbers(batch, 3).size).toBe(0)
+  })
+})
+
+describe('buildPrompt', () => {
+  test('a long reply keeps its opening and its closing question, and long activity keeps its latest lines', () => {
+    const reply = `Summary of the work.\n${'Detail line.\n'.repeat(2000)}Ship it now, or wait for review?`
+    const activity = Array.from({ length: 400 }, (_, i) => `edited file-${i}.ts`)
+    const ex = { person: 'go', trigger: null, activity, reply, turn: 1, press: null, screen: '' }
+    const prompt = buildPrompt(EMPTY, ex)
+    expect(prompt).toContain('Summary of the work.')
+    expect(prompt).toContain('Ship it now, or wait for review?')
+    expect(prompt).toContain('edited file-399.ts')
+    expect(prompt).toContain('…[cut]')
   })
 })
 

@@ -431,6 +431,13 @@ function clip(text: string, max: number): string {
   return text.length <= max ? text : text.slice(0, max) + ' …[cut]'
 }
 
+/** Clips text to its first `head` and last `max - head` characters, since a reply asks its questions at the end. */
+function clipMiddle(text: string, max: number, head: number): string {
+  if (text.length <= max) return text
+
+  return `${text.slice(0, head)}${NL}…[cut]${NL}${text.slice(text.length - (max - head))}`
+}
+
 /** The ledger as the model reads it: the card, the open items and findings with their ids, and recently settled items. */
 function ledgerBlocks(ledger: Ledger): string[] {
   const card = ledger.card
@@ -468,9 +475,9 @@ export function buildPrompt(ledger: Ledger, ex: Exchange): string {
 
   return [
     ...ledgerBlocks(ledger),
-    `<person>${NL}${clip(person, 4000)}${NL}</person>`,
-    `<activity>${NL}${clip(ex.activity.join(NL), 2500)}${NL}</activity>`,
-    `<reply>${NL}${clip(numberBlocks(ex.reply), 12000)}${NL}</reply>`,
+    `<person>${NL}${clipMiddle(person, 4000, 1500)}${NL}</person>`,
+    `<activity>${NL}${clipMiddle(ex.activity.join(NL), 2500, 500)}${NL}</activity>`,
+    `<reply>${NL}${clipMiddle(numberBlocks(ex.reply), 12000, 4000)}${NL}</reply>`,
     `<screen>${NL}${ex.screen}${NL}</screen>`,
   ].join(NL)
 }
