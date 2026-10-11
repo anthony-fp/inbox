@@ -132,6 +132,8 @@ import {
   recordFinding,
 } from './tools'
 import type { CountdownProps } from './countdown-client'
+import { followTo, recordRows } from './arrivals'
+import type { RowRecord } from './arrivals'
 import { ROW_PAD_PT } from './layout'
 import type { FoldProps } from './fold-client'
 import type { LinksProps } from './links-client'
@@ -461,7 +463,7 @@ let top: string | null = null
 let fetchingPrs: Promise<void> = Promise.resolve()
 let nextFetchFindsBranchPr: boolean | null = null
 // Each tab's row ids as of the last write that can add a row, so a row that appears later counts as new.
-let recordedRows: { isDemo: boolean; ids: Partial<Record<Tab, Set<string>>> } | null = null
+let recordedRows: { isDemo: boolean; ids: RowRecord<Tab> } | null = null
 // The pane's latest jump to another tab, whose top edge draws in for DRAW_IN_MS. A reload may lose it mid-draw.
 let jumped: { tab: Tab; at: number } | null = null
 let isSaved = false
@@ -1289,23 +1291,12 @@ async function keepPressedOpen($: EngineInterface, id: string) {
 }
 
 /**
- * Records each tab's row ids and returns, by tab, the ids it did not have at
- * the last record. A tab passed as null is loading: it keeps its record and
- * returns nothing. The first record, and the first after the demo turns on or
- * off, return nothing.
+ * Records each tab's row ids by `recordRows` and returns, by tab, the ids it did not have at the last record.
+ * The first record after the demo turns on or off starts afresh, so it returns nothing.
  */
 function newRows(isDemo: boolean, current: Record<Tab, string[] | null>): Record<Tab, string[]> {
-  const before = recordedRows?.isDemo === isDemo ? recordedRows.ids : {}
-  const ids = { ...before }
-  const added: Record<Tab, string[]> = { needsYou: [], findings: [], prs: [] }
-  for (const { id: tab } of TABS) {
-    const listed = current[tab]
-    if (listed === null) continue
-    const seen = before[tab]
-    if (seen) added[tab] = listed.filter(id => !seen.has(id))
-    ids[tab] = new Set(listed)
-  }
-  recordedRows = { isDemo, ids }
+  const { seen, added } = recordRows(recordedRows?.isDemo === isDemo ? recordedRows.ids : {}, current)
+  recordedRows = { isDemo, ids: seen }
 
   return added
 }
@@ -1394,10 +1385,15 @@ async function followNewRows($: EngineInterface, isOpening = false) {
     findings: view.findings.rows.length === 0 && !(unfolded.includes('finding') && ledger.closedFindings.length > 0),
     prs: prs.length === 0 && !prState.isFetching,
   }[tab]
-  const to = isEmpty ? TABS.find(t => t.id !== tab && added[t.id].length > 0)?.id : undefined
+  const to = followTo(
+    TABS.map(t => t.id),
+    tab,
+    isEmpty,
+    added,
+    ids,
+  )
   if (!to) return
-  const id = ids[to].find(x => added[to].includes(x))
-  await jumpTo($, to, id === undefined ? null : { id, index: ids[to].indexOf(id) })
+  await jumpTo($, to.tab, to.id === null ? null : { id: to.id, index: ids[to.tab].indexOf(to.id) })
 }
 
 async function isPaneShown($: EngineInterface) {

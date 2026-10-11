@@ -7,7 +7,8 @@ import { recordClose, recordFinding } from '../../hooks/tools'
 import { closedShown, feedbackText, SETTLED_MS } from '../../hooks/view'
 import type { RowView } from '../../hooks/view'
 import type { Item, LocalResult } from '../../types'
-import { followTo, isShownEmpty, newRows } from '../src/arrivals'
+import { followTo } from '../../hooks/arrivals'
+import { isShownEmpty, newRows, TAB_IDS } from '../src/arrivals'
 import { endTurn, noteHook, notePrompt, noteToolCall, viewOf } from '../src/core'
 import { demoState } from '../src/demo'
 import { EXIT_MS, ROW_STATE_MS, stepRow } from '../src/rows'
@@ -517,7 +518,7 @@ test('a tool call in a turn the prompt hook recorded, after a Stop sent Codex ba
 
 test('the tab moves from an empty Needs you to Findings when a poll brings a finding, and marks only rows new since its first view', () => {
   const s = noteHook(emptyState('s1'), 'start', 1)
-  const first = newRows(null, viewOf(s, 10))
+  const first = newRows({}, viewOf(s, 10))
   assert.deepEqual(first.added, { needsYou: [], findings: [] })
   const withFinding = {
     ...s,
@@ -527,7 +528,7 @@ test('the tab moves from an empty Needs you to Findings when a poll brings a fin
   const next = newRows(first.seen, viewOf(withFinding, 20))
   assert.deepEqual(next.added, { needsYou: [], findings: ['f1'] })
   const followed = (state: SessionState) =>
-    followTo('needsYou', isShownEmpty(viewOf(state, 20), 'needsYou', new Set(), new Set()), next.added, {
+    followTo(TAB_IDS, 'needsYou', isShownEmpty(viewOf(state, 20), 'needsYou', new Set(), new Set()), next.added, {
       needsYou: [],
       findings: ['f1'],
     })

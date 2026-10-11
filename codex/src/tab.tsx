@@ -27,7 +27,8 @@ import {
 import { ROW_PAD_PT } from '../../hooks/layout'
 import type { Feedback, PlannedKey, RowView } from '../../hooks/view'
 import type { Finding, Item, RowNote } from '../../types'
-import { followTo, isShownEmpty, newRows, TAB_OF } from './arrivals'
+import { followTo } from '../../hooks/arrivals'
+import { isShownEmpty, newRows, TAB_IDS, TAB_OF } from './arrivals'
 import type { Group, SeenRows, Tab } from './arrivals'
 import type { TabView as View } from './core'
 import type { PressReply } from './server'
@@ -145,7 +146,7 @@ let lineNote: { text: string; at: number; isError?: boolean } | null = null
 // When the tab first saw each row the view lists as settled. It draws one in place for SETTLED_MS from then.
 let seen = new Map<string, number>()
 // The row ids the tab has seen, and when each row new to it appeared. A new row draws a bar for NEW_ROW_MS.
-let rowsSeen: SeenRows = null
+let rowsSeen: SeenRows = {}
 const arrived = new Map<string, number>()
 // Rows and Closed lists that arrived since the last draw, which grow in when they are first drawn.
 const entering = new Set<string>()
@@ -246,7 +247,7 @@ function applyView(next: View, seq: number) {
 function follow(v: View, added: Record<Tab, string[]>) {
   const drawn = shownSettled()
   const lists = listsOf(v, drawn)
-  const to = followTo(tab, isShownEmpty(v, tab, drawn, unfolded), added, {
+  const to = followTo(TAB_IDS, tab, isShownEmpty(v, tab, drawn, unfolded), added, {
     needsYou: lists.byTab.needsYou.map(r => r.id),
     findings: lists.byTab.findings.map(r => r.id),
   })
@@ -1211,7 +1212,7 @@ async function toggleDemo() {
   isDemo = !isDemo
   view = null
   seen = new Map()
-  rowsSeen = null
+  rowsSeen = {}
   arrived.clear()
   // The other view's rows are not this one's: none of them leaves or settles in it.
   drawnRows.clear()
