@@ -10,7 +10,6 @@ import { capitalized, clipLabel, noteText, pendingResult, stepEffects, stepIconK
 import type { HelpStep, RowPress } from '../../hooks/presses'
 import {
   allRows,
-  CHOICE_KEYS,
   closedShown,
   DOT,
   emptyText,
@@ -22,10 +21,11 @@ import {
   isGuarded,
   NEW_ROW_MS,
   PRESS_GUARD_MS,
+  rowKeyPlan,
   SETTLED_MS,
 } from '../../hooks/view'
 import { ROW_PAD_PT } from '../../hooks/layout'
-import type { Feedback, RowView } from '../../hooks/view'
+import type { Feedback, PlannedKey, RowView } from '../../hooks/view'
 import type { Finding, Item, RowNote } from '../../types'
 import { followTo, isShownEmpty, newRows, TAB_OF } from './arrivals'
 import type { Group, SeenRows, Tab } from './arrivals'
@@ -388,55 +388,52 @@ function startTyping(id: string) {
   draw()
 }
 
-/**
- * A row's actions as the tab's keys, as the pane draws them. `keys` finish the
- * row: options and steps, the first 9 shown on letters, Done for a task and
- * Address for a finding. `more` are the other ways to respond. Options past the
- * fourth of a question with more than 5 show only after [All N options].
- */
+/** A row's keys, in the order `rowKeyPlan` sets, as the tab's buttons. */
 function rowKeys(r: RowView): { keys: Key[]; more: Key[] } {
   const { id, item } = r
-  const shown = r.actions.filter(a => optionsShown.has(id) || !a.isFolded)
-  const folded = r.actions.length - shown.length
-  // [All N options] follows the last option shown.
-  const lastOption = shown.map(a => a.press.action).lastIndexOf('answer')
-  const keys: Key[] = []
-  const more: Key[] = []
-  // A press whose message failed to send leads with [Try again], which repeats it.
-  const retry = r.feedback?.is === 'notSent' ? r.feedback.retry : null
-  if (retry) keys.push({ label: 'Try again', icon: 'retry', run: () => void act(id, retry) })
-  let letters = 0
-  const lettered = () => (letters < CHOICE_KEYS.length ? { hotkey: CHOICE_KEYS[letters++]! } : {})
-  for (const [n, a] of shown.entries()) {
-    const p = a.press
-    const label = a.label
-    if (p.action === 'answer' && item) {
-      keys.push({ ...lettered(), label, isPrimary: a.isPrimary, run: () => void act(id, p) })
-      if (n === lastOption && folded > 0)
-        keys.push({
-          label: `All ${item.options.length} options`,
+  const key = (k: PlannedKey): Key => {
+    switch (k.slot) {
+      case 'retry':
+        return { label: 'Try again', icon: 'retry', run: () => void act(id, k.press) }
+      case 'allOptions':
+        return {
+          label: `All ${k.count} options`,
           run: () => {
             optionsShown.add(id)
             draw()
           },
-        })
-    } else if (p.action === 'step') {
-      const step = r.steps[p.step]
-      // An open or copy shows its pending note, as the pane does, until the server answers.
-      const pending =
-        a.kind === 'local' && item && step
-          ? feedbackText({ is: 'local', result: pendingResult(stepEffects(item, step), Date.now()) }, 'html')
-          : undefined
-      const icon = stepIcon(step)
-      keys.push({ ...lettered(), label, ...(icon ? { icon } : {}), run: () => void act(id, p, undefined, pending) })
-    } else if (a.hotkey) {
-      const run = p.action === 'type' ? () => startTyping(id) : () => void act(id, p)
-      const icon = p.action === 'done' ? { icon: 'check' as const } : {}
-      ;(a.isFollowUp ? more : keys).push({ hotkey: a.hotkey, label, ...icon, run })
+        }
+      case 'choice': {
+        const { action: a, hotkey } = k
+        const p = a.press
+        const lettered = hotkey ? { hotkey } : {}
+        if (p.action === 'answer')
+          return { ...lettered, label: a.label, isPrimary: a.isPrimary, run: () => void act(id, p) }
+        const step = r.steps[p.step]
+        // An open or copy shows its pending note, as the pane does, until the server answers.
+        const pending =
+          a.kind === 'local' && item && step
+            ? feedbackText({ is: 'local', result: pendingResult(stepEffects(item, step), Date.now()) }, 'html')
+            : undefined
+        const icon = stepIcon(step)
+        return {
+          ...lettered,
+          label: a.label,
+          ...(icon ? { icon } : {}),
+          run: () => void act(id, p, undefined, pending),
+        }
+      }
+      case 'action': {
+        const { action: a, hotkey } = k
+        const p = a.press
+        const run = p.action === 'type' ? () => startTyping(id) : () => void act(id, p)
+        return { hotkey, label: a.label, ...(p.action === 'done' ? { icon: 'check' as const } : {}), run }
+      }
     }
   }
+  const { keys, more } = rowKeyPlan(r, optionsShown.has(id))
 
-  return { keys, more }
+  return { keys: keys.map(key), more: more.map(key) }
 }
 
 function itemRow(v: View, r: RowView, item: Item): Row {

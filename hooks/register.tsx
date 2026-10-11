@@ -81,7 +81,6 @@ import {
   upgradeLedger,
 } from './ledger'
 import {
-  actionId,
   applyPress,
   baseName,
   capitalized,
@@ -104,7 +103,6 @@ import {
 } from './presses'
 import type { Effect, HelpStep, PrActionId, RowPress } from './presses'
 import {
-  CHOICE_KEYS,
   closedShown,
   DOT,
   emptyText,
@@ -120,10 +118,11 @@ import {
   NEW_ROW_MS,
   perTurnStatus,
   PRESS_GUARD_MS,
+  rowKeyPlan,
   SETTLED_MS,
   settledRowIds,
 } from './view'
-import type { InboxView, RowState, RowView } from './view'
+import type { InboxView, PlannedKey, RowState, RowView } from './view'
 import {
   CLOSE_DESCRIPTION,
   CLOSE_SCHEMA,
@@ -2110,69 +2109,72 @@ function stepIcon(step: HelpStep | undefined): string | undefined {
   return kind && STEP_GLYPHS[kind]
 }
 
-/**
- * A question, task or finding's actions as the pane's keys. `keys` finish the
- * row: options and steps, the first 9 shown on letters, Done for a task and
- * Address for a finding. `more` are the other ways to respond: your own words,
- * Explain or Discuss, and Dismiss. Options past the fourth of a question with
- * more than 5 show only after [All N options], which `isAllShown` records.
- */
+/** A question, task or finding's keys, in the order `rowKeyPlan` sets, as the pane's actions. */
 function rowKeyActions($: EngineInterface, r: RowView, isAllShown: boolean): { keys: KeyAction[]; more: KeyAction[] } {
   const { id, item, finding } = r
-  const shown = r.actions.filter(a => isAllShown || !a.isFolded)
-  const folded = r.actions.length - shown.length
-  // [All N options] follows the last option shown.
-  const lastOption = shown.map(a => a.press.action).lastIndexOf('answer')
-  const keys: KeyAction[] = []
-  const more: KeyAction[] = []
-  // A press whose message failed to send leads with [Try again], which repeats it as its own kind.
-  const retry = r.feedback?.is === 'notSent' ? r.feedback.retry : null
-  if (retry)
-    keys.push({
-      key: `retry-${id}`,
-      label: 'Try again',
-      icon: '↻',
-      kind: r.actions.find(a => actionId(a.press) === actionId(retry))?.kind ?? 'talk',
-      onPress: press => runPress($, retry, press.surface),
-    })
-  let letters = 0
-  for (const [n, a] of shown.entries()) {
-    const p = a.press
-    const base = {
-      label: a.label,
-      kind: a.kind,
-      onPress: (press: UiPressArgument) => runPress($, p, press.surface),
-    }
-    const lettered = () => (letters < CHOICE_KEYS.length ? { hotkey: CHOICE_KEYS[letters++]! } : {})
-    if (p.action === 'answer' && item) {
-      keys.push({
-        ...base,
-        ...lettered(),
-        key: `answer-${id}-${item.options.indexOf(p.option)}`,
-        ...(a.isPrimary ? { variant: 'primary' as const } : {}),
-      })
-      if (n === lastOption && folded > 0)
-        keys.push({
+  const keyAction = (k: PlannedKey): KeyAction => {
+    switch (k.slot) {
+      case 'retry':
+        return {
+          key: `retry-${id}`,
+          label: 'Try again',
+          icon: '↻',
+          kind: k.kind,
+          onPress: press => runPress($, k.press, press.surface),
+        }
+      case 'allOptions':
+        return {
           key: `all-options-${id}`,
-          label: `All ${item.options.length} options`,
+          label: `All ${k.count} options`,
           kind: 'view',
           onPress: () => void update($, OPTIONS_SHOWN, s => (s.includes(id) ? s : [...s, id])),
-        })
-    } else if (p.action === 'step' && item) {
-      const icon = stepIcon(r.steps[p.step])
-      keys.push({ ...base, ...lettered(), ...(icon ? { icon } : {}), key: `help-${id}-${p.step}` })
-    } else if (a.hotkey) {
-      // Type's press opens the field; sending from it is what records the reply.
-      const k: KeyAction =
-        p.action === 'type'
-          ? { label: a.label, kind: 'view', key: `typekey-${id}`, onPress: () => void startTyping($, id) }
-          : { ...base, key: p.action === 'dismiss' && finding ? `drop-${id}` : `${p.action}-${id}` }
-      if (a.isFollowUp) more.push({ ...k, hotkey: a.hotkey })
-      else keys.push({ ...k, hotkey: a.hotkey, isMain: true })
+        }
+      case 'choice': {
+        const { action: a, hotkey } = k
+        const p = a.press
+        const base = {
+          label: a.label,
+          kind: a.kind,
+          ...(hotkey ? { hotkey } : {}),
+          onPress: (press: UiPressArgument) => runPress($, p, press.surface),
+        }
+        if (p.action === 'answer')
+          return {
+            ...base,
+            key: `answer-${id}-${(item?.options ?? []).indexOf(p.option)}`,
+            ...(a.isPrimary ? { variant: 'primary' as const } : {}),
+          }
+        const icon = stepIcon(r.steps[p.step])
+        return { ...base, ...(icon ? { icon } : {}), key: `help-${id}-${p.step}` }
+      }
+      case 'action': {
+        const { action: a, hotkey } = k
+        const p = a.press
+        const main = a.isFollowUp ? {} : { isMain: true }
+        // Type's press opens the field; sending from it is what records the reply.
+        if (p.action === 'type')
+          return {
+            label: a.label,
+            kind: 'view',
+            key: `typekey-${id}`,
+            hotkey,
+            ...main,
+            onPress: () => void startTyping($, id),
+          }
+        return {
+          label: a.label,
+          kind: a.kind,
+          key: p.action === 'dismiss' && finding ? `drop-${id}` : `${p.action}-${id}`,
+          hotkey,
+          ...main,
+          onPress: press => runPress($, p, press.surface),
+        }
+      }
     }
   }
+  const { keys, more } = rowKeyPlan(r, isAllShown)
 
-  return { keys, more }
+  return { keys: keys.map(keyAction), more: more.map(keyAction) }
 }
 
 /** A closed item, or a closed finding by its title, as its list's Closed fold draws it. */

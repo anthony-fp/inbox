@@ -350,6 +350,55 @@ function actionsOf(
   ]
 }
 
+/** A row action drawn as a key: `more` holds the follow-ups, and `keys` the rest. */
+export type ActionKey = { slot: 'action'; action: ActionView; hotkey: string }
+
+/**
+ * A row's key, in the order both clients draw them. `retry` repeats a press whose message failed to send, as the
+ * kind of the action it repeats. `choice` is an option or a step, lettered in order while letters last.
+ * `allOptions` shows a question's folded options.
+ */
+export type PlannedKey =
+  | { slot: 'retry'; press: RowPress; kind: PressKind }
+  | {
+      slot: 'choice'
+      action: ActionView & { press: Extract<RowPress, { action: 'answer' | 'step' }> }
+      hotkey?: string
+    }
+  | { slot: 'allOptions'; count: number }
+  | ActionKey
+
+/**
+ * A row's actions as keys. `keys` finish the row: [Try again] first when a send failed, then options and steps,
+ * the first 9 shown on letters, then Done for a task and Address for a finding. `more` are the other ways to
+ * respond: your own words, Explain or Discuss, and Dismiss. A question's folded options show only with
+ * `isAllShown`, and until then [All N options] follows the last option shown.
+ */
+export function rowKeyPlan(r: RowView, isAllShown: boolean): { keys: PlannedKey[]; more: ActionKey[] } {
+  const shown = r.actions.filter(a => isAllShown || !a.isFolded)
+  const folded = r.actions.length - shown.length
+  const lastOption = shown.map(a => a.press.action).lastIndexOf('answer')
+  const keys: PlannedKey[] = []
+  const more: ActionKey[] = []
+  const retry = r.feedback?.is === 'notSent' ? r.feedback.retry : null
+  if (retry) {
+    const kind = r.actions.find(a => actionId(a.press) === actionId(retry))?.kind ?? 'talk'
+    keys.push({ slot: 'retry', press: retry, kind })
+  }
+  let letters = 0
+  for (const [n, a] of shown.entries()) {
+    const { press } = a
+    if (press.action === 'answer' || press.action === 'step') {
+      const hotkey = letters < CHOICE_KEYS.length ? { hotkey: CHOICE_KEYS[letters++]! } : {}
+      keys.push({ slot: 'choice', action: { ...a, press }, ...hotkey })
+      if (n === lastOption && folded > 0)
+        keys.push({ slot: 'allOptions', count: r.actions.filter(x => x.press.action === 'answer').length })
+    } else if (a.hotkey) (a.isFollowUp ? more : keys).push({ slot: 'action', action: a, hotkey: a.hotkey })
+  }
+
+  return { keys, more }
+}
+
 export function inboxView({
   ledger,
   lastActions,
