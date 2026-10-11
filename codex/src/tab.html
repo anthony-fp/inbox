@@ -589,22 +589,8 @@
       .row {
         transition: box-shadow var(--enter);
       }
-      .panel {
-        transition:
-          opacity 200ms ease 40ms,
-          translate var(--enter);
-        @starting-style {
-          opacity: 0;
-          translate: 0 -4px;
-        }
-      }
-      .panel.closing {
-        opacity: 0;
-        translate: 0 -4px;
-        transition:
-          opacity 120ms ease,
-          translate var(--move);
-      }
+      /* A panel does not fade: it stays opaque, clipped by its row's height, so a row closing and the row
+         opening in its place move as one. */
       .row > .content,
       .row > .settled-line,
       .row > .key.undo,

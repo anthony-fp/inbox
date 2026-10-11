@@ -754,7 +754,7 @@ function ListRow({
   const line = last
     ? { ...plain, after: `${DOT}${last}`, afterTone: isFailure(row.feedback) ? ('error' as const) : undefined }
     : plain
-  // A closed row keeps its panel drawn while it collapses, so the panel can fade out.
+  // A closed row keeps its panel drawn while its height collapses over it.
   const isClosing = !isSelected && closingRows.has(row.id)
 
   // The same elements draw the row open and closed, so its line stays put and only the panel under it comes and goes.
