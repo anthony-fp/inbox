@@ -61,7 +61,9 @@ function recommendedOption(options, rec) {
     const w = words(option);
     if (w.length > words(best ?? "").length && w.every((x) => named.has(x))) best = option;
   }
-  return best;
+  const label = (text) => text.match(/^\s*\(?([a-z]|\d{1,2})\s*[:.)]/i)?.[1]?.toLowerCase();
+  const byLabel = /^\s*(?:option\s+)?([a-z]|\d{1,2})\s*[.!]?\s*$/i.exec(rec)?.[1]?.toLowerCase();
+  return best ?? (byLabel ? options.find((o) => label(o) === byLabel) ?? null : null);
 }
 function howFromOutcome(outcome) {
   if (outcome === "dismissed") return "dismissed";

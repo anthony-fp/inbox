@@ -55,7 +55,9 @@ function recommendedOption(options, rec) {
     const w = words(option);
     if (w.length > words(best ?? "").length && w.every((x) => named.has(x))) best = option;
   }
-  return best;
+  const label = (text) => text.match(/^\s*\(?([a-z]|\d{1,2})\s*[:.)]/i)?.[1]?.toLowerCase();
+  const byLabel = /^\s*(?:option\s+)?([a-z]|\d{1,2})\s*[.!]?\s*$/i.exec(rec)?.[1]?.toLowerCase();
+  return best ?? (byLabel ? options.find((o) => label(o) === byLabel) ?? null : null);
 }
 function howFromOutcome(outcome) {
   if (outcome === "dismissed") return "dismissed";
@@ -67,6 +69,8 @@ function howFromOutcome(outcome) {
 function guidanceText(host) {
   return `# Inbox
 ${host.intro}
+
+When you ask the user to decide something, say which option you recommend and why, in one clause ("I'd go with B: it keeps the old API"). If you cannot recommend one, say what would decide it.
 
 A finding is something you noticed that deserves the user's attention but is outside the current task: a bug, a risk, missing tests, tech debt, or a chance to improve something. Record it with mcp__inbox__record_finding the moment you notice it, then go on with the task; fixing it waits until the user asks. Record one too at two moments that are easy to pass over while focused on the task:
 - You work around a problem instead of fixing it, such as copying files by hand because a tool does not reach them.
