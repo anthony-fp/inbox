@@ -323,8 +323,7 @@ var FILLER = /* @__PURE__ */ new Set([
   "all"
 ]);
 function keyWords(text) {
-  const words2 = text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-  return new Set(words2.filter((w) => new RegExp("\\p{N}", "u").test(w) || w.length > 2 && !FILLER.has(w)));
+  return new Set(words(text).filter((w) => new RegExp("\\p{N}", "u").test(w) || w.length > 2 && !FILLER.has(w)));
 }
 function restates(a, b) {
   const x = keyWords(a);
@@ -336,7 +335,7 @@ function restates(a, b) {
   return fewer >= 2 ? shared / fewer >= 0.7 : sameAsk(a, b);
 }
 function sameAsk(a, b) {
-  const norm = (s) => (s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).join(" ");
+  const norm = (s) => words(s).join(" ");
   return norm(a) !== "" && norm(a) === norm(b);
 }
 function matchOpen(items, a) {
@@ -387,6 +386,7 @@ function applyUpdate(ledger, u, now, turn, promptAt = now) {
   let nextId = ledger.nextId;
   let added = 0;
   const addedIds = [];
+  const created = /* @__PURE__ */ new Set();
   for (const a of u.added) {
     if (repeatsRecentlyClosed(ledger.closed, a, promptAt)) {
       addedIds.push(null);
@@ -401,6 +401,7 @@ function applyUpdate(ledger, u, now, turn, promptAt = now) {
     }
     items.push({ ...a, id: `i${nextId}`, turn, at: now });
     addedIds.push(`i${nextId}`);
+    created.add(`i${nextId}`);
     nextId += 1;
     added += 1;
   }
@@ -411,9 +412,7 @@ function applyUpdate(ledger, u, now, turn, promptAt = now) {
     const id = typeof a.item === "number" ? addedIds[a.item] : a.item;
     if (id && kept.some((i) => i.id === id)) askedBy.set(a.id, id);
   }
-  for (const i of kept.filter(
-    (i2) => i2.turn === turn && addedIds.includes(i2.id) && !ledger.items.some((o) => o.id === i2.id)
-  ))
+  for (const i of kept.filter((i2) => created.has(i2.id)))
     for (const f of ledger.findings) if (!askedBy.has(f.id) && restates(f.title, i.ask)) askedBy.set(f.id, i.id);
   const { findings, closedFindings } = ledger.findings.reduce((l, f) => {
     const asker = askedBy.get(f.id);
