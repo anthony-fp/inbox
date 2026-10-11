@@ -12,6 +12,8 @@ export type ClientTab = {
   id: string
   label: string
   count: number
+  /** The count's color, the tab's own tone, as in the terminal and Codex. */
+  countColor: string
   width: number
 }
 
@@ -67,8 +69,7 @@ const Tabs: ClientModule<TabsProps, State> = (props, surface) => {
       // Text on `raised` takes `raisedText` where the palette sets one: there the muted gray can match the fill.
       const onRaised = background !== null && background === colors.raised ? colors.raisedText : null
       const labelColor = onRaised ?? (isShown || isHovered ? null : colors.muted)
-      const countColor = onRaised ?? colors.muted
-      const count = Text({ ...(countColor ? { color: countColor } : {}), children: String(tab.count) })
+      const count = Text({ color: tab.countColor, children: String(tab.count) })
 
       return Box({
         key: tab.id,
@@ -82,7 +83,7 @@ const Tabs: ClientModule<TabsProps, State> = (props, surface) => {
         children: Text({
           ...(labelColor ? { color: labelColor } : {}),
           bold: isShown,
-          children: tab.count > 0 ? [tab.label, ' ', count] : tab.label,
+          children: tab.count > 0 ? [tab.label, '  ', count] : tab.label,
         }),
       })
     }),

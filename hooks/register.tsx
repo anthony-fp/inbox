@@ -2205,7 +2205,7 @@ function desktopTabSizes(
   ]
   const sizes = steps.map(({ padding, gap, hasCounts }) => ({
     widths: tabs.map(t => {
-      const text = hasCounts && t.count > 0 ? `${t.label} ${t.count}` : t.label
+      const text = hasCounts && t.count > 0 ? `${t.label}  ${t.count}` : t.label
       return Math.ceil(text.length / DESKTOP_CHARS_PER_CELL) + 1 + 2 * padding
     }),
     gap,
@@ -3700,6 +3700,7 @@ export const register: Register = on => {
             id,
             label,
             count: tabSizes.hasCounts ? tabCounts[id] : 0,
+            countColor: pal.tone[id] ?? pal.mark[id],
             width: tabSizes.widths[n]!,
           })),
           shown: tab,
