@@ -147,6 +147,17 @@ describe('parseReply', () => {
     ])
   })
 
+  test('a terminal step in a reply that gives no reason only the person can run it is the agent’s to run', () => {
+    const reply = 'Run `./scripts/load.sh` when you want the data loaded; it takes about a minute.'
+    const u = parseReply(
+      ['NEW: do | - | Run the load script | - | -', 'HELP: new 1 | terminal | ./scripts/load.sh | load script'].join(
+        '\n',
+      ),
+      reply,
+    )
+    expect(u?.added[0]?.helps).toEqual([{ kind: 'run', command: './scripts/load.sh', name: 'load script' }])
+  })
+
   test('reads only the last answer when the model corrects itself and answers again', () => {
     const u = parseReply(
       [

@@ -112,6 +112,14 @@ function howFromOutcome(outcome: string): Closed['how'] {
 const NEEDS_PERSON =
   /(?:^|[\s;&|])(?:login|logout|signin|sign-in|sudo|passwd|ssh-add|ssh-keygen)(?=[\s:]|$)|\binit --interactive\b/i
 
+/**
+ * Words a reply uses when only the person can run a command: their credentials, device or account. The inbox
+ * model sometimes marks a command the reply merely asks the person to run as theirs, so a terminal step in a
+ * reply with none of these words is the agent's to run.
+ */
+const PERSON_ONLY_REASON =
+  /credential|password|passphrase|secret|\btoken|\b2fa\b|\bmfa\b|\bdevice\b|phone|android|tablet|account|sign(?:ed)?[- ]?in|log(?:ged)?[- ]?in|only you|you hold|your (?:mac|machine|laptop|computer|keychain)|\bsudo\b/i
+
 /** The inbox model's instructions in a host. */
 export function systemText(host: Host): string {
   const band = host.band ? ` They always see how many items are in <open> and <findings> in ${host.band}.` : ''
@@ -362,7 +370,8 @@ function readHelp(
   if (kind === 'run' || kind === 'terminal') {
     const command = commandText(quoted)
     const isUsable = command !== '' && command.length <= 4000 && isFromReply(command)
-    const isTheirs = kind === 'terminal' || NEEDS_PERSON.test(command)
+    const isTheirs =
+      NEEDS_PERSON.test(command) || (kind === 'terminal' && (source === null || PERSON_ONLY_REASON.test(source)))
     return isUsable ? { kind: isTheirs ? 'terminal' : 'run', command, name } : null
   }
   if (kind === 'link') {
