@@ -89,7 +89,7 @@ Another session has uncommitted edits in `docs/plans/row-actions.md`, `docs/plan
   - a plan in `docs/plans/` has no status line from the fixed set: proposed, building, built, or superseded by another plan;
   - a relative link or a backticked repo path in `docs/`, `README.md`, `AGENTS.md` or `codex/README.md` names a missing file;
   - a `file:symbol` in `docs/looks.md` names a file without that symbol.
-- Its first failures are the to-do list for step 3. Until step 3 lands, the docs checks run in report-only mode, so `check.sh` stays green between commits.
+- Its first failures are the to-do list for step 3.
 - Make `feedbackText` and the other switches over shared unions exhaustive with a `never` check. A new variant then fails the type check in every look that must handle it.
 
 ### 3. The map and the docs
@@ -114,15 +114,12 @@ Another session has uncommitted edits in `docs/plans/row-actions.md`, `docs/plan
 - Waiting on the other session's work: archive `row-actions.md`, and fix the key text in `codex-tab.md`. Its line 57 says keys show before labels; the tab draws no key text.
 - When this step lands, the docs checks switch from report-only to failing.
 
-### 4. Tests written once, run on both hosts
+### 4. A drawing test for the mod's looks
 
-- Move the scenarios both hosts must agree on into `tests/shared-cases.ts`, a plain module with no engine import. These cover the press outcomes, the row order and counts, the Closed fold, and feedback for each look. `tests/hooks.test.ts` and `codex/tests/press.spec.ts` each loop over the cases. The hand copies go.
-- Split the Codex tab's entry, which handles polling, keys and mounting, into `codex/src/tab-main.tsx`. This follows the existing `server-main.ts` and `server-handler.ts` split, and leaves the components importable without a page.
-- Add a drawing test over `demoView`. Every row title and every action label must appear in the terminal pane, in the desktop pane, and in the Codex tab rendered to a string.
-  - The tab needs `preact-render-to-string` as a dev dependency.
-  - The simpler path, testing a shared row function alone, cannot catch an adapter that drops a field. That is the failure this test exists for.
-  - The test checks content, not markup or classes.
-- These tests come before the code moves in steps 5 to 9, so they catch a move that drops something.
+- Add a test over `demoView` to `tests/hooks.test.ts`. Every row title and every action label in the shared view must appear in the terminal pane and in the desktop pane. The expected titles and labels come from the shared view, `inboxView` and `rowKeyPlan`, so a look that drops one fails.
+- The test checks content, not markup or classes.
+- It comes before the code moves in steps 5 to 11, so it catches a move that drops something from the mod's looks. The same test for the Codex tab comes in step 7, after the tab's components can be drawn without a page.
+- No shared table of cases runs in both test runners. Such a table would test the shared functions twice. What differs between the hosts is their own wiring around those functions, which each host's own tests cover.
 
 ### 5. One source for model-read text
 
@@ -152,24 +149,30 @@ Another session has uncommitted edits in `docs/plans/row-actions.md`, `docs/plan
   - Done and Address become primary buttons, as `inbox-ui.md` specifies.
   - A finding's file shows relative to the repo, as the pane shows it. The raw path can be a long absolute path.
 
-### 7. One arrival rule
+### 7. A drawing test for the Codex tab
+
+- `codex/src/tab.tsx` keeps its state in module variables, and its `App` reads them, so it cannot be drawn without a page. Split it the way the server is split. `codex/src/tab-main.tsx` keeps the page: polling, keys, the clipboard and mounting. The components take the tab's state as an argument.
+- Add `preact-render-to-string` as a dev dependency, and a test that draws the tab for `demoView` with each row open in turn. Every row title and action label from the shared view must appear. A test of a shared row function alone cannot catch an adapter that drops a field, which is the failure this test exists for.
+- This comes after step 6, which moves row content out of the tab and leaves less state to pass.
+
+### 8. One arrival rule
 
 - Add `isTabEmpty` and `defaultOpenId` to `hooks/arrivals.ts`. Each host passes its drawn settled rows and its own blockers as named inputs: the stop and unread state in the mod, the heard state in Codex. Use them in both hosts.
 - No behavior changes. The two rules agree today on every case, so one shared rule replaces both.
 
-### 8. One update and press bookkeeping
+### 9. One update and press bookkeeping
 
 - Add `applyExchangeReply` and `settleTurns` to the shared update code, with the activity cap and `addActivity`. The failed-update rule becomes a named input, `advancesOnFailure`. The mod passes false because it has a catch-up. Codex passes true because it has none.
 - Return Undo's `told.closed` cleanup from `applyPress`, as part of its result. Both hosts then apply it.
 - Codex's `notePrompt` uses `withArrival`.
 - Add a shared `openTarget(env, …)` beside `openCommands`, and one demo press helper that returns the stale or sample note.
 
-### 9. A Claude-only PR module
+### 10. A Claude-only PR module
 
 - Move `PrPress`, `applyPrPress`, `prRetryOf`, the PR row ids and `PR_STATUSES` into `hooks/pr-presses.ts`. Its header says Claude only. It gets direct tests in `tests/prs.test.ts`.
 - The PR entries in `DONE_LABELS` move beside it. `view.ts` merges them in, with a note that Codex has no PRs.
 
-### 10. The two drawings in `register.tsx`
+### 11. The two drawings in `register.tsx`
 
 - Group the scattered terminal and desktop values into one table of look traits. The 51 look branches include column sets, cell widths, button frames, row gaps, clip rules and labels. The branches then read named values.
 - The full split into a terminal adapter and a desktop adapter stays out of this plan. The pane's drawing reads 74 module-level values, so the split needs its own design and a live check of every row form in both looks. The traits table is the first step toward it, and the map records why the split waits.
@@ -186,4 +189,4 @@ Another session has uncommitted edits in `docs/plans/row-actions.md`, `docs/plan
 
 - Merging `revamp` into `main`, and pushing.
 - New product behavior beyond the two drift fixes in step 6.
-- The terminal and desktop adapter split. Step 10 says why.
+- The terminal and desktop adapter split. Step 11 says why.

@@ -69,7 +69,7 @@ Change a rule in its owner. Do not change it in a reader.
 | `GUIDANCE` | `hooks/register.tsx:GUIDANCE` and `codex/src/texts.ts:GUIDANCE` | These are hand copies until step 5 of `docs/plans/three-looks.md`. Edit both, and test both agents. |
 | Saved state shapes and upgrades | `types/index.d.ts:PluginState`, `hooks/ledger.ts:upgradeLedger`, `hooks/presses.ts:upgradeLastActions` | The mod also uses `hooks/register.tsx:upgradeState`. Codex uses `codex/src/state.ts:upgraded`. |
 | PR readiness and prompts | `hooks/prs.ts:readiness`, `hooks/prs.ts:prompts` | The mod only |
-| PR presses | `hooks/register.tsx:applyPrPress` | The mod only. Moves to its own module in step 9. |
+| PR presses | `hooks/register.tsx:applyPrPress` | The mod only. Moves to its own module in step 10 of `docs/plans/three-looks.md`. |
 
 Some rules are still written once per adapter. Each is a place where the looks can drift.
 
@@ -77,9 +77,9 @@ Some rules are still written once per adapter. Each is a place where the looks c
 | --- | --- | --- |
 | Row content: mark, second line, finding head, text-field hint, file line | `hooks/register.tsx:itemRow`, `hooks/register.tsx:findingRow`, `codex/src/tab.tsx:itemRow`, `codex/src/tab.tsx:findingRow` | Two copies until step 6 of `docs/plans/three-looks.md` |
 | Copy strings: status line, empty findings text, Undo, Try again, Send, Cancel, group titles | `hooks/register.tsx` and `codex/src/tab.tsx` | Two copies until step 6 of `docs/plans/three-looks.md` |
-| Empty-tab rule and default open row | `hooks/register.tsx:followNewRows`, `hooks/register.tsx:topRow`, `codex/src/arrivals.ts:isShownEmpty`, `codex/src/tab.tsx:selectedIndex` | Two copies until step 7 of `docs/plans/three-looks.md`. Their inputs differ but their results agree today. |
-| Per-reply update, activity cap of 40, Undo's `told.closed` cleanup | `hooks/register.tsx:runUpdate`, `hooks/register.tsx:noteActivity`, `codex/src/update.ts:applied`, `codex/src/core.ts:noteActivity`, `codex/src/server.ts:makeServer` | Two copies until step 8 of `docs/plans/three-looks.md` |
-| Open effect and demo press | `hooks/register.tsx:openPath`, `hooks/register.tsx:runDemoPress`, `codex/src/server.ts:makeServer` | Two copies until step 8 of `docs/plans/three-looks.md` |
+| Empty-tab rule and default open row | `hooks/register.tsx:followNewRows`, `hooks/register.tsx:topRow`, `codex/src/arrivals.ts:isShownEmpty`, `codex/src/tab.tsx:selectedIndex` | Two copies until step 8 of `docs/plans/three-looks.md`. Their inputs differ but their results agree today. |
+| Per-reply update, activity cap of 40, Undo's `told.closed` cleanup | `hooks/register.tsx:runUpdate`, `hooks/register.tsx:noteActivity`, `codex/src/update.ts:applied`, `codex/src/core.ts:noteActivity`, `codex/src/server.ts:makeServer` | Two copies until step 9 of `docs/plans/three-looks.md` |
+| Open effect and demo press | `hooks/register.tsx:openPath`, `hooks/register.tsx:runDemoPress`, `codex/src/server.ts:makeServer` | Two copies until step 9 of `docs/plans/three-looks.md` |
 
 ## Differences on purpose
 
