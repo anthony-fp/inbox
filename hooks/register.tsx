@@ -107,6 +107,9 @@ import {
   CHOICE_KEYS,
   closedShown,
   DOT,
+  emptyText,
+  ROW_TABS,
+  TABS,
   FINDING_BADGES,
   feedbackOf,
   feedbackText,
@@ -133,7 +136,7 @@ import type { CountdownProps } from './countdown-client'
 import type { FoldProps } from './fold-client'
 import type { LinksProps } from './links-client'
 import type { RowProps } from './row-client'
-import { TAB_HEIGHT, type TabsProps } from './tabs-client'
+import { TAB_COUNT_GAP, TAB_HEIGHT, type TabsProps } from './tabs-client'
 
 const LEDGER = atom({ plugin: 'inbox', key: 'ledger' } as const, EMPTY)
 const PRESENCE = atom(
@@ -276,10 +279,10 @@ type Palette = {
   /** Secondary text: ages, counts, labels and closed items. */
   muted: string
   /**
-   * A closed row's age on its card, dimmer than `muted`. It meets 4.5:1 on `card` alone, so a row under the
-   * pointer or selected draws its age in `muted`. Without one, ages are `muted`.
+   * A closed row's age on its card, dimmer than `muted` where the palette has room. It meets 4.5:1 on `card`
+   * alone, so a row under the pointer or selected draws its age in `muted`.
    */
-  age?: string
+  age: string
   /** The letters of a selected row's keys. */
   key: string
   /** The tree's lines. */
@@ -349,6 +352,7 @@ const DARK_ANSI_PALETTE: Palette = {
   raised: 'inactive', // white
   raisedText: 'inverseText', // black
   muted: 'inactive', // white
+  age: 'inactive',
   key: 'suggestion', // bright blue
   line: 'userMessageBackground', // bright black
   divider: 'userMessageBackground',
@@ -360,6 +364,7 @@ const LIGHT_ANSI_PALETTE: Palette = {
   raised: 'text', // black
   raisedText: 'userMessageBackgroundHover', // bright white
   muted: 'inactive', // bright black
+  age: 'inactive',
   key: 'suggestion', // blue
   line: 'userMessageBackground', // white
   divider: 'userMessageBackground',
@@ -399,6 +404,7 @@ const THEME_KEY_PALETTE: Palette = {
   raised: 'subtle',
   raisedText: 'text',
   muted: 'inactive',
+  age: 'inactive',
   key: 'remember',
   line: 'subtle',
   divider: 'subtle',
@@ -421,11 +427,6 @@ const HEX_THEMES = new Set(['dark', 'dark-daltonized', 'light', 'light-daltonize
 function paletteFor(theme: string, look: 'terminal' | 'desktop'): Palette {
   return look === 'desktop' && !HEX_THEMES.has(theme) ? DESKTOP_KEY_PALETTE : (PALETTES[theme] ?? THEME_KEY_PALETTE)
 }
-const TABS: { id: Tab; label: string; hotkey: string }[] = [
-  { id: 'needsYou', label: 'Needs you', hotkey: '1' },
-  { id: 'findings', label: 'Findings', hotkey: '2' },
-  { id: 'prs', label: 'PRs', hotkey: '3' },
-]
 // The blank columns on each side of a docked tab's name, which a click there also selects.
 const TAB_PAD = '  '
 // The Needs you tab lists questions first, because each takes one key.
@@ -2159,25 +2160,14 @@ function rowKeyActions($: EngineInterface, r: RowView, isAllShown: boolean): { k
     } else if (p.action === 'step' && item) {
       const icon = stepIcon(r.steps[p.step])
       keys.push({ ...base, ...lettered(), ...(icon ? { icon } : {}), key: `help-${id}-${p.step}` })
-    } else if (p.action === 'done') {
-      keys.push({ ...base, key: `done-${id}`, hotkey: 'd', isMain: true })
-    } else if (p.action === 'address' && finding) {
-      keys.push({ ...base, key: `address-${id}`, hotkey: 'a', isMain: true })
-    } else if (p.action === 'type') {
-      // The press opens the field; sending from it is what records the reply.
-      more.push({
-        label: a.label,
-        kind: 'view',
-        key: `typekey-${id}`,
-        hotkey: 't',
-        onPress: () => void startTyping($, id),
-      })
-    } else if (p.action === 'explain' && item) {
-      more.push({ ...base, key: `explain-${id}`, hotkey: 'e' })
-    } else if (p.action === 'discuss' && finding) {
-      more.push({ ...base, key: `discuss-${id}`, hotkey: 'e' })
-    } else if (p.action === 'dismiss') {
-      more.push({ ...base, key: finding ? `drop-${id}` : `dismiss-${id}`, hotkey: 'x' })
+    } else if (a.hotkey) {
+      // Type's press opens the field; sending from it is what records the reply.
+      const k: KeyAction =
+        p.action === 'type'
+          ? { label: a.label, kind: 'view', key: `typekey-${id}`, onPress: () => void startTyping($, id) }
+          : { ...base, key: p.action === 'dismiss' && finding ? `drop-${id}` : `${p.action}-${id}` }
+      if (a.isFollowUp) more.push({ ...k, hotkey: a.hotkey })
+      else keys.push({ ...k, hotkey: a.hotkey, isMain: true })
     }
   }
 
@@ -2225,7 +2215,7 @@ function desktopTabSizes(
   ]
   const sizes = steps.map(({ padding, gap, hasCounts }) => ({
     widths: tabs.map(t => {
-      const text = hasCounts && t.count > 0 ? `${t.label}  ${t.count}` : t.label
+      const text = hasCounts && t.count > 0 ? `${t.label}${TAB_COUNT_GAP}${t.count}` : t.label
       return Math.ceil(text.length / DESKTOP_CHARS_PER_CELL) + 1 + 2 * padding
     }),
     gap,
@@ -2779,14 +2769,12 @@ export const register: Register = on => {
     if (!stop && !ledger.card && ledger.items.length === 0 && ledger.findings.length === 0) return next(e)
     const pal = paletteFor(theme, e.surface === 'desktop' ? 'desktop' : 'terminal')
     // Each count as its tab reads: the tab's name, muted, then the count in the tab's color.
-    const counts = (['needsYou', 'findings'] as const)
-      .filter(id => view[id].count > 0)
-      .map(id => (
-        <Text>
-          <Text dimColor>{TABS.find(t => t.id === id)!.label} </Text>
-          <Text color={pal.tone[id] ?? pal.mark[id]}>{view[id].count}</Text>
-        </Text>
-      ))
+    const counts = ROW_TABS.filter(t => view[t.id].count > 0).map(t => (
+      <Text>
+        <Text dimColor>{t.label} </Text>
+        <Text color={pal.tone[t.id] ?? pal.mark[t.id]}>{view[t.id].count}</Text>
+      </Text>
+    ))
 
     // Line 1: the counts, then [Open inbox] at the right end. On desktop a native button is taller than
     // a line of text, so the text sits level with its top. Sample counts could pass for real ones, so the demo says so.
@@ -2854,7 +2842,6 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const elements = $.ui.resolve(e)
     const { Box, Button, Markdown, Text } = elements
-    followUpPresses.clear()
     // Desktop draws every Button as a native button, and only clicks reach the pane: no letters, key hints or hidden hotkeys.
     const look = e.surface === 'desktop' ? 'desktop' : 'terminal'
     paneLook = look
@@ -3211,6 +3198,8 @@ export const register: Register = on => {
           </Box>
         )
     // On desktop, the follow-ups as plain text in a Client, which posts the key clicked.
+    // Emptied here, after the drawing's reads, so a click that lands while they run still finds the last presses.
+    followUpPresses.clear()
     const followUpLinks = (rowId: string, more: KeyAction[]) => {
       if (!hasClient) return null
       for (const a of more) followUpPresses.set(a.key, press => unlessGuarded($, rowId, press, a.onPress))
@@ -3237,7 +3226,7 @@ export const register: Register = on => {
       >
         {keys.map(keyedButton(rowId))}
         {look === 'terminal' && keys.length > 0 && more.length > 0 ? <Text color={pal.muted}>·</Text> : null}
-        {hasClient && more.length > 0 ? followUpLinks(rowId, more) : more.map(keyedButton(rowId, true))}
+        {more.length > 0 ? (followUpLinks(rowId, more) ?? more.map(keyedButton(rowId, true))) : null}
       </Box>
     )
     // The Buttons that take the pane's keys, drawn in a hidden Box.
@@ -3492,7 +3481,7 @@ export const register: Register = on => {
         colors: {
           handle: row.handleTone ? pal.mark[row.handleTone] : null,
           muted: pal.muted,
-          after: line.afterTone ? (pal.tone[line.afterTone] ?? null) : (pal.age ?? pal.muted),
+          after: line.afterTone ? (pal.tone[line.afterTone] ?? null) : pal.age,
           afterHover: line.afterTone ? (pal.tone[line.afterTone] ?? null) : pal.muted,
           hover: pal.raised,
           hoverText: pal.raisedText ?? null,
@@ -3665,7 +3654,7 @@ export const register: Register = on => {
     // An empty tab names what would be there and when it comes. Docked, it sits in
     // the middle of the pane, one Text per line, since a Text cannot center its lines.
     // The lines are balanced: as narrow as they can be without adding a line.
-    const emptyState = (title: string, text = '') => {
+    const emptyState = ({ title, hint: text = '' }: { title: string; hint?: string }) => {
       const wrap = (width: number) => {
         const lines: string[] = []
         for (const word of text.split(' ').filter(Boolean)) {
@@ -4000,7 +3989,7 @@ export const register: Register = on => {
             <Text bold={!isLapsed(d)} color={isLapsed(d) ? pal.muted : undefined}>
               {outcomeText(d)}
             </Text>
-            <Text color={pal.age ?? pal.muted}>{unbroken(`${DOT}${ago(now - d.at)}`)}</Text>
+            <Text color={pal.age}>{unbroken(`${DOT}${ago(now - d.at)}`)}</Text>
           </Text>
         </Box>,
         `closed-${d.id}`,
@@ -4193,7 +4182,7 @@ export const register: Register = on => {
           ]
         : []
       if (isNothing && groups.length === 0 && !stop && unread.length === 0)
-        return emptyState('Nothing needs you.', "Claude's questions and the tasks only you can do show up here.")
+        return emptyState(emptyText('needsYou', 'Claude'))
       // A stop shows above the list. An API error can be resumed from here; the other stops
       // need a fix outside the session first, so they only say what it is.
       const outside = stop
@@ -4241,7 +4230,7 @@ export const register: Register = on => {
           ? [
               section(
                 <Box paddingLeft={2}>
-                  <Text color={pal.muted}>Nothing needs you.</Text>
+                  <Text color={pal.muted}>{emptyText('needsYou', 'Claude').title}</Text>
                 </Box>,
               ),
             ]
@@ -4266,8 +4255,7 @@ export const register: Register = on => {
         how: f.how,
         outcome: f.outcome,
       }))
-      if (findingEntries.length === 0 && closed.length === 0)
-        return emptyState('No findings yet', 'Claude flags issues and opportunities it spots beyond your task.')
+      if (findingEntries.length === 0 && closed.length === 0) return emptyState(emptyText('findings', 'Claude'))
       // With closed findings still shown, the empty text is one line above them.
       const open =
         findingEntries.length > 0
@@ -4469,10 +4457,10 @@ export const register: Register = on => {
       <Box flexDirection="column" flexGrow={1} gap={1}>
         {prGroups.length === 0
           ? // Loading keeps the empty state's text, so only the title changes when the fetch ends.
-            emptyState(
-              prState.isFetching ? 'Checking for PRs…' : 'No PRs',
-              'Your PRs show here when this session opens or links one, or when your branch has one.',
-            )
+            emptyState({
+              title: prState.isFetching ? 'Checking for PRs…' : 'No PRs',
+              hint: 'Your PRs show here when this session opens or links one, or when your branch has one.',
+            })
           : prGroups.map(prBlock)}
       </Box>
     )

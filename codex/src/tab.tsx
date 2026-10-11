@@ -13,6 +13,8 @@ import {
   CHOICE_KEYS,
   closedShown,
   DOT,
+  emptyText,
+  ROW_TABS,
   FINDING_BADGES,
   feedbackText,
   hasAge,
@@ -104,11 +106,6 @@ type Row = {
 
 /** A row that just closed, drawn in its place with its outcome, or a row still open. */
 type Entry = { row: Row } | { settled: RowView }
-
-const TABS: { id: Tab; label: string; hotkey: string }[] = [
-  { id: 'needsYou', label: 'Needs you', hotkey: '1' },
-  { id: 'findings', label: 'Findings', hotkey: '2' },
-]
 
 let view: View | null = null
 // The demo shows the mod's sample entries, and its presses send nothing.
@@ -424,12 +421,11 @@ function rowKeys(r: RowView): { keys: Key[]; more: Key[] } {
           : undefined
       const icon = stepIcon(step)
       keys.push({ ...lettered(), label, ...(icon ? { icon } : {}), run: () => void act(id, p, undefined, pending) })
-    } else if (p.action === 'done') keys.push({ hotkey: 'd', label, icon: 'check', run: () => void act(id, p) })
-    else if (p.action === 'address') keys.push({ hotkey: 'a', label, run: () => void act(id, p) })
-    else if (p.action === 'type') more.push({ hotkey: 't', label, run: () => startTyping(id) })
-    else if (p.action === 'explain' || p.action === 'discuss')
-      more.push({ hotkey: 'e', label, run: () => void act(id, p) })
-    else if (p.action === 'dismiss') more.push({ hotkey: 'x', label, run: () => void act(id, p) })
+    } else if (a.hotkey) {
+      const run = p.action === 'type' ? () => startTyping(id) : () => void act(id, p)
+      const icon = p.action === 'done' ? { icon: 'check' as const } : {}
+      ;(a.isFollowUp ? more : keys).push({ hotkey: a.hotkey, label, ...icon, run })
+    }
   }
 
   return { keys, more }
@@ -1067,8 +1063,8 @@ function NeedsYou({ v, lists, now }: { v: View; lists: Lists; now: number }) {
       </div>
     ) : (
       <div class="empty">
-        <div class="title">Nothing needs you.</div>
-        <div class="muted">Codex's questions and the tasks only you can do show up here.</div>
+        <div class="title">{emptyText('needsYou', 'Codex').title}</div>
+        <div class="muted">{emptyText('needsYou', 'Codex').hint}</div>
       </div>
     )
 
@@ -1084,7 +1080,7 @@ function NeedsYou({ v, lists, now }: { v: View; lists: Lists; now: number }) {
         </section>
       ) : isNothing ? (
         <section>
-          <div class="group-title empty-line">Nothing needs you.</div>
+          <div class="group-title empty-line">{emptyText('needsYou', 'Codex').title}</div>
         </section>
       ) : null}
       <ItemGroup v={v} kind="question" entries={lists.questions} all={all} now={now} />
@@ -1106,8 +1102,8 @@ function Findings({ v, lists, now }: { v: View; lists: Lists; now: number }) {
   if (isNothing && closed.length === 0)
     return (
       <div class="empty">
-        <div class="title">No findings yet</div>
-        <div class="muted">Codex flags issues and opportunities it spots beyond your task.</div>
+        <div class="title">{emptyText('findings', 'Codex').title}</div>
+        <div class="muted">{emptyText('findings', 'Codex').hint}</div>
       </div>
     )
 
@@ -1151,7 +1147,7 @@ function TabBar({ v, now }: { v: View; now: number }) {
   return (
     <nav>
       <div class="tabs">
-        {TABS.map(t => (
+        {ROW_TABS.map(t => (
           <button
             type="button"
             class={`tab ${tab === t.id ? 'shown' : ''}`}
@@ -1441,7 +1437,7 @@ document.addEventListener('keydown', e => {
     }
     return
   }
-  const switched = TABS.find(t => t.hotkey === e.key)
+  const switched = ROW_TABS.find(t => t.hotkey === e.key)
   if (switched) {
     tab = switched.id
     draw()

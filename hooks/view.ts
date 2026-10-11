@@ -13,6 +13,7 @@ import type {
   LocalResult,
   PressKind,
   RowNote,
+  Tab,
   Turns,
 } from '../types'
 import { isLapsed, latestBatch, questionNumbers, reopenFinding, reopenItem } from './ledger'
@@ -103,6 +104,10 @@ export type ActionView = {
   isPrimary: boolean
   /** An option behind [All N options]. */
   isFolded: boolean
+  /** Reply, Explain, Discuss or Dismiss: drawn after the row's answers and main action, as quieter text. */
+  isFollowUp: boolean
+  /** The key that presses it, where the action has a fixed one. Answers and steps take letters in order instead. */
+  hotkey?: string
 }
 
 export type RowView = {
@@ -256,6 +261,32 @@ function stepKind(step: HelpStep): PressKind {
  * "… again" when the row's last press, other than an open or copy, was that action.
  * A settled row offers only Undo, and only after the person's own Done or Dismiss.
  */
+/** The inbox's tabs in order, as every client names them and the keys that switch to them. */
+export const TABS: readonly { id: Tab; label: string; hotkey: string }[] = [
+  { id: 'needsYou', label: 'Needs you', hotkey: '1' },
+  { id: 'findings', label: 'Findings', hotkey: '2' },
+  { id: 'prs', label: 'PRs', hotkey: '3' },
+]
+/** The tabs that list the ledger's rows. Only the Claude pane has PRs. */
+export const ROW_TABS = TABS.filter((t): t is (typeof TABS)[number] & { id: 'needsYou' | 'findings' } => t.id !== 'prs')
+
+/** What an empty tab says, with the agent named, as "Claude" or "Codex". */
+export function emptyText(tab: 'needsYou' | 'findings', agent: string): { title: string; hint: string } {
+  return tab === 'needsYou'
+    ? { title: 'Nothing needs you.', hint: `${agent}'s questions and the tasks only you can do show up here.` }
+    : { title: 'No findings yet', hint: `${agent} flags issues and opportunities it spots beyond your task.` }
+}
+
+const FOLLOW_UPS: ReadonlySet<RowPress['action']> = new Set(['type', 'explain', 'discuss', 'dismiss'])
+const ACTION_KEYS: Partial<Record<RowPress['action'], string>> = {
+  done: 'd',
+  address: 'a',
+  type: 't',
+  explain: 'e',
+  discuss: 'e',
+  dismiss: 'x',
+}
+
 function actionsOf(
   row: { id: string; item: Item | null; steps: HelpStep[] },
   last: LastAction | undefined,
@@ -281,6 +312,8 @@ function actionsOf(
     kind,
     isPrimary: flags.isPrimary ?? false,
     isFolded: flags.isFolded ?? false,
+    isFollowUp: FOLLOW_UPS.has(press.action),
+    ...(ACTION_KEYS[press.action] ? { hotkey: ACTION_KEYS[press.action] } : {}),
   })
   if (state.is === 'settled') return state.canUndo ? [action({ action: 'undo', id }, 'Undo', 'view')] : []
   const stepActions = steps.map((s, n) => action({ action: 'step', id, step: n, label: s.label }, s.label, stepKind(s)))

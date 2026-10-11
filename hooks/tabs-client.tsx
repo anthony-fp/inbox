@@ -35,6 +35,8 @@ type State = { hover: string | null }
  * half a line on each side; 1.25 lines just fits the label, and 1.5 gives the tabs room around it.
  */
 export const TAB_HEIGHT = 1.5
+/** Between a tab's name and its count. The hooks module sizes each tab with it. */
+export const TAB_COUNT_GAP = '  '
 
 /** The tab under (`x`, `y`) in the region, or null over a gap or outside the tabs. */
 function tabAt(props: TabsProps, x: number, y: number): string | null {
@@ -83,7 +85,7 @@ const Tabs: ClientModule<TabsProps, State> = (props, surface) => {
         children: Text({
           ...(labelColor ? { color: labelColor } : {}),
           bold: isShown,
-          children: tab.count > 0 ? [tab.label, '  ', count] : tab.label,
+          children: tab.count > 0 ? [tab.label, TAB_COUNT_GAP, count] : tab.label,
         }),
       })
     }),
