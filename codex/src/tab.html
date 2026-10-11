@@ -28,6 +28,8 @@
         --hover: color-mix(in srgb, var(--key) 14%, transparent);
         --soft: color-mix(in oklab, var(--text) 8%, transparent);
         --soft-hover: color-mix(in oklab, var(--text) 10%, transparent);
+        /* A closed row under the pointer: half --soft, so a list swept by the pointer stays quiet. */
+        --row-hover: color-mix(in oklab, var(--soft) 50%, transparent);
         /* The Codex app's timing: --transition-duration-basic with ease, --cubic-move, --cubic-enter. */
         --quick: 150ms ease;
         --move: 200ms cubic-bezier(0.65, 0, 0.35, 1);
@@ -303,7 +305,7 @@
         white-space: normal;
       }
       .row.collapsed:hover {
-        background-color: var(--soft);
+        background-color: var(--row-hover);
       }
       /* After a click, rows slide under a pointer that has not moved, so nothing they bring under it lights up. */
       .still .row.collapsed:not(:active):hover {

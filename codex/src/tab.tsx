@@ -624,17 +624,13 @@ function forget(id: string) {
   leftOpen.delete(id)
 }
 
-/** Undo on a settled row: the row comes back open and selected, reading "✓ Undo" as other presses read their result. */
+/** Undo on a settled row: the row comes back open and selected, which shows the Undo worked. */
 async function undo(r: RowView) {
   if (undoing.has(r.id)) return
   const t: Tab = r.type === 'finding' ? 'findings' : 'needsYou'
   undoing.add(r.id)
   try {
-    await act(r.id, { action: 'undo', id: r.id }, () => {
-      open(t, r.id)
-      notes.set(r.id, { text: '✓ Undo', at: Date.now() })
-      drawIn(SETTLED_MS)
-    })
+    await act(r.id, { action: 'undo', id: r.id }, () => open(t, r.id))
   } finally {
     undoing.delete(r.id)
     const at = seen.get(r.id)
