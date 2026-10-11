@@ -75,7 +75,7 @@ A row has two forms:
 |---|---|---|---|
 | Question | Needs you | `1) ask · 3m ago`, or `? ask · 3m ago` (see numbers below) | Full ask, one button per option with the recommended one first, styled primary and labeled "(recommended)", help steps |
 | Task | Needs you | `• ask · 3m ago` | Help steps (open, copy, run, terminal, link), "Open PR #N" when the ask names a tracked PR |
-| Finding | Findings | `• title · 3m ago` | Kind badge (▲ Issue or ✦ Opportunity), detail, "Relevant file: path" |
+| Finding | Findings | `▲ title · 3m ago` for an Issue, `✦ title · 3m ago` for an Opportunity | Kind label, detail, "Relevant file: path" |
 | PR block | PRs | Always open: `#12 title`, readiness, one line of facts | PR actions |
 | PR check | PRs, inside the PR block | `✗ lint · failing check`. Status only, with no Fix. | Open log |
 | Review thread | PRs | `◦ api.ts:40 latest comment · 2h ago` | Comments as Markdown |

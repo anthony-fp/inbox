@@ -2937,15 +2937,16 @@ export const register: Register = on => {
         typeKind: item.kind === 'task' ? 'handoff' : 'mark',
       }
     }
-    // A finding handed to Claude folds, as a task does, until Claude's reply leaves it open.
+    // A finding's handle is its kind's mark, ▲ or ✦. Handed to Claude, it folds, as a task does, until Claude's
+    // reply leaves it open.
     const findingRow = (r: RowView, finding: Finding): Row => ({
       id: finding.id,
-      handle: r.state.is === 'handedOff' ? '✓' : r.handle,
-      ...(r.state.is === 'handedOff' ? { handleTone: 'done' as const, fold: {} } : {}),
+      ...(r.state.is === 'handedOff'
+        ? { handle: '✓', handleTone: 'done' as const, fold: {} }
+        : { handle: FINDING_BADGES[finding.kind].mark, handleTone: FINDING_BADGES[finding.kind].tone }),
       title: finding.title,
       meta: (
         <Text wrap="truncate-end">
-          <Text color={pal.mark[FINDING_BADGES[finding.kind].tone]}>{FINDING_BADGES[finding.kind].mark} </Text>
           <Text color={pal.tone[FINDING_BADGES[finding.kind].tone]}>{FINDING_BADGES[finding.kind].label}</Text>
           <Text color={pal.muted}> {ago(now - finding.at)}</Text>
         </Text>
@@ -3246,7 +3247,7 @@ export const register: Register = on => {
 
       return hasAge(f)
         ? {
-            text: f.is === 'done' && row?.handleTone === 'done' ? f.label : feedbackText(f, look),
+            text: f.is === 'done' && row?.handle === '✓' ? f.label : feedbackText(f, look),
             age: ago(now - f.at),
             isFailure: false,
           }
