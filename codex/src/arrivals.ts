@@ -11,6 +11,9 @@ export type Tab = 'needsYou' | 'findings'
 /** A Closed fold, which the person unfolds by its group. */
 export type Group = 'question' | 'task' | 'finding'
 
+/** The tab that lists each group. */
+export const TAB_OF: Record<Group, Tab> = { question: 'needsYou', task: 'needsYou', finding: 'findings' }
+
 export const TAB_IDS: Tab[] = ['needsYou', 'findings']
 
 /** The row ids the tab has seen in each tab, or null before its first view. */

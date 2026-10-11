@@ -37,11 +37,11 @@ At each draw the tab works out the form each row should have now, its target:
 | `undoing` | As `settled`, while its Undo press is out |
 | `gone` | The view no longer lists the row, or its settled time ran out |
 
-`stepRow` takes a row's state and its target and returns the next state. When the target changes, the row starts moving toward it from where it is drawn: `opening` toward open, `closing` toward closed, `settling` toward settled, `leaving` toward gone. A leaving row that is listed again grows back in. When a moving state's time has passed, it comes to rest.
+`stepRow` takes a row's track and its target and returns the next track. A track is the row's state, when it entered it, and whether it draws the open row's panel. When the target changes, the row starts moving toward it from where it is drawn: `opening` toward open, `closing` toward closed, `settling` toward settled, `leaving` toward gone. This holds for a row still growing in, too. A leaving row that is listed again grows back in. When a moving state's time has passed, it comes to rest.
 
 Rules that hold in every state:
 
-- **A panel is never removed while it shows.** `closing` and `settling` keep the panel, so its content is clipped by the shrinking height instead of vanishing. A row that leaves while open keeps its panel while it fades.
+- **A panel is never removed while it shows.** A track that draws the panel keeps drawing it through `closing`, `settling` and `leaving`, so its content is clipped by the shrinking height instead of vanishing. A row that never drew a panel does not gain one when it settles.
 - **The settled line shows as soon as the reply arrives.** It shows the outcome and Undo while the panel shrinks under it, so the press's result is visible at once.
 - **A settling row is laid out as an open row is.** The settled line and the panel share one column, so the panel stays exactly where the open row drew it. The row's fill fades out over the same 200 ms as its height.
 - **Nothing under the line moves while a press is out.** "Sending…" shows in the line's age slot, where the press's result will show.

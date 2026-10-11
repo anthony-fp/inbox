@@ -1,11 +1,14 @@
 // The state machine every row in the Inbox tab moves through, from the draw that first shows it to the draw that
 // removes it. Pure, so it is tested without a page. docs/plans/codex-row-states.md describes the states.
 
-import { EXIT_MS } from './settle'
+/** The Codex app's enter, move and exit lengths, from its bundled styles, in ms. */
+export const ENTER_MS = 300
+export const MOVE_MS = 200
+export const EXIT_MS = 200
 
 /**
  * A row's state. The resting states draw one form: `closed` its line, `open` its line and panel, `settled` its
- * settled line, `undoing` that line while an Undo press is out. The moving states animate between them, and each
+ * settled line, `undoing` that line while an Undo press is out. The moving states animate toward a form, and each
  * keeps what it moves away from drawn: `closing` keeps the panel, `settling` keeps the last open panel under the
  * settled line, and `leaving` keeps the row's last form while it fades and collapses.
  */
@@ -15,15 +18,18 @@ export type RowState =
 /** The form the tab wants a row in now: from the view, the open row, and an Undo press. `gone` once it is not drawn. */
 export type RowTarget = 'closed' | 'open' | 'settled' | 'undoing' | 'gone'
 
-/** A row's state and when it entered it. */
-export type RowTrack = { state: RowState; since: number }
+/**
+ * A row's state, when it entered it, and whether it draws the open row's panel: an open row, one growing in open,
+ * and a row closing, settling or leaving from a state that drew it.
+ */
+export type RowTrack = { state: RowState; since: number; hasPanel: boolean }
 
-/** How long each moving state lasts, in ms: the Codex app's enter, move and exit lengths. Resting states are 0. */
+/** How long each moving state lasts, in ms. Resting states are 0. */
 export const ROW_STATE_MS: Record<RowState, number> = {
-  entering: 300,
-  opening: 200,
-  closing: 200,
-  settling: 200,
+  entering: ENTER_MS,
+  opening: MOVE_MS,
+  closing: MOVE_MS,
+  settling: MOVE_MS,
   leaving: EXIT_MS,
   closed: 0,
   open: 0,
@@ -31,46 +37,18 @@ export const ROW_STATE_MS: Record<RowState, number> = {
   undoing: 0,
 }
 
-type Shape = Exclude<RowTarget, 'undoing'>
-
-/** The form each state shows or is moving to. A row growing in takes the closed or open form it arrived in. */
-const HEADING: Record<Exclude<RowState, 'entering'>, Shape> = {
-  closed: 'closed',
-  opening: 'open',
-  open: 'open',
-  closing: 'closed',
-  settling: 'settled',
-  settled: 'settled',
-  undoing: 'settled',
-  leaving: 'gone',
-}
-
-function isHeading(state: RowState, shape: Shape): boolean {
-  return state === 'entering' ? shape === 'closed' || shape === 'open' : HEADING[state] === shape
-}
-
-/** Where a moving state comes to rest, toward `shape`. Null for `leaving`, whose row is removed. */
-function restOf(state: RowState, shape: Shape): RowState | null {
-  return state === 'entering' ? (shape === 'open' ? 'open' : 'closed') : REST[state]!
-}
-
-const REST: Partial<Record<RowState, RowState | null>> = {
-  opening: 'open',
-  closing: 'closed',
-  settling: 'settled',
-  leaving: null,
-}
+/** A target with Undo's press folded into the settled form: a resting state's name, or `gone`. */
+type Form = Exclude<RowTarget, 'undoing'>
 
 export function isMoving(state: RowState): boolean {
   return ROW_STATE_MS[state] > 0
 }
 
 /**
- * A row's next state, at each draw. A moving state comes to rest once its length has passed, so an animation that
- * never reports its end cannot hold a row. A new target starts the move toward it from wherever the row is drawn.
+ * A row's next track, at each draw. A new target starts the move toward it from wherever the row is drawn. A moving
+ * state comes to rest once its length has passed, so an animation that never reports its end cannot hold a row.
  * `isNew` grows a row the view just brought in, closed or open; any other row the tab has not drawn yet shows its
- * form at once.
- * With `isReduced`, every move ends in the draw that starts it. Null when the row is no longer drawn.
+ * form at once. With `isReduced`, every move ends in the draw that starts it. Null when the row is no longer drawn.
  */
 export function stepRow(
   track: RowTrack | undefined,
@@ -79,58 +57,61 @@ export function stepRow(
   isNew = false,
   isReduced = false,
 ): RowTrack | null {
-  const next = nextState(track, target, now, isNew, isReduced)
-  if (next === null) return null
-  if (isReduced && isMoving(next)) {
-    const rest = restOf(next, target === 'undoing' ? 'settled' : target)
-
-    return rest === null ? null : { state: settle(rest, target), since: now }
-  }
-
-  return next === track?.state ? track : { state: next, since: now }
-}
-
-function nextState(
-  track: RowTrack | undefined,
-  target: RowTarget,
-  now: number,
-  isNew: boolean,
-  isReduced: boolean,
-): RowState | null {
+  const form: Form = target === 'undoing' ? 'settled' : target
   if (!track) {
-    if (target === 'gone') return null
-    if ((target === 'closed' || target === 'open') && isNew && !isReduced) return 'entering'
-    return target
+    if (isNew && !isReduced && (form === 'closed' || form === 'open'))
+      return { state: 'entering', since: now, hasPanel: form === 'open' }
+    return rest(undefined, form, target, now)
   }
-  const { state, since } = track
-  const shape = target === 'undoing' ? 'settled' : target
-  if (!isHeading(state, shape)) return start(state, shape)
-  if (isMoving(state) && now - since >= ROW_STATE_MS[state]) {
-    const rest = restOf(state, shape)
+  const next = formOf(track) === form ? track : moveToward(track, form, now)
+  if (isMoving(next.state) && !isReduced && now - next.since < ROW_STATE_MS[next.state]) return next
 
-    return rest === null ? null : settle(rest, target)
-  }
-  if (state === 'settled' || state === 'undoing') return target === 'undoing' ? 'undoing' : 'settled'
-
-  return state
+  return rest(next, form, target, now)
 }
 
-/** A resting `settled` row is `undoing` while its target says so. */
-function settle(rest: RowState, target: RowTarget): RowState {
-  return rest === 'settled' && target === 'undoing' ? 'undoing' : rest
-}
-
-/** The move from `state` toward a new form. */
-function start(state: RowState, shape: Shape): RowState {
-  switch (shape) {
+/** The form a track shows, or is moving toward. */
+function formOf({ state, hasPanel }: RowTrack): Form {
+  switch (state) {
+    case 'entering':
+      return hasPanel ? 'open' : 'closed'
+    case 'opening':
     case 'open':
-      return 'opening'
+      return 'open'
+    case 'closing':
     case 'closed':
-      // A leaving row that is listed again grows back in.
-      return state === 'leaving' ? 'entering' : 'closing'
+      return 'closed'
+    case 'settling':
     case 'settled':
-      return 'settling'
-    case 'gone':
-      return 'leaving'
+    case 'undoing':
+      return 'settled'
+    case 'leaving':
+      return 'gone'
   }
+}
+
+/**
+ * The move from a track toward a new form. Closing, settling and leaving keep the panel the track drew, so the row
+ * shrinks over it. A leaving row that is listed again closed grows back in.
+ */
+function moveToward(track: RowTrack, form: Form, now: number): RowTrack {
+  switch (form) {
+    case 'open':
+      return { state: 'opening', since: now, hasPanel: true }
+    case 'closed':
+      return track.state === 'leaving'
+        ? { state: 'entering', since: now, hasPanel: false }
+        : { state: 'closing', since: now, hasPanel: track.hasPanel }
+    case 'settled':
+      return { state: 'settling', since: now, hasPanel: track.hasPanel }
+    case 'gone':
+      return { state: 'leaving', since: now, hasPanel: track.hasPanel }
+  }
+}
+
+/** The track at rest in `form`, kept as it is when it already rests there. Null for `gone`. */
+function rest(track: RowTrack | undefined, form: Form, target: RowTarget, now: number): RowTrack | null {
+  if (form === 'gone') return null
+  const state: RowState = target === 'undoing' ? 'undoing' : form
+
+  return track?.state === state ? track : { state, since: now, hasPanel: state === 'open' }
 }

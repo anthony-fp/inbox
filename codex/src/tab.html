@@ -30,10 +30,8 @@
         --soft-hover: color-mix(in oklab, var(--text) 10%, transparent);
         /* A closed row under the pointer: half --soft, so a list swept by the pointer stays quiet. */
         --row-hover: color-mix(in oklab, var(--soft) 50%, transparent);
-        /* The Codex app's timing: --transition-duration-basic with ease, --cubic-move, --cubic-enter. */
+        /* The Codex app's --transition-duration-basic with ease. The tab's script sets --move and --enter. */
         --quick: 150ms ease;
-        --move: 200ms cubic-bezier(0.65, 0, 0.35, 1);
-        --enter: 300ms cubic-bezier(0.19, 1, 0.22, 1);
         /* Where a row's mark sits, and where its text starts. */
         --mark-x: 18px;
         --text-x: 44px;
@@ -470,7 +468,6 @@
         font-weight: 400;
         color: var(--muted);
       }
-      /* A row that just closed keeps a closed row's height, so the list does not change its rhythm. */
       .settled-head {
         display: flex;
         align-items: center;
