@@ -43,6 +43,9 @@ Rules that hold in every state:
 
 - **A panel is never removed while it shows.** `closing` and `settling` keep the panel, so its content is clipped by the shrinking height instead of vanishing. A row that leaves while open keeps its panel while it fades.
 - **The settled line shows as soon as the reply arrives.** It shows the outcome and Undo while the panel shrinks under it, so the press's result is visible at once.
+- **A settling row is laid out as an open row is.** The settled line and the panel share one column, so the panel stays exactly where the open row drew it. The row's fill fades out over the same 200 ms as its height.
+- **Nothing under the line moves while a press is out.** "Sending…" shows in the line's age slot, where the press's result will show.
+- **A row's parts do not fade in.** When a row settles or is undone, its line, panel and Undo swap in place. A fade from nothing there reads as a flicker. A row that arrives still fades in as a whole.
 - **Time ends a move, not the animation.** Each move into a moving state schedules a draw for when it is due to end, and that draw brings the row to rest. An animation that never reports its end cannot hold a row.
 - **A move starts from the drawn height.** A row turned around mid-move starts the new animation from where it is.
 - **A row's end height is its content's height.** The tab adds up the heights of the row's children, which no animation of the row changes.

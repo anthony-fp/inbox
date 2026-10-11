@@ -57,9 +57,9 @@ its age, its detail and its file.
 - **Each action shows its key** before its label, as "a Fix". The keys are the
   pane's: answers and steps on `a b c f g h i l m`, `d` Done, `t` type, `e`
   Explain or Discuss, `x` Dismiss.
-- **A press shows at once.** Until the server answers, the row says
-  "Sending…". Then it shows the action's last-action text, such as "Explain
-  sent · just now". A second press of the same action reads "Explain again".
+- **A press shows at once.** Until the server answers, the row's line says
+  "Sending…" where its age shows, so nothing under the line moves. Then it
+  shows the action's last-action text, such as "Explain sent · just now". A second press of the same action reads "Explain again".
   The repo requires every action to show what it did.
 - **A row handed to Codex folds.** A task whose step or reply went to Codex,
   and a check whose Fix was sent, show a green ✓. Its last action stays
