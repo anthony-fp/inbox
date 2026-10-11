@@ -306,14 +306,11 @@ function applyView(next: View, seq: number) {
 /** Moves to the other tab for its new rows while the tab on screen shows only its empty text, as the mod's pane does. */
 function follow(v: View, added: Record<Tab, string[]>) {
   const drawn = shownSettled()
-  const lists = listsOf(v, drawn)
-  const to = followTo(TAB_IDS, tab, isShownEmpty(v, tab, drawn, unfolded), added, {
-    needsYou: lists.byTab.needsYou.map(r => r.id),
-    findings: lists.byTab.findings.map(r => r.id),
-  })
+  const to = followTo(TAB_IDS, tab, isShownEmpty(v, tab, drawn, unfolded), added)
   if (!to) return
-  tab = to.tab
-  if (to.id) open(to.tab, to.id)
+  tab = to
+  // With no row chosen, the tab draws its top row open, as the mod's pane does.
+  selection[to] = null
 }
 
 /** How long a view read may go unanswered before it counts as failed, so a lost answer cannot stop the polls. */

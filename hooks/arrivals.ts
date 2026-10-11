@@ -27,19 +27,15 @@ export function recordRows<T extends string>(
 }
 
 /**
- * Where to move for rows that just appeared: while the shown tab shows only its empty text, to the first other
- * tab in `tabs` with new rows, and the first new row there that `selectable` lists, or null when it lists none.
- * Null when the look stays.
+ * The tab to move to for rows that just appeared: while the shown tab shows only its empty text, the first other
+ * tab in `tabs` with new rows. Null when the look stays. The look then draws that tab's top row open, not the
+ * new row itself, so rows that arrive above it later keep the top row the open one.
  */
 export function followTo<T extends string>(
   tabs: readonly T[],
   shown: T,
   isShownEmpty: boolean,
   added: Record<T, string[]>,
-  selectable: Record<T, string[]>,
-): { tab: T; id: string | null } | null {
-  const to = isShownEmpty ? tabs.find(t => t !== shown && added[t].length > 0) : undefined
-  if (to === undefined) return null
-
-  return { tab: to, id: selectable[to].find(id => added[to].includes(id)) ?? null }
+): T | null {
+  return (isShownEmpty ? tabs.find(t => t !== shown && added[t].length > 0) : undefined) ?? null
 }

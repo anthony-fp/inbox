@@ -557,11 +557,8 @@ test('the tab moves from an empty Needs you to Findings when a poll brings a fin
   const next = newRows(first.seen, viewOf(withFinding, 20))
   assert.deepEqual(next.added, { needsYou: [], findings: ['f1'] })
   const followed = (state: SessionState) =>
-    followTo(TAB_IDS, 'needsYou', isShownEmpty(viewOf(state, 20), 'needsYou', new Set(), new Set()), next.added, {
-      needsYou: [],
-      findings: ['f1'],
-    })
-  assert.deepEqual(followed(withFinding), { tab: 'findings', id: 'f1' })
+    followTo(TAB_IDS, 'needsYou', isShownEmpty(viewOf(state, 20), 'needsYou', new Set(), new Set()), next.added)
+  assert.equal(followed(withFinding), 'findings')
   // While Needs you says the hooks were not heard, it stays on that warning.
   assert.equal(viewOf({ ...withFinding, heard: NOTHING_HEARD }, 20).heard, 'none')
   assert.equal(followed({ ...withFinding, heard: NOTHING_HEARD }), null)

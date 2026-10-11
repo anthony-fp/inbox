@@ -1334,12 +1334,13 @@ function newRows(isDemo: boolean, current: Record<Tab, string[] | null>): Record
  * Moves the pane to a tab and opens a row there, or shows the tab's top when
  * there is none. The pane then redraws while the tab's top edge draws in.
  */
-async function jumpTo($: EngineInterface, tab: Tab, row: { id: string; index: number } | null) {
+async function jumpTo($: EngineInterface, tab: Tab) {
   const at = await $.clock.now()
   jumped = { tab, at }
   await update($, TAB, () => tab)
-  if (row) await select($, tab, row.id, row.index)
-  else await $.ui.scroll({ in: PANE, to: 'start' }).catch(() => undefined)
+  // With no row chosen, the tab draws its top row open, so rows that arrive above later move the open row with them.
+  await update($, SELECTION, s => ({ ...s, [tab]: NO_CURSOR }))
+  await $.ui.scroll({ in: PANE, to: 'start' }).catch(() => undefined)
   void (async () => {
     for (let n = 1; n <= DRAW_IN_STEPS; n++) {
       await $.clock.sleep(Math.max(0, at + (n * DRAW_IN_MS) / DRAW_IN_STEPS - (await $.clock.now())))
@@ -1419,10 +1420,8 @@ async function followNewRows($: EngineInterface, isOpening = false) {
     tab,
     isEmpty,
     added,
-    ids,
   )
-  if (!to) return
-  await jumpTo($, to.tab, to.id === null ? null : { id: to.id, index: ids[to.tab].indexOf(to.id) })
+  if (to) await jumpTo($, to)
 }
 
 async function isPaneShown($: EngineInterface) {

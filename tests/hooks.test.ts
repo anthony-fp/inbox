@@ -869,6 +869,23 @@ test('a finding Claude records while the pane shows an empty tab brings the pane
   expect(await pane.find({ key: 'new-f4' })).toBeUndefined()
 })
 
+test('findings that arrive one by one after the pane moves to them leave the top one open', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  on('ui.panes', () => ({ value: [{ id: 'inbox', title: 'Inbox', isShown: true, isFocused: true, isPlaced: true }] }))
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'inbox', args: '' } as never)
+  const pane = await $.ui.mount(PANE)
+  for (const title of ['Retry loop never backs off', 'Token cached forever', 'No lint script']) {
+    await $.tool.call({ tool: 'mcp__inbox__record_finding', kind: 'issue', title, detail: 'Found while reading.' })
+    await clock.settle()
+  }
+  await clock.advance(NEW_ROW_MS)
+  expect(await pane.find({ key: 'address-f3' })).toBeDefined()
+  expect(await pane.find({ key: 'address-f1' })).toBeUndefined()
+})
+
 test('t opens a field for the person’s own words: an answer closes its question, a reply hands a finding to Claude', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])
