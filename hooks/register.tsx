@@ -3149,13 +3149,14 @@ export const register: Register = on => {
       a.variant === 'primary' ? `${a.label} (recommended)` : a.label
     const desktopLabel = (a: Pick<KeyAction, 'label' | 'variant' | 'icon'>) =>
       a.icon ? `${a.icon} ${shownLabel(a)}` : shownLabel(a)
+    // On desktop a follow-up (`isFollowUp`) draws as plain text, so the row's answers and main action stand out.
     const keyedButton =
-      (rowId: string) =>
+      (rowId: string, isFollowUp = false) =>
       ({ hotkey, kind: _kind, isMain, icon, ...action }: KeyAction) =>
         look === 'desktop' ? (
           <Button
             {...action}
-            {...(isMain ? { variant: 'primary' as const } : {})}
+            {...(isFollowUp ? { plain: true } : isMain ? { variant: 'primary' as const } : {})}
             label={desktopLabel({ ...action, ...(icon ? { icon } : {}) })}
             {...(isOpenGuarded ? { dimColor: true } : {})}
             onPress={press => unlessGuarded($, rowId, press, action.onPress)}
@@ -3181,8 +3182,8 @@ export const register: Register = on => {
     const keyRow = (rowId: string, keys: KeyAction[], more: KeyAction[] = []) => (
       <Box flexDirection="row" flexWrap="wrap" columnGap={buttonGap} rowGap={look === 'desktop' ? 1 : 0}>
         {keys.map(keyedButton(rowId))}
-        {keys.length > 0 && more.length > 0 ? <Text color={pal.muted}>·</Text> : null}
-        {more.map(keyedButton(rowId))}
+        {look === 'terminal' && keys.length > 0 && more.length > 0 ? <Text color={pal.muted}>·</Text> : null}
+        {more.map(keyedButton(rowId, true))}
       </Box>
     )
     // The Buttons that take the pane's keys, drawn in a hidden Box.
@@ -3474,7 +3475,8 @@ export const register: Register = on => {
         ) : null
       // On desktop the actions take one line, main ones first. The open field replaces the follow-ups,
       // and the field's own submit button is its Send.
-      const desktopGroups = [isTyping ? keys : [...keys, ...more]].filter(group => group.length > 0)
+      const desktopMore = isTyping ? [] : more
+      const hasDesktopKeys = keys.length + desktopMore.length > 0
       const lastText = lastActionText(row.id, row)
       const status = [
         ...(row.fold?.note ? [{ text: row.fold.note, color: pal.muted }] : []),
@@ -3532,17 +3534,16 @@ export const register: Register = on => {
                 </Box>
               ) : null}
               <Box flexDirection="column" marginTop={blankLine}>
-                {/* Desktop drops the dot between groups: a Text among taller native buttons sits at their top edge. */}
                 {look === 'desktop'
                   ? [
-                      ...desktopGroups.map((group, n) => <Box marginTop={n > 0 ? 1 : 0}>{keyRow(row.id, group)}</Box>),
+                      ...(hasDesktopKeys ? [keyRow(row.id, keys, desktopMore)] : []),
                       ...(isTyping
                         ? [
                             <Box
                               flexDirection="row"
                               alignItems="center"
                               columnGap={buttonGap}
-                              marginTop={desktopGroups.length > 0 ? 1 : 0}
+                              marginTop={hasDesktopKeys ? 1 : 0}
                             >
                               <Box flexShrink={1}>{field}</Box>
                               {keyRow(
@@ -3905,19 +3906,32 @@ export const register: Register = on => {
         </Text>
       </Box>
     )
-    // On desktop an invisible border rounds the card's corners. It also pads the content on the left and right,
-    // by about two thirds of a line, and not above or below.
+    // On desktop an invisible border rounds the card's corners. A border also insets its content on the left and
+    // right, so the rounded fill is an absolute Box behind the content, and the rows reach the card's edges.
+    // The content is positioned too, so it paints above the fill.
     const isRoundedCard = look === 'desktop' && !isInline
-    const section = (children: JSX.Element | JSX.Element[]) => (
-      <Box
-        flexDirection="column"
-        paddingY={blankLine}
-        backgroundColor={isInline ? undefined : pal.card}
-        {...(isRoundedCard ? { borderStyle: 'single', borderColor: '#0000' } : {})}
-      >
-        {children}
-      </Box>
-    )
+    const section = (children: JSX.Element | JSX.Element[]) =>
+      isRoundedCard ? (
+        <Box position="relative" flexDirection="column" paddingY={blankLine}>
+          <Box
+            position="absolute"
+            top={0}
+            left={0}
+            right={0}
+            bottom={0}
+            borderStyle="single"
+            borderColor="#0000"
+            backgroundColor={pal.card}
+          />
+          <Box position="relative" flexDirection="column">
+            {children}
+          </Box>
+        </Box>
+      ) : (
+        <Box flexDirection="column" paddingY={blankLine} backgroundColor={isInline ? undefined : pal.card}>
+          {children}
+        </Box>
+      )
     // A blank line in the tree, but for its │: under a title, so the children
     // do not crowd it, and between two-line entries, so they read apart. Inline
     // it is left out, so callers spread what this returns.

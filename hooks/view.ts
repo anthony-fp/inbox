@@ -297,9 +297,12 @@ function actionsOf(
       action({ action: 'explain', id }, 'Explain', 'talk'),
     ]
   const isFolding = item.options.length > OPTIONS_FOLD_AT
+  // The recommended answer leads, so it is the first one read and never folded away.
+  const options =
+    item.rec && item.options.includes(item.rec) ? [item.rec, ...item.options.filter(o => o !== item.rec)] : item.options
 
   return [
-    ...item.options.map((option, n) =>
+    ...options.map((option, n) =>
       action({ action: 'answer', id, option }, clipLabel(option, 32), 'mark', {
         isPrimary: option === item.rec,
         isFolded: isFolding && n >= OPTIONS_FOLD_AT - 1,

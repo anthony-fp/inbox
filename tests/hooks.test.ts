@@ -476,8 +476,13 @@ test('a question with 7 options shows 4 until [All 7 options], draws its steps a
   expect(await pane.find({ key: 'answer-i1-4' })).toBeUndefined()
   expect(await hotkey('answer-i1-4')).toBeUndefined()
   expect((await pane.find({ key: 'all-options-i1' }))?.props.label).toBe('All 7 options')
-  expect([await hotkey('answer-i1-3'), await hotkey('help-i1-0'), await hotkey('help-i1-2')]).toEqual(['f', 'g', 'i'])
-  // The recommended option's drawn label marks it, after its letter.
+  expect([
+    await hotkey('answer-i1-3'),
+    await hotkey('answer-i1-2'),
+    await hotkey('help-i1-0'),
+    await hotkey('help-i1-2'),
+  ]).toEqual(['a', 'f', 'g', 'i'])
+  // The recommended option leads, and its drawn label marks it, after its letter.
   expect((await pane.find({ key: 'answer-i1-3' }))?.props.label).toBe(': Green (recommended)')
 
   await pane.press({ key: 'all-options-i1' })

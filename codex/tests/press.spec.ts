@@ -292,10 +292,10 @@ test('a question lists every option, folds those past the fourth of 7, marks the
   assert.deepEqual(
     actions.map(a => [a.label, a.kind, a.isPrimary, a.isFolded]),
     [
+      ['Green', 'mark', true, false],
       ['Red', 'mark', false, false],
       ['Orange', 'mark', false, false],
       ['Yellow', 'mark', false, false],
-      ['Green', 'mark', true, false],
       ['Blue', 'mark', false, true],
       ['Indigo', 'mark', false, true],
       ['Violet', 'mark', false, true],
