@@ -1,3 +1,16 @@
+// The mod: the host and the adapter for the terminal and desktop looks. It owns the engine hooks, the atoms,
+// the press runner, the PR presses and fetches, the band above the prompt and the /inbox pane. Rules shared
+// with the Codex tab live in view.ts, presses.ts, arrivals.ts, ledger.ts, prs.ts, tools.ts, demo.ts and layout.ts;
+// this file only draws them. See GLOSSARY.md for the terms and docs/looks.md for who owns each rule.
+//
+// Find a section by searching for:
+//   atoms and constants: `const LEDGER`; palettes: `const PALETTES`; the look of a surface: `function lookOf`
+//   model-read guidance: `const GUIDANCE`; per-reply update: `function runUpdate`, `function queueUpdate`
+//   stop and dialogs: `function setStop`, `function openDialog`; PR fetches: `function fetchPrs`
+//   PR presses: `function applyPrPress`; press runner: `async function runPress`; demo: `runDemoPress`
+//   engine hooks: `export const register`; band: `component: 'AbovePrompt'`; pane: `component: 'Pane'`
+//   desktop Clients: `const hasClient`; PR block in the pane: `const prBlock`
+
 import { atom, read, update } from 'claude-code'
 import type {
   EngineInterface,
@@ -1373,7 +1386,7 @@ function tabRowIds(view: InboxView, prViews: PrView[]): Record<Tab, string[]> {
  * the pane to a new row on another tab while the tab on screen shows only its
  * empty text. `isOpening` records the tabs afresh, so nothing in them counts as
  * new. The render cannot write state, so each write that can add a row calls
- * this. See docs/plans/jump-to-new-rows.md.
+ * this. See docs/archive/jump-to-new-rows.md.
  */
 async function followNewRows($: EngineInterface, isOpening = false) {
   const [drawn, tab, unfolded, isShown] = await Promise.all([
@@ -2072,7 +2085,7 @@ async function runDemoPress($: EngineInterface, p: RowPress | PrPress) {
 type Action = {
   key: string
   label: string
-  /** The recommended option. Every look marks it, and desktop draws it as the primary button. */
+  /** The recommended option. The terminal and desktop looks mark it, and desktop draws it as the primary button. */
   variant?: 'primary'
   /** The press that finishes the row, as Done or Address. Desktop draws it as the primary button. */
   isMain?: boolean
@@ -3159,9 +3172,9 @@ export const register: Register = on => {
     // inverts, so the letter and the label both invert the muted color to match.
     // An action past the lettered ones, or one that only changes the view, has no key and draws its label alone.
     // While the open row is guarded, both draw dim and a click does nothing. Its key, a hidden Button, works at once.
-    // On desktop an action is its native button alone. The recommended option's label ends "(recommended)" in every
-    // look. A plain terminal Button ignores `variant`, so there the words are the only mark. Desktop also draws the
-    // option as its primary button.
+    // On desktop an action is its native button alone. The recommended option's label ends "(recommended)" in the
+    // terminal and desktop looks. A plain terminal Button ignores `variant`, so there the words are the only mark.
+    // Desktop also draws the option as its primary button.
     const shownLabel = (a: Pick<KeyAction, 'label' | 'variant'>) =>
       a.variant === 'primary' ? `${a.label} (recommended)` : a.label
     const desktopLabel = (a: Pick<KeyAction, 'label' | 'variant' | 'icon'>) =>

@@ -62,7 +62,7 @@ The public docs and the app disagree on naming.
 |---|---|
 | https://code.claude.com/docs/en/desktop (Markdown line 9) | "three tabs: **Chat** … **Cowork** … and **Code**" |
 | desktop-quickstart (Markdown lines 34-38) | The same three tabs. |
-| `docs/plans/clients.md:22` (this repo, from the repo owner) | "The Claude desktop app has two modes, Claude and Code." |
+| The repo owner, told to Claude | "The Claude desktop app has two modes, Claude and Code." |
 | Changelog through 2.1.295 | Never says "Claude mode" or "Code mode". Still says "Code tab" and "Cowork" at 2.1.290 and 2.1.292. |
 
 - **Code mode** (the docs' "Code tab") runs Claude Code sessions. Everything in this file about plugins and mods applies here.
@@ -323,7 +323,7 @@ Read this before designing any desktop UI for the inbox. It lists what a mod can
 - The app delivers claude.ai connectors to local and SSH Code sessions as in-process `type: "sdk"` servers. "no MCP setting or `managed-mcp.json` reaches them" (https://code.claude.com/docs/en/mcp#how-connectors-reach-claude-code).
 - Servers in `claude_desktop_config.json` reach both the chat side and local Code sessions, and win name clashes. The CLI does not read that file (https://code.claude.com/docs/en/desktop#mcp-servers-from-the-claude-desktop-chat-app, Markdown lines 995-1002).
 - MCP Apps (tool results with an HTML view) render in Claude Desktop chat and claude.ai as inline iframes, one per tool call. "Claude Code calls the tool as text and doesn't render the UI" (https://claude.com/docs/connectors/building/mcp-apps/quickstart#see-the-ui-render-in-claude). Whether Code mode renders them is unknown.
-- The Codex Inbox tab is an MCP App. An inbox in Claude mode could only take that form, plus tools (`docs/plans/clients.md:29`).
+- The Codex Inbox tab is an MCP App. An inbox in Claude mode could only take that form, plus tools.
 
 ## Settings and environment
 
@@ -369,14 +369,10 @@ Source: https://code.claude.com/docs/en/desktop unless noted.
 
 | Topic | Sources | Trust | Why |
 |---|---|---|---|
-| Modes | Docs: three tabs, Chat, Cowork, Code. Repo owner (`clients.md:22`): two modes, Claude and Code. | The repo owner for the current UI. The docs for what each part does. | The owner sees the current app. The docs and changelog have not caught up with the rename. |
-| Whether Claude mode runs Claude Code | `clients.md:29`: "Claude mode runs no Claude Code session". Gateway docs: Cowork, Code and optionally Chat run "on embedded Claude Code sessions". | The gateway docs, until a live check. | It is a direct statement. `clients.md` cites no source. |
+| Modes | Docs: three tabs, Chat, Cowork, Code. Repo owner: two modes, Claude and Code. | The repo owner for the current UI. The docs for what each part does. | The owner sees the current app. The docs and changelog have not caught up with the rename. |
+| Whether Claude mode runs Claude Code | The repo owner: Claude mode runs no Claude Code session. Gateway docs: Cowork, Code and optionally Chat run "on embedded Claude Code sessions". | The gateway docs, until a live check. | The gateway docs are a direct statement. The owner's claim cites no source. |
 | Minimum engine for mods | Overview: Desktop from 2.1.286. Changelog: mods first at 2.1.287. | The overview for Desktop, as a floor. | The inbox was tested with 2.1.292 anyway. |
-| How the inbox turns on | `clients.md:7` and `:56` say the mod "never hooks `session.attach`" and cite `register.tsx:1885`. | The code: `hooks/register.tsx:1966`, `:1971`. | The plan predates commit 05c3548. |
-| Status of Code mode | `clients.md:35-37` say "Not tried" or unknown. | The repo owner's report: it loads. | Reported after commit 05c3548. Not rechecked on 2026-10-08. |
-| Where engine copies live | `clients.md:45`, `:462` say the app "bundles" them. | Live and the desktop page: downloaded into `~/Library/Application Support/Claude/`. | Seen on disk; the docs say "downloads and updates". |
-| Types version | `clients.md:460`: 2.1.293. | Neither is fixed. | The types file is rewritten by whichever engine last loaded the mod. It has read 2.1.292, 2.1.293, 2.1.294 and 2.1.295 at different times. |
-| Copy on desktop | `clients.md:362`: copy routing is correct. Types: "a remote surface has no path yet". | The types. | They come from the engine. |
+| Copy on desktop | Types: "a remote surface has no path yet". A live probe returned `isCopied: true`. | The live probe. | It ran against the desktop app. |
 | Tested engine | `README.md:20`: tested with 2.1.292. App copy: 2.1.289. | Treat 2.1.292 as the minimum until tested. | Inference: the inbox sends `$.model.complete` cache blocks (`hooks/register.tsx:735`). Which engine added them was not found in the changelog. |
 | Store key | `AGENTS.md`: the store is "keyed by the mod's name". | Live: name plus where it was loaded from (`inbox@inline`). | The file name hashes `inbox@inline`. |
 | Link schemes | Interface docs: `https:` or `http://localhost`. Types: `https:` only. | Unknown. Test `http://localhost` live. | Two engine-side sources disagree. |
@@ -451,5 +447,4 @@ Local sources:
 
 - `.claude-plugin/types/claude-code/index.d.ts`: the engine types. Gitignored; rewritten by the engine that loads the mod.
 - `hooks/register.tsx`: how the inbox turns on, reloads and reads prompt origins.
-- `docs/plans/clients.md`: the client plan, including the repo owner's mode names.
 - Live checks on this Mac: process arguments, `claude --version`, `claude agents --json`, `claude plugin list`, the files under `~/Library/Application Support/Claude/` and `~/.claude/plugins/store/`.

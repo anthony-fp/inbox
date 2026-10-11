@@ -1,9 +1,6 @@
 # The inbox as a Codex plugin
 
-Status: first version built in `codex/`. It runs in the desktop app; a
-press from the tab there is not confirmed yet. The Claude Code mod stays
-unchanged. Session checks and the claim check have since left both the mod
-and the plugin, so the parts of this plan about them describe removed code.
+Status: built. The Codex tab runs in the Codex desktop app. Session checks and the claim check were removed from the mod and the plugin, so the parts of this plan about them describe removed code.
 
 Goal: give Codex sessions what the inbox gives Claude Code sessions. That
 means one place for what waits on the person, Codex's findings, and an
@@ -161,15 +158,9 @@ doesn't have. The card after time away and the PRs tab may need it later.
   Codex passes it in `env_vars`, as OpenAI's bundled plugins do [verified:
   hooks, server and update ran with no `node` on the PATH].
 
-### 4. `run_check` would bypass Codex's sandbox
+### 4. Removed: `run_check` and check tracking
 
-In the mod, `run_check` runs each check through Claude's own Bash tool, so it
-gets Claude Code's permission check. An MCP server that runs commands would
-run them outside Codex's sandbox and approvals.
-
-**Do:** leave `run_check` out. Record checks Codex runs in its own shell, as
-the mod already does for Bash. Deny a compound check in `PreToolUse`, with the
-reason the mod gives. `checks.ts` and `check-tracking.ts` carry over unchanged.
+Removed. The mod and the plugin no longer run or record session checks. The check modules and the git and tree helpers they used no longer exist.
 
 ### 5. Which session a tool call belongs to
 

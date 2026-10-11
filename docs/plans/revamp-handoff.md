@@ -1,6 +1,8 @@
 # Revamp handoff
 
-The `revamp` branch builds the UI plan in [inbox-ui.md](inbox-ui.md) through the 16 steps in [target-architecture.md](target-architecture.md). Each step is a commit, followed by a review commit where a reviewer found something. `./scripts/check.sh` passes on every commit. The branch is not merged or pushed.
+Status: building. The revamp branch is not merged yet.
+
+The `revamp` branch builds the UI plan in [inbox-ui.md](inbox-ui.md) through the 16 steps in [target-architecture.md](../archive/target-architecture.md). Each step is a commit, followed by a review commit where a reviewer found something. `./scripts/check.sh` passes on every commit. The branch is not merged or pushed.
 
 ## Before merging
 

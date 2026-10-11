@@ -1,5 +1,7 @@
 # Architecture deepening
 
+Archived on 2026-10-10. It describes the code as it was then. For the current code, read [docs/looks.md](../looks.md) and the files it names.
+
 The Claude app pane and the Codex tab draw the same view model, `hooks/view.ts`. Where both clients still compute the same rule, that rule moves into one shared module, so the clients cannot drift. Each step keeps the mod's behavior, and each one's checks pass before the next starts.
 
 ## Done
@@ -15,7 +17,7 @@ The Claude app pane and the Codex tab draw the same view model, `hooks/view.ts`.
 
 ## Not done
 
-7. **Pane drawing in its own module.** `docs/plans/target-architecture.md` section 2 gives the reason: the pane's drawing reads 74 of `register.tsx`'s module-level values, so its own file would need a host interface almost as wide as the code behind it. The split worth making later puts terminal and desktop drawing behind one row and section interface, as two adapters.
+7. **Pane drawing in its own module.** `docs/archive/target-architecture.md` section 2 gives the reason: the pane's drawing reads 74 of `register.tsx`'s module-level values, so its own file would need a host interface almost as wide as the code behind it. The split worth making later puts terminal and desktop drawing behind one row and section interface, as two adapters.
 
 ## Checks for each step
 

@@ -1,5 +1,7 @@
 # The Codex Inbox tab
 
+Status: built. The key text it describes is out of date: the tab draws no key letters and no list of keys.
+
 The Inbox tab is the Codex plugin's version of the mod's `/inbox` pane. It
 sits beside a Codex conversation in the desktop app. This plan gives its
 layout and the reason for each choice. The plugin's design is in

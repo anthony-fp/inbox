@@ -1,5 +1,7 @@
 # Contrast in every theme
 
+Status: built. The palettes live in `PALETTES` in `hooks/register.tsx`.
+
 Goal: all text in the `/inbox` pane meets WCAG AA. That is 4.5:1 for text and
 3:1 for marker glyphs such as ✓ and ▲. It holds in each of Claude Code's
 built-in themes: Dark, Light, their colorblind-friendly versions, the two ANSI

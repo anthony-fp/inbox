@@ -1,5 +1,7 @@
 # Inbox instructions: review and plan
 
+Status: building. Closed findings and findings kept open until Claude closes them are built. The decisions under "Still open" are not settled.
+
 Goal: each instruction the mod gives has one role, each rule is written in one
 place, and findings reach the Findings tab at the right time and leave it with
 a record.

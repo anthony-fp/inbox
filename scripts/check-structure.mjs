@@ -18,12 +18,9 @@ const SHARED = ['arrivals', 'demo', 'layout', 'ledger', 'presses', 'prs', 'tools
 // hooks/ledger.ts imports a type from the engine. It is erased from the bundle, but the Codex type check then
 // needs the types only an interactive Claude session writes. Step 5 of docs/plans/three-looks.md moves it out.
 const ENGINE_TYPE_IMPORTS = ['ledger']
-// The docs checks report without failing until step 3 of docs/plans/three-looks.md cleans the docs up.
-const DOCS_ENFORCED = false
 const PLAN_STATUS = /^Status: (proposed|building|built|superseded by \S+)/m
 
 const errors = []
-const warnings = []
 const read = path => readFileSync(join(ROOT, path), 'utf8')
 const exists = path => existsSync(join(ROOT, path))
 
@@ -86,15 +83,14 @@ function docFiles() {
 const TOP_LEVEL = new Set(readdirSync(ROOT).filter(entry => entry !== 'node_modules'))
 
 function checkDocs() {
-  const report = DOCS_ENFORCED ? errors : warnings
   for (const doc of docFiles()) {
     const text = read(doc)
     if (doc.startsWith('docs/plans/') && !PLAN_STATUS.test(text))
-      report.push(`${doc} has no status line: "Status: proposed", "building", "built" or "superseded by <plan>".`)
+      errors.push(`${doc} has no status line: "Status: proposed", "building", "built" or "superseded by <plan>".`)
     for (const m of text.matchAll(/\]\(([^)\s]+)\)/g)) {
       const target = m[1].split('#')[0]
       if (!target || /^[a-z]+:/.test(target)) continue
-      if (!existsSync(join(ROOT, dirname(doc), target))) report.push(`${doc} links to ${target}, which does not exist.`)
+      if (!existsSync(join(ROOT, dirname(doc), target))) errors.push(`${doc} links to ${target}, which does not exist.`)
     }
     // A reference doc's paths name files in the product it describes, and a plan not yet built names files it
     // will add, so only their links are checked.
@@ -104,20 +100,18 @@ function checkDocs() {
       const path = m[1]
       if (!TOP_LEVEL.has(path.split('/')[0])) continue
       if (!exists(path) && !existsSync(join(ROOT, dirname(doc), path)))
-        report.push(`${doc} names ${path}, which does not exist.`)
+        errors.push(`${doc} names ${path}, which does not exist.`)
     }
   }
 }
 
 function checkLookMap() {
   const map = 'docs/looks.md'
-  if (!exists(map)) return
-  const report = DOCS_ENFORCED ? errors : warnings
   for (const m of read(map).matchAll(/`([\w./-]+\.[a-z]+):([\w.]+)`/g)) {
     const [, path, symbol] = m
     if (!exists(path)) continue
     if (!new RegExp(`\\b${symbol.replaceAll('.', '\\.')}\\b`).test(read(path)))
-      report.push(`${map} names ${path}:${symbol}, and ${path} has no ${symbol}.`)
+      errors.push(`${map} names ${path}:${symbol}, and ${path} has no ${symbol}.`)
   }
 }
 
@@ -126,8 +120,5 @@ checkCodex()
 checkDocs()
 checkLookMap()
 
-for (const w of warnings) console.log(`  - ${w}`)
 for (const e of errors) console.log(`  x ${e}`)
-if (warnings.length)
-  console.log(`  ${warnings.length} docs problems reported. They fail the check once DOCS_ENFORCED is true.`)
 process.exit(errors.length ? 1 : 0)

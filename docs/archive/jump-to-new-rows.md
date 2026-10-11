@@ -1,5 +1,7 @@
 # Jump to a new row
 
+Archived on 2026-10-10. It describes the code as it was then. For the current code, read [docs/looks.md](../looks.md) and the files it names.
+
 Status: built. Terms follow `GLOSSARY.md`.
 
 ## The rule

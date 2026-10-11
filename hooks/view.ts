@@ -286,11 +286,6 @@ function stepKind(step: HelpStep): PressKind {
   return step.step.some(h => h.kind === 'run') ? 'handoff' : 'local'
 }
 
-/**
- * A row's actions in the order the pane and the tab draw them, each labeled
- * "… again" when the row's last press, other than an open or copy, was that action.
- * A settled row offers only Undo, and only after the person's own Done or Dismiss.
- */
 /** The inbox's tabs in order, as every look names them and the keys that switch to them. */
 export const TABS: readonly { id: Tab; label: string; hotkey: string }[] = [
   { id: 'needsYou', label: 'Needs you', hotkey: '1' },
@@ -317,6 +312,11 @@ const ACTION_KEYS: Partial<Record<RowPress['action'], string>> = {
   dismiss: 'x',
 }
 
+/**
+ * A row's actions in the order the pane and the tab draw them, each labeled
+ * "… again" when the row's last press, other than an open or copy, was that action.
+ * A settled row offers only Undo, and only after the person's own Done or Dismiss.
+ */
 function actionsOf(
   row: { id: string; item: Item | null; steps: HelpStep[] },
   last: LastAction | undefined,

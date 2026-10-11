@@ -1,5 +1,7 @@
 # Architecture changes
 
+Archived on 2026-10-10. It describes the code as it was then. For the current code, read [docs/looks.md](../looks.md) and the files it names.
+
 Goal: move each concept whose rules were spread across `hooks/register.tsx`
 into one module with a small interface, and fix the bugs found on the way.
 Terms follow `GLOSSARY.md`.

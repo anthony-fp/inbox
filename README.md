@@ -40,9 +40,10 @@ letter next to the answer you want, and it goes to Claude as your message. You
 can also have Claude fix a finding, mark a task done, or dismiss anything you
 don't need.
 
-In the panel, `1`, `2` and `3` switch tabs, `j` and `k` move up and down, and
-an action's letter runs it. You can also click. ctrl+x tab moves focus from the
-prompt to the line above it, then to the panel, then back to the prompt. When
+In the terminal, `1`, `2` and `3` switch tabs, `j` and `k` move up and down,
+and an action's letter runs it. The Codex tab takes the same keys without
+showing the letters. In the Claude desktop app, you click. ctrl+x tab moves
+focus in the terminal from the prompt to the line above it, then to the panel, then back to the prompt. When
 the tab you're on is empty and something new
 arrives on another tab, the panel switches to it.
 

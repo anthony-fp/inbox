@@ -133,7 +133,7 @@ Each platform file has its own "Where sources disagree" table. These conflicts s
 | `isInteractive` in Code mode | `claude-code-mods.md:152` calls `isInteractive: false` an inference from the types. A live probe logged it false at `session.start` ([desktop](claude-desktop-app.md#live-probe-of-a-code-mode-session)). | Live |
 | `$.ui.copy` on desktop | One types comment says "a remote surface has no path yet", and `claude-code-mods.md` row 112 calls it unknown. A live probe returned `isCopied: true` ([desktop](claude-desktop-app.md#live-probe-of-a-code-mode-session)). | Live |
 | Codex app version | `mcp-apps.md:12` says it "was not recorded". `codex-plugins.md:16` records the bundled CLI, 0.160.1. Neither records the ChatGPT app build. | `codex-plugins.md` |
-| This repo's plans | `docs/plans/clients.md` is stale at `:7`, `:29`, `:35-37`, `:42`, `:45`, `:56`, `:362`, `:460` and `:462`; `AGENTS.md` says the store is keyed by name, not plugin id; `README.md:20` names engine 2.1.292; `codex/README.md:9-10` says the desktop app "has not been tried yet". | The reference files; see each file's disagreement table |
+| This repo's plans | `AGENTS.md` says the store is keyed by name, not plugin id; `README.md:20` names engine 2.1.292. | The reference files; see each file's disagreement table |
 
 ## Files
 

@@ -1,5 +1,7 @@
 # Rows handed to Claude
 
+Archived on 2026-10-10. It describes the code as it was then. For the current code, read [docs/looks.md](../looks.md) and the files it names.
+
 Status: built. Terms follow `GLOSSARY.md`. It extends
 [action-feedback.md](action-feedback.md).
 
@@ -77,7 +79,7 @@ still shows its options after Run, which is the bug the person reported.
 
 Findings keep their current behavior. Whether Address and Discuss should
 keep a finding open until Claude closes it is an open decision in
-[instructions.md](instructions.md).
+[instructions.md](../plans/instructions.md).
 
 ## Saved state
 

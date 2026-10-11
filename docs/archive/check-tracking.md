@@ -1,5 +1,7 @@
 # Check tracking
 
+Archived on 2026-10-10. It describes the code as it was then. For the current code, read [docs/looks.md](../looks.md) and the files it names.
+
 Superseded: session checks, `run_check`, the Bash refusal and the claim send-back were removed from the mod and the Codex plugin.
 
 Status: done. `hooks/check-tracking.ts` owns the check results, how they

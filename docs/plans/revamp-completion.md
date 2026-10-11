@@ -1,16 +1,18 @@
 # Finishing the revamp
 
+Status: building. The revamp branch is not merged yet.
+
 The revamp is done when the `revamp` branch merges to main with every part below finished. Nothing outside it gets built first.
 
 The revamp covers the work planned on this branch:
 
-- [target-architecture.md](target-architecture.md), the 16 build steps
+- [target-architecture.md](../archive/target-architecture.md), the 16 build steps
 - [inbox-ui.md](inbox-ui.md), the UI plan
-- [band-redesign.md](band-redesign.md) and the 2026-10-09 decisions
+- [band-redesign.md](../archive/band-redesign.md) and the 2026-10-09 decisions
 - [desktop-look.md](desktop-look.md), the desktop design
 - [revamp-handoff.md](revamp-handoff.md), its live checks and known gaps
 
-It does not cover the cross-client work in `docs/plans/clients.md`, Claude mode, or the shared HTML view. Those come after the merge.
+It does not cover Claude mode or the shared HTML view. Those come after the merge.
 
 Code is built in a separate worktree, `revamp-build`, and moves to `revamp` once `check.sh` passes. Your sessions load the `revamp` worktree and hot-reload it, so unfinished edits there would reach your live inbox.
 

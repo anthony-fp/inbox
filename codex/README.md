@@ -6,8 +6,9 @@ and the findings Codex recorded. The list shows in
 an Inbox tab beside the conversation, and its buttons send your answer to
 Codex as your own message.
 
-Status: first version. A full session ran through `codex exec`. A session in
-the desktop app, with the tab open, has not been tried yet.
+Status: built. The tab runs in the Codex desktop app. Presses, Dismiss, Undo
+and row switching were checked there on 2026-10-10. After a reinstall, the
+server reloads its handler without restarting the app.
 
 ## Install
 

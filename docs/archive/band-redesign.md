@@ -1,8 +1,10 @@
 # Band redesign: counts only
 
+Archived on 2026-10-10. It describes the code as it was then. For the current code, read [docs/looks.md](../looks.md) and the files it names.
+
 The band is the block the inbox draws above the prompt. This plan cuts it to one line: the counts for Needs you and Findings, with [Open inbox] at the right end. A stop adds a second line with [Resume]. Everything else lives in the pane.
 
-It is built. 5e6bcdc cut the band to the counts and the stop line and removed the last-session offer. f51412e moved [Open inbox] to the right end. One part was left out: on desktop the band's text is not cut to fit, so a long line wraps. [desktop-look.md](desktop-look.md) keeps it that way, because the words matter more than one line.
+It is built. 5e6bcdc cut the band to the counts and the stop line and removed the last-session offer. f51412e moved [Open inbox] to the right end. One part was left out: on desktop the band's text is not cut to fit, so a long line wraps. [desktop-look.md](../plans/desktop-look.md) keeps it that way, because the words matter more than one line.
 
 ## What the band shows
 

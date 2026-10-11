@@ -175,7 +175,7 @@ on('session.attach', { surface: 'desktop' }, async ($, e, next) => {
 
 ## The desktop app
 
-The public docs describe "three tabs: **Chat** for conversations, **Cowork** for Dispatch and longer agentic work, and **Code** for software development". [desktop] The app now shows two modes, "Claude" and "Code" (`docs/plans/clients.md`). This document reads "Code tab" in the docs as Code mode. Whether Claude mode equals Chat plus Cowork is unknown.
+The public docs describe "three tabs: **Chat** for conversations, **Cowork** for Dispatch and longer agentic work, and **Code** for software development". [desktop] The app now shows two modes, "Claude" and "Code" (reported by the repo owner). This document reads "Code tab" in the docs as Code mode. Whether Claude mode equals Chat plus Cowork is unknown.
 
 ### How Code mode runs the engine
 
@@ -242,7 +242,7 @@ The public docs describe "three tabs: **Chat** for conversations, **Cowork** for
 ### Admin and network
 
 - Desktop managed keys: `disableDesktopLocalSessions`, `disableSshSavedPasswords`, `sshConfigs`, `sshHostAllowlist`, `browserExternalPageTools`, `disableBrowserExternalNavigation`, `managedMcpServers` (3P). The Linux policy file `/etc/claude-desktop/managed-settings.json` is "a different file from Claude Code's managed settings file". [desktop#managed-settings; desktop#device-management-policies]
-- Admin-console settings "also reach these sessions on Anthropic's API when the session authenticates with an eligible login". "In a Cowork session on this machine, Claude Code never fetches admin-console settings". [desktop#managed-settings] Inference: Cowork sessions run Claude Code, which conflicts with `docs/plans/clients.md` saying Claude mode has no Claude Code session, if Claude mode includes Cowork.
+- Admin-console settings "also reach these sessions on Anthropic's API when the session authenticates with an eligible login". "In a Cowork session on this machine, Claude Code never fetches admin-console settings". [desktop#managed-settings] Inference: Cowork sessions run Claude Code. Whether Claude mode runs a Claude Code session is open if Claude mode includes Cowork.
 - Network hosts include `*.claudeusercontent.com` and `*.claudemcpcontent.com`. [desktop#network-access-requirements]
 - Feature availability by provider: Desktop, cloud sessions, mobile, Remote Control and Artifacts need a Claude subscription. When `ANTHROPIC_BASE_URL` is not `api.anthropic.com`, Claude Code turns off Remote Control and server-managed settings. [feature-availability]
 
@@ -1527,13 +1527,6 @@ The changelog page "is generated from the CHANGELOG.md on GitHub". On 2026-10-08
 
 ### Repo docs that are stale
 
-- `docs/plans/clients.md` (untracked, changing during the day) said at the time of reading:
-  - The mod "never hooks `session.attach` and never reads `$.session.surfaces()`", citing `hooks/register.tsx:1885`. Commit `05c3548` changed that.
-  - `isInteractive` at start and attach behavior are "Unknown" or "Not tried".
-  - The app "bundles 2.1.289 and 2.1.293". The app downloads those copies outside its bundle.
-  - The type check runs against types "(2.1.293)".
-  - Fixed `index.d.ts` line numbers, which drift with each engine.
-  - "Claude mode runs no Claude Code session". Several docs and changelog entries show Cowork sessions run the engine. See "Where sources disagree".
 - `AGENTS.md`: "The plugin store is keyed by the mod's name". Live store file names are keyed by plugin id (`inbox_inline-7e8589075f50.json`).
 - `AGENTS.md` and `ROADMAP.md:29` call the per-turn call a "Sonnet call". `sonnet` resolves to different models by provider. See "What the inbox's model calls cost".
 - `hooks/register.tsx` comment at `:1964-1965` says "-p, the SDK and VS Code draw nothing". That matches the docs. The types give `vscode` its own element table.
@@ -1556,13 +1549,13 @@ Each row names the conflict, which source to trust, and why.
 
 | # | Conflict | Trust | Why |
 |---|---|---|---|
-| 1 | App naming. The docs say "Code tab" and "three tabs: Chat … Cowork … Code" [O#where-mods-run; desktop]. The app now has two modes, "Claude" and "Code" (`docs/plans/clients.md`). | The app | The docs lag the app. Read "Code tab" as Code mode. |
+| 1 | App naming. The docs say "Code tab" and "three tabs: Chat … Cowork … Code" [O#where-mods-run; desktop]. The app now has two modes, "Claude" and "Code" (reported by the repo owner). | The app | The docs lag the app. Read "Code tab" as Code mode. |
 | 2 | Minimum version. Overview: terminal 2.1.287, desktop 2.1.286 [O#turn-mods-on-or-off]. Admin page: 2.1.286 for all [A]. The changelog first lists mods at 2.1.287 [CL]. | Overview | It is the more specific page and matches the changelog. Before 2.1.287 the early-access switch may still have gated mods. Unknown. |
 | 3 | Which surfaces draw. Docs: only terminal and desktop; "`e.surface` is `terminal` or `desktop`" [O#where-mods-run; R#render-sites]. Types: `RenderSurface = 'terminal' \| 'desktop' \| 'mobile' \| 'vscode'`, each with an element table [T: `RenderSurface`]. | Docs for behavior today; types for what code must handle | The types are likely ahead of the shipped apps. A render hook typed from the types must still handle all four values. |
 | 4 | Desktop exceptions. "Except elements the elements table marks terminal-only" [O#where-mods-run] leaves out the terminal-only render sites (`ToolProgress`, `TurnDuration`, `InfoNotice`) and that `Svg` is desktop-only. | Reference tables | [R#render-sites; R#elements] are the detailed lists. |
-| 5 | Desktop start. The docs imply nothing special is needed in Code mode. Live, recorded in `docs/plans/clients.md:56`: while the mod gated on `isInteractive` alone, "`/inbox` and the mod's tools did not exist" in Code mode. Commit `05c3548` adds the attach paths (`hooks/register.tsx:1962-1974`). `SessionStartInput` mentions only REPL, `-p` and SDK [T]. | Live check | The failure was recorded. Which path turns the mod on, and the exact start values (`isInteractive`, `surfaces()`) were not logged. The docs never warn that an `isInteractive` gate excludes desktop. |
+| 5 | Desktop start. The docs imply nothing special is needed in Code mode. Live: while the mod gated on `isInteractive` alone, "`/inbox` and the mod's tools did not exist" in Code mode. Commit `05c3548` adds the attach paths (`hooks/register.tsx:1962-1974`). `SessionStartInput` mentions only REPL, `-p` and SDK [T]. | Live check | The failure was recorded. Which path turns the mod on, and the exact start values (`isInteractive`, `surfaces()`) were not logged. The docs never warn that an `isInteractive` gate excludes desktop. |
 | 6 | Guard scope. The admin page says the guard protects "the system prompt" and managed instructions, and "Everything else is allowed" [A#know-what-happens-by-default]. The guard's source skips every user-tier hook on `prompt.compose`, `prompt.context` and `classic.*`, and refuses `tool.register` under `allowedMcpServers` [G]. | Source, for the main branch | The source is exact. Whether the shipped guard matches it is unknown. |
-| 7 | Cloud sessions. `docs/plans/clients.md` lists cloud sessions among places hooks run. Hooks run there only "for a plugin that reaches the cloud session" [O#where-mods-run], which needs server-managed settings [PO]. | Docs | The inbox, installed from GitHub, does not reach cloud sessions. |
+| 7 | Cloud sessions. Hooks run there only "for a plugin that reaches the cloud session" [O#where-mods-run], which needs server-managed settings [PO]. | Docs | The inbox, installed from GitHub, does not reach cloud sessions. |
 | 8 | Remote turn-off. It appears only in the built-in table and the troubleshoot messages [O; TS#check-whether-mods-can-load], not on the admin page. | Neither is complete | Whether it stops built-in mods, and how "saved off" clears in the desktop app, is undocumented. |
 | 9 | Test kit. The test page lists 5 mount-handle methods and 8 matchers [TT]. The types add `findAll`, `drawn`, `key`, `pointer`, `post`, `advance`, `resize`, `describe`, `test(name,{options})` and more matchers [T]. | Types | The docs say to trust the types when they disagree [C#get-the-types-for-your-build]. |
 | 10 | `session.attach`. One row in the reference events table [R#events]. The create, test and troubleshoot pages never mention it. Matcher, timing and roster are only in the types. | Types plus live checks | The desktop gate depends on it. |
@@ -1577,7 +1570,7 @@ Each row names the conflict, which source to trust, and why.
 | 19 | The reference baseline is "as of v2.1.290" while the test and troubleshoot pages document 2.1.292 and 2.1.293 features. | Newer pages | The pages were updated unevenly. |
 | 20 | `Svg` availability. Docs: desktop only. Types: "every remote surface" (desktop, mobile, vscode). | Both | They agree for terminal and desktop, the inbox's two drawing surfaces. |
 | 21 | Element the surface lacks. Interface page: Claude Code "draws its own version of the site" [IF#build-a-tree-from-elements]. Gallery: an Svg-only pane in the terminal "opens empty" [GA#svg]. Types: "an omitted one draws a fragment". | Unknown; gallery and types agree | Check live with `Box[Text, Raster]` on desktop. Until then, branch on the surface and never rely on either fallback. |
-| 22 | Desktop Link schemes. Docs: `https:` or `http://localhost` [IF#link-in-the-desktop-app]. Types: only `https:` on a remote surface. `docs/plans/clients.md` follows the docs. | Types, until checked | The types are newer and stricter. Use https links. |
+| 22 | Desktop Link schemes. Docs: `https:` or `http://localhost` [IF#link-in-the-desktop-app]. Types: only `https:` on a remote surface. | Types, until checked | The types are newer and stricter. Use https links. |
 | 23 | Terminal Link drawing. Gallery: URL text after the label. Types: an OSC 8 span, URL text only where the terminal lacks OSC 8. | Types | Unverified. |
 | 24 | Button props. The docs omit `variant`, `role`, `hover`, and string or `Text` children. The inbox uses `variant`. Button `action` is terminal-only in the types; the docs don't say. | Types | Name the engine build when relying on them. |
 | 25 | Box props. The docs omit `display`, `overflow`, `minWidth`, `flexWrap`. The inbox relies on `display="none"`. | Types | |
@@ -1590,8 +1583,7 @@ Each row names the conflict, which source to trust, and why.
 | 32 | `$.model.complete` system prompt. The API page doesn't mention the CLI identity block the types say is prepended. | Types | Readers of the docs alone would think only their `system` is sent. |
 | 33 | `$.process.run` 4 MiB stream cap and "CLI only" are in the types only. | Types | |
 | 34 | `session.end` clock. Reference: counted "from when your settings `SessionEnd` hooks finish". Types: one bound "covers every hook, its `$` waits and core". | Unknown | Measure live. |
-| 35 | `docs/plans/clients.md` lines 7 and 56 say the mod "never hooks `session.attach`" and that `isOn = e.isInteractive` is set once. `hooks/register.tsx:1962-1974` now does both differently. Lines 35-37 still mark `isInteractive` and attach as unknown or not tried; line 45 and 462 say the app "bundles" engines it actually downloads; line 460 names 2.1.293 types. | Code and live checks | The plan predates commits `05c3548` and `f7536d0`. |
-| 36 | `docs/plans/clients.md:362` says copy through `press.surface` is correct for a Code-mode session. Types: "a remote surface has no path yet". | Live: the plan | A live probe returned `isCopied: true` on desktop. [desktop](claude-desktop-app.md#live-probe-of-a-code-mode-session) |
+| 36 | Copy through `press.surface` in a Code-mode session. Types: "a remote surface has no path yet". | Live | A live probe returned `isCopied: true` on desktop. [desktop](claude-desktop-app.md#live-probe-of-a-code-mode-session) |
 | 37 | Toast placement. API page: one line at the right under the prompt in the classic renderer. Types: "notification bar". | Probably the same place | |
 | 38 | VS Code plugin changes. Install page: "Your changes apply to open sessions without a restart." VS Code page: the dialog shows "Restart Claude to apply plugin changes". | Unknown | Check live. |
 | 39 | Plugin origins. Docs list `@marketplace`, `@inline`, `@skills-dir`, `@synced`. Types list `@<marketplace>`, `@inline`, `@builtin`. Live store files show `@builtin`. | Both, combined | Each lists part of the set. |
@@ -1621,10 +1613,10 @@ Each row names the conflict, which source to trust, and why.
 | 63 | MCP quickstart lists a "Claude Code desktop app" and a separate "Claude Desktop chat app". Desktop pages describe one app with tabs. The app now has two modes. | The app | The quickstart is outdated. |
 | 64 | Oversized MCP result. MCP page: replaced "with a message". SDK page: "with an error message". | Unknown | |
 | 65 | MCP connect timers. MCP page calls a 5 s cap "the standard 5-second connect timeout". Quickstart and SDK call the 30 s `MCP_TIMEOUT` the connection timeout. | SDK page | It names both timers. |
-| 66 | `docs/plans/clients.md:29` says the docs don't cover which plugin parts Claude mode loads. The platform-support page does: Chat ignores hooks, mods and local MCP. | Platform-support page | |
-| 67 | Cowork and Claude Code. Desktop docs say Cowork sessions run Claude Code (OTel passed "to Claude Code"; "Claude Code never fetches admin-console settings" there). `docs/plans/clients.md` says Claude mode has "No Claude Code session". | Docs, if Claude mode includes Cowork | A locally installed mod still would not load there, since Cowork plugins come from claude.ai. |
+| 66 | Which plugin parts Claude mode loads. The platform-support page says Chat ignores hooks, mods and local MCP. | Platform-support page | |
+| 67 | Cowork and Claude Code. Desktop docs say Cowork sessions run Claude Code (OTel passed "to Claude Code"; "Claude Code never fetches admin-console settings" there). | Docs, if Claude mode includes Cowork | A locally installed mod still would not load there, since Cowork plugins come from claude.ai. |
 | 68 | "Desktop is interactive only" [desktop] versus a headless stream-json child (live `ps`), which the types say starts with `isInteractive: false` (types; not logged live). | Both | Different meanings: user experience versus engine flag. |
-| 69 | SSH and mods. Desktop docs: SSH supports plugins. The mods table excludes only WSL. `docs/plans/clients.md` says the docs don't say whether a mod draws there. | Docs imply it draws | Neither says it outright. Check live. |
+| 69 | SSH and mods. Desktop docs: SSH supports plugins. The mods table excludes only WSL. | Docs imply it draws | Neither says it outright. Check live. |
 | 70 | Plugins in cloud sessions. The carry-over table and settings page: no user or repo plugin loads. The changelog describes synced plugins that load, run SessionStart hooks and connect MCP servers, and a fix for a mod's `session.receive` hook in cloud sessions. | Both | The table omits the synced path. |
 | 71 | No `web` surface. claude.ai/code is a Remote Control client, but `RenderSurface` has no web value. No page says how a browser viewer attaches. | Unknown | |
 | 72 | Desktop as a Remote Control viewer. The Remote Control page lists Claude Desktop as a viewer; the mods table's Remote Control row names only claude.ai and mobile. | Unknown | Whether it attaches as `desktop` decides whether the inbox turns on. |
@@ -1632,7 +1624,7 @@ Each row names the conflict, which source to trust, and why.
 | 74 | Desktop session list. Sessions page: the desktop app keeps "their own session list". Live: desktop Code sessions show in `claude agents --json` and `ListAgents` and store transcripts in `~/.claude/projects`. | Live | "Own list" holds only for the resume picker. |
 | 75 | Agent view vs `--json`. The TUI hides interactive sessions until backgrounded; `--json` lists "every live session". | Both | The TUI list is a subset. |
 | 76 | Mod messaging. Types give mods `$.session.send` and `session.receive`; the messaging page describes only model-driven `SendMessage` and `ListAgents`. | Types | |
-| 77 | `ROADMAP.md` and `docs/plans/clients.md` I15 say the store keeps each session's ledger but has no liveness. `claude agents --json` is the documented liveness source and is not mentioned in repo plans. | Docs | |
+| 77 | `ROADMAP.md` says the store keeps each session's ledger but has no liveness. `claude agents --json` is the documented liveness source and is not mentioned in repo plans. | Docs | |
 | 78 | Desktop and `-p`. Changelog 2.1.260: "`-p --resume`/`--continue` (as used by the desktop app)". Live `ps` on 2026-10-08: the app's engine runs with stream-json flags and no `-p`. | Live | Matters for the `--bare` default flip. |
 | 79 | Installed plugins in SDK sessions. SDK plugins page implies a CLI-installed plugin must be passed by path. Headless page: `-p` loads installed plugins unless `--bare`. The `settingSources` table never lists installed plugins. Mods overview: hooks run in the Agent SDK. | Unknown | Live check in "Unknown". |
 | 80 | `--bare` and `--plugin-dir` mods. Headless page: `--bare` still loads `--plugin-dir`. Mods overview and create page: `--bare` stops mods. Refusal message names only "installed plugins that are not managed". | Unknown | Inference: an `@inline` hooks module may still load. |
@@ -1642,14 +1634,13 @@ Each row names the conflict, which source to trust, and why.
 | 84 | Desktop as an SDK host. SDK pages never say so; only the changelog does (2.1.208, 2.1.260, 2.1.280, 2.1.282). The mods table marks "`claude -p` and the Agent SDK" as drawing nothing and the Code tab as drawing. | Both | The difference is the `ui_attach` surface declaration, described only in the types. |
 | 85 | `--bare` skip list. headless#examples names "hooks, plugins, auto memory, or `CLAUDE.md`". #start-faster-with-bare-mode adds skills, commands, subagents and MCP servers. | Fuller list | Incomplete, not contradictory. |
 | 86 | Types on `vscode`. `Mounted` says the `vscode` tables "lack `Input` and `Client`". The `vscode` element table includes `Input`. Seen in 2.1.294 and 2.1.295 types. | Unknown | One of the two is stale. |
-| 87 | Desktop mode names, third source. claude-apps-gateway: Desktop "runs its Cowork and Code tabs, plus the Chat tab when you enable it, on embedded Claude Code sessions". `docs/plans/clients.md`: "Claude mode runs no Claude Code session". | Unknown | Conflict holds at least for gateway builds. |
+| 87 | Desktop mode names, third source. claude-apps-gateway: Desktop "runs its Cowork and Code tabs, plus the Chat tab when you enable it, on embedded Claude Code sessions". | Unknown | Gateway builds run Claude Code in Cowork and Code. |
 | 88 | Artifacts page vs live tool. Page: "Single page: Relative links do not resolve" and "No backend: An artifact is a static page". Live `Artifact` tool: multi-file `files`, a per-artifact database, viewer identity, "depending on what is enabled for this person". | Live tool, per account | |
 | 89 | Artifact surfaces. Page names "Claude Code CLI, or the Claude desktop app". Changelog 2.1.268 adjusts "[VSCode] … artifact permission prompts" and gives Cowork the Artifact tool. | Changelog | The page omits VS Code and Cowork. |
 | 90 | Artifact surface version. "Requires Claude Code v2.1.281 or later" sits after the remote-control sentence. Unclear whether it covers all artifacts. | Unknown | Inference: remote-control only, since `/artifacts` needs 2.1.208. |
 | 91 | JetBrains panel. JetBrains page describes only the terminal CLI. Changelog 2.1.281 says "VS Code and JetBrains panels". | Unknown | Matters because the mods table promises drawing for "the JetBrains plugin". |
 | 92 | Remote Control hosts. Platforms page: "CLI, Desktop, or VS Code". Changelog 2.1.273 mentions Remote Control "attached to a … JetBrains session". | Changelog | JetBrains is the CLI, so it is covered in practice. |
 | 93 | Status line and mods. The status line page describes one user-set line. The mods interface map shows mods adding "a status line under the prompt" (`$.ui.status`). Neither page mentions the other. | Unknown | How the two share a row is not documented. |
-| 94 | `clients.md` vs code. `docs/plans/clients.md` says the mod "never hooks `session.attach` and never reads `$.session.surfaces()`" and sets `isOn` once at start. Commit `05c3548` does both (`hooks/register.tsx:1962-1974`). | Code | The plan text is stale. It also names types version 2.1.293 and fixed `index.d.ts` line numbers, which drift. |
 | 95 | The SDK `readMcpResource()` is "*Alpha.*" on the TS reference. The MCP Apps pages describe the `ui://` flow as stable for hosts. | Both | Different products: SDK API status, not the protocol. |
 | 96 | Host allow rules. permissions#settings-precedence: hosts can supply managed policy "including permission allow rules unless the admin sets the `allowManaged*Only` locks". settings-reference#parentsettingsbehavior: host settings apply "still filtered to restrictive values". | Unknown | Allow rules are not restrictive. |
 | 97 | `CLAUDE_CODE_PLUGIN_DIR_WATCH`. mods/reference documents only `1`. env-vars also documents `0` (off everywhere). | env-vars | The reference is incomplete. |
@@ -1950,6 +1941,6 @@ Every page was read on 2026-10-08. Page URLs below were checked to resolve that 
 
 ### Local sources
 
-- This repo at `55ab122`: `hooks/register.tsx`, `hooks/ledger.ts`, `hooks/prs.ts`, `hooks/hooks.json`, `.claude-plugin/plugin.json`, `tests/hooks.test.ts`, `scripts/check.sh`, `README.md`, `ROADMAP.md`, `AGENTS.md`, `docs/plans/clients.md` (untracked, read during the day).
+- This repo at `55ab122`: `hooks/register.tsx`, `hooks/ledger.ts`, `hooks/prs.ts`, `hooks/hooks.json`, `.claude-plugin/plugin.json`, `tests/hooks.test.ts`, `scripts/check.sh`, `README.md`, `ROADMAP.md`, `AGENTS.md`.
 - Live commands on 2026-10-08: `claude --version`, `claude plugin list`, `claude plugin details inbox`, `claude plugin validate`, `claude plugin test`, `claude agents --json`, `ps`, and file listings of `~/.claude/plugins/store/` and `~/Library/Application Support/Claude/`.
 

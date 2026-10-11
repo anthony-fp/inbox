@@ -1,5 +1,7 @@
 # Motion and Undo
 
+Status: building. The Claude app part is not fully tested.
+
 The Codex tab gets enter, exit and move animations, and both clients get a clearer Undo state. Codex gets motion first, because its view is a web page. The Claude app's pane has no CSS, so its motion waits on a probe.
 
 ## Status

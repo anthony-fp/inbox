@@ -1,8 +1,10 @@
 # Inbox UI plan for four clients
 
+Status: built. It is the UI spec the code follows.
+
 This plan sets what the inbox shows in each client and how the person acts on it. The view model, the press contract and the renderers come next, and they must follow from this plan. Section 7 lists what they must provide.
 
-The facts behind it are in [docs/reference/](../reference/README.md), checked on 2026-10-08. Where `clients.md` disagrees with the reference, the reference wins.
+The facts behind it are in [docs/reference/](../reference/README.md), checked on 2026-10-08.
 
 Lines that depend on a decision in section 6 carry a tag, such as "(decision 3)". Section 6 states the default taken for each decision. If you pick differently, only the tagged lines change.
 

@@ -1,3 +1,10 @@
+// The saved ledger and its writes, and the texts the models read: `systemText`, `buildPrompt`, `inboxText`,
+// `carryText`, `closedText`, `answerNote`. Both hosts import it. AGENTS.md's rule for testing model-read text
+// covers those texts.
+//
+// Claude only today: the stop text (`stopText`, `statusLine`), `dialogText`, the command rows (`readCommandRow`),
+// and the transcript code, which imports a `claude-code` type. Step 5 of docs/plans/three-looks.md moves them out.
+
 import type { SessionMessage } from 'claude-code'
 
 import type { Card, Closed, ClosedFinding, Dialog, Finding, Help, Item, Ledger, Stop } from '../types'

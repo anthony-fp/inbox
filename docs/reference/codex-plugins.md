@@ -1828,7 +1828,6 @@ read-only while writing this file.
 | Mode switcher copy | L/sandboxing (IDE-extension tab) still shows "Chat / Agent / Agent (full access)". The mode pickers on L/sandboxing and L/permission-modes show a "Do anything" label that is not in their mode list | n/a | Leftover UI copy. |
 | Listing translations | D/deploy/submission#translate-listing-text: importing translations "doesn't yet change the text shown in the Plugins Directory or listing API responses" | n/a | A documented feature that is not live yet. |
 | Transcript item fields (repo) | codex-plugin.md:325 lists five fields. Live and code use `aggregated_output` and argv lists | Live | The plan's list is incomplete. |
-| clients.md line numbers (repo) | docs/plans/clients.md:555-559 cites `server.ts:71-73`, `:36`, `:115` | Code | Now 73-79, 38, 123. |
 
 ## Unknown, and how to check
 
@@ -1975,7 +1974,7 @@ developers.openai.com/plugins (packaging, submission, UI):
 ### This repo
 
 `docs/plans/codex-plugin.md`, `docs/plans/codex-tab.md`,
-`docs/plans/clients.md`, `codex/README.md`, `codex/plugin/.codex-plugin/plugin.json`,
+`codex/README.md`, `codex/plugin/.codex-plugin/plugin.json`,
 `codex/plugin/.mcp.json`, `codex/plugin/hooks/hooks.json`,
 `.agents/plugins/marketplace.json`, `.claude-plugin/plugin.json`,
 `codex/src/{server,server-main,server-handler,hook,state,update,transcript,texts,tab}`.

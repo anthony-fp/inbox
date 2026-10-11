@@ -1,5 +1,7 @@
 # Desktop polish
 
+Status: building. The spacing rules are built; two hover and press checks still need a person.
+
 The open row and the lists looked haphazard in the Claude app, and less so in the Codex tab. This plan sets one spacing rule for both, and for each app an action layout, tabs and rows drawn with that app's own controls.
 
 ## What is wrong today

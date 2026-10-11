@@ -1,6 +1,8 @@
 # Inbox target architecture and build plan
 
-This plan sets the code shape that serves the UI in [inbox-ui.md](inbox-ui.md), and the order to build it in. The UI plan is decided. This plan follows it in three layers: the view model first, then the press contract, then the renderers.
+Archived on 2026-10-10. It describes the code as it was then. For the current code, read [docs/looks.md](../looks.md) and the files it names.
+
+This plan sets the code shape that serves the UI in [inbox-ui.md](../plans/inbox-ui.md), and the order to build it in. The UI plan is decided. This plan follows it in three layers: the view model first, then the press contract, then the renderers.
 
 Section references such as "UI 2.3" point to `inbox-ui.md`.
 
@@ -514,7 +516,7 @@ Every step:
 - **Goal:** a known passing start.
 - **Do:**
   - In the worktree, run `npm --prefix codex ci` if `codex/node_modules` is missing, then `./scripts/check.sh`. If it fails on files this work did not touch, stop and report to the owner before step 1.
-  - Check whether the main checkout still has uncommitted edits to `docs/plans/architecture.md`. If it does, ask the owner whether they will be committed first. Until they are, step 1 leaves that file alone, and its update moves to the first step after the branch is rebased onto them.
+  - Check whether the main checkout still has uncommitted edits to `docs/archive/architecture.md`. If it does, ask the owner whether they will be committed first. Until they are, step 1 leaves that file alone, and its update moves to the first step after the branch is rebased onto them.
 - **Commit:** none.
 
 ### Step 1. Remove session checks and PR Fix
@@ -544,7 +546,7 @@ Every step:
     - `codex/tsconfig.json` drops the deleted files; `codex/README.md`.
     - Not `codex/plugin/hooks/hooks.json`. Its matchers and the Stop timeout of 60 stay as they are, even where a matcher now serves no check.
   - Tests: `tests/hooks.test.ts`, `tests/prs.test.ts`, `codex/tests/hook.spec.ts`, `update.spec.ts`, `server.spec.ts`, `helpers.ts` (`commandEndLine`).
-  - Docs: `GLOSSARY.md`, `docs/plans/codex-plugin.md`, `docs/reference/claude-code-mods.md` (its `run_check` line), and `docs/plans/architecture.md` unless step 0 deferred it. Mark `check-tracking.md` and `exact-check-results.md` as superseded at their top. AGENTS.md: the line naming `toolAnswer`.
+  - Docs: `GLOSSARY.md`, `docs/plans/codex-plugin.md`, `docs/reference/claude-code-mods.md` (its `run_check` line), and `docs/archive/architecture.md` unless step 0 deferred it. Mark `check-tracking.md` and `exact-check-results.md` as superseded at their top. AGENTS.md: the line naming `toolAnswer`.
 - **Behavior:**
   - No failing-check rows, band check lines, `run_check`, Bash refusal or claim send-back.
   - The count is questions plus tasks that are not handed off.
@@ -848,7 +850,7 @@ Every step:
 
 **Waits on the owner.**
 - **The `classic.Stop` reading**, before step 1 commits. The mod keeps the capture of replies other hooks blocked, and only the claim send-back goes (section 8). Removing the whole hook would be a model-read change.
-- **`docs/plans/architecture.md`**, before step 1. The main checkout has uncommitted edits to it, so step 1's edit would conflict with them (step 0).
+- **`docs/archive/architecture.md`**, before step 1. The main checkout has uncommitted edits to it, so step 1's edit would conflict with them (step 0).
 - **Codex keys under owner decision 3**, before step 12. UI 2.9 keeps them; owner decision 3 calls keys terminal-only. This plan keeps them per UI 2.9 (6.2).
 - **The reopen wording.** If A/B 3 picks version A, the next carry text lists the reopened item but does not say "reopened", which departs from UI 2.3's wording. The owner may require the explicit line.
 - **Terminal links stay Buttons**, departing from UI 3.2's `Link` (6.1).

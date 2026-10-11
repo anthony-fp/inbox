@@ -1,6 +1,6 @@
 # One inbox in three looks
 
-Status: proposed. Terms follow `GLOSSARY.md`.
+Status: building. Steps 1 to 3 are done. Terms follow `GLOSSARY.md`.
 
 Agents build and maintain this product, so the code itself has to tell them two things. First, which rules every look shares, and where each one lives. Second, where the looks differ on purpose, and why. Today the core rules are shared. The rules around that core are copied per look, and nothing says which copies must match. This plan makes each rule live in one place, writes down every deliberate difference next to the code, and adds checks that fail when a look drifts.
 
@@ -12,7 +12,7 @@ Agents build and maintain this product, so the code itself has to tell them two 
 - **Adapter**: the code that draws the shared view in one look. `hooks/register.tsx` draws the terminal and desktop looks. `codex/src/tab.tsx` draws the Codex tab.
 - **Difference on purpose**: a behavior that differs between looks because one look cannot do something, or because the product decided so. Every other difference is drift.
 
-## What the code does today
+## The drift this plan fixes
 
 What is already shared, in one place:
 
@@ -31,7 +31,7 @@ What drifts, with the evidence the review found:
    - The double ✓ is avoided by checking the glyph in the pane and the tone in the tab.
    - The pane recomputes feedback in the renderer instead of reading `RowView.feedback`.
 3. **Copy is repeated in each adapter.** This covers the status line, "No open findings.", the demo banner, "N Closed", "Undo", "Try again", "All N options", Send and Cancel, the group titles, and the group count rule.
-4. **The empty-tab rule and the default open row are written twice, with different inputs.** `followNewRows` in the mod and `isShownEmpty` in Codex disagree about Closed folds that list only just-settled rows.
+4. **The empty-tab rule and the default open row are written twice, with different inputs.** `followNewRows` in the mod and `isShownEmpty` in Codex read different inputs. Their results agree today, because a row drawn as settled already keeps its tab from being empty. A change to one would not reach the other.
 5. **The per-reply update is written twice.**
    - Both copies exclude the explained row and cap activity at 40.
    - The mod keeps `turnsApplied` when an update fails. Codex advances it, because Codex has no catch-up. That difference is on purpose, but only a Codex comment says so.
@@ -155,7 +155,7 @@ Another session has uncommitted edits in `docs/plans/row-actions.md`, `docs/plan
 ### 7. One arrival rule
 
 - Add `isTabEmpty` and `defaultOpenId` to `hooks/arrivals.ts`. Each host passes its drawn settled rows and its own blockers as named inputs: the stop and unread state in the mod, the heard state in Codex. Use them in both hosts.
-- No behavior changes. The two hosts disagree on one case: a Closed fold that lists only rows still drawn as settled. The mod treats that tab as not empty and does not jump; Codex jumps. That becomes a named input, `foldHidesSettled`, set to today's value in each host. Which behavior should win is a product question for Pete.
+- No behavior changes. The two rules agree today on every case, so one shared rule replaces both.
 
 ### 8. One update and press bookkeeping
 

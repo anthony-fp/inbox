@@ -466,7 +466,7 @@ Code at `55ab122`.
 | Theme | `applyHost` uses `theme` and `styles.variables` only (`tab.tsx:104`). `color-scheme` is set in CSS (`codex/src/tab.html:10`, `:36`, `:54`). The root paints `var(--bg)` (`:11`, `:72`). | Claude: transparent background, `<meta name="color-scheme">`, `styles.css.fonts`. | Opaque card and fallback font in Claude [inference]. |
 | Clipboard | Falls back to manual copy because "The tab's frame may not get the clipboard" (`tab.tsx:202-205`). | `permissions.clipboardWrite`, which hosts "MAY honor". | Declare it and keep the fallback. |
 | Session key | `sessionOf` reads Codex's `_meta["x-codex-turn-metadata"].session_id`, `thread_id` or `threadId` (`server.ts:73`). A call without one fails (`:158`). | The spec defines no conversation key. Claude sends none. | Every call fails in Claude as written. |
-| Visibility | `APP_ONLY = { ui: { visibility: ['app'] } }` on `inbox_view` and `inbox_press` (`server.ts:28`, `:44`, `:54`). | Hiding depends on the host. | See `docs/plans/clients.md` I21 (`:443-456`). |
+| Visibility | `APP_ONLY = { ui: { visibility: ['app'] } }` on `inbox_view` and `inbox_press` (`server.ts:28`, `:44`, `:54`). | Hiding depends on the host. | |
 
 ## What this means for an inbox view in Claude mode
 
@@ -506,7 +506,7 @@ All of this is inference from the facts above, unless a source is given.
 | MCP Inspector page | The `2026-07-28` recipes page still says `--advertise-apps` claims support "at `initialize`" and assumes "a server that shows its app tools only to app-capable clients" (L74). Its sample output uses `"clipboard"` and `"text/html"` (L84-86). [S] uses `clipboardWrite` and `text/html;profile=mcp-app`. | The spec for field names. The page is partly outdated, and still treats per-client tool filtering as normal. |
 | Consent to display | HELP: "No additional setup is needed". MA getting-started: Claude asks to Allow. | MA getting-started, the more specific page. Check live. |
 | Iframe or WebView | HELP and transparent-theming: sandboxed iframes. Design-guidelines: mobile uses "a native WebView ... rather than a sandboxed iframe". | Design-guidelines for mobile. |
-| Desktop app naming | desktop.md L9 "three tabs: Chat, Cowork, Code"; HELP names "Claude, Cowork, Claude Desktop"; `docs/plans/clients.md:22` says two modes, Claude and Code. The Cowork changelog (v2.31226.0, 3P) says "Unified Claude ... combines Chat and Cowork" and turns on for all orgs on November 10. | The public docs are outdated for orgs on Unified Claude. Map Claude mode to Chat plus Cowork when reading docs. |
+| Desktop app naming | desktop.md L9 "three tabs: Chat, Cowork, Code"; HELP names "Claude, Cowork, Claude Desktop"; the repo owner says two modes, Claude and Code. The Cowork changelog (v2.31226.0, 3P) says "Unified Claude ... combines Chat and Cowork" and turns on for all orgs on November 10. | The public docs are outdated for orgs on Unified Claude. Map Claude mode to Chat plus Cowork when reading docs. |
 | SDK versions | Claude quickstart verified with ext-apps 1.7.5 and `@modelcontextprotocol/sdk` 1.30.1. ext-apps is now 2.0.3 on split `@modelcontextprotocol/client`/`core`. | The wire protocol is unchanged ([SDK] `docs/migrate-to-2.md#L14-L18`), so either works for the view. |
 | Skill install command | claude.com: `/plugin install mcp-apps@mcp-apps`. ext-apps: `/plugin install mcp-apps@modelcontextprotocol-ext-apps`. | Unknown; the marketplace name decides. |
 | Hosted SDK docs | Capitalized paths such as `Quickstart.html` serve a frozen v1.1.2 build; lowercase paths serve 2.x. The old github.io host 301-redirects by path. Both report the same `last-modified`. | Use lowercase `apps.extensions.modelcontextprotocol.io/api/` URLs. |
@@ -517,7 +517,6 @@ All of this is inference from the facts above, unless a source is given.
 | `externalIframes` | SEP-1865 L148 names it; neither spec file defines it. | Treat as not existing. |
 | Draft sampling vs core | [D] adds view-side `sampling/createMessage`; core `2026-07-28` deprecates Sampling. Both spec files keep `ping` and `logging`, which core removed or deprecated. | Do not build on view-side sampling. |
 | Working group rule | SEP-2133 L74 "SHOULD"; extensions/overview L95 "must". | Not relevant to the inbox. |
-| Repo plans | `docs/plans/clients.md:42` cites `codex/src/server.ts:139` for the no-session failure; it is now `:158`. `clients.md:38`, `:42`, `:43`, `:49` list conversation id, push and placement as unknown; the docs now answer them (none, poll, no persistent mode). `clients.md:29` says Claude mode has no Claude Code session, but Cowork sessions run Claude Code (desktop.md L825, L853). | The docs and current code. Whether mods run in Cowork is still unknown. |
 
 ## Unknown, and how to check
 
@@ -608,4 +607,3 @@ This repo:
 
 - `codex/src/server.ts`, `codex/src/tab.tsx`, `codex/src/tab.html`: the Codex tab and server.
 - `docs/plans/codex-plugin.md`: live Codex checks (`:53-56`, `:333`).
-- `docs/plans/clients.md`: client plan and I21.

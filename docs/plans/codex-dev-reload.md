@@ -1,5 +1,7 @@
 # Live reload for the Codex tab
 
+Status: built.
+
 **Goal:** while `npm --prefix codex run dev` runs, a saved change to the tab or the server shows in an open Codex Inbox tab within a few seconds. You don't reinstall, reopen the tab, start a new chat or restart Codex. Hooks run as a new process for each event, so they already use the installed build.
 
 ## Why a change takes so long to show today

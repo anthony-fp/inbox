@@ -1,6 +1,6 @@
 // The Inbox tab beside a Codex conversation, bundled into tab.html. It polls
-// the plugin's server for the view and sends presses back. Its layout follows
-// the mod's /inbox pane: docs/plans/codex-tab.md.
+// the plugin's server for the view and sends presses back. It owns how the
+// Codex look draws a row; row rules come from hooks/view.ts. See docs/looks.md.
 
 import { render } from 'preact'
 import type { ComponentChildren, JSX } from 'preact'
