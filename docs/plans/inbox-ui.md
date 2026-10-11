@@ -73,8 +73,8 @@ A row has two forms:
 
 | Row | Where | Closed form | Open form adds |
 |---|---|---|---|
-| Question | Needs you | `1) ask · 3m ago`, or `• ask · 3m ago` (see numbers below) | Full ask, one button per option with the recommended one first, styled primary and labeled "(recommended)", help steps |
-| Task | Needs you | `• ask · 3m ago` | Help steps (open, copy, run, terminal, link), "Open PR #N" when the ask names a tracked PR |
+| Question | Needs you | `ask · 3m ago`. The terminal adds `1)` or `•` before it (see numbers below) | Full ask, one button per option with the recommended one first, styled primary and labeled "(recommended)", help steps |
+| Task | Needs you | `ask · 3m ago`. The terminal adds `•` before it | Help steps (open, copy, run, terminal, link), "Open PR #N" when the ask names a tracked PR |
 | Finding | Findings | Two lines in every client: `▲ Issue · 3m ago` or `✦ Opportunity · 3m ago`, then the title | Detail, "Relevant file: path" |
 | PR block | PRs | Always open: `#12 title`, readiness, one line of facts | PR actions |
 | PR check | PRs, inside the PR block | Two lines: `✗ Failing check`, then the check's name. Status only, with no Fix. | Open log |
@@ -85,7 +85,7 @@ A row has two forms:
 | Settled | Where the row was | `✓ Done · just now` with the leave bar | [Undo], after a Mark |
 | Closed fold | Under Questions and Tasks, and Findings (decision 1) | `▸ 3 Closed` | Up to 3 closed items, each `ask → outcome` |
 
-The Codex tab draws its lists flat, with no tree lines, in the app's sans font. A question's number shows as the number alone in a round gray badge. A number means typing it answers that question. Other questions and tasks draw no mark, and their titles keep the same column. A row handed to Codex shows ✓. Rows sit flush, with no dividers between them. A collapsed row fills gray on hover and takes a click anywhere on it. A finding's handle is its kind's mark, ▲ or ✦, in the kind's color, and its badge is the kind's name alone.
+The Codex tab draws its lists flat, with no tree lines, in the app's sans font. Questions and tasks draw no mark, and their titles keep the same column. A row handed to Codex shows ✓. Rows sit flush, with no dividers between them. A collapsed row fills gray on hover and takes a click anywhere on it. A finding's handle is its kind's mark, ▲ or ✦, in the kind's color, and its badge is the kind's name alone.
 
 The Closed fold's outcomes are today's: the answer itself ("Yes, rename"), "Done", "You ran it", "Dismissed", "Expired", "Closed by Claude: <reason>", and the per-turn update's own outcome text.
 
@@ -100,7 +100,7 @@ The group title "Your tasks" becomes "Tasks", to match "Questions".
 
 So when older questions stay open, or Claude labeled its questions differently, the pane's "1)" and a typed "1" name different questions. That sends an answer to the wrong question as the person.
 
-The rule: a question's handle shows a number only when a typed number reaches it now, and shows the number `answerNote` would resolve. In the terminal, every other open question shows a task's bullet, `•`. In the Claude app pane and the Codex tab, it shows no mark, as tasks do there. Once the person sends any message, the batch is no longer "the reply just before", and every handle becomes `•` until Claude asks again. The Codex tab follows the same rule, since it uses `answerNote` through `promptNotes`. Claude mode has no prompt hook, so its rows have no numbers.
+The rule, in the terminal: a question's handle shows a number only when a typed number reaches it now, and shows the number `answerNote` would resolve. Every other open question shows a task's bullet, `•`. The Claude app pane and the Codex tab draw no number or bullet: a question's own buttons answer it there, and Claude's reply already shows the numbers a typed answer uses. Once the person sends any message, the batch is no longer "the reply just before", and every handle becomes `•` until Claude asks again. The Codex tab follows the same rule, since it uses `answerNote` through `promptNotes`. Claude mode has no prompt hook, so its rows have no numbers.
 
 **Which row is open** (decision 3).
 

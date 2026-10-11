@@ -88,8 +88,6 @@ function stepIcon(step: HelpStep | undefined): IconName | undefined {
 type Row = {
   id: string
   handle: string
-  /** The number a typed reply answers this question by, drawn as a badge in place of the handle. */
-  number?: number
   /** `done` once the row is handed to Codex, which also sets how its feedback reads. */
   handleTone?: Tone
   /** A finding's kind, which sets its handle's color and size. */
@@ -449,9 +447,8 @@ function itemRow(v: View, r: RowView, item: Item): Row {
 
   return {
     id,
-    // Only a number a typed reply reaches marks an item; a bullet would say nothing the group header doesn't.
+    // Only a handed-off item has a mark. Its options answer a question, and the group header says the kind.
     handle: isHandedOff ? '✓' : '',
-    ...(isHandedOff || r.number === null ? {} : { number: r.number }),
     handleTone: isHandedOff ? 'done' : undefined,
     ...(isHandedOff ? { fold: {} } : {}),
     title: item.ask,
@@ -757,11 +754,7 @@ function ListRow({
   const isClosing = track.hasPanel && (track.state === 'closing' || track.state === 'leaving')
   const isSelected = track.hasPanel && !isClosing
   const bar = isNew(row.id) ? ` new tone-bar-${tone}` : ''
-  const handle = (
-    <span class={`mark ${row.handleTone ?? row.kind ?? ''}`}>
-      {row.number === undefined ? row.handle : <span class="number">{row.number}</span>}
-    </span>
-  )
+  const handle = <span class={`mark ${row.handleTone ?? row.kind ?? ''}`}>{row.handle}</span>
 
   const plain = row.line ?? { text: row.title, after: row.titleAfter }
   // A row's last action takes the place of its age, as "✓ Discuss 1m ago". It is muted unless it failed: a done row's ✓ is already green.

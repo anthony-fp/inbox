@@ -115,8 +115,6 @@ export type RowView = {
   type: 'question' | 'task' | 'finding'
   /** "1)" for a question a typed number answers now, "•" for any other row. Codex's tool results quote it. */
   handle: string
-  /** The number a typed reply answers this question by now, or null when none does. */
-  number: number | null
   title: string
   at: number | null
   item: Item | null
@@ -535,7 +533,6 @@ export function inboxView({
       type: item.kind,
       // A question no typed number reaches takes a task's bullet: a "?" reads as a missing number.
       handle: n === undefined ? '•' : `${n})`,
-      number: n ?? null,
       title: item.ask,
       at: item.at,
       item,
@@ -554,7 +551,6 @@ export function inboxView({
       id: finding.id,
       type: 'finding',
       handle: '•',
-      number: null,
       title: finding.title,
       at: finding.at,
       item: null,

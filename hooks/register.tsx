@@ -2941,8 +2941,8 @@ export const register: Register = on => {
 
       return {
         id: item.id,
-        // Desktop marks only a number a typed reply reaches; its bullet would say nothing the group header doesn't.
-        handle: isHandedOff ? '✓' : look === 'desktop' && r.number === null ? '' : r.handle,
+        // Desktop marks only a handed-off item. Its options answer a question, and the group header says the kind.
+        handle: isHandedOff ? '✓' : look === 'desktop' ? '' : r.handle,
         handleTone: isHandedOff ? 'done' : undefined,
         ...(isHandedOff ? { fold: {} } : {}),
         title: item.ask,
