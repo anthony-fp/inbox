@@ -121,8 +121,7 @@ let isDemo = false
 let readError: string | null = null
 /**
  * What the tab says about the server it talks to: why a newer build of it did not load, or that its fingerprint
- * differs from this page's, as when the page came from newer server sources than a server the loader cannot
- * reload. Null when neither holds.
+ * still differs from this page's while the page cannot replace itself. Null when neither holds.
  */
 let serverNote: string | null = null
 // Polls that failed in a row while a view shows, and when the shown view was read.
@@ -268,11 +267,12 @@ async function read() {
   const seq = ++requested
   try {
     const next = await callTool<View>('inbox_view', { demo: isDemo }, READ_TIMEOUT_MS)
-    if (next.devPage && next.devPage !== PAGE) void swapPage()
+    const isPageOld = next.devPage !== PAGE
+    if (isPageOld) void swapPage()
     serverNote = next.serverLoadError
       ? `The inbox server could not load its new build, so it still runs the last one. ${next.serverLoadError}`
-      : next.serverBuild !== SERVER_BUILD
-        ? 'This tab and the inbox server are from different builds. Quit and reopen Codex.'
+      : next.serverBuild !== SERVER_BUILD && !isPageOld
+        ? 'This tab and the inbox server are from different builds. Close the Inbox tab and open it again.'
         : null
     applyView(next, seq)
   } catch (err) {
@@ -304,7 +304,7 @@ function failureText(err: unknown): string {
 const PAGE = (window as { __inboxPage?: string }).__inboxPage
 let isSwapping = false
 
-/** Replaces this page with the one the dev build has ready. The new page connects to Codex again. */
+/** Replaces this page with the one the server serves now. The new page connects to Codex again. */
 async function swapPage() {
   if (isSwapping) return
   isSwapping = true

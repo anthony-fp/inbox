@@ -191,6 +191,18 @@ test('the tab opens from the app-only inbox_view tool, and the model’s inbox t
   assert.equal(read.result.contents[0]?.uri, tabUri('<html></html>'))
 })
 
+test('with no dev build, the view names the installed page and inbox_tab_page serves it, so a tab from an older build replaces itself', async () => {
+  const { call } = await setup(0)
+  const view = (await call('inbox_view', {}, { thread_id: 's1' })) as unknown as {
+    result: { structuredContent: { devPage: string } }
+  }
+  assert.equal(view.result.structuredContent.devPage, tabUri('<html></html>'))
+  const page = (await call('inbox_tab_page', {}, { thread_id: 's1' })) as unknown as {
+    result: { structuredContent: { html: string } }
+  }
+  assert.equal(page.result.structuredContent.html, '<html></html>')
+})
+
 test('the inbox tool answers in text: the count, each row that waits, and where to act on them', async () => {
   const { dir, call } = await setup(0)
   const codex = { 'x-codex-turn-metadata': { session_id: 's1', turn_id: 't1' } }

@@ -73,7 +73,7 @@ const toolsFor = (uri: string) => [
   },
   {
     name: 'inbox_tab_page',
-    description: 'The tab page the dev build keeps built.',
+    description: 'The tab page the server serves now.',
     inputSchema: { type: 'object', properties: {} },
     _meta: APP_ONLY,
   },
@@ -164,16 +164,20 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     return /Queued message (\S+)/.exec(r.stdout)?.[1] ?? null
   }
 
+  /** The tab page to show: the dev build's while it runs, else this handler's own, which a reinstall replaces. */
+  const currentPage = async () => (await deps.devPage?.()) ?? deps.tabHtml
+
   const pressOn = (s: SessionState, p: RowPress, at = now()) =>
     applyPress(s.ledger, s.lastActions[p.id], p, { now: at, turnsStarted: s.presence.turnsStarted, extraSteps: [] })
 
-  /** The view for the tab, with the session it was read for. */
-  const served = (s: SessionState, id: string): TabView => {
+  /** The view for the tab, with the session it was read for and the page the server serves now. */
+  const served = async (s: SessionState, id: string): Promise<TabView> => {
     const loadError = deps.loadError?.()
 
     return {
       ...viewOf(s, now()),
       thread: id,
+      devPage: tabUri(await currentPage()),
       ...(deps.build ? { serverBuild: deps.build } : {}),
       ...(loadError ? { serverLoadError: loadError } : {}),
     }
@@ -251,7 +255,7 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
         pressed.r.last?.result,
       )
 
-    return { view: served(await readState(dir, id), id), copy, error, note }
+    return { view: await served(await readState(dir, id), id), copy, error, note }
   }
 
   /** Opens a link, or a path as `openCommands` decides. Returns why it could not, or null. */
@@ -287,15 +291,15 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
   }
 
   /** A press in the demo changes only its copy and performs nothing: each send, open or copy gives its row the sample note. */
-  function onDemoPress(id: string, p: RowPress, thread: unknown): PressReply {
+  async function onDemoPress(id: string, p: RowPress, thread: unknown): Promise<PressReply> {
     const s = demoOf(id)
     const r = thread === id ? pressOn(s, p) : ({ stale: true } as const)
-    if ('stale' in r) return { view: served(s, id), copy: null, error: null, note: 'stale' }
+    if ('stale' in r) return { view: await served(s, id), copy: null, error: null, note: 'stale' }
     const { lasts, isSample } = demoRecord(r.last ? { [p.id]: r.last } : {}, r.effects)
     const next: SessionState = { ...s, ledger: r.ledger, lastActions: { ...s.lastActions, ...lasts } }
     demos.set(id, next)
 
-    return { view: served(next, id), copy: null, error: null, note: isSample ? 'sample' : null }
+    return { view: await served(next, id), copy: null, error: null, note: isSample ? 'sample' : null }
   }
 
   async function callTool(
@@ -323,21 +327,15 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
         return text(inboxToolText(viewOf(s, now())))
       }
       case 'inbox_view': {
-        const devPage = await deps.devPage?.()
-        const dev = devPage ? { devPage: tabUri(devPage) } : {}
-        if (args.demo === true)
-          return { ...text('Inbox demo'), structuredContent: { ...served(demoOf(id), id), ...dev } }
+        if (args.demo === true) return { ...text('Inbox demo'), structuredContent: await served(demoOf(id), id) }
         const s = await updateState(dir, id, s => ({ ...s, tabSeenAt: now() }))
-        return { ...text('Inbox view'), structuredContent: { ...served(s, id), ...dev } }
+        return { ...text('Inbox view'), structuredContent: await served(s, id) }
       }
-      case 'inbox_tab_page': {
-        const devPage = await deps.devPage?.()
-        if (!devPage) return { ...text('Not done: no dev build is running.'), isError: true }
-        return { ...text('Tab page'), structuredContent: { html: stamped(devPage) } }
-      }
+      case 'inbox_tab_page':
+        return { ...text('Tab page'), structuredContent: { html: stamped(await currentPage()) } }
       case 'inbox_press': {
         const p = args.press as RowPress
-        const r = args.demo === true ? onDemoPress(id, p, args.thread) : await onPress(id, p, args.thread)
+        const r = await (args.demo === true ? onDemoPress(id, p, args.thread) : onPress(id, p, args.thread))
         return { ...text(r.error ?? (r.note ? noteText(r.note) : 'Done')), structuredContent: r }
       }
     }
