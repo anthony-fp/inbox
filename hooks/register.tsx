@@ -131,7 +131,7 @@ import {
 import type { CountdownProps } from './countdown-client'
 import type { FoldProps } from './fold-client'
 import type { RowProps } from './row-client'
-import type { TabsProps } from './tabs-client'
+import { TAB_HEIGHT, type TabsProps } from './tabs-client'
 
 const LEDGER = atom({ plugin: 'inbox', key: 'ledger' } as const, EMPTY)
 const PRESENCE = atom(
@@ -3749,7 +3749,9 @@ export const register: Register = on => {
           {...(look === 'desktop' ? { flexWrap: 'wrap' as const } : {})}
           columnGap={isInline ? 3 : look === 'desktop' ? 2 : 1}
         >
-          {hasClient && tabProps ? <elements.Client key="tabs" module="./tabs-client.tsx" props={tabProps} /> : null}
+          {hasClient && tabProps ? (
+            <elements.Client key="tabs" module="./tabs-client.tsx" height={TAB_HEIGHT} props={tabProps} />
+          ) : null}
           {tabProps
             ? null
             : TABS.map(({ id, label }) => {

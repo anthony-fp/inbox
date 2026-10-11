@@ -34,7 +34,7 @@ type State = { hover: string | null }
  * A tab's drawn height in lines. A fill comes out rounded only inside a border, which insets the label by
  * half a line on each side; 1.25 lines just fits the label, and 1.5 gives the tabs room around it.
  */
-const TAB_HEIGHT = 1.5
+export const TAB_HEIGHT = 1.5
 
 /** The tab under (`x`, `y`) in the region, or null over a gap or outside the tabs. */
 function tabAt(props: TabsProps, x: number, y: number): string | null {
