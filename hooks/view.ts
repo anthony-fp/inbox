@@ -267,12 +267,18 @@ function localText(r: LocalResult, look: Look): string {
 
 /** Feedback as a row reads it, before any age. */
 export function feedbackText(f: Feedback, look: Look): string {
-  if (f.is === 'note') return noteText(f.note)
-  if (f.is === 'local') return localText(f.result, look)
-  if (f.is === 'queued') return `Queued: ${f.label}`
-  if (f.is === 'notSent') return `Not sent: ${f.reason}`
-
-  return `✓ ${f.label}`
+  switch (f.is) {
+    case 'note':
+      return noteText(f.note)
+    case 'local':
+      return localText(f.result, look)
+    case 'queued':
+      return `Queued: ${f.label}`
+    case 'notSent':
+      return `Not sent: ${f.reason}`
+    case 'done':
+      return `✓ ${f.label}`
+  }
 }
 
 /** A step's kind: one that asks Claude to run a command hands the row off; the rest open or copy. */

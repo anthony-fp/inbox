@@ -1,6 +1,7 @@
 #!/bin/sh
-# Checks the mod: formatting with Prettier, its structure with
-# `claude plugin validate`, its types with tsc, and its tests with
+# Checks the mod: formatting with Prettier, its plugin structure with
+# `claude plugin validate`, the imports and docs that keep the three looks in
+# step with scripts/check-structure.mjs, its types with tsc, and its tests with
 # `claude plugin test`. Then the Codex plugin in codex/. Exits 1 on any failure,
 # and when a check cannot run.
 #
@@ -38,6 +39,7 @@ check "prettier" npx -y "$PRETTIER" --check .
 [ "$status" = "$before" ] || echo "      Fix: npx -y $PRETTIER --write ."
 
 check "plugin validate" claude plugin validate "$DIR"
+check "structure" node "$DIR/scripts/check-structure.mjs"
 # Claude Code writes these types when it loads the mod from this folder, and
 # claude -p does not. A worktree's copy does not load while another copy of the
 # mod loads first. The types name no paths, so a worktree uses the main checkout's.
