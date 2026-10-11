@@ -87,15 +87,10 @@ The saved records do not say whether an answer came from a press or from the age
 
 ### 4. A closing line can invent a decision
 
-- **Where:** the `CLOSED` line in `systemText`, and `isLapsed`.
-- **What is wrong:**
-  - `CLOSED` asks for "what was decided" when the person answered, when the work finished, and when the item stopped mattering. When the agent went ahead on its own default, the model writes a decision the person never made. That outcome reaches the agent as the person's answer.
-  - The pane shows an item as lapsed only when the outcome starts with words like "no longer applies". `systemText` never asks for those words.
-- **Proposed wording:**
-
-  > CLOSED: <id> | the outcome, at most 8 words. When the person answered, write their answer. When the work is done, write "done: <what>". When nobody decided and the item no longer applies, write "no longer applies: <why>". Never write a choice the person did not make.
-
-- **Risk:** this is the section where a one-word change once made the model re-add dismissed questions. Run the dismissed-question fixture as the guard.
+- **Done.** `CLOSED` now asks for one of three forms. The person's answer when they gave one. Otherwise "done: <what the agent did>", or "no longer applies: <why>".
+- **What was wrong:** `CLOSED` asked for "what was decided" in every case. When the agent picked an option on its own, the outcome read as the person's choice, and that reached the agent as the person's answer.
+- **Why the wording names the case:** the first version only said "Never write a choice the person did not make". Sonnet still wrote the agent's pick as the outcome in 8 of 8 runs. The kept version says that an option the agent picked, or one the work made moot, is not the person's answer.
+- The pane draws an outcome that starts "no longer applies" as lapsed.
 
 ### 5. Who closes a finding
 
@@ -224,9 +219,20 @@ Theme 7 was measured with its own fixtures. A case counts when the finding and t
 
 In the mention-only case, Sonnet wrote an `ASKED` line with no item in 5 of 8 runs. The code ignores an `ASKED` line that names no open item, so the finding stayed open.
 
+Theme 4 was measured with its own fixtures. A case counts when the outcome takes the form its case calls for. The guard counts runs that do not ask a dismissed question again.
+
+| Case | Sonnet before | Sonnet after | Codex before | Codex after |
+| --- | --- | --- | --- | --- |
+| The agent picked an option on its own | 0 of 8 | 8 of 8 | 0 of 5 | 5 of 5 |
+| The work made the question moot | 0 of 8 | 8 of 8 | 0 of 5 | 5 of 5 |
+| The person answered | 8 of 8 | 8 of 8 | 5 of 5 | 5 of 5 |
+| A dismissed question stays closed | 8 of 8 | 8 of 8 | 5 of 5 | 5 of 5 |
+
+The first version asked the dismissed question again in up to 4 of 8 Sonnet runs. The kept version did not.
+
 ## Proposed order
 
-1. Theme 4. It needs the most careful A/B.
+1. Theme 4 is done.
 2. Theme 3 and theme 6's close result. These are code changes with small model-read edits.
 3. Theme 8. Theme 7 is done.
 
