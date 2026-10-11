@@ -266,6 +266,12 @@ function upgradeLastActions(saved) {
 // ../hooks/view.ts
 var CHOICE_KEYS = [..."abcfghilm"];
 var SETTLED_MS = 5120;
+var TABS = [
+  { id: "needsYou", label: "Needs you", hotkey: "1" },
+  { id: "findings", label: "Findings", hotkey: "2" },
+  { id: "prs", label: "PRs", hotkey: "3" }
+];
+var ROW_TABS = TABS.filter((t) => t.id !== "prs");
 
 // src/settle.ts
 var POLL_MS = 3e3;
