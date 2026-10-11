@@ -188,7 +188,7 @@ export const START_TITLE =
   'inbox: where this session stands, as of the last reply. An "inbox:" text beside a later prompt replaces this.'
 
 const CATCH_UP =
-  'The ledger below may have missed turns. Close every item in <open> that the conversation shows answered, done, dealt with, or no longer relevant, and every finding in <findings> that it shows was fixed. Add as NEW only what still waits on the user and is not already in <open> or <findings>.'
+  'The ledger below may have missed turns. Write a CLOSED line for every item in <open> that the conversation shows answered, done, dealt with, or no longer relevant, and a FIXED line for every finding in <findings> that it shows was fixed. Add as NEW only what still waits on the user and is not already in <open> or <findings>.'
 
 /**
  * Asks a fork of the main conversation to bring the ledger up to date at once,
