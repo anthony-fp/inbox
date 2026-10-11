@@ -2031,6 +2031,16 @@ test('the desktop pane draws each action as one button and the tabs as one click
   expect((await fold()).isUnfolded).toBe(true)
   expect(await pane.find(closedItem)).toBeDefined()
 
+  // An open row outside a tree, as in Findings, draws: the engine refuses the whole drawing over one bad size.
+  await $.tool.call({
+    tool: 'mcp__inbox__record_finding',
+    kind: 'issue',
+    title: 'Retry loop never backs off',
+    detail: 'Hot.',
+  })
+  await clock.settle()
+  expect(await pane.find({ text: 'Hot.' })).toBeDefined()
+
   // The app draws its own close mark on the pane's title bar.
   expect(await pane.find({ key: 'close-pane' })).toBeUndefined()
 })
