@@ -56,15 +56,16 @@ its age, its detail and its file.
   time keeps the list readable, as in the pane.
 - **Each action shows its key** before its label, as "a Fix". The keys are the
   pane's: answers and steps on `a b c f g h i l m`, `d` Done, `t` type, `e`
-  Explain or Discuss, `x` Dismiss, `v` Details.
+  Explain or Discuss, `x` Dismiss.
 - **A press shows at once.** Until the server answers, the row says
   "Sending…". Then it shows the action's last-action text, such as "Explain
   sent · just now". A second press of the same action reads "Explain again".
   The repo requires every action to show what it did.
 - **A row handed to Codex folds.** A task whose step or reply went to Codex,
-  and a check whose Fix was sent, show a green ✓. Selected, such a row shows
-  its note and only Details. Details shows its body and actions again. The
-  row no longer waits on the person, so it leaves the count.
+  and a check whose Fix was sent, show a green ✓. Its last action stays
+  muted, since the ✓ already says it went. Selected, such a row shows its
+  body and actions like any other row. The row no longer waits on the
+  person, so it leaves the count.
 - **A row that just closed stays in place.** For about five seconds it shows
   a ✓, how it closed, and what it was, on one line. Then it moves under
   Closed. A finding sent to Codex shows what was sent. A check that passed

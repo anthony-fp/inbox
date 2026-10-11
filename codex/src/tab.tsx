@@ -97,7 +97,7 @@ type Row = {
   keys: Key[]
   /** Actions that talk about the row or drop it, after `keys` and a muted dot. */
   more: Key[]
-  /** The row no longer waits on the person: selected, it shows `note`, with its body and keys behind Details. */
+  /** The row no longer waits on the person, so its group's count leaves it out. Selected, it also shows `note`. */
   fold?: { note?: string }
   typing?: { hint: string; send: (text: string) => void }
   feedback: Feedback | null
@@ -127,7 +127,6 @@ let typing: string | null = null
 let focusTyping = false
 // Typed text by row, kept until it is sent, so a redraw, a new selection or a closed field keeps it.
 const drafts = new Map<string, string>()
-const details = new Set<string>()
 // Questions whose every option shows. Until then, one with more than 5 options shows 4.
 const optionsShown = new Set<string>()
 const unfolded = new Set<Group>()
@@ -624,22 +623,9 @@ function isOpenGuarded(): boolean {
   return isGuarded(selection[tab]?.openedAt ?? 0, Date.now())
 }
 
-/** The selected row's keys: a folded row offers only Details until it is opened. */
+/** The selected row's keys. */
 function rowActions(row: Row): { keys: Key[]; more: Key[] } {
-  const detailsKey = {
-    hotkey: 'v',
-    label: details.has(row.id) ? 'Hide details' : 'Details',
-    icon: details.has(row.id) ? ('down' as const) : ('right' as const),
-    run: () => {
-      if (details.has(row.id)) details.delete(row.id)
-      else details.add(row.id)
-      draw()
-    },
-  }
-  // Details only shows more of the row, so it draws as plain text with the follow-ups, never as a main action.
-  if (row.fold && !details.has(row.id)) return { keys: [], more: [detailsKey] }
-
-  return row.fold ? { keys: row.keys, more: [...row.more, detailsKey] } : { keys: row.keys, more: row.more }
+  return { keys: row.keys, more: row.more }
 }
 
 // ── Drawing ─────────────────────────────────────────────────────────────────
@@ -760,19 +746,10 @@ function ListRow({
   )
 
   const plain = row.line ?? { text: row.title, after: row.titleAfter }
-  // A row's last action takes the place of its age, as "✓ Discuss 1m ago". It is green only on a row that shows a ✓,
-  // so on a row still open it does not read as an answer.
+  // A row's last action takes the place of its age, as "✓ Discuss 1m ago". It is muted unless it failed: a done row's ✓ is already green.
   const last = isFeedbackShown(row) ? lastText(row, now) : null
   const line = last
-    ? {
-        ...plain,
-        after: ` · ${last}`,
-        afterTone: isFailure(row.feedback)
-          ? ('error' as const)
-          : row.handleTone === 'done' && row.feedback?.is === 'done'
-            ? ('done' as const)
-            : undefined,
-      }
+    ? { ...plain, after: ` · ${last}`, afterTone: isFailure(row.feedback) ? ('error' as const) : undefined }
     : plain
   // A closed row keeps its panel drawn while it collapses, so the panel can fade out.
   const isClosing = !isSelected && closingRows.has(row.id)
@@ -805,7 +782,6 @@ function ListRow({
 
 /** An open row's details under its line: its kind, body, notes, actions and copy box. */
 function Panel({ row, isClosing }: { row: Row; isClosing: boolean }) {
-  const isOpen = !row.fold || details.has(row.id)
   const { keys, more } = rowActions(row)
   const copied = copies.get(row.id)
   const note = noteOf(row.id)
@@ -820,7 +796,7 @@ function Panel({ row, isClosing }: { row: Row; isClosing: boolean }) {
   return (
     <div class={isClosing ? 'panel closing' : 'panel'} inert={isClosing}>
       {row.meta ? <div class="meta">{row.meta}</div> : null}
-      {isOpen && row.body ? <div class="body">{row.body}</div> : null}
+      {row.body ? <div class="body">{row.body}</div> : null}
       {notes.length > 0 ? <div class="tight">{notes}</div> : null}
       {/* The row's answers and main action, then its follow-ups, on one line that wraps. An open field replaces the
           follow-ups, on its own line. */}

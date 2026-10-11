@@ -273,9 +273,6 @@
         white-space: pre;
         color: var(--muted);
       }
-      .line .after.tone-done {
-        color: var(--done);
-      }
       /* Open, and while closing, the title shows in full where it stood, with the age following its last word. */
       .row.selected .line,
       .row.closing .line {
@@ -294,10 +291,10 @@
         background-color: var(--soft);
       }
       /* After a click, rows slide under a pointer that has not moved, so nothing they bring under it lights up. */
-      .still .row.collapsed:hover {
+      .still .row.collapsed:not(:active):hover {
         background-color: transparent;
       }
-      .still .fold:hover {
+      .still .fold:not(:active):hover {
         color: var(--muted);
       }
       .title {

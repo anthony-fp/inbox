@@ -25,7 +25,6 @@ Lines that depend on a decision in section 6 carry a tag, such as "(decision 3)"
 - **Hand-off**: a press that gives the row's work to the agent, so it stops waiting on the person for now.
 - **Settled row**: a row that just closed or was handed off, kept in place with a ✓ and its outcome for 5.12 s before it leaves.
 - **Leave bar**: the thin line under a settled row that empties over those 5.12 s, so the person sees when the row will move. The 5.12 s is a value tuned by hand; it was cut from 6.4 s after use.
-- **Details**: the button on a folded row that shows its body and actions again. Hide details folds it back.
 - **Chat**, **Cowork** and **Unified Claude**: the desktop app's Claude mode. The public docs split it into Chat and Cowork, an agent mode that can run on the person's machine. A changelog says "Unified Claude ... combines Chat and Cowork".
 
 ## 1. Summary
@@ -118,12 +117,12 @@ Every press is one of five kinds. The kind decides what the screen shows at once
 | Kind | What it does | What shows at once |
 |---|---|---|
 | **Talk** | Sends a message asking Claude to talk or draft. The row's work is not given away. | The row stays open and in the count. Its age becomes `✓ Explain · just now`. The button reads "Explain again". |
-| **Hand-off** | Sends a message that gives the work to Claude. | The row leaves the count and folds to `✓ Address · just now [Details]`, until the re-entry rule below brings it back. One keeps today's behavior: a PR block, which is always open, records `✓ Resolve conflicts` on the block. |
+| **Hand-off** | Sends a message that gives the work to Claude. | The row leaves the count and shows `✓ Address · just now`, until the re-entry rule below brings it back. One keeps today's behavior: a PR block, which is always open, records `✓ Resolve conflicts` on the block. |
 | **Local** | Opens or copies on the person's machine. | A note on the row at once: `Opening settings.json…` or `Copying npm test…`. The result replaces it: `✓ Opened settings.json`, or in red, `Could not open settings.json: it was moved`. |
 | **Mark** | Changes state only, and sends nothing. | The row settles in place with the Mark's own label, `✓ Done` or `✓ Dismissed`, and an [Undo] button, then leaves after 5.12 s. |
 | **View** | Changes only what is on screen, or reloads it. | The change itself: a view opens or closes, a row unfolds, a tab switches, a status reads `Refreshing PRs`. |
 
-The View kind covers [Open inbox], the tab buttons, Details and Hide details, [All 7 options], the Closed fold, Show demo and Hide demo, Reply in chat, Undo and Retry. [Try again] repeats a failed press, so it takes that press's kind.
+The View kind covers [Open inbox], the tab buttons, [All 7 options], the Closed fold, Show demo and Hide demo, Reply in chat, Undo and Retry. [Try again] repeats a failed press, so it takes that press's kind.
 
 **Answering a question** is a Mark and a send together. The row settles as `✓ Yes, rename`, and `Re "<ask>": <answer>` goes to Claude. It has no Undo, because the message is already on its way.
 
@@ -190,7 +189,7 @@ Actions keep one order on every row: the main action, then the action that finis
 | | Address all N threads | More than one thread waits on the person | Hand-off |
 | | Open PR | Always | Local |
 | | Dismiss | Never on the current branch's PR (`hooks/register.tsx:3622`) | Mark |
-| Band and pane controls | Open inbox, Close, tabs, Details, All N options, Closed fold, Retry, Show demo, Hide demo, Undo | Where each applies | View |
+| Band and pane controls | Open inbox, Close, tabs, All N options, Closed fold, Retry, Show demo, Hide demo, Undo | Where each applies | View |
 
 Three rows have no Dismiss:
 
@@ -498,7 +497,7 @@ The status sits at the right of the tab row. A read error or a note takes its ow
 
 **Kept from today's tab.**
 
-- Rows, groups, folds and Details.
+- Rows, groups and folds.
 - Rows that vanish between polls settle in place.
 - The out-of-order poll guard.
 - A draft per row, with Send and Cancel.

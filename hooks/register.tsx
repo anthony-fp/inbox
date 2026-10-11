@@ -164,7 +164,6 @@ const NOTES = atom({ plugin: 'inbox', key: 'notes' } as const, {} as Record<stri
 const ARRIVAL = atom({ plugin: 'inbox', key: 'arrival' } as const, null as Arrival | null)
 const LAST_ACTIONS = atom({ plugin: 'inbox', key: 'lastActions' } as const, {} as Record<string, LastAction>)
 const UNFOLDED = atom({ plugin: 'inbox', key: 'unfolded' } as const, [] as (Item['kind'] | 'finding')[])
-const SHOWN_DETAILS = atom({ plugin: 'inbox', key: 'shownDetails' } as const, [] as string[])
 const OPTIONS_SHOWN = atom({ plugin: 'inbox', key: 'optionsShown' } as const, [] as string[])
 const IS_KEY_LIST_SHOWN = atom({ plugin: 'inbox', key: 'isKeyListShown' } as const, false)
 const UNREADABLE = atom({ plugin: 'inbox', key: 'unreadable' } as const, null as string | null)
@@ -2385,7 +2384,6 @@ async function forgetRowState($: EngineInterface) {
     update($, SELECTION, () => NO_SELECTION),
     update($, TYPING, () => null),
     update($, UNFOLDED, () => []),
-    update($, SHOWN_DETAILS, () => []),
     update($, OPTIONS_SHOWN, () => []),
     update($, DRAFTS, () => ({})),
     update($, NOTES, () => ({})),
@@ -2857,7 +2855,6 @@ export const register: Register = on => {
       typing,
       unfolded,
       isKeyListShown,
-      shownDetails,
       arrival,
       optionsShown,
     ] = await Promise.all([
@@ -2868,7 +2865,6 @@ export const register: Register = on => {
       read($, TYPING),
       read($, UNFOLDED),
       read($, IS_KEY_LIST_SHOWN),
-      read($, SHOWN_DETAILS),
       read($, ARRIVAL),
       read($, OPTIONS_SHOWN),
     ])
@@ -2915,11 +2911,8 @@ export const register: Register = on => {
       typeHint?: string
       /** What sending those words does: closes a question, or hands a task or finding off. */
       typeKind?: PressKind
-      /**
-       * The row no longer waits on the person. Selected, it shows `line` and
-       * `note`, with its body and keys behind Details, on `v`.
-       */
-      fold?: { line?: string; note?: string }
+      /** The row no longer waits on the person, so its group's count leaves it out. Selected, it also shows `note`. */
+      fold?: { note?: string }
     }
     // An item's group header says whether it is a question or a task, so the row
     // needs no context line. The recommended answer is marked on its key.
@@ -3030,12 +3023,7 @@ export const register: Register = on => {
         handle: isSent ? '✓' : '◦',
         handleTone: isSent ? 'done' : undefined,
         ...(isSent || isChanged
-          ? {
-              fold: {
-                line: `@${latest.author}: ${commentLine(latest.body)}`,
-                ...(t.isLinesChanged ? { note: 'Lines changed since this comment · still open on GitHub' } : {}),
-              },
-            }
+          ? { fold: t.isLinesChanged ? { note: 'Lines changed since this comment · still open on GitHub' } : {} }
           : {}),
         meta: (
           <Text wrap="truncate-end">
@@ -3217,8 +3205,6 @@ export const register: Register = on => {
     }
     // A typed reply needs a text field, so it is left out where there is none.
     const pressable = (keys: KeyAction[]) => keys.filter(k => Input || !k.key.startsWith('typekey-'))
-    const toggleDetails = (id: string) =>
-      void update($, SHOWN_DETAILS, s => (s.includes(id) ? s.filter(x => x !== id) : [...s, id]))
     // Under a just-closed row, a thin bar that empties as its time in place runs out.
     // ─ is a light line across a cell and ╴ across its left half, so the bar shrinks by half cells.
     const leaveBar = (at: number, isLapsed: boolean) => {
@@ -3231,23 +3217,11 @@ export const register: Register = on => {
         </Text>
       ) : null
     }
-    // A folded row offers only Details, which shows its body and its keys.
-    const detailsKey = (row: Row): KeyAction => ({
-      key: `fold-details-${row.id}`,
-      label: shownDetails.includes(row.id) ? 'Hide details' : 'Details',
-      icon: shownDetails.includes(row.id) ? '▾' : '▸',
-      hotkey: 'v',
-      kind: 'view',
-      onPress: () => toggleDetails(row.id),
-    })
     // The selected row's keys, for both the key row it draws and the hidden bindings.
-    const rowActions = (row: Row): { keys: KeyAction[]; more: KeyAction[] } => {
-      if (row.fold && !shownDetails.includes(row.id)) return { keys: [detailsKey(row)], more: [] }
-      const keys = pressable(row.keys())
-      const more = pressable(row.moreKeys?.() ?? [])
-
-      return row.fold ? { keys, more: [...more, detailsKey(row)] } : { keys, more }
-    }
+    const rowActions = (row: Row): { keys: KeyAction[]; more: KeyAction[] } => ({
+      keys: pressable(row.keys()),
+      more: pressable(row.moreKeys?.() ?? []),
+    })
     // Under the open field: Send sends the row's draft, and Cancel closes the field and keeps the draft.
     const fieldActions = (row: Row): KeyAction[] => [
       {
@@ -3263,9 +3237,6 @@ export const register: Register = on => {
         onPress: () => void update($, TYPING, t => (t === row.id ? null : t)),
       },
     ]
-    // A last action is green only on a row that shows a ✓, as a folded review thread
-    // does. On a row still open it is muted, so it does not read as an answer.
-    const lastTone = (row: Row) => (row.handleTone === 'done' ? ('done' as const) : undefined)
     // A last action reads "✓ Discuss · 1m ago", or "Queued: Discuss · 1m ago". A row whose own mark is a ✓
     // leaves out the second one. A note and a Local result read alone, with no age. A failure is red.
     const feedbackLabel = (id: string, row?: Row) => {
@@ -3274,19 +3245,16 @@ export const register: Register = on => {
 
       return hasAge(f)
         ? {
-            text: f.is === 'done' && row && lastTone(row) ? f.label : feedbackText(f, look),
+            text: f.is === 'done' && row?.handleTone === 'done' ? f.label : feedbackText(f, look),
             age: ago(now - f.at),
             isFailure: false,
-            isQueued: f.is === 'queued',
           }
-        : { text: feedbackText(f, look), age: '', isFailure: isFailure(f), isQueued: false }
+        : { text: feedbackText(f, look), age: '', isFailure: isFailure(f) }
     }
     const lastActionText = (id: string, row?: Row) => {
       const f = feedbackLabel(id, row)
 
-      return f
-        ? { text: [f.text, f.age].filter(Boolean).join(' · '), isFailure: f.isFailure, isQueued: f.isQueued }
-        : null
+      return f ? { text: [f.text, f.age].filter(Boolean).join(' · '), isFailure: f.isFailure } : null
     }
     // A section's children hang from its title like a directory listing. A
     // child's row has a 1-column bar, 3 columns for the tree, 3 for its marker,
@@ -3381,8 +3349,7 @@ export const register: Register = on => {
         ? {
             ...plain,
             after: ` · ${[f.text, isNarrowDesktop ? '' : f.age].filter(Boolean).join(' ')}`,
-            // A message still queued is muted: nothing has reached Claude yet.
-            afterTone: f.isFailure ? ('error' as const) : f.age && !f.isQueued ? lastTone(row) : undefined,
+            afterTone: f.isFailure ? ('error' as const) : undefined,
           }
         : { ...plain, after: [plain.after, isNarrowDesktop ? '' : plain.age].filter(Boolean).join('') || undefined }
     }
@@ -3508,16 +3475,14 @@ export const register: Register = on => {
       // On desktop the actions take one line, main ones first. The open field replaces the follow-ups,
       // and the field's own submit button is its Send.
       const desktopGroups = [isTyping ? keys : [...keys, ...more]].filter(group => group.length > 0)
-      const isOpen = !row.fold || shownDetails.includes(row.id)
       const lastText = lastActionText(row.id, row)
-      const tone = lastTone(row) ? pal.tone.done : pal.muted
       const status = [
         ...(row.fold?.note ? [{ text: row.fold.note, color: pal.muted }] : []),
         ...(lastText
           ? [
               {
                 text: lastText.text,
-                color: lastText.isFailure ? pal.tone.error : lastText.isQueued ? pal.muted : tone,
+                color: lastText.isFailure ? pal.tone.error : pal.muted,
               },
             ]
           : []),
@@ -3556,14 +3521,7 @@ export const register: Register = on => {
                 {row.titleAfter ? <Text color={pal.muted}>{unbroken(row.titleAfter)}</Text> : null}
               </Text>
               {row.subtitle}
-              {isOpen && row.body ? <Box marginTop={blankLine}>{row.body}</Box> : null}
-              {!isOpen && row.fold?.line ? (
-                <Box marginTop={blankLine}>
-                  <Text wrap="truncate-end" color={pal.muted}>
-                    {clipLine(row.fold.line, tree ? 7 : 5)}
-                  </Text>
-                </Box>
-              ) : null}
+              {row.body ? <Box marginTop={blankLine}>{row.body}</Box> : null}
               {status.length > 0 ? (
                 <Box flexDirection="column" marginTop={blankLine}>
                   {status.map(s => (

@@ -403,12 +403,10 @@ test('a task handed to Claude folds and leaves the count until Claude’s reply 
   await clock.settle()
   expect(sent.at(-1)).toContain('./load.sh')
   expect(await pane.find({ text: /Run load script · just now/ })).toBeDefined()
-  expect(await pane.find({ key: 'help-i1-0' })).toBeUndefined()
   expect(await band.find({ text: /1 needs you/ })).toBeDefined()
 
-  // Behind Details, a copy says where to run the command, and an open of a missing file says so in red, with no toast.
-  // Neither unfolds the task or brings it back into the count.
-  await pane.press({ key: 'fold-details-i1-key' })
+  // Its other steps still show: a copy says where to run the command, and an open of a missing file says so in red,
+  // with no toast. Neither brings the task back into the count.
   await pane.press({ key: 'help-i1-1' })
   await clock.settle()
   expect(copied).toEqual(['npm login'])
@@ -418,7 +416,6 @@ test('a task handed to Claude folds and leaves the count until Claude’s reply 
   const red = (await pane.find({ type: 'Text', text: 'Could not open load.md: it no longer exists' }))?.props.color
   expect(red).toBeDefined()
   expect(toasts).toEqual([])
-  expect(await pane.find({ key: 'fold-details-i1' })).toBeDefined()
   expect(await band.find({ text: /1 needs you/ })).toBeDefined()
   // A failure stays until the next press on its row.
   await clock.advance(SETTLED_MS)
@@ -636,7 +633,6 @@ test('last actions an earlier build saved convert once by the table, and a task 
   const pane = await $.ui.mount(PANE)
   const band = await $.ui.mount({ plugin: 'inbox', surface: 'terminal', ...BAND })
   expect(await pane.find({ text: /Run load script · just now/ })).toBeDefined()
-  expect(await pane.find({ key: 'help-i1-0' })).toBeUndefined()
   expect(await band.find({ text: /need you/ })).toBeUndefined()
   // Findings' Closed fold stays open across the reloads. The closed finding shows there once it has settled.
   await clock.advance(SETTLED_MS)
@@ -836,11 +832,9 @@ test('a finding Claude records while the pane shows an empty tab brings the pane
 
   await pane.press({ key: 'address-f1' })
   expect(sent.at(-1)).toContain('Please address this finding you recorded:\nIssue: Retry loop never backs off')
-  // It folds to what was sent, with its keys behind Details, and leaves the finding count. It stays listed.
+  // It folds to what was sent and leaves the finding count. It stays listed.
   await clock.settle()
   expect(await pane.find({ text: /Address · just now/ })).toBeDefined()
-  expect(await pane.find({ key: 'fold-details-f1' })).toBeDefined()
-  expect(await pane.find({ key: 'address-f1' })).toBeUndefined()
   expect(await band.find({ text: /1 finding/ })).toBeUndefined()
   await clock.advance(9000)
   expect(await pane.find({ text: /Retry loop never backs off/ })).toBeDefined()
@@ -849,7 +843,6 @@ test('a finding Claude records while the pane shows an empty tab brings the pane
   await $.turn.start({ text: sent.at(-1) ?? '', turnId: 't1' })
   await $.turn.complete({ answer: 'Added a backoff.', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
   await clock.settle()
-  expect(await pane.find({ key: 'fold-details-f1' })).toBeUndefined()
   expect((await pane.find({ key: 'address-f1-key' }))?.props.label).toBe('Address again')
   expect(await band.find({ text: /1 finding/ })).toBeDefined()
 
@@ -922,7 +915,6 @@ test('t opens a field for the person’s own words: an answer closes its questio
   )
   await clock.settle()
   expect(await pane.find({ text: /Reply · just now/ })).toBeDefined()
-  expect(await pane.find({ key: 'fold-details-f3' })).toBeDefined()
   await clock.advance(9000)
   expect(await pane.find({ text: /README is stale/ })).toBeDefined()
 })
@@ -1350,7 +1342,6 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   expect(await pane.find({ text: /✓ Discuss ·/ })).toBeDefined()
   expect((await pane.find({ key: 'discuss-T1' }))?.props.label).toMatch(/Discuss again$/)
   // A hook refuses Address: the thread stays open and waiting, says why, and offers [Try again].
-  const details = 'fold-details-acme/greet#12 thread T1'
   submitAnswer = { drop: 'a hook refused it' }
   await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'address-T1' })
@@ -1358,35 +1349,29 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   expect(sent.at(-1)).toContain('bin/greet:4, from @sam:\nQuote the name.')
   await clock.settle()
   expect(await pane.find({ text: 'Not sent: a hook refused it' })).toBeDefined()
-  expect(await pane.find({ key: details })).toBeUndefined()
   expect((await pane.find({ key: 'address-T1-key' }))?.props.label).toBe('Address')
   // Tried again during a turn, it folds at once and reads Queued until its prompt enters.
   submitAnswer = 'hold'
   await pane.press({ key: 'retry-T1' })
   await clock.settle()
   expect(await pane.find({ text: /^Queued: Address · just now$/ })).toBeDefined()
-  expect(await pane.find({ key: details })).toBeDefined()
   await arrive($)
   await clock.settle()
   expect(await pane.find({ text: /^Address · just now$/ })).toBeDefined()
 
-  // Sent to Claude, the thread folds to its first line, with its keys behind Details, until the reviewer answers.
-  expect(await pane.find({ key: 'address-T1-key' })).toBeUndefined()
-  await pane.press({ key: `${details}-key` })
+  // Sent to Claude, the thread folds out of the count, and keeps its keys, until the reviewer answers.
   expect((await pane.find({ key: 'address-T1-key' }))?.props.label).toBe('Address again')
   // Opening it on GitHub keeps it folded and out of the count.
   await pane.press({ key: 'open-T1' })
   await clock.settle()
   expect(ran.at(-1)).toEqual(['open', 'https://github.com/acme/greet/pull/12#r1'])
   expect(await pane.find({ text: '✓ Opened the comment' })).toBeDefined()
-  expect(await pane.find({ key: details })).toBeDefined()
   expect(await pane.find({ text: /^ 1$/ })).toBeDefined()
   hasReply = true
   await pane.press({ key: 'tab-findings' })
   await pane.press({ key: 'tab-prs' })
   await clock.settle()
   expect(await pane.find({ text: /Still unquoted/ })).toBeDefined()
-  expect(await pane.find({ key: details })).toBeUndefined()
 
   // The thread is resolved on GitHub, and a refresh drops it, after the pane drew it and before Address lands.
   const sends = sent.length
@@ -1717,7 +1702,8 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   // A typed reply hands the task off on the copy: it folds and leaves the count.
   await pane.press({ key: 'typekey-d17' })
   await pane.input({ key: 'type-d17', text: 'Done in both.' })
-  expect(await pane.find({ key: 'fold-details-d17' })).toBeDefined()
+  await clock.settle()
+  expect(await band.find({ text: /5 need you/ })).toBeDefined()
 
   // Done settles the sample task in place; Undo brings it back open; then it moves to Closed.
   await pane.press({ key: 'title-d14' })
