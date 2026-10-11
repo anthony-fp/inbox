@@ -610,13 +610,10 @@ function pressed(
     case 'type': {
       const words = p.text.trim()
       if (!words) return unchanged
-      if (item.kind === 'question') return answered(words)
-      // A task stays open: the agent closes it once the reply settles it.
-      return {
-        ledger,
-        last: record('handoff'),
-        effects: [{ kind: 'send', text: messages.taskReply(item, words), by: null }],
-      }
+      // The item stays open: typed words can be an answer or a question back, so the agent closes it once the
+      // words settle it.
+      const text = item.kind === 'question' ? messages.answer(item, words) : messages.taskReply(item, words)
+      return { ledger, last: record('handoff'), effects: [{ kind: 'send', text, by: null }] }
     }
     case 'explain':
       return {

@@ -1061,5 +1061,81 @@
         "new": "csv|410|redirect"
       }
     ]
+  },
+  {
+    "name": "typed-answer-closes-question",
+    "about": "Words typed on a question that answer it close it.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 10,
+      "card": {
+        "goal": "Ship the reports export",
+        "done": [],
+        "now": "Waiting on the cache decision",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [
+        {
+          "id": "i7",
+          "kind": "question",
+          "label": null,
+          "ask": "Should findings close only when the person confirms a fix?",
+          "options": ["Yes", "No"],
+          "rec": "Yes",
+          "helps": [],
+          "turn": 5,
+          "at": 1
+        }
+      ]
+    },
+    "exchange": {
+      "person": "Re \"Should findings close only when the person confirms a fix?\": yes, only on my confirmation",
+      "reply": "Done: findings now close only when you confirm the fix. The tests pass.",
+      "activity": ["edited hooks/ledger.ts"]
+    },
+    "checks": [
+      {
+        "closed": "i7"
+      }
+    ]
+  },
+  {
+    "name": "typed-question-keeps-question",
+    "about": "Words typed on a question that ask something back leave it open.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 10,
+      "card": {
+        "goal": "Ship the reports export",
+        "done": [],
+        "now": "Waiting on the cache decision",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [
+        {
+          "id": "i7",
+          "kind": "question",
+          "label": null,
+          "ask": "Should findings close only when the person confirms a fix?",
+          "options": ["Yes", "No"],
+          "rec": "Yes",
+          "helps": [],
+          "turn": 5,
+          "at": 1
+        }
+      ]
+    },
+    "exchange": {
+      "person": "Re \"Should findings close only when the person confirms a fix?\": why wouldn't we want the model to close findings itself?",
+      "reply": "Letting the model close findings would clear stale ones sooner, but it also closed findings you had only put off in earlier runs. Confirming keeps that from happening. I'd still go with Yes. Which do you want?",
+      "activity": []
+    },
+    "checks": [
+      {
+        "open": "i7"
+      }
+    ]
   }
 ]

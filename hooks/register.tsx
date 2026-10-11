@@ -2972,7 +2972,7 @@ export const register: Register = on => {
         keys: () => rowKeyActions($, r, optionsShown.includes(r.id)).keys,
         moreKeys: () => rowKeyActions($, r, optionsShown.includes(r.id)).more,
         typeHint: item.kind === 'task' ? 'Your reply to Claude' : 'Your answer',
-        typeKind: item.kind === 'task' ? 'handoff' : 'mark',
+        typeKind: 'handoff',
       }
     }
     // A finding's handle is its kind's mark, ▲ or ✦. Handed to Claude, it folds, as a task does, until Claude's

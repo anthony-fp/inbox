@@ -886,7 +886,7 @@ test('findings that arrive one by one after the pane moves to them leave the top
   expect(await pane.find({ key: 'address-f1' })).toBeUndefined()
 })
 
-test('t opens a field for the person’s own words: an answer closes its question, a reply hands a finding to Claude', async ($, on) => {
+test('t opens a field for the person’s own words: a question’s words go to Claude, which closes it once they answer it, and a reply hands a finding to Claude', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])
   on('ui.focus', () => ({}))
@@ -931,6 +931,9 @@ test('t opens a field for the person’s own words: an answer closes its questio
   // [Send] sends them as the answer.
   await pane.press({ key: 'send-i1' })
   expect(sent.at(-1)).toBe('Re "Use Node or Python?": Deno, actually')
+  expect((await pane.find({ key: 'row-i1' }))?.text).toContain('✓ Replied just now')
+  await $.tool.call({ tool: 'mcp__inbox__close', id: 'i1', answer: 'Deno' } as never)
+  await clock.settle()
   expect(await pane.find({ key: 'row-i1' })).toBeUndefined()
 
   await pane.press({ key: 'tab-findings' })
@@ -1024,9 +1027,7 @@ test('a press during a turn reads Queued until its prompt enters, and one that w
   await pane.press({ key: 'typekey-i2' })
   await pane.input({ key: 'type-i2', text: 'yes' })
   await clock.settle()
-  // The answered question leaves the count at once, and settles as queued, with no ✓.
-  expect(await band.find({ text: /Needs you 1/ })).toBeDefined()
-  expect(await pane.find({ text: 'Queued: Yes' })).toBeDefined()
+  expect(await pane.find({ text: /Queued: Reply/ })).toBeDefined()
   // The turn ends and both prompts enter.
   await arrive($)
   await clock.settle()
@@ -1050,7 +1051,7 @@ test('a press during a turn reads Queued until its prompt enters, and one that w
   expect(sent.at(-1)).toBe('Re "Use Node or Python?": Node')
   expect(await pane.find({ key: 'row-i1' })).toBeDefined()
   expect(await pane.find({ text: 'Not sent: a hook refused it' })).toBeDefined()
-  expect(await band.find({ text: /Needs you 1/ })).toBeDefined()
+  expect(await band.find({ text: /Needs you 2/ })).toBeDefined()
   // Nothing went, so no option reads "again".
   expect((await pane.find({ key: 'answer-i1-0-key' }))?.props.label).toBe('Node (recommended)')
 
