@@ -220,9 +220,6 @@ const DESKTOP_TAB_PAD = '\u00a0'.repeat(3)
  * tall and the rows sit flush. A Box in the hooks tree counts padding in half lines, so it pads twice this.
  */
 const DESKTOP_ROW_PAD = 0.5
-// How far a transparent border, the only way to round a desktop fill, insets a Box's content on the left and
-// right, in columns: about 13 pt, measured on a section card, over a column's 7.9 pt.
-const DESKTOP_BORDER_INSET = 1.65
 // Theme keys, so the colors follow the person's Claude Code theme.
 const NEEDS_YOU = 'warning'
 // A child's place under its section: a middle child, the last, or a block the tree passes.
@@ -3516,11 +3513,6 @@ export const register: Register = on => {
             />
           </Box>
         )
-      // On desktop the open row's fill is rounded. Its border insets the content, so the lead before the handle
-      // gives that inset back, and the handle and title stay where the closed row drew them.
-      const isRoundedRow = isSelected && look === 'desktop' && !isInline
-      // Taken from the tree's indent, or else from the handle's left padding, so no width goes below 0.
-      const inset = isRoundedRow ? DESKTOP_BORDER_INSET : 0
       const { keys, more } = isSelected ? rowActions(row) : { keys: [], more: [] }
       const isTyping = Input !== null && !!row.typeHint && typing === row.id
       const field =
@@ -3555,15 +3547,9 @@ export const register: Register = on => {
           alignItems="flex-start"
           overflow="hidden"
           backgroundColor={isSelected ? pal.selection : undefined}
-          {...(isRoundedRow ? { borderStyle: 'single', borderColor: '#0000' } : {})}
         >
-          <Box width={tree ? 4 - inset : 1} flexShrink={0} />
-          <Box
-            width={tree ? 3 : 4 - inset}
-            flexShrink={0}
-            paddingLeft={tree ? 0 : 2 - inset}
-            paddingY={isSelected ? rowPad : 0}
-          >
+          <Box width={tree ? 4 : 1} flexShrink={0} />
+          <Box width={tree ? 3 : 4} flexShrink={0} paddingLeft={tree ? 0 : 2} paddingY={isSelected ? rowPad : 0}>
             {/* Without a Client, desktop's title alone opens the row, so the list draws half as many native buttons. */}
             {row.handleTone ? (
               <Text color={pal.mark[row.handleTone]}>{row.handle}</Text>
@@ -3966,16 +3952,9 @@ export const register: Register = on => {
         </Text>
       </Box>
     )
-    // On desktop an invisible border rounds the card's corners. It also pads the content on the left and right,
-    // by about two thirds of a line, and not above or below.
-    const isRoundedCard = look === 'desktop' && !isInline
+    // Square on desktop: a rounded fill needs a border, which would inset the rows from the card's edges.
     const section = (children: JSX.Element | JSX.Element[]) => (
-      <Box
-        flexDirection="column"
-        paddingY={blankLine}
-        backgroundColor={isInline ? undefined : pal.card}
-        {...(isRoundedCard ? { borderStyle: 'single', borderColor: '#0000' } : {})}
-      >
+      <Box flexDirection="column" paddingY={blankLine} backgroundColor={isInline ? undefined : pal.card}>
         {children}
       </Box>
     )
@@ -4073,7 +4052,8 @@ export const register: Register = on => {
       closed.length === 0
         ? []
         : [
-            ...titleGap(false),
+            // On desktop the fold row sits flush under the rows, as the rows sit flush with each other.
+            ...(look === 'desktop' ? [] : titleGap(false)),
             foldRow(kind, closed.length, isUnfolded),
             ...(isUnfolded ? closed.flatMap((d, n) => [...closedGap(), closedRow(d, childPos(n, closed.length))]) : []),
           ]
