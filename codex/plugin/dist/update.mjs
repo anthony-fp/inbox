@@ -112,6 +112,7 @@ HELP: <item> | <kind> | <value> | <name>
     open | a file or folder the person needs to open or edit, the path as written
     copy | text for the person to paste into a file or form, never a command: "block N" for the code block marked [block N] in <reply>, or one line of text
     run | a shell command the reply asks the person to run or approve: "block N" or the command
+    terminal | a shell command the reply says only the person can run, because it needs their credentials, password, device or account: "block N" or the command
     link | an https URL the person needs to visit
   name: what a copy, command or link is, at most 3 words ("settings snippet", "removal command", "token page"), or "-".
   Use only paths, commands, text and URLs that appear in <reply> or <activity>. Never invent one.
@@ -140,10 +141,11 @@ function readHelp(kind, value, name, blocks, source) {
   if (kind === "copy") {
     return quoted.trim() !== "" && quoted.length <= 8e3 && isFromReply(quoted) ? { kind, text: quoted, name } : null;
   }
-  if (kind === "run") {
+  if (kind === "run" || kind === "terminal") {
     const command = commandText(quoted);
     const isUsable = command !== "" && command.length <= 4e3 && isFromReply(command);
-    return isUsable ? { kind: NEEDS_PERSON.test(command) ? "terminal" : "run", command, name } : null;
+    const isTheirs = kind === "terminal" || NEEDS_PERSON.test(command);
+    return isUsable ? { kind: isTheirs ? "terminal" : "run", command, name } : null;
   }
   if (kind === "link") {
     try {
