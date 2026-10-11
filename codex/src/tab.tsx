@@ -171,6 +171,63 @@ let requested = 0
 let shown = 0
 let isPressing = false
 
+// ── State kept across a page swap ───────────────────────────────────────────
+
+/**
+ * What the person chose or typed in this tab, which the page a swap writes in reads back once. Notes and presses
+ * still out are left behind, since the new page reads the view fresh. A new `version` makes an older record unread.
+ */
+type Kept = {
+  version: 1
+  isDemo: boolean
+  tab: Tab
+  selection: Record<Tab, string | null>
+  typing: string | null
+  drafts: [string, string][]
+  optionsShown: string[]
+  unfolded: Group[]
+}
+const KEPT_KEY = 'inbox-tab-kept'
+
+// The host may block storage in the tab's frame. Then a swap starts the new page empty, as a reload does.
+function keepState() {
+  const kept: Kept = {
+    version: 1,
+    isDemo,
+    tab,
+    selection: { needsYou: selection.needsYou?.id ?? null, findings: selection.findings?.id ?? null },
+    typing,
+    drafts: [...drafts],
+    optionsShown: [...optionsShown],
+    unfolded: [...unfolded],
+  }
+  try {
+    sessionStorage.setItem(KEPT_KEY, JSON.stringify(kept))
+  } catch {}
+}
+
+function restoreState() {
+  let kept: Kept | null = null
+  try {
+    const raw = sessionStorage.getItem(KEPT_KEY)
+    sessionStorage.removeItem(KEPT_KEY)
+    kept = raw ? (JSON.parse(raw) as Kept) : null
+  } catch {}
+  if (kept?.version !== 1) return
+  isDemo = kept.isDemo
+  tab = kept.tab
+  for (const t of TAB_IDS) {
+    const id = kept.selection[t]
+    // An openedAt of 0 reads as open by default, so the restored row's actions take a press at once.
+    selection[t] = id ? { id, openedAt: 0 } : null
+  }
+  typing = kept.typing
+  focusTyping = typing !== null
+  for (const [id, text] of kept.drafts) drafts.set(id, text)
+  for (const id of kept.optionsShown) optionsShown.add(id)
+  for (const g of kept.unfolded) unfolded.add(g)
+}
+
 // ── The host ────────────────────────────────────────────────────────────────
 
 let nextId = 0
@@ -314,6 +371,7 @@ async function swapPage() {
     // page's. Timer ids count up from 1, so clearing every id up to a new one stops them all.
     const last = window.setTimeout(() => undefined, 0)
     for (let i = 1; i <= last; i++) clearTimeout(i)
+    keepState()
     document.open()
     document.write(html)
     document.close()
@@ -1544,6 +1602,7 @@ document.addEventListener('keydown', e => {
   }
 })
 
+restoreState()
 request('ui/initialize', {
   protocolVersion: '2026-01-26',
   appInfo: { name: 'inbox', version: '0.1.0' },
