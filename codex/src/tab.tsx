@@ -88,6 +88,8 @@ function stepIcon(step: HelpStep | undefined): IconName | undefined {
 type Row = {
   id: string
   handle: string
+  /** The number a typed reply answers this question by, drawn as a badge in place of the handle. */
+  number?: number
   /** `done` once the row is handed to Codex, which also sets how its feedback reads. */
   handleTone?: Tone
   /** A finding's kind, which sets its handle's color and size. */
@@ -447,7 +449,9 @@ function itemRow(v: View, r: RowView, item: Item): Row {
 
   return {
     id,
-    handle: isHandedOff ? '✓' : r.handle,
+    // Only a number a typed reply reaches marks an item; a bullet would say nothing the group header doesn't.
+    handle: isHandedOff ? '✓' : '',
+    ...(isHandedOff || r.number === null ? {} : { number: r.number }),
     handleTone: isHandedOff ? 'done' : undefined,
     ...(isHandedOff ? { fold: {} } : {}),
     title: item.ask,
@@ -753,11 +757,9 @@ function ListRow({
   const isClosing = track.hasPanel && (track.state === 'closing' || track.state === 'leaving')
   const isSelected = track.hasPanel && !isClosing
   const bar = isNew(row.id) ? ` new tone-bar-${tone}` : ''
-  // A number a typed reply reaches, as "1)", draws as a badge holding the number.
-  const number = /^(\d+)\)$/.exec(row.handle)?.[1]
   const handle = (
     <span class={`mark ${row.handleTone ?? row.kind ?? ''}`}>
-      {number ? <span class="number">{number}</span> : row.handle}
+      {row.number === undefined ? row.handle : <span class="number">{row.number}</span>}
     </span>
   )
 

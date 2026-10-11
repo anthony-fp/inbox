@@ -85,7 +85,7 @@ A row has two forms:
 | Settled | Where the row was | `✓ Done · just now` with the leave bar | [Undo], after a Mark |
 | Closed fold | Under Questions and Tasks, and Findings (decision 1) | `▸ 3 Closed` | Up to 3 closed items, each `ask → outcome` |
 
-The Codex tab draws its lists flat, with no tree lines, in the app's sans font. A question's number shows as the number alone in a round gray badge, and a question no number reaches shows a task's bullet, •. A number still means typing it answers that question. Rows sit flush, with no dividers between them. A collapsed row fills gray on hover and takes a click anywhere on it. A finding's handle is its kind's mark, ▲ or ✦, in the kind's color, and its badge is the kind's name alone.
+The Codex tab draws its lists flat, with no tree lines, in the app's sans font. A question's number shows as the number alone in a round gray badge. A number means typing it answers that question. Other questions and tasks draw no mark, and their titles keep the same column. A row handed to Codex shows ✓. Rows sit flush, with no dividers between them. A collapsed row fills gray on hover and takes a click anywhere on it. A finding's handle is its kind's mark, ▲ or ✦, in the kind's color, and its badge is the kind's name alone.
 
 The Closed fold's outcomes are today's: the answer itself ("Yes, rename"), "Done", "You ran it", "Dismissed", "Expired", "Closed by Claude: <reason>", and the per-turn update's own outcome text.
 
@@ -100,7 +100,7 @@ The group title "Your tasks" becomes "Tasks", to match "Questions".
 
 So when older questions stay open, or Claude labeled its questions differently, the pane's "1)" and a typed "1" name different questions. That sends an answer to the wrong question as the person.
 
-The rule: a question's handle shows a number only when a typed number reaches it now, and shows the number `answerNote` would resolve. Every other open question shows a task's bullet, `•`, in every client. Once the person sends any message, the batch is no longer "the reply just before", and every handle becomes `•` until Claude asks again. The Codex tab follows the same rule, since it uses `answerNote` through `promptNotes`. Claude mode has no prompt hook, so its rows have no numbers.
+The rule: a question's handle shows a number only when a typed number reaches it now, and shows the number `answerNote` would resolve. In the terminal, every other open question shows a task's bullet, `•`. In the Claude app pane and the Codex tab, it shows no mark, as tasks do there. Once the person sends any message, the batch is no longer "the reply just before", and every handle becomes `•` until Claude asks again. The Codex tab follows the same rule, since it uses `answerNote` through `promptNotes`. Claude mode has no prompt hook, so its rows have no numbers.
 
 **Which row is open** (decision 3).
 

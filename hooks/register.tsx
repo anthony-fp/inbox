@@ -2935,8 +2935,8 @@ export const register: Register = on => {
 
       return {
         id: item.id,
-        // "?" marks a question no typed number reaches. Desktop draws a task's bullet, since "?" reads as "unknown" there.
-        handle: isHandedOff ? '✓' : r.handle,
+        // Desktop marks only a number a typed reply reaches; its bullet would say nothing the group header doesn't.
+        handle: isHandedOff ? '✓' : look === 'desktop' && r.number === null ? '' : r.handle,
         handleTone: isHandedOff ? 'done' : undefined,
         ...(isHandedOff ? { fold: {} } : {}),
         title: item.ask,
