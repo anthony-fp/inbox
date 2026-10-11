@@ -44,10 +44,39 @@ The short summary of where the session stands: its goal, what's done, and
 what's happening now.
 
 **New row**:
-A row a client lists for the first time since it last recorded its rows. It
-draws a bar for a few seconds, and a client showing an empty tab moves to it.
+A row a look lists for the first time since it last recorded its rows. It
+draws a bar for a few seconds, and a look showing an empty tab moves to it.
 
 **Last action**:
 What an item or PR in the pane says after the person presses one of its
 actions: a ✓ and the action's label, as in "✓ Discuss · 1m ago". Each keeps
 only its latest.
+
+### Looks and hosts
+
+**Look**:
+One of the three ways the inbox is drawn: `terminal` in the Claude Code
+terminal, `desktop` in the Claude desktop app's Code mode pane, and `codex` in
+the Codex tab. `Look` in `hooks/view.ts`.
+_Avoid_: client, surface
+
+**Host**:
+The program that runs the inbox code. The mod draws the terminal and desktop
+looks. The Codex plugin draws the Codex tab.
+
+**Shared module**:
+A file in `hooks/` that both hosts import. It imports nothing from the engine
+or from either host.
+
+**Adapter**:
+The code that draws the shared view in one look: `hooks/register.tsx` for the
+terminal and desktop looks, `codex/src/tab.tsx` for the Codex tab.
+
+**Difference on purpose**:
+A behavior that differs between looks because one look cannot do something,
+or because the product decided so. Any other difference is drift.
+
+The engine has two terms of its own. Its `surface` is where Claude Code runs,
+and includes `mobile` and `vscode`; `lookOf` in `hooks/register.tsx` maps it to
+a look. Its `Client` is a drawn region that takes clicks over its whole shape,
+as in `hooks/row-client.tsx`.

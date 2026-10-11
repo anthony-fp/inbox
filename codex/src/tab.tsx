@@ -422,7 +422,7 @@ function rowKeys(r: RowView): { keys: Key[]; more: Key[] } {
         // An open or copy shows its pending note, as the pane does, until the server answers.
         const pending =
           a.kind === 'local' && item && step
-            ? feedbackText({ is: 'local', result: pendingResult(stepEffects(item, step), Date.now()) }, 'html')
+            ? feedbackText({ is: 'local', result: pendingResult(stepEffects(item, step), Date.now()) }, 'codex')
             : undefined
         const icon = stepIcon(step)
         return {
@@ -711,7 +711,7 @@ function feedbackLabel(row: Row): string | null {
   const f = row.feedback
   if (!f) return null
 
-  return f.is === 'done' && row.handleTone === 'done' ? f.label : feedbackText(f, 'html')
+  return f.is === 'done' && row.handleTone === 'done' ? f.label : feedbackText(f, 'codex')
 }
 
 /** The feedback with its age. A note, a Local result and a message not sent read alone, with no age. */
@@ -1290,12 +1290,12 @@ function contentHeight(el: HTMLElement): number {
   return [...el.children].reduce((sum, child) => sum + child.getBoundingClientRect().height, 0)
 }
 
-type Look = { height: number; opacity: number }
+type Frame = { height: number; opacity: number }
 
 /** Animates the element from one height and opacity to another, then leaves it clipped toward `to.height`. */
-function tween(el: HTMLElement, from: Look, to: Look, timing: KeyframeAnimationOptions) {
-  const frame = (l: Look) => ({ height: `${l.height}px`, opacity: l.opacity })
-  run(el, [frame(from), frame(to)], timing, to.height)
+function tween(el: HTMLElement, from: Frame, to: Frame, timing: KeyframeAnimationOptions) {
+  const keyframe = (f: Frame) => ({ height: `${f.height}px`, opacity: f.opacity })
+  run(el, [keyframe(from), keyframe(to)], timing, to.height)
 }
 
 /** Grows the element in from nothing to `height`, fading in. */
@@ -1360,12 +1360,12 @@ function startState(el: HTMLElement, state: RowState, from: () => number): boole
       return true
     case 'closing':
     case 'settling':
-      collapse(el, drawnLook(el, from))
+      collapse(el, drawnFrame(el, from))
       return true
     case 'leaving': {
-      const look = drawnLook(el, from)
+      const frame = drawnFrame(el, from)
       for (const a of el.getAnimations()) a.cancel()
-      tween(el, look, { height: 0, opacity: 0 }, EXIT)
+      tween(el, frame, { height: 0, opacity: 0 }, EXIT)
       return true
     }
     default:
@@ -1376,7 +1376,7 @@ function startState(el: HTMLElement, state: RowState, from: () => number): boole
 }
 
 /** The element's height and opacity as drawn now, mid-animation included, read before its animations are cancelled. */
-function drawnLook(el: HTMLElement, height: () => number): Look {
+function drawnFrame(el: HTMLElement, height: () => number): Frame {
   return { height: height(), opacity: Number(getComputedStyle(el).opacity) }
 }
 
@@ -1385,7 +1385,7 @@ function drawnLook(el: HTMLElement, height: () => number): Look {
  * in it was in. The animation holds that end until the draw that removes the panel cancels it, so the panel never
  * shows again for a frame.
  */
-function collapse(el: HTMLElement, from: Look) {
+function collapse(el: HTMLElement, from: Frame) {
   const panel = el.querySelector<HTMLElement>('.panel.closing')
   // A closing row keeps its open line until the panel goes, so its end height is measured as it will draw then.
   const row = el.querySelector<HTMLElement>('.row.closing')

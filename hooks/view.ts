@@ -92,8 +92,13 @@ export type Feedback =
   | { is: 'local'; result: LocalResult }
   | { is: 'note'; note: RowNote['note']; at: number }
 
-/** Where a row is drawn, which decides some of its words: the mod in a terminal or the desktop app, or an HTML view. */
-export type Look = 'terminal' | 'desktop' | 'html'
+/**
+ * How the inbox is drawn, which decides some of its words: the mod in the Claude Code terminal or the desktop
+ * app's pane, or the Codex tab. GLOSSARY.md defines it.
+ */
+export type Look = 'terminal' | 'desktop' | 'codex'
+/** The looks the mod draws. */
+export type ModLook = Exclude<Look, 'codex'>
 
 export type ActionView = {
   press: RowPress
@@ -280,7 +285,7 @@ function stepKind(step: HelpStep): PressKind {
  * "… again" when the row's last press, other than an open or copy, was that action.
  * A settled row offers only Undo, and only after the person's own Done or Dismiss.
  */
-/** The inbox's tabs in order, as every client names them and the keys that switch to them. */
+/** The inbox's tabs in order, as every look names them and the keys that switch to them. */
 export const TABS: readonly { id: Tab; label: string; hotkey: string }[] = [
   { id: 'needsYou', label: 'Needs you', hotkey: '1' },
   { id: 'findings', label: 'Findings', hotkey: '2' },
@@ -370,12 +375,12 @@ function actionsOf(
 }
 
 /**
- * A list's entry as a client draws it: an open row as the client builds it, or a row that just closed, which keeps
+ * A list's entry as a look draws it: an open row as its adapter builds it, or a row that just closed, which keeps
  * its place and cannot be selected.
  */
 export type DrawnEntry<R> = { row: R } | { settled: RowView; state: Extract<RowState, { is: 'settled' }> }
 
-/** The view's lists as a client draws them, and each tab's open rows in order, which the selection moves over. */
+/** The view's lists as a look draws them, and each tab's open rows in order, which the selection moves over. */
 export type DrawnLists<R> = {
   questions: DrawnEntry<R>[]
   tasks: DrawnEntry<R>[]
@@ -384,7 +389,7 @@ export type DrawnLists<R> = {
 }
 
 /**
- * The view's lists as a client draws them. A row that just closed shows in place while `isSettledDrawn` says so,
+ * The view's lists as a look draws them. A row that just closed shows in place while `isSettledDrawn` says so,
  * and is left out after. `toRow` builds an open row, or returns null to leave it out.
  */
 export function drawnLists<R>(
@@ -428,7 +433,7 @@ export function settledIn(entries: DrawnEntry<unknown>[]): Set<string> {
 export type ActionKey = { slot: 'action'; action: ActionView; hotkey: string }
 
 /**
- * A row's key, in the order both clients draw them. `retry` repeats a press whose message failed to send, as the
+ * A row's key, in the order every look draws them. `retry` repeats a press whose message failed to send, as the
  * kind of the action it repeats. `choice` is an option or a step, lettered in order while letters last.
  * `allOptions` shows a question's folded options.
  */

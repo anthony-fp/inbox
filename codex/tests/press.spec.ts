@@ -183,7 +183,7 @@ test('a run step on a question sends its command and leaves the question open, a
       { kind: 'open', target: '.env.local', name: '.env.local' },
     ],
   })
-  const local = (result: LocalResult) => feedbackText({ is: 'local', result }, 'html')
+  const local = (result: LocalResult) => feedbackText({ is: 'local', result }, 'codex')
   assert.equal(local(pending), 'Copying env line\u2002·\u2002Opening .env.local…')
   assert.equal(local(finishedResult(pending, [null, null], 60)), '✓ Copied env line\u2002·\u2002Opened .env.local')
   assert.equal(
@@ -342,7 +342,7 @@ test('Address hands a finding off: it folds until an applied turn leaves it open
   const sent = after(s, { action: 'address', id: 'f3' })
   const folded = viewOf(sent, 60).findings
   assert.deepEqual(
-    folded.rows.map(r => [r.id, r.state.is, r.feedback && feedbackText(r.feedback, 'html')]),
+    folded.rows.map(r => [r.id, r.state.is, r.feedback && feedbackText(r.feedback, 'codex')]),
     [['f3', 'handedOff', 'Queued: Address']],
   )
   assert.equal(folded.count, 0)

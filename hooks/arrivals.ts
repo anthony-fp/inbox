@@ -1,4 +1,4 @@
-// Which rows are new to a client, and where it moves for them. The pane and the
+// Which rows are new to a look, and where it moves for them. The pane and the
 // Codex tab both follow these rules, each with its own tabs and its own rule
 // for when a tab shows only its empty text. Pure, and imports nothing from the engine.
 
@@ -29,7 +29,7 @@ export function recordRows<T extends string>(
 /**
  * Where to move for rows that just appeared: while the shown tab shows only its empty text, to the first other
  * tab in `tabs` with new rows, and the first new row there that `selectable` lists, or null when it lists none.
- * Null when the client stays.
+ * Null when the look stays.
  */
 export function followTo<T extends string>(
   tabs: readonly T[],

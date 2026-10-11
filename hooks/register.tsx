@@ -4,6 +4,7 @@ import type {
   Register,
   SessionAppendMessage,
   UiCopyResult,
+  RenderSurface,
   UiPressArgument,
   UiScrollResult,
 } from 'claude-code'
@@ -123,7 +124,7 @@ import {
   settledIn,
   settledRowIds,
 } from './view'
-import type { DrawnEntry, InboxView, PlannedKey, RowView } from './view'
+import type { DrawnEntry, InboxView, ModLook, PlannedKey, RowView } from './view'
 import {
   CLOSE_DESCRIPTION,
   CLOSE_SCHEMA,
@@ -440,8 +441,15 @@ const HEX_THEMES = new Set(['dark', 'dark-daltonized', 'light', 'light-daltonize
 // On the desktop app's dark background, #1a1a19, the cards and the selected tab stand half as far above it as the
 // terminal's fills do, which read too strong in the pane.
 const DESKTOP_DARK_FILLS = { card: '#292929', raised: '#333333' }
+/**
+ * The look the mod draws for an engine surface. Mobile and VS Code get the terminal look, which nobody has checked
+ * there: docs/reference/claude-desktop-app.md records what is known about those surfaces.
+ */
+function lookOf(surface: RenderSurface): ModLook {
+  return surface === 'desktop' ? 'desktop' : 'terminal'
+}
 /** The palette for a Claude Code theme, drawn in the terminal or the desktop app. */
-function paletteFor(theme: string, look: 'terminal' | 'desktop'): Palette {
+function paletteFor(theme: string, look: ModLook): Palette {
   if (look === 'terminal') return PALETTES[theme] ?? THEME_KEY_PALETTE
   if (!HEX_THEMES.has(theme)) return DESKTOP_KEY_PALETTE
   const palette = PALETTES[theme]!
@@ -535,7 +543,7 @@ function focusHintFor(element: string): string | null {
  */
 const followUpPresses = new Map<string, (press: UiPressArgument) => void>()
 /** Which look the pane last drew in, for the redraws a timer runs. */
-let paneLook: 'terminal' | 'desktop' = 'terminal'
+let paneLook: ModLook = 'terminal'
 
 /** Every Button and Input key in a drawn tree: the keys the focus can move to. */
 function focusKeys(node: unknown, keys = new Set<string>()): Set<string> {
@@ -2770,7 +2778,7 @@ export const register: Register = on => {
     const { Box, Button, Text } = $.ui.resolve(e)
     const [{ ledger, stop, view, isDemo, now }, theme] = await Promise.all([drawnState($), read($, THEME)])
     if (!stop && !ledger.card && ledger.items.length === 0 && ledger.findings.length === 0) return next(e)
-    const pal = paletteFor(theme, e.surface === 'desktop' ? 'desktop' : 'terminal')
+    const pal = paletteFor(theme, lookOf(e.surface))
     // Each count as its tab reads: the tab's name, muted, then the count in the tab's color.
     const counts = ROW_TABS.filter(t => view[t.id].count > 0).map(t => (
       <Text>
@@ -2846,7 +2854,7 @@ export const register: Register = on => {
     const elements = $.ui.resolve(e)
     const { Box, Button, Markdown, Text } = elements
     // Desktop draws every Button as a native button, and only clicks reach the pane: no letters, key hints or hidden hotkeys.
-    const look = e.surface === 'desktop' ? 'desktop' : 'terminal'
+    const look = lookOf(e.surface)
     paneLook = look
     // Without a Client, an older desktop engine draws each of these with Buttons instead.
     const hasClient = look === 'desktop' && 'Client' in elements
