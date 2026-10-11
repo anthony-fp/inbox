@@ -229,6 +229,35 @@ function asked(id: string, kind: Item['kind'], turn: number): Item {
   return { id, kind, label: null, ask: `Ask ${id}`, options: [], rec: null, helps: [], turn, at: turn }
 }
 
+test('Needs you lists the newest reply first and keeps each older reply in the order it asked', () => {
+  const s = emptyState('s1')
+  const state: SessionState = {
+    ...s,
+    ledger: {
+      ...s.ledger,
+      turn: 3,
+      batchTurn: 3,
+      nextId: 6,
+      items: [
+        asked('i1', 'question', 1),
+        asked('i2', 'question', 1),
+        asked('i3', 'task', 2),
+        asked('i4', 'task', 2),
+        asked('i5', 'question', 3),
+      ],
+    },
+  }
+  const v = viewOf(state, 10)
+  assert.deepEqual(
+    v.needsYou.questions.map(r => r.id),
+    ['i5', 'i1', 'i2'],
+  )
+  assert.deepEqual(
+    v.needsYou.tasks.map(r => r.id),
+    ['i3', 'i4'],
+  )
+})
+
 test('the tab lists Needs you in the mod’s order, numbers only the questions a typed number answers, and counts what waits', () => {
   const s = emptyState('s1')
   // An older question and task stay open after the latest reply asked a question, a task and a question.
@@ -260,8 +289,8 @@ test('the tab lists Needs you in the mod’s order, numbers only the questions a
     ['i2', '•', 'open'],
   ])
   assert.deepEqual(rows(v.needsYou.tasks), [
-    ['i1', '•', 'handedOff'],
     ['i4', '•', 'open'],
+    ['i1', '•', 'handedOff'],
   ])
   assert.equal(v.needsYou.count, 4)
   assert.equal(v.needsYou.topId, 'i3')

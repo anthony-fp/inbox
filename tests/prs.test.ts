@@ -1,6 +1,15 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { commentLine, prRefs, prNeedsYou, readThreads, readView, readableComment, readiness } from '../hooks/prs'
+import {
+  byPrOrder,
+  commentLine,
+  prRefs,
+  prNeedsYou,
+  readThreads,
+  readView,
+  readableComment,
+  readiness,
+} from '../hooks/prs'
 
 const VIEW = JSON.stringify({
   number: 12,
@@ -202,5 +211,25 @@ describe('prs', () => {
       text: 'Waiting: 1 thread sent to Claude, needs approval',
     })
     expect(readiness({ ...onOthers, checks: [], threads: [] }, sent).status).toBe('ready')
+  })
+
+  test('PRs that wait on the person come first, then those waiting on others, then finished ones, newest first within each', () => {
+    const view = readView('acme/greet#12', VIEW)!
+    const base = { ...view, checks: [], threads: [], reviewDecision: 'APPROVED', fetchedAt: 0, error: null }
+    const pr = (number: number, changes: Partial<typeof base>) => ({
+      ...base,
+      ...changes,
+      number,
+      ref: `acme/greet#${number}`,
+    })
+    const prs = [
+      pr(9, { state: 'MERGED' }),
+      pr(20, { reviewDecision: 'REVIEW_REQUIRED' }),
+      pr(11, {}),
+      pr(14, { mergeable: 'CONFLICTING' }),
+      pr(15, {}),
+      pr(13, { isDraft: true }),
+    ]
+    expect(prs.sort(byPrOrder).map(p => p.number)).toEqual([14, 15, 11, 13, 20, 9])
   })
 })

@@ -273,6 +273,21 @@ export function readiness(
   )
 }
 
+/** Where each status sorts: what waits on the person first, then what waits on others, then what is finished. */
+const STATUS_ORDER: Record<PrStatus, number> = { blocked: 0, ready: 1, draft: 2, waiting: 3, merged: 4, closed: 5 }
+
+/**
+ * The PR section's order: by status, then the newest PR first. The status is read without sent threads, so
+ * sending a thread to the agent does not move its PR while the press shows; only a fetch from GitHub can.
+ */
+export function byPrOrder(a: PrView, b: PrView): number {
+  return (
+    STATUS_ORDER[readiness(a).status] - STATUS_ORDER[readiness(b).status] ||
+    b.number - a.number ||
+    a.ref.localeCompare(b.ref)
+  )
+}
+
 /**
  * The HTML tags review bots write in comments, such as `<sub>` and `<details>`.
  * Lowercase only, so a type parameter such as `Props<P>` stays.

@@ -48,6 +48,7 @@ import type { IsThreadSent, PrStatus } from './prs'
 import {
   THREADS_QUERY,
   VIEW_FIELDS,
+  byPrOrder,
   commentLine,
   failingChecks,
   parseRef,
@@ -1673,13 +1674,15 @@ function drawnPrs(
   lastActions: Record<string, LastAction>,
   now: number,
 ): { pr: PrView; isSettled: boolean }[] {
-  return Object.values(prState.views).flatMap((pr): { pr: PrView; isSettled: boolean }[] =>
-    isTracked(prState, linked, pr.ref)
-      ? [{ pr, isSettled: false }]
-      : isDismissing(lastActions, pr.ref, now)
-        ? [{ pr, isSettled: true }]
-        : [],
-  )
+  return Object.values(prState.views)
+    .sort(byPrOrder)
+    .flatMap((pr): { pr: PrView; isSettled: boolean }[] =>
+      isTracked(prState, linked, pr.ref)
+        ? [{ pr, isSettled: false }]
+        : isDismissing(lastActions, pr.ref, now)
+          ? [{ pr, isSettled: true }]
+          : [],
+    )
 }
 
 /**

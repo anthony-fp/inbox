@@ -16,7 +16,7 @@ import type {
   Tab,
   Turns,
 } from '../types'
-import { isLapsed, latestBatch, questionNumbers, reopenFinding, reopenItem } from './ledger'
+import { isLapsed, questionNumbers, reopenFinding, reopenItem } from './ledger'
 import { actionId, capitalized, clipLabel, isHandedOff, isUndoable, noteText, retryOf, stepsOf } from './presses'
 import type { HelpStep, RowPress } from './presses'
 
@@ -167,21 +167,14 @@ const UPDATE_FAILED = 'Last update failed. Items from that reply may be missing.
 const UPDATE_RETRIES = ' It retries after your next message.'
 
 /**
- * The open items in the order Needs you lists them. Questions: the latest
- * batch's in the order Claude asked them, then the rest newest first. Tasks:
- * oldest first.
+ * The open items in the order Needs you lists them: the newest reply's first, and each reply's in the order the
+ * agent asked them, which is id order. Tasks follow the same rule, since a reply's tasks often depend on each other.
  */
 function needsYouOrder(ledger: Ledger): { questions: Item[]; tasks: Item[] } {
-  const latest = new Set(latestBatch(ledger).map(i => i.id))
-  const questions = ledger.items.filter(i => i.kind === 'question')
+  const newestReplyFirst = (kind: Item['kind']) =>
+    ledger.items.filter(i => i.kind === kind).sort((a, b) => b.turn - a.turn)
 
-  return {
-    questions: [
-      ...questions.filter(i => latest.has(i.id)),
-      ...questions.filter(i => !latest.has(i.id)).sort((a, b) => b.turn - a.turn),
-    ],
-    tasks: ledger.items.filter(i => i.kind === 'task').sort((a, b) => a.turn - b.turn),
-  }
+  return { questions: newestReplyFirst('question'), tasks: newestReplyFirst('task') }
 }
 
 /**
