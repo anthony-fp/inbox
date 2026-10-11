@@ -340,7 +340,6 @@ Each section gives four things:
   - No gap between the context line and the title, matching the terminal.
   - Actions follow rule 8.
   - The open thread adds:
-    - the "Review thread" meta
     - the Markdown body (probe 13)
     - the fold line and the "Lines changed" note
     - [Try again] when a send failed, then Address, Draft reply, Open, then Discuss, each reading "… again" when it was the last action

@@ -2900,8 +2900,7 @@ export const register: Register = on => {
       handle: string
       /** A status color for a marker handle, such as a failing check's ✗. A Button takes no color, so this handle is Text and only the row's text selects it. */
       handleTone?: Tone
-      meta?: JSX.Element
-      /** A line above the title, open or closed, as a finding's kind and age. */
+      /** A line above the title, open or closed: the row's kind, then its age and counts. */
       head?: { label: string; tone: Tone; age: string }
       title: string
       /** Muted text on the selected title's line, such as an age. */
@@ -2990,13 +2989,9 @@ export const register: Register = on => {
       id: prCheckId(pr, c),
       handle: '✗',
       handleTone: 'error',
-      meta: (
-        <Text color={pal.tone.error} bold={look !== 'desktop'}>
-          Failing check
-        </Text>
-      ),
+      head: { label: 'Failing check', tone: 'error', age: '' },
       title: c.name,
-      line: { text: c.name, after: `${DOT}failing check`, afterTone: 'error' },
+      line: { text: c.name },
       body: null,
       keys: () => [
         {
@@ -3037,23 +3032,23 @@ export const register: Register = on => {
         ...(isSent || isChanged
           ? { fold: t.isLinesChanged ? { note: `Lines changed since this comment${DOT}still open on GitHub` } : {} }
           : {}),
-        meta: (
-          <Text wrap="truncate-end">
-            <Text color={pal.tone.prs} bold={look !== 'desktop'}>
-              Review thread
-            </Text>
-            <Text color={pal.muted}>
-              {t.at === null ? '' : ` ${ago(now - t.at)}`}
-              {t.replies > 0 ? `${DOT}${t.replies + 1} comments` : ''}
-              {t.isOutdated ? `${DOT}outdated` : ''}
-            </Text>
-          </Text>
-        ),
+        head: {
+          label: 'Review thread',
+          tone: 'prs',
+          age: [
+            t.at === null ? '' : ago(now - t.at),
+            t.replies > 0 ? `${t.replies + 1} comments` : '',
+            t.isOutdated ? 'outdated' : '',
+          ]
+            .filter(Boolean)
+            .map(part => `${DOT}${part}`)
+            .join(''),
+        },
         title: threadWhere(t),
         line: {
           before: `${threadWhere(t, baseName(t.path))} `,
           text: commentLine(latest.body),
-          ...(isChanged ? { after: `${DOT}lines changed` } : t.at === null ? {} : { age: `${DOT}${ago(now - t.at)}` }),
+          ...(isChanged ? { after: `${DOT}lines changed` } : {}),
         },
         body: comment,
         keys: () => [
@@ -3402,7 +3397,7 @@ export const register: Register = on => {
     const headLine = (head: NonNullable<Row['head']>, ageColor: string) => (
       <Text wrap="truncate-end">
         <Text color={pal.tone[head.tone] ?? pal.mark[head.tone]}>{head.label}</Text>
-        <Text color={ageColor}>{head.age}</Text>
+        {head.age ? <Text color={ageColor}>{head.age}</Text> : null}
       </Text>
     )
     const unselectedLine = (row: Row, onPress: (press: UiPressArgument) => void, inset: number) => {
@@ -3567,7 +3562,6 @@ export const register: Register = on => {
           {isSelected ? (
             <Box flexDirection="column" flexShrink={1} flexGrow={1} paddingRight={1} paddingY={space.rowPad}>
               {row.head ? headLine(row.head, pal.muted) : null}
-              {row.meta}
               <Text wrap="wrap">
                 <Text bold>{row.title}</Text>
                 {row.titleAfter ? <Text color={pal.muted}>{unbroken(row.titleAfter)}</Text> : null}

@@ -1323,7 +1323,7 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   expect((await pane.find({ key: 'resolve-acme/greet#12' }))?.props.label).toBe('Resolve conflicts again')
 
   // Open PR reports on the block, and a failed open reads in the failing check's red.
-  const red = (await pane.find({ type: 'Text', text: /^Failing check$/ }))?.props.color
+  const red = (await pane.findAll({ type: 'Text', text: /^Failing check$/ })).find(n => n.props.color)?.props.color
   expect(red).toBeDefined()
   expect(await pane.find({ text: '✓ Opened PR #12' })).toBeUndefined()
   await pane.press({ key: 'open-acme/greet#12' })

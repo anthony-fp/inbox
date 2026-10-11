@@ -77,8 +77,8 @@ A row has two forms:
 | Task | Needs you | `• ask · 3m ago` | Help steps (open, copy, run, terminal, link), "Open PR #N" when the ask names a tracked PR |
 | Finding | Findings | Two lines in every client: `▲ Issue · 3m ago` or `✦ Opportunity · 3m ago`, then the title | Detail, "Relevant file: path" |
 | PR block | PRs | Always open: `#12 title`, readiness, one line of facts | PR actions |
-| PR check | PRs, inside the PR block | `✗ lint · failing check`. Status only, with no Fix. | Open log |
-| Review thread | PRs | `◦ api.ts:40 latest comment · 2h ago` | Comments as Markdown |
+| PR check | PRs, inside the PR block | Two lines: `✗ Failing check`, then the check's name. Status only, with no Fix. | Open log |
+| Review thread | PRs | Two lines: `◦ Review thread · 2h ago`, with the comment count and "outdated" when they apply, then `api.ts:40 latest comment` | Comments as Markdown |
 | Review thread, sent | PRs | Folds to `✓ Address` and the latest comment's first line | Unfolds when a newer comment arrives |
 | Review thread, lines changed | PRs | Folds with no ✓, noted `Lines changed since this comment · still open on GitHub` | Nothing says the change fixed it, so it gets no ✓ |
 | Stop | Top of the band and pane | One red line: what stopped and what to do | Nothing |
