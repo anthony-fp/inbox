@@ -216,10 +216,10 @@ const DESKTOP_CHARS_PER_CELL = 1.25
 const DESKTOP_CLIP_CHARS_PER_CELL = 1.1
 const DESKTOP_TAB_PAD = '\u00a0'.repeat(3)
 /**
- * A closed desktop row's padding above and below its text, in a Client's lines, so the row is 2 lines
+ * A closed desktop row's padding above and below its text, in a Client's lines, so the row is 1.5 lines
  * tall and the rows sit flush. A Box in the hooks tree counts padding in half lines, so it pads twice this.
  */
-const DESKTOP_ROW_PAD = 0.5
+const DESKTOP_ROW_PAD = 0.25
 // Theme keys, so the colors follow the person's Claude Code theme.
 const NEEDS_YOU = 'warning'
 // A child's place under its section: a middle child, the last, or a block the tree passes.
