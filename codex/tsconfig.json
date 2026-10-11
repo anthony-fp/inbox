@@ -15,5 +15,5 @@
       "claude-code": ["../.claude-plugin/types/claude-code"]
     }
   },
-  "include": ["src", "tests", "../hooks/ledger.ts"]
+  "include": ["src", "tests", "../hooks/ledger.ts", "../evals"]
 }

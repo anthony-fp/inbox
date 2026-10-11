@@ -1,0 +1,1065 @@
+[
+  {
+    "name": "explain-reply-pick-reaches-row",
+    "about": "An Explain reply's recommendation reaches the open question.",
+    "ledger": {
+      "turn": 4,
+      "nextId": 4,
+      "card": {
+        "goal": "Add caching to the product API",
+        "done": ["Profiled slow endpoints"],
+        "now": "Waiting on cache choice",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [
+        {
+          "id": "i3",
+          "kind": "question",
+          "label": null,
+          "ask": "Which cache should the product API use?",
+          "options": ["Redis", "In-memory"],
+          "rec": null,
+          "helps": [],
+          "turn": 3,
+          "at": 3
+        }
+      ]
+    },
+    "exchange": {
+      "person": "Remind me what this question you asked me is about: why it came up, and what each choice would mean. Don't act on it yet.\n\"Which cache should the product API use?\"\nOptions: Redis / In-memory",
+      "turn": 4,
+      "press": {
+        "id": "i3",
+        "action": "explain"
+      },
+      "reply": "This came up because /products takes 900 ms at p95, almost all of it in the same three queries.\n\n- **Redis**: a shared cache across all four API instances. Cache hits stay consistent, and a deploy doesn't empty it. It adds a service to run and about 1 ms per lookup.\n- **In-memory**: each instance keeps its own LRU. No new service, and lookups are near free. But each instance warms separately, and a price change can show stale for up to the TTL on some instances.\n\nI'd go with Redis: prices change during the day, and stale prices on some instances would confuse customers. I haven't changed anything yet."
+    },
+    "checks": [
+      {
+        "item": "i3",
+        "rec": "redis"
+      }
+    ]
+  },
+  {
+    "name": "narrowed-question-new-options",
+    "about": "A reply that narrows a question leaves one open question with the new options, as the old item or a new one.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 6,
+      "card": {
+        "goal": "Add caching to the product API",
+        "done": ["Profiled slow endpoints"],
+        "now": "Waiting on cache choice",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [
+        {
+          "id": "i5",
+          "kind": "question",
+          "label": null,
+          "ask": "Which Postgres version should the new database run?",
+          "options": ["Postgres", "SQLite"],
+          "rec": null,
+          "helps": [],
+          "turn": 5,
+          "at": 5
+        }
+      ]
+    },
+    "exchange": {
+      "person": "we're going with postgres for sure",
+      "turn": 6,
+      "reply": "Good, Postgres it is. That leaves the version: our host offers 15 and 16. 16 has the faster bulk loading we'd use for the nightly import, and the client library we use supports both. I'd go with 16. Which version should I set up?"
+    },
+    "checks": [
+      {
+        "waiting": "version",
+        "options": "16"
+      }
+    ]
+  },
+  {
+    "name": "reworded-question-not-new",
+    "about": "A reworded open question is not added again.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 6,
+      "card": {
+        "goal": "Add caching to the product API",
+        "done": ["Profiled slow endpoints"],
+        "now": "Waiting on cache choice",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [
+        {
+          "id": "i5",
+          "kind": "question",
+          "label": null,
+          "ask": "Should I delete the old migrations folder?",
+          "options": ["Delete it", "Keep it"],
+          "rec": null,
+          "helps": [],
+          "turn": 5,
+          "at": 5
+        }
+      ]
+    },
+    "exchange": {
+      "person": "what's the status?",
+      "turn": 6,
+      "reply": "The import script now runs in 40 s, down from 3 min. The tests pass.\n\nOne thing still waits on you: can I remove the old migrations folder, or should it stay?"
+    },
+    "checks": [
+      {
+        "open": "i5"
+      },
+      {
+        "added": 0
+      }
+    ]
+  },
+  {
+    "name": "unrelated-progress-keeps-questions",
+    "about": "Unrelated progress closes no open question.",
+    "ledger": {
+      "turn": 7,
+      "nextId": 7,
+      "card": {
+        "goal": "Add caching to the product API",
+        "done": ["Profiled slow endpoints"],
+        "now": "Waiting on cache choice",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [
+        {
+          "id": "i5",
+          "kind": "question",
+          "label": null,
+          "ask": "Which cache should the product API use?",
+          "options": ["Redis", "In-memory"],
+          "rec": null,
+          "helps": [],
+          "turn": 5,
+          "at": 5
+        },
+        {
+          "id": "i6",
+          "kind": "question",
+          "label": null,
+          "ask": "Should cache keys include the locale?",
+          "options": ["Yes", "No"],
+          "rec": null,
+          "helps": [],
+          "turn": 5,
+          "at": 5
+        }
+      ]
+    },
+    "exchange": {
+      "person": "while you wait on me, fix the flaky checkout test",
+      "turn": 7,
+      "activity": ["edited tests/checkout.test.ts", "ran: npm test -- checkout"],
+      "reply": "Fixed the flaky checkout test. It waited on a fixed 200 ms timer; it now waits for the order-saved event. It passed 50 runs in a row."
+    },
+    "checks": [
+      {
+        "open": "i5"
+      },
+      {
+        "open": "i6"
+      },
+      {
+        "added": 0
+      }
+    ]
+  },
+  {
+    "name": "dismissed-question-stays-closed",
+    "about": "A dismissed question asked again is not added.",
+    "ledger": {
+      "turn": 9,
+      "nextId": 9,
+      "card": {
+        "goal": "Add caching to the product API",
+        "done": ["Profiled slow endpoints"],
+        "now": "Waiting on cache choice",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [],
+      "closed": [
+        {
+          "id": "i7",
+          "kind": "question",
+          "ask": "Should I add a feature flag for the new cache?",
+          "how": "dismissed",
+          "outcome": "dismissed",
+          "at": 8
+        }
+      ]
+    },
+    "exchange": {
+      "person": "ok, ship the cache behind nothing, just merge it",
+      "turn": 9,
+      "activity": ["ran: git push origin cache"],
+      "reply": "Pushed the cache branch and opened PR #41. Should I add a feature flag for the new cache before it merges, so it can be turned off without a deploy?"
+    },
+    "checks": [
+      {
+        "notNew": "flag"
+      }
+    ]
+  },
+  {
+    "name": "stated-recommendation-kept",
+    "about": "A stated recommendation becomes the item's rec.",
+    "ledger": {
+      "turn": 2,
+      "nextId": 2,
+      "card": {
+        "goal": "Add caching to the product API",
+        "done": ["Profiled slow endpoints"],
+        "now": "Waiting on cache choice",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": []
+    },
+    "exchange": {
+      "person": "how should we expire cache entries?",
+      "turn": 2,
+      "reply": "Two ways fit here:\n\n1. A fixed TTL of 5 minutes on every entry.\n2. Clear an entry when its product is saved.\n\nI recommend clearing on save: prices then update at once, and the TTL can stay long. Which do you want?"
+    },
+    "checks": [
+      {
+        "new": "expir|clear|ttl",
+        "rec": "clear|save"
+      }
+    ]
+  },
+  {
+    "name": "reason-not-recommendation",
+    "about": "A reason for one answer is not a recommendation.",
+    "ledger": {
+      "turn": 2,
+      "nextId": 2,
+      "card": {
+        "goal": "Add caching to the product API",
+        "done": ["Profiled slow endpoints"],
+        "now": "Waiting on cache choice",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": []
+    },
+    "exchange": {
+      "person": "what's next?",
+      "turn": 2,
+      "reply": "The cache works locally. Two decisions are yours:\n\n1. Deploy it today, so the slow pages are fixed before the sale starts tomorrow?\n2. Turn on the new metrics dashboard? It costs about $40 a month."
+    },
+    "checks": [
+      {
+        "new": "deploy",
+        "rec": null
+      }
+    ]
+  },
+  {
+    "name": "put-off-finding-stays-open",
+    "about": "A finding the person put off stays open.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 6,
+      "card": {
+        "goal": "Ship the greeting CLI v1",
+        "done": ["Arg parser fixed"],
+        "now": "Preparing the release",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [],
+      "findings": [
+        {
+          "id": "f4",
+          "kind": "issue",
+          "title": "README has no install steps",
+          "detail": "New users cannot install the CLI from the README alone.",
+          "path": "README.md",
+          "at": 1
+        },
+        {
+          "id": "f5",
+          "kind": "opportunity",
+          "title": "Arg parser has no tests for quoted values",
+          "detail": "A regression in quoting would go unnoticed.",
+          "path": "src/args.ts",
+          "at": 1
+        }
+      ]
+    },
+    "exchange": {
+      "person": "don't worry about the README thing for now, let's get the release out",
+      "turn": 6,
+      "activity": ["ran: npm version patch"],
+      "reply": "Bumped the version to 1.0.1 and tagged it. The release build is running."
+    },
+    "checks": [
+      {
+        "open": "f4"
+      },
+      {
+        "open": "f5"
+      }
+    ]
+  },
+  {
+    "name": "agent-fixed-finding-closes",
+    "about": "A finding the agent fixed closes.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 6,
+      "card": {
+        "goal": "Ship the greeting CLI v1",
+        "done": ["Arg parser fixed"],
+        "now": "Preparing the release",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [],
+      "findings": [
+        {
+          "id": "f4",
+          "kind": "issue",
+          "title": "README has no install steps",
+          "detail": "New users cannot install the CLI from the README alone.",
+          "path": "README.md",
+          "at": 1
+        },
+        {
+          "id": "f5",
+          "kind": "opportunity",
+          "title": "Arg parser has no tests for quoted values",
+          "detail": "A regression in quoting would go unnoticed.",
+          "path": "src/args.ts",
+          "at": 1
+        }
+      ]
+    },
+    "exchange": {
+      "person": "add the install steps to the readme",
+      "turn": 6,
+      "activity": ["edited README.md"],
+      "reply": "Added an Install section to the README with the npm command and a one-line usage example."
+    },
+    "checks": [
+      {
+        "closed": "f4"
+      },
+      {
+        "open": "f5"
+      }
+    ]
+  },
+  {
+    "name": "person-fixed-finding-closes",
+    "about": "A finding the person fixed closes.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 6,
+      "card": {
+        "goal": "Ship the greeting CLI v1",
+        "done": ["Arg parser fixed"],
+        "now": "Preparing the release",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [],
+      "findings": [
+        {
+          "id": "f4",
+          "kind": "issue",
+          "title": "README has no install steps",
+          "detail": "New users cannot install the CLI from the README alone.",
+          "path": "README.md",
+          "at": 1
+        },
+        {
+          "id": "f5",
+          "kind": "opportunity",
+          "title": "Arg parser has no tests for quoted values",
+          "detail": "A regression in quoting would go unnoticed.",
+          "path": "src/args.ts",
+          "at": 1
+        }
+      ]
+    },
+    "exchange": {
+      "person": "fyi I already added install steps to the README myself, pushed it",
+      "turn": 6,
+      "activity": [],
+      "reply": "Thanks. I pulled your change, and the README's Install section matches the published package name."
+    },
+    "checks": [
+      {
+        "closed": "f4"
+      },
+      {
+        "open": "f5"
+      }
+    ]
+  },
+  {
+    "name": "set-aside-finding-stays-open",
+    "about": "A finding the person set aside stays open until they dismiss it.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 6,
+      "card": {
+        "goal": "Ship the greeting CLI v1",
+        "done": ["Arg parser fixed"],
+        "now": "Preparing the release",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [],
+      "findings": [
+        {
+          "id": "f4",
+          "kind": "issue",
+          "title": "README has no install steps",
+          "detail": "New users cannot install the CLI from the README alone.",
+          "path": "README.md",
+          "at": 1
+        },
+        {
+          "id": "f5",
+          "kind": "opportunity",
+          "title": "Arg parser has no tests for quoted values",
+          "detail": "A regression in quoting would go unnoticed.",
+          "path": "src/args.ts",
+          "at": 1
+        }
+      ]
+    },
+    "exchange": {
+      "person": "the README finding doesn't matter, we'll never document install there",
+      "turn": 6,
+      "activity": [],
+      "reply": "Understood, I'll leave the README as it is."
+    },
+    "checks": [
+      {
+        "open": "f4"
+      }
+    ],
+    "min": {
+      "codex": 0.4
+    }
+  },
+  {
+    "name": "credentials-command-is-terminal",
+    "about": "A command needing the person's credentials is theirs to run.",
+    "ledger": {
+      "turn": 3,
+      "nextId": 3,
+      "card": {
+        "goal": "Ship last_seen_at",
+        "done": ["Migration written"],
+        "now": "Waiting on production run",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": []
+    },
+    "exchange": {
+      "person": "what's left?",
+      "turn": 3,
+      "activity": ["ran: ./scripts/migrate --env staging"],
+      "reply": "The migration ran on staging in 4 seconds. Production is the last step, and only you hold the production credentials, so it has to be you:\n\n```\n./scripts/migrate --env production\n```\n\nAfter it finishes, set LAST_SEEN_ENABLED=true in the hosting dashboard."
+    },
+    "checks": [
+      {
+        "new": "migrat|production",
+        "help": "terminal"
+      }
+    ]
+  },
+  {
+    "name": "device-command-is-terminal",
+    "about": "A command on the person's device is theirs to run.",
+    "ledger": {
+      "turn": 3,
+      "nextId": 3,
+      "card": {
+        "goal": "Ship last_seen_at",
+        "done": ["Migration written"],
+        "now": "Waiting on production run",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": []
+    },
+    "exchange": {
+      "person": "can we check it on a phone?",
+      "turn": 3,
+      "activity": [],
+      "reply": "The simulator run passes. To check it on your iPhone, which is plugged into your Mac, not mine, run this and then tap through the cancel flow:\n\n```\nnpm run ios -- --device\n```"
+    },
+    "checks": [
+      {
+        "new": "phone|iphone|device",
+        "help": "terminal"
+      }
+    ]
+  },
+  {
+    "name": "agent-runnable-command-not-terminal",
+    "about": "A command the agent could run is not marked as the person's.",
+    "ledger": {
+      "turn": 3,
+      "nextId": 3,
+      "card": {
+        "goal": "Ship last_seen_at",
+        "done": ["Migration written"],
+        "now": "Waiting on production run",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": []
+    },
+    "exchange": {
+      "person": "what do you need from me?",
+      "turn": 3,
+      "activity": ["edited scripts/load.sh"],
+      "reply": "The load script is ready. It reads the CSV export and fills the local database. Run `./scripts/load.sh` when you want the data loaded; it takes about a minute."
+    },
+    "checks": [
+      {
+        "noHelp": "terminal"
+      }
+    ]
+  },
+  {
+    "name": "approval-not-terminal",
+    "about": "An approval the agent then acts on is not a command for the person.",
+    "ledger": {
+      "turn": 3,
+      "nextId": 3,
+      "card": {
+        "goal": "Ship last_seen_at",
+        "done": ["Migration written"],
+        "now": "Waiting on production run",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": []
+    },
+    "exchange": {
+      "person": "ok, staging next?",
+      "turn": 3,
+      "activity": [],
+      "reply": "Staging is ready for the deploy. Once you approve, I'll run `./deploy.sh staging` and watch the health checks. Approve the staging deploy?"
+    },
+    "checks": [
+      {
+        "noHelp": "terminal"
+      }
+    ]
+  },
+  {
+    "name": "task-about-finding-replaces-it",
+    "about": "A task about a finding takes its place.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 10,
+      "card": {
+        "goal": "Clean up the reports app before release",
+        "done": ["Report export fixed"],
+        "now": "Finishing the export work",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [],
+      "findings": [
+        {
+          "id": "f4",
+          "kind": "issue",
+          "title": "Move 2.5 GB research folder out of apps/reports",
+          "detail": "The folder bloats the app package; it belongs in a separate repo.",
+          "path": null,
+          "at": 1
+        },
+        {
+          "id": "f5",
+          "kind": "issue",
+          "title": "Tabs unreadable in the light theme",
+          "detail": "Tab labels use the dark-theme gray.",
+          "path": null,
+          "at": 1
+        }
+      ]
+    },
+    "exchange": {
+      "person": "finish the export work",
+      "reply": "Export now streams rows, and the report tests pass.\n\nOne thing waits on you. The QA run is still reading from the research folder I flagged in f4, so I can't move it yet. Tell me when Inbox QA finishes and I'll move the folder out of apps/reports.",
+      "activity": []
+    },
+    "checks": [
+      {
+        "closed": "f4",
+        "outcome": "asked as"
+      },
+      {
+        "open": "f5"
+      },
+      {
+        "new": "qa"
+      }
+    ]
+  },
+  {
+    "name": "question-about-finding-replaces-it",
+    "about": "A question about a finding takes its place.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 10,
+      "card": {
+        "goal": "Clean up the reports app before release",
+        "done": ["Report export fixed"],
+        "now": "Finishing the export work",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [],
+      "findings": [
+        {
+          "id": "f4",
+          "kind": "issue",
+          "title": "Release notes miss the login fix",
+          "detail": "The changelog skips the login redirect fix shipped this week.",
+          "path": null,
+          "at": 1
+        },
+        {
+          "id": "f5",
+          "kind": "issue",
+          "title": "Tabs unreadable in the light theme",
+          "detail": "Tab labels use the dark-theme gray.",
+          "path": null,
+          "at": 1
+        }
+      ]
+    },
+    "exchange": {
+      "person": "commit the export fix",
+      "reply": "The export fix is committed.\n\nShould I add the login fix to the release notes now, or leave it for the release PR? I'd add it now: it's one line and easy to forget.",
+      "activity": []
+    },
+    "checks": [
+      {
+        "closed": "f4",
+        "outcome": "asked as"
+      },
+      {
+        "open": "f5"
+      },
+      {
+        "new": "login"
+      }
+    ]
+  },
+  {
+    "name": "finding-of-open-question-closes",
+    "about": "A finding recorded for an open question closes into it.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 10,
+      "card": {
+        "goal": "Clean up the reports app before release",
+        "done": ["Report export fixed"],
+        "now": "Finishing the export work",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [
+        {
+          "id": "i5",
+          "kind": "question",
+          "label": null,
+          "ask": "Delete the old staging branch and its preview deploy?",
+          "options": ["Delete it", "Keep it"],
+          "rec": "Delete it",
+          "helps": [],
+          "turn": 5,
+          "at": 1
+        }
+      ],
+      "findings": [
+        {
+          "id": "f5",
+          "kind": "issue",
+          "title": "Tabs unreadable in the light theme",
+          "detail": "Tab labels use the dark-theme gray.",
+          "path": null,
+          "at": 1
+        },
+        {
+          "id": "f6",
+          "kind": "issue",
+          "title": "Old staging branch is still deployed",
+          "detail": "staging-old still runs on the preview host and costs money.",
+          "path": null,
+          "at": 1
+        }
+      ]
+    },
+    "exchange": {
+      "person": "what's left?",
+      "reply": "I recorded the old staging deploy as a finding too, since it costs money every day.\n\nThe question from before still stands: delete the old staging branch and its preview deploy? I'd delete it: nothing points at it.",
+      "activity": []
+    },
+    "checks": [
+      {
+        "closed": "f6",
+        "outcome": "asked as"
+      },
+      {
+        "open": "i5"
+      }
+    ]
+  },
+  {
+    "name": "mentioned-finding-stays-open",
+    "about": "A finding the reply only mentions stays open.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 10,
+      "card": {
+        "goal": "Clean up the reports app before release",
+        "done": ["Report export fixed"],
+        "now": "Finishing the export work",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [],
+      "findings": [
+        {
+          "id": "f4",
+          "kind": "issue",
+          "title": "Upload test fails about one run in five on CI",
+          "detail": "test_upload_large times out under load; it needs a longer timeout or a smaller fixture.",
+          "path": null,
+          "at": 1
+        },
+        {
+          "id": "f5",
+          "kind": "issue",
+          "title": "Tabs unreadable in the light theme",
+          "detail": "Tab labels use the dark-theme gray.",
+          "path": null,
+          "at": 1
+        }
+      ]
+    },
+    "exchange": {
+      "person": "finish the export work",
+      "reply": "Export now streams rows and the tests pass. The upload test failed once on CI; I recorded it as f4, since it's outside this task. Nothing waits on you.",
+      "activity": []
+    },
+    "checks": [
+      {
+        "open": "f4"
+      },
+      {
+        "open": "f5"
+      }
+    ]
+  },
+  {
+    "name": "unrelated-question-keeps-findings",
+    "about": "An unrelated question leaves the findings open.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 10,
+      "card": {
+        "goal": "Clean up the reports app before release",
+        "done": ["Report export fixed"],
+        "now": "Finishing the export work",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [],
+      "findings": [
+        {
+          "id": "f4",
+          "kind": "issue",
+          "title": "Upload test fails about one run in five on CI",
+          "detail": "test_upload_large times out under load; it needs a longer timeout or a smaller fixture.",
+          "path": null,
+          "at": 1
+        },
+        {
+          "id": "f5",
+          "kind": "issue",
+          "title": "Tabs unreadable in the light theme",
+          "detail": "Tab labels use the dark-theme gray.",
+          "path": null,
+          "at": 1
+        }
+      ]
+    },
+    "exchange": {
+      "person": "open the PR",
+      "reply": "The export PR is ready. Ship it now, or wait for the code owner's review? I'd wait: they own the report code.",
+      "activity": []
+    },
+    "checks": [
+      {
+        "open": "f4"
+      },
+      {
+        "open": "f5"
+      },
+      {
+        "new": "ship|pr"
+      }
+    ]
+  },
+  {
+    "name": "put-off-finding-not-asked",
+    "about": "A finding put off is neither asked nor closed.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 10,
+      "card": {
+        "goal": "Clean up the reports app before release",
+        "done": ["Report export fixed"],
+        "now": "Finishing the export work",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [],
+      "findings": [
+        {
+          "id": "f4",
+          "kind": "issue",
+          "title": "Upload test fails about one run in five on CI",
+          "detail": "test_upload_large times out under load; it needs a longer timeout or a smaller fixture.",
+          "path": null,
+          "at": 1
+        },
+        {
+          "id": "f5",
+          "kind": "issue",
+          "title": "Tabs unreadable in the light theme",
+          "detail": "Tab labels use the dark-theme gray.",
+          "path": null,
+          "at": 1
+        }
+      ]
+    },
+    "exchange": {
+      "person": "leave the flaky upload test for later, not now",
+      "reply": "Okay, I'll leave the flaky upload test for later. It stays in your findings.",
+      "activity": []
+    },
+    "checks": [
+      {
+        "open": "f4"
+      },
+      {
+        "open": "f5"
+      }
+    ]
+  },
+  {
+    "name": "agent-pick-not-person-answer",
+    "about": "An option the agent picked is recorded as done, not as the person's answer.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 10,
+      "card": {
+        "goal": "Ship the reports export",
+        "done": ["Export streams rows"],
+        "now": "Finishing the export",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [
+        {
+          "id": "i7",
+          "kind": "question",
+          "label": null,
+          "ask": "Use SQLite or Postgres for the export cache?",
+          "options": ["SQLite", "Postgres"],
+          "rec": "SQLite",
+          "helps": [],
+          "turn": 5,
+          "at": 1
+        }
+      ],
+      "findings": [],
+      "closed": [],
+      "batchTurn": 5
+    },
+    "exchange": {
+      "person": "keep going on the export",
+      "reply": "The export cache is in. I went with SQLite for now, since it needs no server, and the cache tests pass. Nothing else waits on you.",
+      "activity": []
+    },
+    "checks": [
+      {
+        "closed": "i7",
+        "outcome": "^(done|no longer applies):"
+      }
+    ]
+  },
+  {
+    "name": "person-answer-recorded",
+    "about": "The person's answer is the outcome.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 10,
+      "card": {
+        "goal": "Ship the reports export",
+        "done": ["Export streams rows"],
+        "now": "Finishing the export",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [
+        {
+          "id": "i7",
+          "kind": "question",
+          "label": null,
+          "ask": "Should the old CSV endpoint return 410 Gone or redirect?",
+          "options": ["410 Gone", "Redirect"],
+          "rec": "Redirect",
+          "helps": [],
+          "turn": 5,
+          "at": 1
+        }
+      ],
+      "findings": [],
+      "closed": [],
+      "batchTurn": 5
+    },
+    "exchange": {
+      "person": "redirect",
+      "reply": "Done: the old CSV endpoint now redirects to the new export, and its test passes.",
+      "activity": []
+    },
+    "checks": [
+      {
+        "closed": "i7",
+        "outcome": "^(?!done|no longer).*redirect"
+      }
+    ]
+  },
+  {
+    "name": "finished-task-closes",
+    "about": "A task the person finished closes.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 10,
+      "card": {
+        "goal": "Ship the reports export",
+        "done": ["Export streams rows"],
+        "now": "Finishing the export",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [
+        {
+          "id": "i8",
+          "kind": "task",
+          "label": null,
+          "ask": "Sign in to npm so the agent can publish",
+          "options": [],
+          "rec": null,
+          "helps": [],
+          "turn": 5,
+          "at": 1
+        }
+      ],
+      "findings": [],
+      "closed": [],
+      "batchTurn": 5
+    },
+    "exchange": {
+      "person": "done, I'm signed in",
+      "reply": "Published reports-export 1.4.0 to npm.",
+      "activity": ["$ npm publish → + reports-export@1.4.0"]
+    },
+    "checks": [
+      {
+        "closed": "i8"
+      }
+    ]
+  },
+  {
+    "name": "moot-question-no-invented-pick",
+    "about": "A question the work made moot names no choice.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 10,
+      "card": {
+        "goal": "Ship the reports export",
+        "done": ["Export streams rows"],
+        "now": "Finishing the export",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [
+        {
+          "id": "i7",
+          "kind": "question",
+          "label": null,
+          "ask": "Keep the legacy XLSX export behind a flag?",
+          "options": ["Keep it", "Remove it"],
+          "rec": "Keep it",
+          "helps": [],
+          "turn": 5,
+          "at": 1
+        }
+      ],
+      "findings": [],
+      "closed": [],
+      "batchTurn": 5
+    },
+    "exchange": {
+      "person": "the ticket changed, see the update",
+      "reply": "The product team removed XLSX from the spec this morning, per the ticket you linked, so I deleted the legacy XLSX export along with its flag. Tests pass.",
+      "activity": []
+    },
+    "checks": [
+      {
+        "closed": "i7",
+        "outcome": "^(done|no longer applies):"
+      }
+    ]
+  },
+  {
+    "name": "long-reply-question-kept",
+    "about": "A question at the end of a long reply becomes an item.",
+    "ledger": {
+      "turn": 3,
+      "nextId": 10
+    },
+    "exchange": {
+      "person": "continue the refactor",
+      "reply": "Done with the reports refactor. Here is what changed:\n\n- Moved handler 0 into the reports module and updated its imports and its unit test.\n- Moved handler 1 into the reports module and updated its imports and its unit test.\n- Moved handler 2 into the reports module and updated its imports and its unit test.\n- Moved handler 3 into the reports module and updated its imports and its unit test.\n- Moved handler 4 into the reports module and updated its imports and its unit test.\n- Moved handler 5 into the reports module and updated its imports and its unit test.\n- Moved handler 6 into the reports module and updated its imports and its unit test.\n- Moved handler 7 into the reports module and updated its imports and its unit test.\n- Moved handler 8 into the reports module and updated its imports and its unit test.\n- Moved handler 9 into the reports module and updated its imports and its unit test.\n- Moved handler 10 into the reports module and updated its imports and its unit test.\n- Moved handler 11 into the reports module and updated its imports and its unit test.\n- Moved handler 12 into the reports module and updated its imports and its unit test.\n- Moved handler 13 into the reports module and updated its imports and its unit test.\n- Moved handler 14 into the reports module and updated its imports and its unit test.\n- Moved handler 15 into the reports module and updated its imports and its unit test.\n- Moved handler 16 into the reports module and updated its imports and its unit test.\n- Moved handler 17 into the reports module and updated its imports and its unit test.\n- Moved handler 18 into the reports module and updated its imports and its unit test.\n- Moved handler 19 into the reports module and updated its imports and its unit test.\n- Moved handler 20 into the reports module and updated its imports and its unit test.\n- Moved handler 21 into the reports module and updated its imports and its unit test.\n- Moved handler 22 into the reports module and updated its imports and its unit test.\n- Moved handler 23 into the reports module and updated its imports and its unit test.\n- Moved handler 24 into the reports module and updated its imports and its unit test.\n- Moved handler 25 into the reports module and updated its imports and its unit test.\n- Moved handler 26 into the reports module and updated its imports and its unit test.\n- Moved handler 27 into the reports module and updated its imports and its unit test.\n- Moved handler 28 into the reports module and updated its imports and its unit test.\n- Moved handler 29 into the reports module and updated its imports and its unit test.\n- Moved handler 30 into the reports module and updated its imports and its unit test.\n- Moved handler 31 into the reports module and updated its imports and its unit test.\n- Moved handler 32 into the reports module and updated its imports and its unit test.\n- Moved handler 33 into the reports module and updated its imports and its unit test.\n- Moved handler 34 into the reports module and updated its imports and its unit test.\n- Moved handler 35 into the reports module and updated its imports and its unit test.\n- Moved handler 36 into the reports module and updated its imports and its unit test.\n- Moved handler 37 into the reports module and updated its imports and its unit test.\n- Moved handler 38 into the reports module and updated its imports and its unit test.\n- Moved handler 39 into the reports module and updated its imports and its unit test.\n- Moved handler 40 into the reports module and updated its imports and its unit test.\n- Moved handler 41 into the reports module and updated its imports and its unit test.\n- Moved handler 42 into the reports module and updated its imports and its unit test.\n- Moved handler 43 into the reports module and updated its imports and its unit test.\n- Moved handler 44 into the reports module and updated its imports and its unit test.\n- Moved handler 45 into the reports module and updated its imports and its unit test.\n- Moved handler 46 into the reports module and updated its imports and its unit test.\n- Moved handler 47 into the reports module and updated its imports and its unit test.\n- Moved handler 48 into the reports module and updated its imports and its unit test.\n- Moved handler 49 into the reports module and updated its imports and its unit test.\n- Moved handler 50 into the reports module and updated its imports and its unit test.\n- Moved handler 51 into the reports module and updated its imports and its unit test.\n- Moved handler 52 into the reports module and updated its imports and its unit test.\n- Moved handler 53 into the reports module and updated its imports and its unit test.\n- Moved handler 54 into the reports module and updated its imports and its unit test.\n- Moved handler 55 into the reports module and updated its imports and its unit test.\n- Moved handler 56 into the reports module and updated its imports and its unit test.\n- Moved handler 57 into the reports module and updated its imports and its unit test.\n- Moved handler 58 into the reports module and updated its imports and its unit test.\n- Moved handler 59 into the reports module and updated its imports and its unit test.\n- Moved handler 60 into the reports module and updated its imports and its unit test.\n- Moved handler 61 into the reports module and updated its imports and its unit test.\n- Moved handler 62 into the reports module and updated its imports and its unit test.\n- Moved handler 63 into the reports module and updated its imports and its unit test.\n- Moved handler 64 into the reports module and updated its imports and its unit test.\n- Moved handler 65 into the reports module and updated its imports and its unit test.\n- Moved handler 66 into the reports module and updated its imports and its unit test.\n- Moved handler 67 into the reports module and updated its imports and its unit test.\n- Moved handler 68 into the reports module and updated its imports and its unit test.\n- Moved handler 69 into the reports module and updated its imports and its unit test.\n- Moved handler 70 into the reports module and updated its imports and its unit test.\n- Moved handler 71 into the reports module and updated its imports and its unit test.\n- Moved handler 72 into the reports module and updated its imports and its unit test.\n- Moved handler 73 into the reports module and updated its imports and its unit test.\n- Moved handler 74 into the reports module and updated its imports and its unit test.\n- Moved handler 75 into the reports module and updated its imports and its unit test.\n- Moved handler 76 into the reports module and updated its imports and its unit test.\n- Moved handler 77 into the reports module and updated its imports and its unit test.\n- Moved handler 78 into the reports module and updated its imports and its unit test.\n- Moved handler 79 into the reports module and updated its imports and its unit test.\n- Moved handler 80 into the reports module and updated its imports and its unit test.\n- Moved handler 81 into the reports module and updated its imports and its unit test.\n- Moved handler 82 into the reports module and updated its imports and its unit test.\n- Moved handler 83 into the reports module and updated its imports and its unit test.\n- Moved handler 84 into the reports module and updated its imports and its unit test.\n- Moved handler 85 into the reports module and updated its imports and its unit test.\n- Moved handler 86 into the reports module and updated its imports and its unit test.\n- Moved handler 87 into the reports module and updated its imports and its unit test.\n- Moved handler 88 into the reports module and updated its imports and its unit test.\n- Moved handler 89 into the reports module and updated its imports and its unit test.\n- Moved handler 90 into the reports module and updated its imports and its unit test.\n- Moved handler 91 into the reports module and updated its imports and its unit test.\n- Moved handler 92 into the reports module and updated its imports and its unit test.\n- Moved handler 93 into the reports module and updated its imports and its unit test.\n- Moved handler 94 into the reports module and updated its imports and its unit test.\n- Moved handler 95 into the reports module and updated its imports and its unit test.\n- Moved handler 96 into the reports module and updated its imports and its unit test.\n- Moved handler 97 into the reports module and updated its imports and its unit test.\n- Moved handler 98 into the reports module and updated its imports and its unit test.\n- Moved handler 99 into the reports module and updated its imports and its unit test.\n- Moved handler 100 into the reports module and updated its imports and its unit test.\n- Moved handler 101 into the reports module and updated its imports and its unit test.\n- Moved handler 102 into the reports module and updated its imports and its unit test.\n- Moved handler 103 into the reports module and updated its imports and its unit test.\n- Moved handler 104 into the reports module and updated its imports and its unit test.\n- Moved handler 105 into the reports module and updated its imports and its unit test.\n- Moved handler 106 into the reports module and updated its imports and its unit test.\n- Moved handler 107 into the reports module and updated its imports and its unit test.\n- Moved handler 108 into the reports module and updated its imports and its unit test.\n- Moved handler 109 into the reports module and updated its imports and its unit test.\n- Moved handler 110 into the reports module and updated its imports and its unit test.\n- Moved handler 111 into the reports module and updated its imports and its unit test.\n- Moved handler 112 into the reports module and updated its imports and its unit test.\n- Moved handler 113 into the reports module and updated its imports and its unit test.\n- Moved handler 114 into the reports module and updated its imports and its unit test.\n- Moved handler 115 into the reports module and updated its imports and its unit test.\n- Moved handler 116 into the reports module and updated its imports and its unit test.\n- Moved handler 117 into the reports module and updated its imports and its unit test.\n- Moved handler 118 into the reports module and updated its imports and its unit test.\n- Moved handler 119 into the reports module and updated its imports and its unit test.\n- Moved handler 120 into the reports module and updated its imports and its unit test.\n- Moved handler 121 into the reports module and updated its imports and its unit test.\n- Moved handler 122 into the reports module and updated its imports and its unit test.\n- Moved handler 123 into the reports module and updated its imports and its unit test.\n- Moved handler 124 into the reports module and updated its imports and its unit test.\n- Moved handler 125 into the reports module and updated its imports and its unit test.\n- Moved handler 126 into the reports module and updated its imports and its unit test.\n- Moved handler 127 into the reports module and updated its imports and its unit test.\n- Moved handler 128 into the reports module and updated its imports and its unit test.\n- Moved handler 129 into the reports module and updated its imports and its unit test.\n- Moved handler 130 into the reports module and updated its imports and its unit test.\n- Moved handler 131 into the reports module and updated its imports and its unit test.\n- Moved handler 132 into the reports module and updated its imports and its unit test.\n- Moved handler 133 into the reports module and updated its imports and its unit test.\n- Moved handler 134 into the reports module and updated its imports and its unit test.\n- Moved handler 135 into the reports module and updated its imports and its unit test.\n- Moved handler 136 into the reports module and updated its imports and its unit test.\n- Moved handler 137 into the reports module and updated its imports and its unit test.\n- Moved handler 138 into the reports module and updated its imports and its unit test.\n- Moved handler 139 into the reports module and updated its imports and its unit test.\n- Moved handler 140 into the reports module and updated its imports and its unit test.\n- Moved handler 141 into the reports module and updated its imports and its unit test.\n- Moved handler 142 into the reports module and updated its imports and its unit test.\n- Moved handler 143 into the reports module and updated its imports and its unit test.\n- Moved handler 144 into the reports module and updated its imports and its unit test.\n- Moved handler 145 into the reports module and updated its imports and its unit test.\n- Moved handler 146 into the reports module and updated its imports and its unit test.\n- Moved handler 147 into the reports module and updated its imports and its unit test.\n- Moved handler 148 into the reports module and updated its imports and its unit test.\n- Moved handler 149 into the reports module and updated its imports and its unit test.\n\nOne decision before I go on: should the old CSV endpoint return 410 Gone, or redirect to the new export? I'd go with the redirect: existing scripts keep working.",
+      "activity": []
+    },
+    "checks": [
+      {
+        "new": "csv|410|redirect"
+      }
+    ]
+  }
+]

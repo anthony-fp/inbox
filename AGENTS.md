@@ -18,6 +18,7 @@ Test a change to text a model reads before keeping it. Small rewordings change b
 - Claude reads the tool descriptions and results from `hooks/tools.ts`. Codex reads those too, and its own tool texts in `codex/src/texts.ts`.
 - The inbox model reads `systemText` and the blocks from `buildPrompt` in `hooks/ledger.ts`. In the mod it is a Sonnet call after each reply. In Codex it is `codex exec` with the model in `MODEL` in `codex/src/update.ts`.
 - To compare two versions, print each one's prompt for the same sample exchange. Run each several times with `claude -p --model sonnet --tools "" --system-prompt …`, and for text Codex reads, with `codex exec` and the Codex model. Count the outcomes.
+- After a change to `systemText` or `buildPrompt`, run `./scripts/eval.sh`. It runs the inbox model on the cases in `evals/cases.json`, on Sonnet and on Codex, and fails a case that passes in too few runs. Add a case for each behavior a change sets out to fix. `check.sh` leaves the evals out, since each run calls a model.
 
 ## Presses
 
