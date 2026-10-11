@@ -37,7 +37,8 @@ Section references such as "UI 2.3" point to `inbox-ui.md`.
 
 | File | Owns | Imports |
 |---|---|---|
-| `hooks/view.ts` (new) | `inboxView`, the view types, the Needs you order and count, row state, feedback, settled rows, `perTurnStatus`, `isGuarded`, `feedbackText`, and the shared timing constants | `types`, `hooks/ledger.ts` (`questionNumbers`), `hooks/presses.ts` (types, `stepsOf`, `isHandedOff`). Nothing from the engine. |
+| `hooks/view.ts` (new) | `inboxView`, the view types, the Needs you order and count, row state, feedback, settled rows, `rowKeyPlan` (the order and letters of a row's keys), `perTurnStatus`, `isGuarded`, `feedbackText`, and the shared timing constants | `types`, `hooks/ledger.ts` (`questionNumbers`), `hooks/presses.ts` (types, `stepsOf`, `isHandedOff`). Nothing from the engine. |
+| `hooks/arrivals.ts` (new) | `recordRows` and `followTo`: which rows are new to a client, and the tab and row it moves to for them. Each client passes its tabs and its rule for an empty tab. | Nothing. |
 | `hooks/presses.ts` | `PressKind` (defined in `types/index.d.ts` beside `LastAction`, which stores it, and re-exported here), `RowPress`, `Effect`, `applyPress`, `reopenOnFailure`, `retryOf`, `actionId`, `stepsOf`, `isHandedOff` (renamed from `isTaskHandedOff`), and today's `messages`, `steps`, `openCommands`, `localPath` | `types`, `hooks/ledger.ts`, `hooks/prs.ts` (`namedPrs`, `parseRef`) |
 | `hooks/ledger.ts` | Today's ledger writes and model-read texts. Gains `questionNumbers`, `reopenItem`, `closeFinding` and `reopenFinding`. `closedRecord` keeps the item. | `types` |
 | `hooks/prs.ts` | PR readiness and PR prompts. Loses `isFixSent` and `prompts.fix`. | `types` |

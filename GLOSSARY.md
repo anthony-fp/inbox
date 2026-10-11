@@ -43,6 +43,10 @@ PRs tabs.
 The short summary of where the session stands: its goal, what's done, and
 what's happening now.
 
+**New row**:
+A row a client lists for the first time since it last recorded its rows. It
+draws a bar for a few seconds, and a client showing an empty tab moves to it.
+
 **Last action**:
 What an item or PR in the pane says after the person presses one of its
 actions: a ✓ and the action's label, as in "✓ Discuss · 1m ago". Each keeps
