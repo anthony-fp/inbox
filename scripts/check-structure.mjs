@@ -7,6 +7,7 @@
 //
 // Usage: node scripts/check-structure.mjs. Exits 1 on any failure.
 
+import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -82,6 +83,16 @@ function docFiles() {
 // in the home folder or in a host's install folder are left alone.
 const TOP_LEVEL = new Set(readdirSync(ROOT).filter(entry => entry !== 'node_modules'))
 
+/** Whether Git ignores the path, as it does build output such as the dev build's, which exists only while it runs. */
+function isIgnored(path) {
+  try {
+    execFileSync('git', ['-C', ROOT, 'check-ignore', '-q', '--no-index', path])
+    return true
+  } catch {
+    return false
+  }
+}
+
 function checkDocs() {
   for (const doc of docFiles()) {
     const text = read(doc)
@@ -99,7 +110,7 @@ function checkDocs() {
     for (const m of text.matchAll(/`([\w.-]+\/[\w./-]+\.[a-z]+)(?::[\w.]+)?`/g)) {
       const path = m[1]
       if (!TOP_LEVEL.has(path.split('/')[0])) continue
-      if (!exists(path) && !existsSync(join(ROOT, dirname(doc), path)))
+      if (!exists(path) && !existsSync(join(ROOT, dirname(doc), path)) && !isIgnored(path))
         errors.push(`${doc} names ${path}, which does not exist.`)
     }
   }

@@ -5,7 +5,8 @@ import type { On, PromptOrigin, RenderSurface } from 'claude-code'
 import type { FoldProps } from '../hooks/fold-client'
 import type { LinksProps } from '../hooks/links-client'
 import type { TabsProps } from '../hooks/tabs-client'
-import { NEW_ROW_MS, PRESS_GUARD_MS, SETTLED_MS } from '../hooks/view'
+import { demoView } from '../hooks/demo'
+import { NEW_ROW_MS, PRESS_GUARD_MS, SETTLED_MS, inboxView, perTurnStatus, rowKeyPlan } from '../hooks/view'
 
 const LEDGER_REPLY = `GOAL: Add a greeting CLI
 DONE: Plan written
@@ -2096,4 +2097,93 @@ test('a tool call after a hot reload, before the load converts the ledger, still
   strip = false
   const r = await $.tool.call({ tool: 'mcp__inbox__close', id: 'f1', reason: 'fixed' } as never)
   expect(JSON.stringify(r)).toMatch(/f1/)
+})
+
+test('every row and action in the demo is drawn in the terminal and desktop looks', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'inbox', args: 'demo' } as never)
+
+  const { ledger, lastActions, notes, turns } = demoView(1_000_000)
+  const view = inboxView({
+    ledger,
+    lastActions,
+    notes,
+    turns,
+    extraSteps: {},
+    settleWindowMs: SETTLED_MS,
+    status: perTurnStatus(ledger, { isUpdating: false, isFailed: false, retries: true }),
+    now: 1_000_000,
+  })
+  const TITLE_START = 20
+  const expectedLabels = (row: (typeof view.findings.rows)[number]) => {
+    const { keys, more } = rowKeyPlan(row, true)
+    return [...keys, ...more].flatMap(k => {
+      if (k.slot === 'retry') return ['Try again']
+      if (k.slot === 'allOptions') return []
+      return [k.action.label]
+    })
+  }
+  const tabs = [
+    {
+      id: 'needsYou',
+      rows: [...view.needsYou.questions, ...view.needsYou.tasks].filter(r => r.state.is !== 'settled'),
+    },
+    { id: 'findings', rows: view.findings.rows.filter(r => r.state.is !== 'settled') },
+  ] as const
+  expect(tabs.map(t => t.rows.length > 0)).toEqual([true, true])
+
+  for (const look of ['terminal', 'desktop'] as const) {
+    const pane =
+      look === 'terminal'
+        ? await $.ui.mount(PANE)
+        : await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 120 } })
+    const drawn = async () => {
+      const links = (await pane.findAll({ type: 'Client' })).flatMap(
+        c => (c.props.props as Partial<LinksProps>).links ?? [],
+      )
+      const controls = [
+        ...(await pane.findAll({ type: 'Button' }))
+          .filter(b => !(b.key ?? '').endsWith('-key'))
+          .map(b => String(b.props.label)),
+        ...links.map(l => l.label),
+      ].map(label =>
+        label
+          .replace(/^[^\p{L}\p{N}]+/u, '')
+          .replace(/ \(recommended\)$/, '')
+          .trim(),
+      )
+      const texts = (await pane.findAll({ type: 'Text' })).map(t => t.text ?? '')
+      return { controls, texts }
+    }
+    for (const [n, tab] of tabs.entries()) {
+      if (look === 'terminal') {
+        if (await pane.find({ key: `tab-${tab.id}` })) await pane.press({ key: `tab-${tab.id}` })
+      } else {
+        const { tabs: bar, gap } = (await pane.find({ key: 'tabs' }))?.props.props as TabsProps
+        const x = bar.slice(0, n).reduce((sum, t) => sum + t.width + gap, 0)
+        await pane.pointer({ type: 'down', x, y: 1, button: 'left', in: 'tabs' })
+      }
+      await clock.settle()
+      for (const row of tab.rows) {
+        await clock.advance(PRESS_GUARD_MS)
+        if (look === 'terminal' && (await pane.find({ key: `select-${row.id}` }))) {
+          await pane.press({ key: `select-${row.id}` })
+        } else if (look === 'desktop' && (await pane.find({ key: `select-${row.id}` }))) {
+          await pane.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: `select-${row.id}` })
+        }
+        if (await pane.find({ key: `all-options-${row.id}` })) await pane.press({ key: `all-options-${row.id}` })
+        await clock.settle()
+        const { controls, texts } = await drawn()
+        const isTitleDrawn = [...controls, ...texts].some(t =>
+          t.includes(row.state.is === 'open' ? row.title : row.title.slice(0, TITLE_START)),
+        )
+        expect(isTitleDrawn, `${look} ${tab.id} row ${row.id} draws its title`).toBe(true)
+        if (row.state.is !== 'open') continue
+        for (const w of expectedLabels(row))
+          expect(controls.includes(w), `${look} ${tab.id} row ${row.id} draws "${w}"`).toBe(true)
+      }
+    }
+  }
 })
