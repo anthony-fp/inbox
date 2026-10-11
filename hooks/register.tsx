@@ -3519,6 +3519,8 @@ export const register: Register = on => {
       // On desktop the open row's fill is rounded. Its border insets the content, so the lead before the handle
       // gives that inset back, and the handle and title stay where the closed row drew them.
       const isRoundedRow = isSelected && look === 'desktop' && !isInline
+      // Taken from the tree's indent, or else from the handle's left padding, so no width goes below 0.
+      const inset = isRoundedRow ? DESKTOP_BORDER_INSET : 0
       const { keys, more } = isSelected ? rowActions(row) : { keys: [], more: [] }
       const isTyping = Input !== null && !!row.typeHint && typing === row.id
       const field =
@@ -3555,8 +3557,13 @@ export const register: Register = on => {
           backgroundColor={isSelected ? pal.selection : undefined}
           {...(isRoundedRow ? { borderStyle: 'single', borderColor: '#0000' } : {})}
         >
-          <Box width={(tree ? 4 : 1) - (isRoundedRow ? DESKTOP_BORDER_INSET : 0)} flexShrink={0} />
-          <Box width={tree ? 3 : 4} flexShrink={0} paddingLeft={tree ? 0 : 2} paddingY={isSelected ? rowPad : 0}>
+          <Box width={tree ? 4 - inset : 1} flexShrink={0} />
+          <Box
+            width={tree ? 3 : 4 - inset}
+            flexShrink={0}
+            paddingLeft={tree ? 0 : 2 - inset}
+            paddingY={isSelected ? rowPad : 0}
+          >
             {/* Without a Client, desktop's title alone opens the row, so the list draws half as many native buttons. */}
             {row.handleTone ? (
               <Text color={pal.mark[row.handleTone]}>{row.handle}</Text>
