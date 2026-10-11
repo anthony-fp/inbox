@@ -136,8 +136,10 @@ NOW: where the work stands at the end of this reply, at most 12 words. Name what
 RUNNING: something still running that the person may open, as "name: URL or port". Dev servers, simulators, background jobs. Omit anything the agent stopped. Zero or more lines.
 CLOSED: <id> | what was decided, at most 8 words. For each item in <open> the person answered in <person> (including "all recommended", "go", "yes to all", numbered answers), or that the reply or <activity> shows is done or no longer applies. A person asking what an item means has not answered it, and a reply explaining it does not close it. When <person> asks to run an item's command and the reply says it ran, that item is done. So is an item whose command the person ran themselves, per <person>, when its output shows it worked.
 FIXED: <id> | what fixed it, at most 8 words. One line for each finding in <findings> that the reply, <activity> or <person> shows was fixed. Never for a finding the person puts off or sets aside: it stays open until they dismiss it.
+ASKED: <id> | <item>
+  For a finding in <findings> that a NEW line or an item in <open> asks the person about. item: "new N" for the Nth NEW line in your answer, or an id from <open>. The item takes the finding's place, so the person sees it once.
 NEW: <kind> | <label> | <ask> | <options> | <rec>
-  One line per thing in <reply> that waits on the person and is not already in <open> or <findings>. A finding the agent recorded is not NEW unless the reply asks the person to decide on it now. When the reply restates, rewords or narrows an item in <open>, it is not new: add HELP lines to that item's id instead.
+  One line per thing in <reply> that waits on the person and is not already in <open> or <findings>. A finding the agent recorded is not NEW unless the reply asks the person to decide or do something about it now; then also write an ASKED line for it. When the reply restates, rewords or narrows an item in <open>, it is not new: add HELP lines to that item's id instead.
   kind: "decide" (a choice, approval, or information only the person has, explicitly put to them, without which the agent cannot go on with its task) or "do" (an action only the person can take, without which the agent cannot continue or finish: sign in, run a command needing their password, test on their device, reply to a teammate).
   label: the reply's own number or id for it ("1", "D3"), or "-".
   ask: plain words, readable without the reply, at most 12 words, or up to 16 when 12 would lose meaning. Keep the question's meaning and every alternative it names. Replace any term the reply coined with what it means.
@@ -313,6 +315,8 @@ export type Update = {
   helped: { id: string; help: Help }[]
   /** New options or a new recommendation for open questions. Null keeps what the question has. */
   updated: { id: string; options: string[] | null; rec: string | null }[]
+  /** Findings an item now asks about: an open item's id, or the place of a NEW item in `added`. */
+  asked: { id: string; item: string | number }[]
 }
 
 const FENCE = /```[^\n]*\n([\s\S]*?)```/g
@@ -559,7 +563,7 @@ function dash(value: string | undefined): string | null {
   return v === '' || v === '-' ? null : v
 }
 
-const KEY_LINE = /^\s*[-*]?\s*(GOAL|DONE|NOW|RUNNING|CLOSED|FIXED|NEW|UPDATE|HELP)\s*:\s*(.*)$/
+const KEY_LINE = /^\s*[-*]?\s*(GOAL|DONE|NOW|RUNNING|CLOSED|FIXED|ASKED|NEW|UPDATE|HELP)\s*:\s*(.*)$/
 
 /**
  * Reads the model's line format; null when no known key appears. `source` is
@@ -574,6 +578,7 @@ export function parseReply(text: string, source: string | null = null): Update |
   const helped: Update['helped'] = []
   const updated: Update['updated'] = []
   const helps: { target: string; help: Help }[] = []
+  const asks: { id: string; target: string }[] = []
   let seen = 0
   const lines = text.split(NL)
   // The model sometimes writes an answer, then a correction and a whole second answer. Each answer starts with
@@ -597,6 +602,9 @@ export function parseReply(text: string, source: string | null = null): Update |
       // CLOSED closes items and FIXED closes findings, so a finding the person only put off stays open.
       const [id, outcome] = value.split('|').map(s => s.trim())
       if (id && /^f\d/.test(id) === (key === 'FIXED')) closed.push({ id, outcome: outcome ?? '' })
+    } else if (key === 'ASKED') {
+      const [id, target] = value.split('|').map(s => s.trim())
+      if (id && /^f\d+$/.test(id) && target) asks.push({ id, target })
     } else if (key === 'NEW') {
       // The recommendation is the last field. The model sometimes writes one answer after "|" instead of " / ".
       const [kind, label, ask, ...rest] = value.split('|').map(dash)
@@ -637,8 +645,14 @@ export function parseReply(text: string, source: string | null = null): Update |
     if (item) item.helps = withHelp(item.helps, help)
     else if (!n && id) helped.push({ id, help })
   }
+  const asked: Update['asked'] = []
+  for (const { id, target } of asks) {
+    const n = target.match(/\bnew\s*(\d+)\b/i)
+    const item = n ? added.indexOf(newLines[Number(n[1]) - 1]!) : target.match(/\b(i\d+)\b/)?.[1]
+    if (item !== undefined && item !== -1) asked.push({ id, item })
+  }
 
-  return seen === 0 ? null : { card: { ...card, done: card.done.slice(-4) }, closed, added, helped, updated }
+  return seen === 0 ? null : { card: { ...card, done: card.done.slice(-4) }, closed, added, helped, updated, asked }
 }
 
 const FILLER = new Set([
@@ -841,15 +855,22 @@ export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number
 
   let nextId = ledger.nextId
   let added = 0
+  // The open item each NEW line became, by its place in u.added; null for one dropped as recently closed.
+  const addedIds: (string | null)[] = []
   for (const a of u.added) {
-    if (repeatsRecentlyClosed(ledger.closed, a, promptAt)) continue
+    if (repeatsRecentlyClosed(ledger.closed, a, promptAt)) {
+      addedIds.push(null)
+      continue
+    }
     const at = matchOpen(items, a)
     const restated = items[at]
     if (restated) {
       items[at] = { ...restated, helps: a.helps.reduce((all, h) => withHelp(all, h), restated.helps) }
+      addedIds.push(restated.id)
       continue
     }
     items.push({ ...a, id: `i${nextId}`, turn, at: now })
+    addedIds.push(`i${nextId}`)
     nextId += 1
     added += 1
   }
@@ -858,8 +879,20 @@ export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number
   const kept = items.filter(i => turn - i.turn <= STALE_AFTER).slice(-MAX_OPEN)
   for (const i of items) if (!kept.includes(i)) closed.push(closedRecord(i, { outcome: EXPIRED, how: 'expired' }, now))
 
+  // A finding an open item asks about closes into that item, so one thing shows in one list. The model names
+  // the pairs in ASKED lines; a new item that rewords a finding's title closes it without one.
+  const askedBy = new Map<string, string>()
+  for (const a of u.asked) {
+    const id = typeof a.item === 'number' ? addedIds[a.item] : a.item
+    if (id && kept.some(i => i.id === id)) askedBy.set(a.id, id)
+  }
+  for (const i of kept.filter(
+    i => i.turn === turn && addedIds.includes(i.id) && !ledger.items.some(o => o.id === i.id),
+  ))
+    for (const f of ledger.findings) if (!askedBy.has(f.id) && restates(f.title, i.ask)) askedBy.set(f.id, i.id)
   const { findings, closedFindings } = ledger.findings.reduce((l, f) => {
-    const outcome = closing.get(f.id)
+    const asker = askedBy.get(f.id)
+    const outcome = closing.get(f.id) ?? (asker ? `asked as ${asker}` : undefined)
 
     return outcome === undefined ? l : closeFinding(l, f.id, { outcome, how: 'update' }, now)
   }, ledger)
@@ -994,15 +1027,16 @@ export function answerNote(ledger: Ledger, text: string): string | null {
 }
 
 /**
- * Adds a finding Claude recorded. One whose title matches an open one is
- * skipped, so the same finding is not listed twice.
+ * Adds a finding Claude recorded. One whose title matches an open finding, or
+ * rewords an open item's ask, is skipped, so one thing shows in one list.
  */
 export function addFinding(
   ledger: Ledger,
   finding: Omit<Finding, 'id'>,
 ): { ledger: Ledger; id: string; isAdded: boolean } {
   const findings = ledger.findings
-  const same = findings.find(f => sameAsk(f.title, finding.title))
+  const same =
+    findings.find(f => sameAsk(f.title, finding.title)) ?? ledger.items.find(i => restates(i.ask, finding.title))
   if (same) return { ledger, id: same.id, isAdded: false }
   const id = `f${ledger.nextId}`
 

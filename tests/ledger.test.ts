@@ -416,6 +416,47 @@ describe('reopening', () => {
       'f2',
     ])
   })
+
+  test('a finding an item asks about closes into that item', () => {
+    const finding = { kind: 'issue' as const, title: 'Research folder sits in the app', detail: 'd', path: null, at: 1 }
+    const open = addFinding(addFinding(EMPTY, finding).ledger, { ...finding, title: 'Tabs unreadable' }).ledger
+    const reply = 'NEW: do | - | Tell Claude when QA ends, to move the folder | - | -\nASKED: f1 | new 1'
+    const updated = applyUpdate(open, parseReply(reply)!, 6, 1)
+    expect(updated.items.map(i => i.id)).toEqual(['i3'])
+    expect(updated.findings.map(f => f.id)).toEqual(['f2'])
+    expect(updated.closedFindings.map(f => [f.id, f.how, f.outcome])).toEqual([['f1', 'update', 'asked as i3']])
+    const later = applyUpdate(updated, parseReply('ASKED: f2 | i3')!, 7, 2)
+    expect(later.findings).toEqual([])
+  })
+
+  test('an ASKED line naming no open item leaves the finding open', () => {
+    const finding = { kind: 'issue' as const, title: 'Tabs unreadable', detail: 'd', path: null, at: 1 }
+    const open = addFinding(EMPTY, finding).ledger
+    expect(applyUpdate(open, parseReply('ASKED: f1 | i9\nASKED: f1 | new 1')!, 6, 1).findings.map(f => f.id)).toEqual([
+      'f1',
+    ])
+  })
+
+  test('a new item that rewords an open finding closes it, and a finding that rewords an open item is not added', () => {
+    const finding = {
+      kind: 'issue' as const,
+      title: 'Release notes miss the login fix',
+      detail: 'd',
+      path: null,
+      at: 1,
+    }
+    const open = addFinding(EMPTY, finding).ledger
+    const asked = applyUpdate(
+      open,
+      parseReply('NEW: decide | - | Add the login fix to the release notes? | Yes / No | -')!,
+      6,
+      1,
+    )
+    expect(asked.findings).toEqual([])
+    expect(asked.closedFindings.map(f => f.outcome)).toEqual(['asked as i2'])
+    const again = addFinding(asked, finding)
+    expect([again.isAdded, again.id]).toEqual([false, 'i2'])
+  })
 })
 
 describe('upgradeLedger', () => {

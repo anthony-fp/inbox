@@ -120,12 +120,13 @@ The saved records do not say whether an answer came from a press or from the age
 
 ### 7. A finding asked as a question shows twice
 
-- **Where:** the `NEW` rule in `systemText`, and the closing section of the guidance.
-- **What is wrong:** the guidance asks the agent to state a workaround in its reply. The reply often ends by asking whether to fix it, and that question becomes an item. The finding stays open beside it, so the person sees two rows with two sets of buttons.
-- **No frequency data yet.** The saved ledgers do not show this case.
-- **Proposed wording,** in the guidance:
-
-  > If you ask the user to decide on a finding you recorded, close the finding in the same turn with the reason "asked as a question".
+- **Decided:** one thing shows in one list. When an item asks the person about a finding, the item takes its place, and the finding closes as "asked as iN".
+- **Why the item wins:** an item has options and one-press steps, and it is what waits on the person now. A finding is for review later.
+- **What was wrong:** the `NEW` rule let the inbox model add an item about a finding, but nothing closed the finding. A saved ledger shows the case: a finding to move a folder, and a task to say when the folder is free to move.
+- **What changed:**
+  - `systemText` has an `ASKED: <finding> | <item>` line, for "new N" or an open item's id.
+  - The code also closes an open finding when a new item rewords its title.
+  - `record_finding` does not add a finding that rewords an open item. It answers with that item's id.
 
 ### 8. Codex reads the inbox in two shapes
 
@@ -210,11 +211,24 @@ Before the rule, most recommendations came from a reply that took a position and
 - **Theme 1 not kept:** ten Sonnet agent replies per version, in two scenarios. With the paragraph, the agent put commands in code blocks. But the items gained nothing. In the fork scenario, both versions gave a recommendation and a one-press step in 10 of 10 replies. In the migration scenario, the paragraph added approval questions, and slightly fewer tasks got a step: 8 of 18, against 11 of 20.
 - **Limits:** the agent runs used a short preamble in place of Claude Code's full system prompt. The Codex agent was not run.
 
+Theme 7 was measured with its own fixtures. A case counts when the finding and the item show once, in one list.
+
+| Case | Sonnet before | Sonnet after | Codex before | Codex after |
+| --- | --- | --- | --- | --- |
+| The reply asks the person to do something about a finding | 0 of 8 | 7 of 8 | 0 of 5 | 5 of 5 |
+| The reply asks the person to decide on a finding | 0 of 8 | 8 of 8 | 0 of 5 | 5 of 5 |
+| The agent records a finding for an open question | 0 of 8 | 8 of 8 | 0 of 5 | 5 of 5 |
+| A finding the reply only mentions stays open | 8 of 8 | 8 of 8 | 5 of 5 | 5 of 5 |
+| An unrelated question leaves the findings open | 8 of 8 | 8 of 8 | 5 of 5 | 5 of 5 |
+| A finding the person put off stays open | 8 of 8 | 8 of 8 | 5 of 5 | 5 of 5 |
+
+In the mention-only case, Sonnet wrote an `ASKED` line with no item in 5 of 8 runs. The code ignores an `ASKED` line that names no open item, so the finding stayed open.
+
 ## Proposed order
 
 1. Theme 4. It needs the most careful A/B.
 2. Theme 3 and theme 6's close result. These are code changes with small model-read edits.
-3. Themes 7 and 8.
+3. Theme 8. Theme 7 is done.
 
 Themes 2 and 5 are built. Theme 2 includes the stricter recommendation rule that f181 called for. Theme 1 was measured and not kept. Theme 4 is not started.
 
