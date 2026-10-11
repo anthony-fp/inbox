@@ -1130,11 +1130,22 @@ export function inboxText(host: Host, ledger: Ledger, isOpen: boolean): string {
   return out.join(NL)
 }
 
-/** An item that closed without the person deciding it: dismissed, expired, or overtaken by the work. */
+/** How an item or finding ended: handled, set aside by the person, or overtaken without anyone deciding it. */
+export type ClosedState = 'handled' | 'dismissed' | 'lapsed'
+
+export function closedState(d: Pick<Closed, 'how' | 'outcome'>): ClosedState {
+  if (d.how === 'dismissed') return 'dismissed'
+  if (d.how === 'expired') return 'lapsed'
+  // The agent's close and the per-reply update write their own outcome, so only its wording says the work
+  // overtook the item. An agent's close reads "closed by <agent>: <reason>".
+  const isOvertaken = /^(?:closed by \w+: )?(?:no longer applies|replaced|superseded|moot)/i.test(d.outcome)
+
+  return (d.how === 'claude' || d.how === 'update') && isOvertaken ? 'lapsed' : 'handled'
+}
+
+/** An item that closed without being handled: dismissed, expired, or overtaken by the work. */
 export function isLapsed(d: Pick<Closed, 'how' | 'outcome'>): boolean {
-  if (d.how === 'dismissed' || d.how === 'expired' || d.how === 'claude') return true
-  // The per-reply update writes its own outcome, so only its wording says the work overtook the item.
-  return d.how === 'update' && /^(no longer applies|replaced|superseded|moot)/i.test(d.outcome)
+  return closedState(d) !== 'handled'
 }
 
 /** How an item closed, in words a model reads without the mod's vocabulary. */

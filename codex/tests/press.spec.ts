@@ -398,7 +398,7 @@ test('Address hands a finding off: it folds until an applied turn leaves it open
     [
       [
         'f3',
-        { is: 'settled', label: 'Closed by Codex: fixed', at: 90, canUndo: false, isQueued: false, isLapsed: true },
+        { is: 'settled', label: 'Closed by Codex: fixed', at: 90, canUndo: false, isQueued: false, isLapsed: false },
         [],
       ],
     ],

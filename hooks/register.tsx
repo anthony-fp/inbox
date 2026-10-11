@@ -76,6 +76,7 @@ import {
   catchUpPrompt,
   CLAUDE_CODE,
   guidanceText,
+  closedState,
   isLapsed,
   promptNotes,
   resetTime,
@@ -124,6 +125,7 @@ import {
   emptyText,
   ROW_TABS,
   TABS,
+  CLOSED_MARKS,
   FINDING_BADGES,
   feedbackOf,
   feedbackText,
@@ -4007,7 +4009,7 @@ export const register: Register = on => {
     const closedRow = (d: ClosedLine, pos: TreePos) =>
       treeRow(
         pos,
-        <Text color={pal.muted}>◇</Text>,
+        <Text color={closedState(d) === 'handled' ? pal.mark.done : pal.muted}>{CLOSED_MARKS[closedState(d)]}</Text>,
         <Box flexDirection="column">
           <Text wrap="wrap" color={pal.muted}>
             {d.ask}

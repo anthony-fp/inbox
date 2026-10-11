@@ -17,6 +17,7 @@ import type {
   Turns,
 } from '../types'
 import { isLapsed, questionNumbers, reopenFinding, reopenItem } from './ledger'
+import type { ClosedState } from './ledger'
 import { actionId, capitalized, clipLabel, isHandedOff, isUndoable, noteText, retryOf, stepsOf } from './presses'
 import type { HelpStep, RowPress } from './presses'
 
@@ -34,6 +35,9 @@ export const FINDING_BADGES: Record<Finding['kind'], { label: string; mark: stri
   issue: { label: 'Issue', mark: '▲', tone: 'issue' },
   opportunity: { label: 'Opportunity', mark: '✦', tone: 'done' },
 }
+
+/** The mark before a row in a Closed fold, by how it ended. */
+export const CLOSED_MARKS: Record<ClosedState, string> = { handled: '✓', dismissed: '✕', lapsed: '–' }
 
 /** How many closed items each Closed fold lists. */
 export const CLOSED_SHOWN = 3

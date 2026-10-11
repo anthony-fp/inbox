@@ -11,6 +11,7 @@ import {
   closeByAgent,
   closeFinding,
   closeItem,
+  closedState,
   latestBatch,
   parseReply,
   questionNumbers,
@@ -497,6 +498,22 @@ describe('reopening', () => {
     expect(asked.closedFindings.map(f => f.outcome)).toEqual(['asked as i2'])
     const again = addFinding(asked, finding)
     expect([again.isAdded, again.id]).toEqual([false, 'i2'])
+  })
+})
+
+describe('closedState', () => {
+  test('an item ends handled, dismissed, or lapsed when the work overtook it', () => {
+    const cases: [Parameters<typeof closedState>[0], string][] = [
+      [{ how: 'answered', outcome: 'Postgres' }, 'handled'],
+      [{ how: 'done', outcome: 'done' }, 'handled'],
+      [{ how: 'claude', outcome: 'closed by Codex: fixed' }, 'handled'],
+      [{ how: 'claude', outcome: 'closed by Claude: no longer applies, the spec dropped it' }, 'lapsed'],
+      [{ how: 'update', outcome: 'done: removed the XLSX export' }, 'handled'],
+      [{ how: 'update', outcome: 'no longer applies: XLSX removed from spec' }, 'lapsed'],
+      [{ how: 'expired', outcome: 'expired' }, 'lapsed'],
+      [{ how: 'dismissed', outcome: 'dismissed' }, 'dismissed'],
+    ]
+    expect(cases.map(([d]) => closedState(d))).toEqual(cases.map(([, state]) => state))
   })
 })
 

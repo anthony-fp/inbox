@@ -5,7 +5,9 @@
 import { render } from 'preact'
 import type { ComponentChildren, JSX } from 'preact'
 
-import { ago, isLapsed } from '../../hooks/ledger'
+import { ago, closedState, isLapsed } from '../../hooks/ledger'
+import type { ClosedState } from '../../hooks/ledger'
+import { CLOSED_MARKS } from '../../hooks/view'
 import {
   baseName,
   capitalized,
@@ -1026,6 +1028,7 @@ function itemsClosed(v: View, kind: 'question' | 'task', entries: Entry[]): Clos
     ask: d.ask,
     outcome: d.outcome,
     isLapsed: isLapsed(d),
+    state: closedState(d),
     at: d.at,
   }))
 }
@@ -1067,6 +1070,7 @@ type ClosedLine = {
   outcome: string
   /** Closed without the person deciding it: dismissed, expired, or overtaken by the work. */
   isLapsed: boolean
+  state: ClosedState
   at: number
 }
 
@@ -1087,7 +1091,7 @@ function ClosedFold({ group, closed, now }: { group: Group; closed: ClosedLine[]
           {closed.map(d => (
             <div class="entry" key={`closed-${d.id}`}>
               <div class="row">
-                <span class="mark">◇</span>
+                <span class={d.state === 'handled' ? 'mark done' : 'mark'}>{CLOSED_MARKS[d.state]}</span>
                 <div class="content tight">
                   <div class="muted">{d.ask}</div>
                   <div>
@@ -1169,6 +1173,7 @@ function Findings({ v, lists, now }: { v: View; lists: Lists; now: number }) {
     ask: f.title,
     outcome: f.outcome,
     isLapsed: isLapsed(f),
+    state: closedState(f),
     at: f.closedAt,
   }))
   const isNothing = lists.findings.length === 0
