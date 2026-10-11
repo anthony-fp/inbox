@@ -42,7 +42,7 @@ When the system asks for reduced motion, every duration is 0, and Undo's fill st
 
 Only what appears or leaves moves, including rows a poll brings. Hover, press and selection fills and text colors change at once, as a native control's do.
 
-Every row keeps one element from arrival to removal, keyed by its id, whether it is open, settled or back after Undo. Today a row changes key when it settles, so nothing can move between the two states.
+Every row keeps one element from arrival to removal, keyed by its id, whether it is open, settled or back after Undo. So a row's height can move between any two of them.
 
 The 400 ms guard after a row opens stays, but it no longer dims the buttons. The dimming read as a flicker on every click.
 

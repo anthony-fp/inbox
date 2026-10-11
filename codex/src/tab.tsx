@@ -233,11 +233,8 @@ function applyView(next: View, seq: number) {
   readAt = Date.now()
   const before = seen
   seen = settledSeen(seen, settledIds(next), Date.now())
-  // A row seen settled for the first time starts to leave once SETTLED_MS passes, and is gone EXIT_MS later.
-  if ([...seen.keys()].some(id => !before.has(id))) {
-    drawIn(SETTLED_MS)
-    drawIn(SETTLED_MS + EXIT_MS)
-  }
+  // A row seen settled for the first time starts to leave once SETTLED_MS passes. Its exit schedules its own end.
+  if ([...seen.keys()].some(id => !before.has(id))) drawIn(SETTLED_MS)
   view = next
   const rows = newRows(rowsSeen, next)
   rowsSeen = rows.seen
@@ -1248,6 +1245,9 @@ async function toggleDemo() {
   seen = new Map()
   rowsSeen = null
   arrived.clear()
+  // The other view's rows are not this one's: none of them leaves or settles in it.
+  for (const id of [...tracks.keys()]) forget(id)
+  lastOrder.clear()
   selection.needsYou = null
   selection.findings = null
   typing = null
@@ -1299,10 +1299,15 @@ function App(): ComponentChildren {
 // ── Motion ──────────────────────────────────────────────────────────────────
 
 // The Codex app's own timing, from its bundled styles: --cubic-enter, --cubic-move and --cubic-exit.
-const ENTER: KeyframeAnimationOptions = { duration: 300, easing: 'cubic-bezier(.19, 1, .22, 1)' }
-const MOVE_MS = 200
+// Their lengths are the row states', so a row comes to rest as its animation ends.
+const ENTER: KeyframeAnimationOptions = { duration: ROW_STATE_MS.entering, easing: 'cubic-bezier(.19, 1, .22, 1)' }
+const MOVE_MS = ROW_STATE_MS.opening
 const MOVE: KeyframeAnimationOptions = { duration: MOVE_MS, easing: 'cubic-bezier(.65, 0, .35, 1)' }
-const EXIT: KeyframeAnimationOptions = { duration: EXIT_MS, easing: 'cubic-bezier(.8, 0, .4, 1)', fill: 'forwards' }
+const EXIT: KeyframeAnimationOptions = {
+  duration: ROW_STATE_MS.leaving,
+  easing: 'cubic-bezier(.8, 0, .4, 1)',
+  fill: 'forwards',
+}
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
 
 type Heights = Map<string, { el: HTMLElement; height: number }>

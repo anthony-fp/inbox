@@ -1,6 +1,8 @@
 // The state machine every row in the Inbox tab moves through, from the draw that first shows it to the draw that
 // removes it. Pure, so it is tested without a page. docs/plans/codex-row-states.md describes the states.
 
+import { EXIT_MS } from './settle'
+
 /**
  * A row's state. The resting states draw one form: `closed` its line, `open` its line and panel, `settled` its
  * settled line, `undoing` that line while an Undo press is out. The moving states animate between them, and each
@@ -22,7 +24,7 @@ export const ROW_STATE_MS: Record<RowState, number> = {
   opening: 200,
   closing: 200,
   settling: 200,
-  leaving: 200,
+  leaving: EXIT_MS,
   closed: 0,
   open: 0,
   settled: 0,
