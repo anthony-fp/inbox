@@ -12,7 +12,9 @@ import {
   allRows,
   closedShown,
   DOT,
+  drawnLists,
   emptyText,
+  entryId,
   ROW_TABS,
   FINDING_BADGES,
   feedbackText,
@@ -23,9 +25,10 @@ import {
   PRESS_GUARD_MS,
   rowKeyPlan,
   SETTLED_MS,
+  settledIn,
 } from '../../hooks/view'
 import { ROW_PAD_PT } from '../../hooks/layout'
-import type { Feedback, PlannedKey, RowView } from '../../hooks/view'
+import type { DrawnEntry, DrawnLists, Feedback, PlannedKey, RowView } from '../../hooks/view'
 import type { Finding, Item, RowNote } from '../../types'
 import { followTo } from '../../hooks/arrivals'
 import { isShownEmpty, newRows, TAB_IDS, TAB_OF } from './arrivals'
@@ -109,7 +112,7 @@ type Row = {
 }
 
 /** A row that just closed, drawn in its place with its outcome, or a row still open. */
-type Entry = { row: Row } | { settled: RowView }
+type Entry = DrawnEntry<Row>
 
 let view: View | null = null
 // The demo shows the mod's sample entries, and its presses send nothing.
@@ -162,7 +165,7 @@ type DrawnRow = { track: RowTrack; openRow?: Row }
 // Each drawn row, by id. The rows of a tab not shown have none.
 const drawnRows = new Map<string, DrawnRow>()
 // The lists the last row step returned, which the draw shows and the next step reads each row's place from.
-let drawnLists: Lists | null = null
+let lastLists: Lists | null = null
 // Each view request takes the next number, and a reply older than the view shown is dropped.
 let requested = 0
 let shown = 0
@@ -502,47 +505,20 @@ function findingRow(v: View, r: RowView, f: Finding): Row {
   }
 }
 
-type Lists = {
-  questions: Entry[]
-  tasks: Entry[]
-  findings: Entry[]
-  /** Each tab's open rows in order: the selection and the keys read these. A settled row cannot be selected. */
-  byTab: Record<Tab, Row[]>
-}
+type Lists = DrawnLists<Row>
 
 /** The view's lists as the tab draws them. A settled row shows while `drawn` has it, and is left out after. */
 function listsOf(v: View, drawn: ReadonlySet<string>): Lists {
-  const entries = (rows: RowView[]) =>
-    rows.flatMap((r): Entry[] => {
-      if (r.state.is === 'settled') return drawn.has(r.id) ? [{ settled: r }] : []
-      if (r.item) return [{ row: itemRow(v, r, r.item) }]
-      return r.finding ? [{ row: findingRow(v, r, r.finding) }] : []
-    })
-  const rowsOf = (list: Entry[]) => list.flatMap(x => ('row' in x ? [x.row] : []))
-  const questions = entries(v.needsYou.questions)
-  const tasks = entries(v.needsYou.tasks)
-  const findings = entries(v.findings.rows)
-
-  return {
-    questions,
-    tasks,
-    findings,
-    byTab: { needsYou: [...rowsOf(questions), ...rowsOf(tasks)], findings: rowsOf(findings) },
-  }
-}
-
-/** The ids of the settled rows a list draws, which its Closed fold leaves out. */
-function settledIn(entries: Entry[]): Set<string> {
-  return new Set(entries.flatMap(x => ('settled' in x ? [x.settled.id] : [])))
+  return drawnLists(
+    v,
+    id => drawn.has(id),
+    r => (r.item ? itemRow(v, r, r.item) : r.finding ? findingRow(v, r, r.finding) : null),
+  )
 }
 
 /** The settled rows drawn in place now. */
 function shownSettled(): Set<string> {
   return drawnSettled(seen, Date.now(), undoing)
-}
-
-function entryId(x: Entry): string {
-  return 'row' in x ? x.row.id : x.settled.id
 }
 
 const LIST_OF = { question: 'questions', task: 'tasks', finding: 'findings' } as const
@@ -564,7 +540,7 @@ function stepLists(v: View): { lists: Lists; changed: Set<string> } {
     const listedIds = new Set(listed.map(entryId))
     const entries = [...listed]
     // A row the last draw drew that the view no longer lists here leaves from the place it drew.
-    for (const [n, last] of (drawnLists?.[LIST_OF[group]] ?? []).entries()) {
+    for (const [n, last] of (lastLists?.[LIST_OF[group]] ?? []).entries()) {
       const id = entryId(last)
       if (!listedIds.has(id) && drawnRows.has(id)) entries.splice(Math.min(n, entries.length), 0, last)
     }
@@ -1216,7 +1192,7 @@ async function toggleDemo() {
   arrived.clear()
   // The other view's rows are not this one's: none of them leaves or settles in it.
   drawnRows.clear()
-  drawnLists = null
+  lastLists = null
   selection.needsYou = null
   selection.findings = null
   typing = null
@@ -1510,9 +1486,9 @@ function draw() {
   }
   const before = measure()
   const step = view ? stepLists(view) : null
-  drawnLists = step?.lists ?? null
+  lastLists = step?.lists ?? null
   wakeForMoves()
-  render(<App lists={drawnLists} />, root)
+  render(<App lists={lastLists} />, root)
   animateDraw(before, step?.changed ?? new Set())
   if (focusTyping && typing) {
     focusTyping = false

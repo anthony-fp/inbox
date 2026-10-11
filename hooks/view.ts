@@ -350,6 +350,61 @@ function actionsOf(
   ]
 }
 
+/**
+ * A list's entry as a client draws it: an open row as the client builds it, or a row that just closed, which keeps
+ * its place and cannot be selected.
+ */
+export type DrawnEntry<R> = { row: R } | { settled: RowView; state: Extract<RowState, { is: 'settled' }> }
+
+/** The view's lists as a client draws them, and each tab's open rows in order, which the selection moves over. */
+export type DrawnLists<R> = {
+  questions: DrawnEntry<R>[]
+  tasks: DrawnEntry<R>[]
+  findings: DrawnEntry<R>[]
+  byTab: { needsYou: R[]; findings: R[] }
+}
+
+/**
+ * The view's lists as a client draws them. A row that just closed shows in place while `isSettledDrawn` says so,
+ * and is left out after. `toRow` builds an open row, or returns null to leave it out.
+ */
+export function drawnLists<R>(
+  v: InboxView,
+  isSettledDrawn: (id: string) => boolean,
+  toRow: (r: RowView) => R | null,
+): DrawnLists<R> {
+  const entries = (rows: RowView[]) =>
+    rows.flatMap((r): DrawnEntry<R>[] => {
+      if (r.state.is === 'settled') return isSettledDrawn(r.id) ? [{ settled: r, state: r.state }] : []
+      const row = toRow(r)
+      return row === null ? [] : [{ row }]
+    })
+  const questions = entries(v.needsYou.questions)
+  const tasks = entries(v.needsYou.tasks)
+  const findings = entries(v.findings.rows)
+
+  return {
+    questions,
+    tasks,
+    findings,
+    byTab: { needsYou: [...rowsIn(questions), ...rowsIn(tasks)], findings: rowsIn(findings) },
+  }
+}
+
+export function entryId(x: DrawnEntry<{ id: string }>): string {
+  return 'row' in x ? x.row.id : x.settled.id
+}
+
+/** A list's open rows in order. */
+export function rowsIn<R>(entries: DrawnEntry<R>[]): R[] {
+  return entries.flatMap(x => ('row' in x ? [x.row] : []))
+}
+
+/** The ids of the rows that just closed a list draws, which its Closed fold leaves out. */
+export function settledIn(entries: DrawnEntry<unknown>[]): Set<string> {
+  return new Set(entries.flatMap(x => ('settled' in x ? [x.settled.id] : [])))
+}
+
 /** A row action drawn as a key: `more` holds the follow-ups, and `keys` the rest. */
 export type ActionKey = { slot: 'action'; action: ActionView; hotkey: string }
 

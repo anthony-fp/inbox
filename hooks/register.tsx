@@ -104,6 +104,7 @@ import type { Effect, EffectHost, HelpStep, PrActionId, RowPress } from './press
 import {
   closedShown,
   DOT,
+  drawnLists,
   emptyText,
   ROW_TABS,
   TABS,
@@ -118,10 +119,12 @@ import {
   perTurnStatus,
   PRESS_GUARD_MS,
   rowKeyPlan,
+  rowsIn,
   SETTLED_MS,
+  settledIn,
   settledRowIds,
 } from './view'
-import type { InboxView, PlannedKey, RowState, RowView } from './view'
+import type { DrawnEntry, InboxView, PlannedKey, RowState, RowView } from './view'
 import {
   CLOSE_DESCRIPTION,
   CLOSE_SCHEMA,
@@ -3087,21 +3090,16 @@ export const register: Register = on => {
       }
     }
 
-    // Each list's entries in order: a row, or a row that just closed, which stays in its place and cannot be selected.
-    type Entry = { row: Row } | { settled: RowView; state: Extract<RowState, { is: 'settled' }> }
-    const entriesOf = (list: RowView[], toRow: (r: RowView) => Row | null): Entry[] =>
-      list.flatMap((r): Entry[] => {
-        if (r.state.is === 'settled') return [{ settled: r, state: r.state }]
-        const row = toRow(r)
-        return row ? [{ row }] : []
-      })
-    const rowsOf = (entries: Entry[]) => entries.flatMap(x => ('row' in x ? [x.row] : []))
-    // Each tab's rows in order: the cursor, the counts and the drawing all read these.
-    const needsYouGroups = NEEDS_YOU_GROUPS.map(g => {
-      const entries = entriesOf(view.needsYou[g.list], r => (r.item ? itemRow(r, r.item) : null))
-      return { ...g, entries, rows: rowsOf(entries) }
-    })
-    const findingEntries = entriesOf(view.findings.rows, r => (r.finding ? findingRow(r, r.finding) : null))
+    type Entry = DrawnEntry<Row>
+    // Each list's entries, and each tab's rows in order: the cursor, the counts and the drawing all read these.
+    // The pane draws every row the view lists as just closed.
+    const lists = drawnLists(
+      view,
+      () => true,
+      r => (r.item ? itemRow(r, r.item) : r.finding ? findingRow(r, r.finding) : null),
+    )
+    const needsYouGroups = NEEDS_YOU_GROUPS.map(g => ({ ...g, entries: lists[g.list], rows: rowsIn(lists[g.list]) }))
+    const findingEntries = lists.findings
     // A PR dismissed moments ago draws settled, with no rows.
     const prGroups = shownPrs.map(({ pr, isSettled }) => ({
       pr,
@@ -3111,8 +3109,8 @@ export const register: Register = on => {
         : [...failingChecks(pr).map(c => checkRow(pr, c)), ...waitingThreads(pr).map(t => threadRow(pr, t))],
     }))
     const rows: Record<Tab, Row[]> = {
-      needsYou: needsYouGroups.flatMap(g => g.rows),
-      findings: rowsOf(findingEntries),
+      needsYou: lists.byTab.needsYou,
+      findings: lists.byTab.findings,
       prs: prGroups.flatMap(g => g.rows),
     }
     // What waits on the person: rows, or on the PRs tab, PRs. A row handed to Claude waits on Claude.
@@ -4116,12 +4114,11 @@ export const register: Register = on => {
         </Box>
       )
     }
-    const settledOf = (entries: Entry[]) => new Set(entries.flatMap(x => ('settled' in x ? [x.settled.id] : [])))
     const needsYouView = () => {
       // A group with no open, settled or closed items is left out.
       const groups = needsYouGroups.flatMap(g => {
         const { entries } = g
-        const closed = closedShown(view.needsYou.closed[g.list], settledOf(entries))
+        const closed = closedShown(view.needsYou.closed[g.list], settledIn(entries))
         if (entries.length === 0 && closed.length === 0) return []
         const isUnfolded = unfolded.includes(g.kind)
         // The group's children in order: its open items, then the fold row and, unfolded, the closed items.
@@ -4226,7 +4223,7 @@ export const register: Register = on => {
 
     // A finding stays listed until Claude closes it or the person dismisses it. Then it settles and moves to Closed.
     const findingsView = () => {
-      const closed = closedShown(view.findings.closed, settledOf(findingEntries)).map(f => ({
+      const closed = closedShown(view.findings.closed, settledIn(findingEntries)).map(f => ({
         id: f.id,
         ask: f.title,
         at: f.closedAt,
