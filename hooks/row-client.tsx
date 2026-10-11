@@ -19,6 +19,8 @@ export type RowProps = {
   title: string
   /** The age, or the row's last action in its place. */
   after: string
+  /** A line above the title, as a finding's kind and age: `label` in its color, then `age` as `after` is drawn. */
+  head: { label: string; color: string | null; age: string } | null
   /** Lines of padding above and below the text. The hover covers it. */
   padY: number
   /** 2 for a question, which can take two lines; 1 otherwise. */
@@ -93,6 +95,8 @@ const Row: ClientModule<RowProps, State> = (props, surface) => {
   // A raised background can share its color with muted text, so on it all text takes the palette's text for it.
   const isRaised = background !== null && background === props.colors.hover
   const color = (own: string | null) => (isRaised && props.colors.hoverText ? props.colors.hoverText : own)
+  // `after` and a head's age dim at rest and take `afterHover` under the pointer or pressed.
+  const ageColor = background ? props.colors.afterHover : props.colors.after
   const colored = (own: string | null) => {
     const c = color(own)
     return c ? { color: c } : {}
@@ -116,20 +120,32 @@ const Row: ClientModule<RowProps, State> = (props, surface) => {
         children: Text({ ...colored(props.colors.handle), children: props.handle }),
       }),
       Box({
+        flexDirection: 'column',
         flexShrink: 1,
         flexGrow: 1,
         paddingY: props.padY,
-        children: Text({
-          wrap: 'wrap',
-          ...colored(null),
-          children: [
-            ...(props.before ? [Text({ ...colored(props.colors.muted), children: props.before })] : []),
-            line.title,
-            ...(line.after
-              ? [Text({ ...colored(background ? props.colors.afterHover : props.colors.after), children: line.after })]
-              : []),
-          ],
-        }),
+        children: [
+          ...(props.head
+            ? [
+                Text({
+                  wrap: 'truncate-end',
+                  children: [
+                    Text({ ...colored(props.head.color), children: props.head.label }),
+                    Text({ ...colored(ageColor), children: props.head.age }),
+                  ],
+                }),
+              ]
+            : []),
+          Text({
+            wrap: 'wrap',
+            ...colored(null),
+            children: [
+              ...(props.before ? [Text({ ...colored(props.colors.muted), children: props.before })] : []),
+              line.title,
+              ...(line.after ? [Text({ ...colored(ageColor), children: line.after })] : []),
+            ],
+          }),
+        ],
       }),
     ],
   })

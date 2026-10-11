@@ -2906,6 +2906,8 @@ export const register: Register = on => {
       /** A status color for a marker handle, such as a failing check's ✗. A Button takes no color, so this handle is Text and only the row's text selects it. */
       handleTone?: Tone
       meta?: JSX.Element
+      /** A line above the title, open or closed, as a finding's kind and age. */
+      head?: { label: string; tone: Tone; age: string }
       title: string
       /** Muted text on the selected title's line, such as an age. */
       titleAfter?: string
@@ -2939,7 +2941,7 @@ export const register: Register = on => {
       return {
         id: item.id,
         // "?" marks a question no typed number reaches. Desktop draws a task's bullet, since "?" reads as "unknown" there.
-        handle: isHandedOff ? '✓' : look === 'desktop' && r.handle === '?' ? '•' : r.handle,
+        handle: isHandedOff ? '✓' : r.handle,
         handleTone: isHandedOff ? 'done' : undefined,
         ...(isHandedOff ? { fold: {} } : {}),
         title: item.ask,
@@ -2960,16 +2962,12 @@ export const register: Register = on => {
         ? { handle: '✓', handleTone: 'done' as const, fold: {} }
         : { handle: FINDING_BADGES[finding.kind].mark, handleTone: FINDING_BADGES[finding.kind].tone }),
       title: finding.title,
-      meta: (
-        <Text wrap="truncate-end">
-          <Text color={pal.tone[FINDING_BADGES[finding.kind].tone]}>{FINDING_BADGES[finding.kind].label}</Text>
-          <Text color={pal.muted}>
-            {DOT}
-            {ago(now - finding.at)}
-          </Text>
-        </Text>
-      ),
-      line: { text: finding.title, age: `${DOT}${ago(now - finding.at)}` },
+      head: {
+        label: FINDING_BADGES[finding.kind].label,
+        tone: FINDING_BADGES[finding.kind].tone,
+        age: `${DOT}${ago(now - finding.at)}`,
+      },
+      line: { text: finding.title },
       body: (
         <Box flexDirection="column" rowGap={blankLine}>
           <Text wrap="wrap">{finding.detail}</Text>
@@ -3410,6 +3408,13 @@ export const register: Register = on => {
     // to what fits beside the handle and the row's other text, less a desktop button's frame.
     // A row with a second line breaks its text at a space before `after`, which
     // stays on the first line, and clips the rest to the second.
+    // A row's head: its label in its tone, then its age.
+    const headLine = (head: NonNullable<Row['head']>, ageColor: string) => (
+      <Text wrap="truncate-end">
+        <Text color={pal.tone[head.tone] ?? pal.mark[head.tone]}>{head.label}</Text>
+        <Text color={ageColor}>{head.age}</Text>
+      </Text>
+    )
     const unselectedLine = (row: Row, onPress: (press: UiPressArgument) => void, inset: number) => {
       const line = closedLine(row)
       const before = line.before?.length ?? 0
@@ -3437,6 +3442,7 @@ export const register: Register = on => {
 
       return (
         <Box flexDirection="column">
+          {row.head ? headLine(row.head, pal.age) : null}
           {/* Only `after` shrinks when the line is too long: a shrunk `before` would wrap mid-path. */}
           <Box flexDirection="row">
             {line.before ? (
@@ -3472,6 +3478,9 @@ export const register: Register = on => {
         before: line.before ?? '',
         title: line.text.trim(),
         after: line.after ? unbroken(line.after) : '',
+        head: row.head
+          ? { label: row.head.label, color: pal.tone[row.head.tone] ?? pal.mark[row.head.tone], age: row.head.age }
+          : null,
         padY: DESKTOP_ROW_PAD,
         maxLines: row.hasSecondLine ? 2 : 1,
         charsPerCell: DESKTOP_CLIP_CHARS_PER_CELL,
@@ -3564,6 +3573,7 @@ export const register: Register = on => {
           </Box>
           {isSelected ? (
             <Box flexDirection="column" flexShrink={1} flexGrow={1} paddingRight={1} paddingY={rowPad}>
+              {row.head ? headLine(row.head, pal.muted) : null}
               {row.meta}
               <Text wrap="wrap">
                 <Text bold>{row.title}</Text>

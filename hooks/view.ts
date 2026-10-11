@@ -409,7 +409,8 @@ export function inboxView({
     const row = rowOf({
       id: item.id,
       type: item.kind,
-      handle: item.kind === 'task' ? '•' : n === undefined ? '?' : `${n})`,
+      // A question no typed number reaches takes a task's bullet: a "?" reads as a missing number.
+      handle: n === undefined ? '•' : `${n})`,
       title: item.ask,
       at: item.at,
       item,

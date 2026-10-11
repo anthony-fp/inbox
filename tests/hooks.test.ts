@@ -337,13 +337,13 @@ test('a question’s handle is the number a typed answer reaches, and the band c
   const pane = await $.ui.mount(PANE)
   const band = await $.ui.mount({ plugin: 'inbox', surface: 'terminal', ...BAND })
   const handle = async (id: string) => (await pane.find({ key: `select-${id}` }))?.props.label
-  // The latest reply's questions lead, numbered as a typed answer reaches them, and older ones read "?".
+  // The latest reply's questions lead, numbered as a typed answer reaches them, and older ones take a bullet.
   expect(await pane.find({ key: 'explain-i3' })).toBeDefined()
   expect([await handle('i3'), await handle('i5'), await handle('i1'), await handle('i2')]).toEqual([
     '1)',
     '2)',
-    '?',
-    '?',
+    '•',
+    '•',
   ])
   expect(await band.find({ text: /Needs you 6/ })).toBeDefined()
   expect(await pane.find({ text: /^ 6$/ })).toBeDefined()
@@ -352,7 +352,7 @@ test('a question’s handle is the number a typed answer reaches, and the band c
   const answered = await $.prompt.submit({ text: '1. yes', wait: false, origin: { kind: 'composer' } })
   expect(answered.context?.join('\n')).toContain('1 → "Add a --loud flag?"')
   // After any message of the person's, a typed number no longer reaches the batch.
-  expect(await handle('i3')).toBe('?')
+  expect(await handle('i3')).toBe('•')
 
   // A task handed to Claude leaves the band's count and the tab's alike.
   await pane.press({ key: 'select-i4' })

@@ -254,7 +254,7 @@ test('the tab lists Needs you in the mod’s order, numbers only the questions a
     ['i3', '1)', 'open'],
     // The task in the batch takes position 2, as a typed "2." would answer it.
     ['i5', '3)', 'open'],
-    ['i2', '?', 'open'],
+    ['i2', '•', 'open'],
   ])
   assert.deepEqual(rows(v.needsYou.tasks), [
     ['i1', '•', 'handedOff'],
@@ -267,7 +267,7 @@ test('the tab lists Needs you in the mod’s order, numbers only the questions a
   const after = viewOf(notePrompt(state, 'thanks', 20).state, 30)
   assert.deepEqual(
     after.needsYou.questions.map(r => r.handle),
-    ['?', '?', '?'],
+    ['•', '•', '•'],
   )
 })
 

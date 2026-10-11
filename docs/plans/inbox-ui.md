@@ -73,9 +73,9 @@ A row has two forms:
 
 | Row | Where | Closed form | Open form adds |
 |---|---|---|---|
-| Question | Needs you | `1) ask · 3m ago`, or `? ask · 3m ago` (see numbers below) | Full ask, one button per option with the recommended one first, styled primary and labeled "(recommended)", help steps |
+| Question | Needs you | `1) ask · 3m ago`, or `• ask · 3m ago` (see numbers below) | Full ask, one button per option with the recommended one first, styled primary and labeled "(recommended)", help steps |
 | Task | Needs you | `• ask · 3m ago` | Help steps (open, copy, run, terminal, link), "Open PR #N" when the ask names a tracked PR |
-| Finding | Findings | `▲ title · 3m ago` for an Issue, `✦ title · 3m ago` for an Opportunity | Kind label, detail, "Relevant file: path" |
+| Finding | Findings | Two lines in every client: `▲ Issue · 3m ago` or `✦ Opportunity · 3m ago`, then the title | Detail, "Relevant file: path" |
 | PR block | PRs | Always open: `#12 title`, readiness, one line of facts | PR actions |
 | PR check | PRs, inside the PR block | `✗ lint · failing check`. Status only, with no Fix. | Open log |
 | Review thread | PRs | `◦ api.ts:40 latest comment · 2h ago` | Comments as Markdown |
@@ -100,7 +100,7 @@ The group title "Your tasks" becomes "Tasks", to match "Questions".
 
 So when older questions stay open, or Claude labeled its questions differently, the pane's "1)" and a typed "1" name different questions. That sends an answer to the wrong question as the person.
 
-The rule: a question's handle shows a number only when a typed number reaches it now, and shows the number `answerNote` would resolve. Every other open question shows `?`. Once the person sends any message, the batch is no longer "the reply just before", and every handle becomes `?` until Claude asks again. The Codex tab follows the same rule, since it uses `answerNote` through `promptNotes`. Claude mode has no prompt hook, so its rows have no numbers.
+The rule: a question's handle shows a number only when a typed number reaches it now, and shows the number `answerNote` would resolve. Every other open question shows a task's bullet, `•`, in every client. Once the person sends any message, the batch is no longer "the reply just before", and every handle becomes `•` until Claude asks again. The Codex tab follows the same rule, since it uses `answerNote` through `promptNotes`. Claude mode has no prompt hook, so its rows have no numbers.
 
 **Which row is open** (decision 3).
 
@@ -591,7 +591,7 @@ Section 2 applies to every client. The tables list where each change lands in to
 | The band is the counts and [Open inbox]; a stop adds a line under them | The band render in `hooks/register.tsx` | The band showed up to seven lines on too many topics. The pane holds the rows. |
 | The last-session offer is removed | `PREVIOUS`, `bringBack` and the `p:<folder>` store key | The owner chose to drop it |
 | Needs you order: questions, then tasks | Group order in the pane, `hooks/register.tsx:2836` | Claude's latest questions come first and read 1, 2, 3 |
-| A question's number is the one `answerNote` resolves, else `?` | `itemRow` numbers by place among open questions, `hooks/register.tsx:2828` | A typed number must answer the question the pane numbers |
+| A question's number is the one `answerNote` resolves, else `•` | `itemRow` numbers by place among open questions, `hooks/register.tsx:2828` | A typed number must answer the question the pane numbers |
 | No row opens on its own after a press (decision 3) | Selection fallback, `hooks/register.tsx:1132-1153` | A row opening under the pointer catches a second click |
 | 0.4 s press guard, with dim buttons | New | A double-click on a title lands on a button that just drew |
 | Each press declares one of the five kinds in 2.3, and its feedback follows the kind | `Action.kind`, a `PressKind`, in `hooks/register.tsx` | One rule a new action cannot get wrong |

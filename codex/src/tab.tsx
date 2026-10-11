@@ -673,7 +673,7 @@ function TypeField({ row }: { row: Row }) {
         aria-label={typed.hint}
         onInput={e => drafts.set(row.id, e.currentTarget.value)}
       />
-      <button type="submit" class="key">
+      <button type="submit" class="key primary">
         Send
       </button>
       <button
@@ -740,12 +740,11 @@ function ListRow({
   now: number
 }) {
   const bar = isNew(row.id) ? ` new tone-bar-${tone}` : ''
-  // A number a typed reply reaches, as "1)", draws as a badge holding the number. A question no typed number
-  // reaches, "?", draws a task's bullet: a ? or an empty badge reads as a missing number.
+  // A number a typed reply reaches, as "1)", draws as a badge holding the number.
   const number = /^(\d+)\)$/.exec(row.handle)?.[1]
   const handle = (
     <span class={`mark ${row.handleTone ?? row.kind ?? ''}`}>
-      {number ? <span class="number">{number}</span> : row.handle === '?' ? '•' : row.handle}
+      {number ? <span class="number">{number}</span> : row.handle}
     </span>
   )
 
