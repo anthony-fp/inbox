@@ -98,6 +98,8 @@ export type ServerDeps = {
   devPage?: () => Promise<string | null>
   /** The fingerprint build.mjs stamped into this server, sent with each view. */
   build?: string
+  /** Why the loader could not load a newer build of the server, while this one keeps running. */
+  loadError?: () => string | null
 }
 
 type Message = { jsonrpc: '2.0'; id?: number | string; method?: string; params?: Record<string, unknown> }
@@ -166,11 +168,16 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     applyPress(s.ledger, s.lastActions[p.id], p, { now: at, turnsStarted: s.presence.turnsStarted, extraSteps: [] })
 
   /** The view for the tab, with the session it was read for. */
-  const served = (s: SessionState, id: string): TabView => ({
-    ...viewOf(s, now()),
-    thread: id,
-    ...(deps.build ? { serverBuild: deps.build } : {}),
-  })
+  const served = (s: SessionState, id: string): TabView => {
+    const loadError = deps.loadError?.()
+
+    return {
+      ...viewOf(s, now()),
+      thread: id,
+      ...(deps.build ? { serverBuild: deps.build } : {}),
+      ...(loadError ? { serverLoadError: loadError } : {}),
+    }
+  }
 
   /**
    * Applies a press drawn for `thread` in session `id`'s state, and runs its effects with `runSends` and

@@ -120,10 +120,11 @@ let isDemo = false
 // Why the first read of the view failed, which leaves no view to show. Null when it has not failed.
 let readError: string | null = null
 /**
- * Set when the server's fingerprint differs from this page's, as when the dev build swapped in a page built from
- * server sources newer than the server Codex is running. Codex keeps a plugin's server until the app quits.
+ * What the tab says about the server it talks to: why a newer build of it did not load, or that its fingerprint
+ * differs from this page's, as when the page came from newer server sources than a server the loader cannot
+ * reload. Null when neither holds.
  */
-let isServerMismatched = false
+let serverNote: string | null = null
 // Polls that failed in a row while a view shows, and when the shown view was read.
 let pollFailures = 0
 let readAt = 0
@@ -268,7 +269,11 @@ async function read() {
   try {
     const next = await callTool<View>('inbox_view', { demo: isDemo }, READ_TIMEOUT_MS)
     if (next.devPage && next.devPage !== PAGE) void swapPage()
-    isServerMismatched = next.serverBuild !== SERVER_BUILD
+    serverNote = next.serverLoadError
+      ? `The inbox server could not load its new build, so it still runs the last one. ${next.serverLoadError}`
+      : next.serverBuild !== SERVER_BUILD
+        ? 'This tab and the inbox server are from different builds. Quit and reopen Codex.'
+        : null
     applyView(next, seq)
   } catch (err) {
     if (view) pollFailures++
@@ -1165,11 +1170,7 @@ function TabBar({ v, now }: { v: View; now: number }) {
         ))}
       </div>
       <div class="status">{status}</div>
-      {isServerMismatched ? (
-        <div class="status-line tone-error">
-          This tab and the inbox server are from different builds. Quit and reopen Codex.
-        </div>
-      ) : null}
+      {serverNote ? <div class="status-line tone-error">{serverNote}</div> : null}
       {error ? <div class="status-line tone-error">{error}</div> : null}
       {lineNote && Date.now() - lineNote.at < SETTLED_MS ? (
         <div class={lineNote.isError ? 'status-line tone-error' : 'status-line muted'}>{lineNote.text}</div>

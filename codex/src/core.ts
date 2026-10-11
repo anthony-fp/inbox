@@ -191,8 +191,9 @@ export type View = InboxView & {
 /**
  * `devPage` is the address of the page the dev build has ready, while it runs. `serverBuild` is the fingerprint
  * build.mjs stamped into the running server, which a tab page built from newer server sources does not match.
+ * `serverLoadError` says why a newer build of the server did not load.
  */
-export type TabView = View & { thread: string; devPage?: string; serverBuild?: string }
+export type TabView = View & { thread: string; devPage?: string; serverBuild?: string; serverLoadError?: string }
 
 /**
  * Each row's last press, without a Local result still pending after PRESS_TIMEOUT_MS. The server

@@ -111,6 +111,27 @@ export function dataDir(env: NodeJS.ProcessEnv, pluginRoot: string): string {
   return join(homedir(), '.codex', 'inbox-dev')
 }
 
+/**
+ * What `npm --prefix codex run dev` builds, from the dev.json it writes into the data folder while it runs: the tab's
+ * page and the server's handler. Null when no dev build runs, including once the process that wrote the file is
+ * gone, as one killed before it could delete it.
+ */
+export async function devBuild(dir: string): Promise<{ tab: string; server?: string } | null> {
+  try {
+    const d = JSON.parse(await readFile(join(dir, 'dev.json'), 'utf8')) as {
+      tab: string
+      server?: string
+      pid?: number
+    }
+    if (typeof d.pid !== 'number') return null
+    // Signal 0 checks that the process exists and sends nothing.
+    process.kill(d.pid, 0)
+    return d
+  } catch {
+    return null
+  }
+}
+
 /** Session ids name files, so only the characters Codex's ids use pass. */
 function fileName(sessionId: string): string {
   if (!/^[\w-]{1,100}$/.test(sessionId)) throw new Error(`Not a session id: ${sessionId}`)

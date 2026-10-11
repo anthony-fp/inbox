@@ -1,63 +1,105 @@
-// The MCP server's entry point, bundled as dist/server.mjs. One JSON-RPC
-// message per line on stdin and stdout.
+// The MCP server's entry point, bundled as dist/server.mjs. One JSON-RPC message per line on stdin and stdout.
+//
+// Codex starts this process once per app launch and keeps it. So it only reads lines and passes each to the
+// handler module, which it imports again whenever that module's file changes: a reinstalled plugin, or the build
+// `npm --prefix codex run dev` keeps while it runs. A change to this file itself still needs Codex restarted.
 
-import { readFile, stat } from 'node:fs/promises'
+import { stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
-import { makeServer } from './server'
-import { dataDir } from './state'
-import TAB_HTML from './tab.html'
-import { run } from './run'
+import type { createHandler } from './server-handler'
+import { dataDir, devBuild } from './state'
 
-/** The desktop app's codex binary: from CODEX_CLI_PATH, which .mcp.json passes on, else the binary that started this server. */
-async function appCli(): Promise<string> {
-  if (process.env.CODEX_CLI_PATH) return process.env.CODEX_CLI_PATH
-  const r = await run(['ps', '-o', 'comm=', '-p', String(process.ppid)], { cwd: '/', timeoutMs: 5000 })
-  const path = r.stdout.trim()
+type Handler = ReturnType<typeof createHandler>
 
-  return r.code === 0 && /(^|\/)codex$/.test(path) ? path : 'codex'
+const here = dirname(fileURLToPath(import.meta.url))
+const dir = dataDir(process.env, dirname(here))
+
+/** The handler module to run: the dev build's while one runs, else the installed one. */
+async function handlerPath(): Promise<string> {
+  const server = (await devBuild(dir))?.server
+  const isBuilt = server
+    ? await stat(server).then(
+        () => true,
+        () => false,
+      )
+    : false
+
+  return server && isBuilt ? server : join(here, 'server-handler.mjs')
+}
+
+let current: { key: string; handle: Promise<Handler> } | null = null
+let lastLoaded: Handler | null = null
+// Why the newest handler file did not import, while an older handler keeps answering. Each view carries it.
+let loadError: string | null = null
+
+/** Imports a handler file, and records why it failed, if it did. */
+function load(url: string, path: string): Promise<Handler> {
+  const handle = import(url).then((m: { createHandler: typeof createHandler }) => m.createHandler(dir, () => loadError))
+  handle.then(
+    h => {
+      lastLoaded = h
+      loadError = null
+    },
+    err => {
+      loadError = `${path}: ${err instanceof Error ? err.message : String(err)}`
+      process.stderr.write(`inbox: could not load ${loadError}\n`)
+    },
+  )
+
+  return handle
 }
 
 /**
- * Reads the page that `npm --prefix codex run dev` keeps built. It writes dev.json, naming the page, into
- * this data folder while it runs. The page is read again only when its file changes.
+ * The handler for the module's current file. A file that changed is imported again under a new URL, since Node
+ * keeps a module by its URL. Each import stays in memory until the process ends, which a reload per save allows.
+ * A file that fails to import, as one caught mid-write, leaves the last handler in place. Node keeps the failure
+ * under its URL too, so the import is tried again only once the file changes.
  */
-function devPageIn(dir: string): () => Promise<string | null> {
-  let cached: { path: string; mtimeMs: number; html: string } | null = null
-  return async () => {
-    try {
-      const { tab } = JSON.parse(await readFile(join(dir, 'dev.json'), 'utf8')) as { tab: string }
-      const { mtimeMs } = await stat(tab)
-      if (cached?.path !== tab || cached.mtimeMs !== mtimeMs)
-        cached = { path: tab, mtimeMs, html: await readFile(tab, 'utf8') }
-      return cached.html
-    } catch {
-      return null
-    }
+async function currentHandler(): Promise<Handler> {
+  const path = await handlerPath()
+  const { mtimeMs } = await stat(path).catch(() => ({ mtimeMs: -1 }))
+  const key = `${pathToFileURL(path).href}?v=${mtimeMs}`
+  if (current?.key !== key) current = { key, handle: load(key, path) }
+  const { handle } = current
+  try {
+    return await handle
+  } catch (err) {
+    if (lastLoaded) return lastLoaded
+    throw err
   }
 }
 
-const dir = dataDir(process.env, dirname(dirname(fileURLToPath(import.meta.url))))
-const handle = makeServer({
-  dir,
-  now: Date.now,
-  exec: run,
-  tabHtml: TAB_HTML,
-  fallbackCli: appCli,
-  devPage: devPageIn(dir),
-  build: SERVER_BUILD,
-})
+const reply = (r: unknown) => process.stdout.write(`${JSON.stringify(r)}\n`)
+// Each message waits for the handler of the one before it, so handlers start in arrival order, as they did when
+// the server was one module. Their replies still finish in any order.
+let ready: Promise<unknown> = Promise.resolve()
 
 createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', line => {
-  let message
+  let message: { id?: unknown }
   try {
     message = JSON.parse(line)
   } catch {
     return
   }
-  void handle(message).then(reply => {
-    if (reply) process.stdout.write(`${JSON.stringify(reply)}\n`)
-  })
+  const handler = ready.then(currentHandler)
+  ready = handler.catch(() => undefined)
+  void handler.then(
+    handle =>
+      handle(message as Parameters<Handler>[0]).then(r => {
+        if (r) reply(r)
+      }),
+    // With no handler loaded at all, a request gets an error instead of no answer.
+    err => {
+      if (message.id === undefined) return
+      const why = err instanceof Error ? err.message : String(err)
+      reply({
+        jsonrpc: '2.0',
+        id: message.id,
+        error: { code: -32603, message: `The inbox server could not load: ${why}` },
+      })
+    },
+  )
 })

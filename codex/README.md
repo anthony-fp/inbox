@@ -60,13 +60,18 @@ A change shows in Codex after `npm run build`, a reinstall with
 `codex plugin add inbox@inbox`, and a new chat. Each build gives the tab's
 page a new address, so Codex does not reuse its saved copy.
 
-To change the tab while you watch it, run `npm run dev`. It rebuilds the
-tab's page on each save and points the installed plugin's server at it. An
-open Inbox tab swaps to the new page within a few seconds. The tab can swap
-only if its own page came from a build that has this feature. Changes to the
-server or the hooks still need a build, a reinstall and a restart of Codex,
-which keeps a plugin's server running across reinstalls and new chats. The tab
-says when its page and the running server come from different builds.
+To change the tab or the server while you watch them, run `npm run dev`. On
+each save it rebuilds the tab's page and the server's handler, and points the
+installed plugin's server at both. An open Inbox tab swaps to the new page
+within a few seconds, and the server's next call runs the new handler. The
+tab can swap only if its own page came from a build that has this feature.
+
+Codex keeps a plugin's server process running across reinstalls and new
+chats. That process is a small loader, `src/server-main.ts`, which imports the
+handler, `dist/server-handler.mjs`, again whenever its file changes. So a
+build and a reinstall take effect without restarting Codex. Only a change to
+the loader itself needs Codex quit and reopened. The tab says when its page
+and the running handler come from different builds.
 
 `../scripts/check.sh` checks the bundles are current, the types and the
 tests. The design and what was measured are in

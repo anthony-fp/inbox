@@ -1455,7 +1455,7 @@ threads a root thread and its forks belong to. They differ after a fork.
 
 - **Which binary.** The server uses the CLI path a hook saved, then
   `CODEX_CLI_PATH`, then its parent process if named `codex`, then `codex`
-  (codex/src/server-main.ts:14-20, codex/src/server.ts:88).
+  (codex/src/server-handler.ts `appCli`, codex/src/server.ts:88).
 - A press from the tab in the desktop app is not yet confirmed end to end
   (docs/plans/codex-plugin.md:3-4).
 
@@ -1823,7 +1823,7 @@ read-only while writing this file.
 | Desktop session tried? (repo) | codex/README.md:9-10: "has not been tried yet". codex-plugin.md:421-423: it ran. :434-436: "Not yet". :3-4: tab press unconfirmed | codex-plugin.md:421-423 for hooks and polling | The README and step list are stale; the press is still unconfirmed. |
 | Poll interval (repo) | codex-plugin.md:56, :119, :332: 5 s or "every few seconds". codex/src/tab.tsx:52: 3 s | Code | |
 | `additionalContextLimit` (repo) | codex-plugin.md:231-234: SessionStart sets it. hooks.json has none | Code | The plan was not implemented. |
-| `CODEX_CLI_PATH` in the server (repo) | codex-plugin.md:361-365: servers get no Codex variables. `.mcp.json` lists it in `env_vars`; server-main.ts:13 says ".mcp.json passes [it] on" | Unknown | Whether it arrives is not recorded. |
+| `CODEX_CLI_PATH` in the server (repo) | codex-plugin.md:361-365: servers get no Codex variables. `.mcp.json` lists it in `env_vars`; `appCli` in server-handler.ts says ".mcp.json passes [it] on" | Unknown | Whether it arrives is not recorded. |
 | `session_meta.source` (repo) | codex-plugin.md:331: desktop transcripts have `source: "vscode"`. Live: 8 of 58 desktop transcripts do; the rest are subagent threads. Whether this and the 60-transcript count in "Session, thread and turn ids" (9 top-level) are the same sample is not recorded [unknown] | Both | True for top-level threads only. |
 | Mode switcher copy | L/sandboxing (IDE-extension tab) still shows "Chat / Agent / Agent (full access)". The mode pickers on L/sandboxing and L/permission-modes show a "Do anything" label that is not in their mode list | n/a | Leftover UI copy. |
 | Listing translations | D/deploy/submission#translate-listing-text: importing translations "doesn't yet change the text shown in the Plugins Directory or listing API responses" | n/a | A documented feature that is not live yet. |
@@ -1978,7 +1978,7 @@ developers.openai.com/plugins (packaging, submission, UI):
 `docs/plans/clients.md`, `codex/README.md`, `codex/plugin/.codex-plugin/plugin.json`,
 `codex/plugin/.mcp.json`, `codex/plugin/hooks/hooks.json`,
 `.agents/plugins/marketplace.json`, `.claude-plugin/plugin.json`,
-`codex/src/{server,server-main,hook,state,update,transcript,texts,tab}`.
+`codex/src/{server,server-main,server-handler,hook,state,update,transcript,texts,tab}`.
 
 ### Not authoritative
 

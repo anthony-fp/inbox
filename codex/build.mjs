@@ -8,11 +8,12 @@
 //   node build.mjs --check  exits 1 when plugin/dist differs from a fresh build
 //   node build.mjs --tests  bundles tests/*.spec.ts into test-dist for `node --test`. They aren't
 //                          *.test.ts, which `claude plugin test` would run as the mod's.
-//   node build.mjs --dev    rebuilds the tab's page into .dev/tab.html on each save, and points the
-//                          installed plugin's server at it, so an open Inbox tab swaps to it.
+//   node build.mjs --dev    rebuilds the tab's page and the server's handler into .dev on each save, and points
+//                          the installed plugin's server at them, so an open Inbox tab swaps to the page and the
+//                          server runs the handler, with no restart.
 
 import { createHash } from 'node:crypto'
-import { mkdirSync, readdirSync, readFileSync, rmSync, watch, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, watch, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -23,14 +24,14 @@ const here = dirname(fileURLToPath(import.meta.url))
 const mode = process.argv[2] ?? ''
 
 /**
- * A fingerprint of the sources the server is built from, leaving out the tab page it carries. The server sends it
- * with each view and the tab page holds its own, so a page built from newer server sources than the running
- * server can say so.
+ * A fingerprint of the sources the server's handler is built from, leaving out the tab page it carries. The server
+ * sends it with each view and the tab page holds its own, so a page built from newer server sources than the
+ * handler running can say so.
  */
 async function serverBuild() {
   const result = await esbuild.build({
     absWorkingDir: here,
-    entryPoints: ['src/server-main.ts'],
+    entryPoints: ['src/server-handler.ts'],
     bundle: true,
     platform: 'node',
     format: 'esm',
@@ -79,16 +80,16 @@ const tabPage = (html, script) => html.replace('/*TAB_SCRIPT*/', () => script)
 const build = await serverBuild()
 const tabScript = mode === '--dev' ? '' : await buildTabScript(build)
 
-/** Loads tab.html with the tab's script inlined. */
-const inlineTab = {
+/** Loads tab.html with `script` inlined. */
+const inlineTab = script => ({
   name: 'inline-tab',
   setup(build) {
     build.onLoad({ filter: /[/\\]tab\.html$/ }, args => ({
-      contents: tabPage(readFileSync(args.path, 'utf8'), tabScript),
+      contents: tabPage(readFileSync(args.path, 'utf8'), script),
       loader: 'text',
     }))
   },
-}
+})
 
 const common = {
   bundle: true,
@@ -97,7 +98,7 @@ const common = {
   target: 'node20',
   loader: { '.html': 'text' },
   define: { SERVER_BUILD: JSON.stringify(build) },
-  plugins: [inlineTab],
+  plugins: [inlineTab(tabScript)],
   legalComments: 'none',
   logLevel: 'warning',
 }
@@ -105,11 +106,13 @@ const common = {
 const entries = {
   hook: 'src/hook-main.ts',
   server: 'src/server-main.ts',
+  'server-handler': 'src/server-handler.ts',
   update: 'src/update-main.ts',
 }
 
 if (mode === '--dev') {
   const page = join(here, '.dev', 'tab.html')
+  const handler = join(here, '.dev', 'server-handler.mjs')
   // The data folder Codex gives the installed plugin, as dataDir in src/state.ts maps it.
   const pointer = join(
     process.env.CODEX_HOME || join(homedir(), '.codex'),
@@ -120,11 +123,22 @@ if (mode === '--dev') {
   )
   const write = async () => {
     try {
-      writeFileSync(
-        page,
-        tabPage(readFileSync(join(here, 'src', 'tab.html'), 'utf8'), await buildTabScript(await serverBuild())),
-      )
-      console.log(`${new Date().toLocaleTimeString()} Built the tab page`)
+      const build = await serverBuild()
+      const script = await buildTabScript(build)
+      writeFileSync(page, tabPage(readFileSync(join(here, 'src', 'tab.html'), 'utf8'), script))
+      // A tab opened while this runs starts from the handler's own page, so that page carries the script too.
+      const server = await esbuild.build({
+        ...common,
+        absWorkingDir: here,
+        entryPoints: ['src/server-handler.ts'],
+        define: { SERVER_BUILD: JSON.stringify(build) },
+        plugins: [inlineTab(script)],
+        write: false,
+      })
+      // The server imports the file once its time changes, so it must never see it half written.
+      writeFileSync(`${handler}.tmp`, server.outputFiles[0].text)
+      renameSync(`${handler}.tmp`, handler)
+      console.log(`${new Date().toLocaleTimeString()} Built the tab page and the server's handler`)
     } catch (err) {
       console.error(err instanceof Error ? err.message : err)
     }
@@ -132,7 +146,8 @@ if (mode === '--dev') {
   mkdirSync(dirname(page), { recursive: true })
   mkdirSync(dirname(pointer), { recursive: true })
   await write()
-  writeFileSync(pointer, JSON.stringify({ tab: page }))
+  // The server ignores the file once this process is gone, as when it was killed before it could delete it.
+  writeFileSync(pointer, JSON.stringify({ tab: page, server: handler, pid: process.pid }))
   const stop = () => {
     rmSync(pointer, { force: true })
     process.exit(0)
@@ -145,7 +160,7 @@ if (mode === '--dev') {
       clearTimeout(timer)
       timer = setTimeout(write, 100)
     })
-  console.log('Watching codex/src and hooks. Open Inbox tabs update after each save. Ctrl-C stops.')
+  console.log('Watching codex/src and hooks. Open Inbox tabs and the server update after each save. Ctrl-C stops.')
 } else if (mode === '--tests') {
   const tests = readdirSync(join(here, 'tests')).filter(f => f.endsWith('.spec.ts'))
   await esbuild.build({
