@@ -55,7 +55,7 @@ describe('parseReply', () => {
     expect(item?.rec).toBe(null)
   })
 
-  test('keeps a recommendation only as the answer it names', () => {
+  test('keeps a recommendation only as the answer it names, by its words or its letter', () => {
     const [stray, named] = parseReply(
       [
         'NEW: decide | - | Refuse check commands in Bash? | Refuse / Keep both paths | Pick one for me',
@@ -63,6 +63,8 @@ describe('parseReply', () => {
       ].join('\n'),
     )!.added
     expect([stray?.rec, named?.rec]).toEqual([null, 'Use 3001'])
+    const [lettered] = parseReply('NEW: decide | - | Which cancel UI? | A: Cancel button / B: Manage flow | A')!.added
+    expect(lettered?.rec).toBe('A: Cancel button')
   })
 
   test('a key written as "-" adds nothing and keeps the card', () => {

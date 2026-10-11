@@ -196,6 +196,16 @@ Theme 5 was measured the same way, with its own fixtures. Rewording the finding 
 
 A finding the person sets aside still closes in 3 of 5 Codex runs. The person can dismiss it from the tab either way.
 
+A later rule asks the agent to recommend whenever it asks the user to decide: "When you ask the user to decide something, say which option you recommend and why, in one clause. If you cannot recommend one, say what would decide it." It is in `guidanceText`, after the first paragraph. Claude wrote 10 replies per scenario, Codex 6.
+
+| Scenario | Claude reply names its pick, before → after | Claude questions with a recommendation, before → after | Codex questions with a recommendation, before → after |
+| --- | --- | --- | --- |
+| A product choice | 6 of 10 → 10 of 10 | 10 of 11 → 10 of 11 | 6 of 6 → 6 of 6 |
+| A tradeoff the agent could leave open | 1 of 10 → 10 of 10 | 8 of 8 → 10 of 10 | 6 of 6 → 6 of 6 |
+| A fact only the user has | 0 of 10 → 0 of 10 | 0 of 10 → 0 of 10 | 0 of 6 → 0 of 6 |
+
+Before the rule, most recommendations came from a reply that took a position and asked "Want me to start?", not from a stated pick. With the rule, Claude also said what would decide the fact-only question in 3 of 10 replies. An approval scenario was dropped, because both agents took "go on" as the approval itself. The runs also found that a pick written as a letter, such as "A", was dropped when the option read "A: Cancel button". The parser now matches a letter or number to its option.
+
 - **Explain wording:** ten Sonnet agent replies to each Explain message, about a cache question. Asking "and which you would pick" made the agent name a pick in 9 of 10 replies, against 1 of 10. Only the question wording changed. The task wording was not tested and stays.
 - **Theme 1 not kept:** ten Sonnet agent replies per version, in two scenarios. With the paragraph, the agent put commands in code blocks. But the items gained nothing. In the fork scenario, both versions gave a recommendation and a one-press step in 10 of 10 replies. In the migration scenario, the paragraph added approval questions, and slightly fewer tasks got a step: 8 of 18, against 11 of 20.
 - **Limits:** the agent runs used a short preamble in place of Claude Code's full system prompt. The Codex agent was not run.
