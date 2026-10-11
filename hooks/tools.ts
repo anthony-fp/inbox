@@ -67,7 +67,10 @@ export function recordFinding(
 
   return {
     ledger: r.ledger,
-    result: r.isAdded ? `Recorded as ${r.id}. The user sees it in ${host.findingsIn}.` : `Already recorded as ${r.id}.`,
+    result: !r.isAdded
+      ? `Already recorded as ${r.id}.`
+      : `Recorded as ${r.id}. The user sees it in ${host.findingsIn}.` +
+        (r.expired ? ` The list was full, so the oldest finding, ${r.expired.id}, closed: ${r.expired.title}.` : ''),
   }
 }
 

@@ -418,6 +418,20 @@ describe('reopening', () => {
     ])
   })
 
+  test('a finding added to a full list closes the oldest as expired, so it stays in Closed', () => {
+    const finding = { kind: 'issue' as const, title: '', detail: 'd', path: null, at: 1 }
+    const full = Array.from({ length: 30 }, (_, n) => n).reduce(
+      (l, n) => addFinding(l, { ...finding, title: `Problem number ${n}` }).ledger,
+      EMPTY,
+    )
+    const r = addFinding(full, { ...finding, title: 'One more problem', at: 7 })
+    expect([r.isAdded, r.expired?.id]).toEqual([true, 'f1'])
+    expect(r.ledger.findings.length).toBe(30)
+    expect(r.ledger.closedFindings.map(f => [f.id, f.how, f.outcome, f.closedAt])).toEqual([
+      ['f1', 'expired', 'list full', 7],
+    ])
+  })
+
   test('a finding an item asks about closes into that item', () => {
     const finding = { kind: 'issue' as const, title: 'Research folder sits in the app', detail: 'd', path: null, at: 1 }
     const open = addFinding(addFinding(EMPTY, finding).ledger, { ...finding, title: 'Tabs unreadable' }).ledger

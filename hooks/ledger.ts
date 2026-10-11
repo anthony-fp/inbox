@@ -1035,26 +1035,25 @@ export function answerNote(ledger: Ledger, text: string): string | null {
 
 /**
  * Adds a finding Claude recorded. One whose title matches an open finding, or
- * rewords an open item's ask, is skipped, so one thing shows in one list.
+ * rewords an open item's ask, is skipped, so one thing shows in one list. When
+ * the list is full, the oldest finding closes as expired to make room.
  */
 export function addFinding(
   ledger: Ledger,
   finding: Omit<Finding, 'id'>,
-): { ledger: Ledger; id: string; isAdded: boolean } {
-  const findings = ledger.findings
+): { ledger: Ledger; id: string; isAdded: boolean; expired: Finding | null } {
   const same =
-    findings.find(f => sameAsk(f.title, finding.title)) ?? ledger.items.find(i => restates(i.ask, finding.title))
-  if (same) return { ledger, id: same.id, isAdded: false }
+    ledger.findings.find(f => sameAsk(f.title, finding.title)) ?? ledger.items.find(i => restates(i.ask, finding.title))
+  if (same) return { ledger, id: same.id, isAdded: false, expired: null }
   const id = `f${ledger.nextId}`
+  const expired = ledger.findings.length >= MAX_FINDINGS ? ledger.findings[0]! : null
+  const room = expired ? closeFinding(ledger, expired.id, { how: 'expired', outcome: 'list full' }, finding.at) : ledger
 
   return {
-    ledger: {
-      ...ledger,
-      findings: [...findings, { ...finding, id }].slice(-MAX_FINDINGS),
-      nextId: ledger.nextId + 1,
-    },
+    ledger: { ...room, findings: [...room.findings, { ...finding, id }], nextId: ledger.nextId + 1 },
     id,
     isAdded: true,
+    expired,
   }
 }
 
