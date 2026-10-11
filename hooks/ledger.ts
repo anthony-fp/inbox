@@ -106,9 +106,11 @@ function howFromOutcome(outcome: string): Closed['how'] {
 /**
  * Commands that sign in or ask for a password. They need the person's own
  * terminal, so their button copies them instead of asking Claude to run them.
+ * Each word counts only as a command or subcommand, as in `gh auth login`, so a
+ * path or URL holding it, as in `curl https://x/login`, stays the agent's to run.
  */
 const NEEDS_PERSON =
-  /\b(login|logout|auth|signin|sign-in|sudo|passwd|ssh-add|ssh-keygen|configure|init --interactive)\b/i
+  /(?:^|[\s;&|])(?:login|logout|signin|sign-in|sudo|passwd|ssh-add|ssh-keygen)(?=[\s:]|$)|\binit --interactive\b/i
 
 /** The inbox model's instructions in a host. */
 export function systemText(host: Host): string {

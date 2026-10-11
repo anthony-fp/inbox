@@ -111,6 +111,27 @@ describe('parseReply', () => {
     ])
   })
 
+  test("only a command that signs in or asks for a password is the person's to run on its own", () => {
+    const commands: [string, 'run' | 'terminal'][] = [
+      ['gh auth status', 'run'],
+      ['npm test -- src/auth', 'run'],
+      ['git log -- auth/', 'run'],
+      ['./configure && make', 'run'],
+      ['aws configure list', 'run'],
+      ['curl https://api.example.com/login', 'run'],
+      ['npm login', 'terminal'],
+      ['gh auth login', 'terminal'],
+      ['firebase login:ci', 'terminal'],
+      ['sudo apt install jq', 'terminal'],
+      ['make build && sudo make install', 'terminal'],
+      ['ssh-add ~/.ssh/id_ed25519', 'terminal'],
+    ]
+    for (const [command, kind] of commands) {
+      const u = parseReply(`NEW: decide | - | Run it? | Yes / No | -\nHELP: new 1 | run | ${command} | -`, command)
+      expect([command, u?.added[0]?.helps[0]?.kind]).toEqual([command, kind])
+    }
+  })
+
   test('a terminal step is a command for the person to run, so it copies instead of asking the agent', () => {
     const reply = 'Only you hold the production credentials, so run `./scripts/migrate --env production` yourself.'
     const u = parseReply(
