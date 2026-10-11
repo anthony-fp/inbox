@@ -228,16 +228,16 @@ const DESKTOP_LINE_PT = 19
  */
 const DESKTOP_ROW_PAD = ROW_PAD_PT / DESKTOP_LINE_PT
 /**
- * Where a row's handle and its text start, in columns. In a group's tree the tree's │ runs in the lead. A flat row,
- * as Findings lists them, has a 1-column lead. The open row, the closed row's Client and the settled row all draw at
- * these columns, so a row's title stays put as it opens, closes or settles.
+ * Where a row's handle and its text start, in columns. In the terminal, a group's tree runs its │ in the lead, and a
+ * flat row, as Findings lists them, has a 1-column lead. Desktop draws no tree, so every list there uses `desktop`,
+ * and section titles and Closed folds start at its handle column. The open row, the closed row's Client and the
+ * settled row all draw at these columns, so a row's title stays put as it opens, closes or settles.
  */
 const ROW_COLUMNS = {
   tree: { lead: 4, handleAt: 4, textAt: 7 },
   flat: { lead: 1, handleAt: 3, textAt: 5 },
+  desktop: { lead: 1, handleAt: 2, textAt: 5 },
 } as const
-/** A tree row's mark column, which a nested row's lead also steps by. */
-const TREE_MARK_WIDTH = ROW_COLUMNS.tree.textAt - ROW_COLUMNS.tree.lead
 // Theme keys, so the colors follow the person's Claude Code theme.
 const NEEDS_YOU = 'warning'
 // A child's place under its section: a middle child, the last, or a block the tree passes.
@@ -438,9 +438,16 @@ const DESKTOP_KEY_PALETTE: Palette = {
   selection: 'rgba(76, 154, 255, 0.2)',
 }
 const HEX_THEMES = new Set(['dark', 'dark-daltonized', 'light', 'light-daltonized'])
+// On the desktop app's dark background, #1a1a19, the cards and the selected tab stand half as far above it as the
+// terminal's fills do, which read too strong in the pane.
+const DESKTOP_DARK_FILLS = { card: '#292929', raised: '#333333' }
 /** The palette for a Claude Code theme, drawn in the terminal or the desktop app. */
 function paletteFor(theme: string, look: 'terminal' | 'desktop'): Palette {
-  return look === 'desktop' && !HEX_THEMES.has(theme) ? DESKTOP_KEY_PALETTE : (PALETTES[theme] ?? THEME_KEY_PALETTE)
+  if (look === 'terminal') return PALETTES[theme] ?? THEME_KEY_PALETTE
+  if (!HEX_THEMES.has(theme)) return DESKTOP_KEY_PALETTE
+  const palette = PALETTES[theme]!
+
+  return theme.startsWith('dark') ? { ...palette, ...DESKTOP_DARK_FILLS } : palette
 }
 // The blank columns on each side of a docked tab's name, which a click there also selects.
 const TAB_PAD = '  '
@@ -2900,8 +2907,8 @@ export const register: Register = on => {
       handle: string
       /** A status color for a marker handle, such as a failing check's ✗. A Button takes no color, so this handle is Text and only the row's text selects it. */
       handleTone?: Tone
-      /** A line above the title, open or closed: the row's kind, then its age and counts. */
-      head?: { label: string; tone: Tone; age: string }
+      /** A line above the title, open or closed: the row's kind, its age, then `notes`, such as a comment count. */
+      head?: { label: string; tone: Tone; age: string; notes?: string }
       title: string
       /** Muted text on the selected title's line, such as an age. */
       titleAfter?: string
@@ -2998,7 +3005,6 @@ export const register: Register = on => {
           key: `log-${pr.ref}-${c.name}`,
           label: 'Open log',
           icon: '↗',
-          isMain: true,
           hotkey: 'o',
           kind: 'local',
           onPress: prPress({ action: 'log', ref: pr.ref, check: c.name }),
@@ -3035,11 +3041,8 @@ export const register: Register = on => {
         head: {
           label: 'Review thread',
           tone: 'prs',
-          age: [
-            t.at === null ? '' : ago(now - t.at),
-            t.replies > 0 ? `${t.replies + 1} comments` : '',
-            t.isOutdated ? 'outdated' : '',
-          ]
+          age: t.at === null ? '' : `${DOT}${ago(now - t.at)}`,
+          notes: [t.replies > 0 ? `${t.replies + 1} comments` : '', t.isOutdated ? 'outdated' : '']
             .filter(Boolean)
             .map(part => `${DOT}${part}`)
             .join(''),
@@ -3282,11 +3285,23 @@ export const register: Register = on => {
           }
         : { text: feedbackText(f, look), age: '', isFailure: isFailure(f) }
     }
-    const lastActionText = (id: string, row?: Row) => {
-      const f = feedbackLabel(id, row)
+    const lastActionText = (id: string) => {
+      const f = feedbackLabel(id)
 
       return f ? { text: [f.text, f.age].filter(Boolean).join(DOT), isFailure: f.isFailure } : null
     }
+    // A press that went through, or waits in the queue, takes the place of the row's age on its top line, open or
+    // closed: the head line, or the title's line. A note or failure reads under the body instead. A narrow desktop
+    // pane drops the age, not the action.
+    const pressedAge = (row: Row) => {
+      const f = feedbackLabel(row.id, row)
+
+      return f?.age ? `${DOT}${[f.text, isNarrowDesktop ? '' : f.age].filter(Boolean).join(' ')}` : null
+    }
+    const headOf = (row: Row, head: NonNullable<Row['head']>) => ({
+      ...head,
+      age: `${pressedAge(row) ?? head.age}${head.notes ?? ''}`,
+    })
     // A section's children hang from its title like a directory listing. A
     // child's row has a 1-column bar, 3 columns for the tree, 3 for its marker,
     // then its text. `branch` draws the tree: ├─ on the child's first line, or
@@ -3304,18 +3319,24 @@ export const register: Register = on => {
       )
     // A row with no marker, such as a group's empty line, starts its text right after the tree.
     // A row at depth 1 hangs from a tree under the marker column, as a group's closed items do.
+    // The columns a row draws at: one set on desktop, the tree's or the flat ones in the terminal.
+    const columnsFor = (tree?: TreePos | null) =>
+      look === 'desktop' ? ROW_COLUMNS.desktop : tree ? ROW_COLUMNS.tree : ROW_COLUMNS.flat
+    // A tree row's mark column, which a nested row's lead also steps by.
+    const markColumns = look === 'desktop' ? ROW_COLUMNS.desktop : ROW_COLUMNS.tree
+    const markWidth = markColumns.textAt - markColumns.handleAt
     const treeRow = (
       pos: TreePos | null,
       marker: JSX.Element | null,
       content: JSX.Element,
       key?: string,
       depth = 0,
-      lead = ROW_COLUMNS.tree.lead + TREE_MARK_WIDTH * depth,
+      lead = markColumns.handleAt + markWidth * depth,
     ) => (
       <Box key={key} flexDirection="row" alignItems="flex-start" overflow="hidden">
         <Box width={lead} flexShrink={0} />
         {marker ? (
-          <Box width={TREE_MARK_WIDTH} flexShrink={0}>
+          <Box width={markWidth} flexShrink={0}>
             {marker}
           </Box>
         ) : null}
@@ -3375,14 +3396,15 @@ export const register: Register = on => {
     const closedLine = (row: Row) => {
       const plain = row.line ?? { text: row.title, age: row.titleAfter }
       const f = feedbackLabel(row.id, row)
+      // A head line already shows the press.
+      if (f && !(row.head && f.age))
+        return {
+          ...plain,
+          after: `${DOT}${[f.text, isNarrowDesktop ? '' : f.age].filter(Boolean).join(' ')}`,
+          afterTone: f.isFailure ? ('error' as const) : undefined,
+        }
 
-      return f
-        ? {
-            ...plain,
-            after: `${DOT}${[f.text, isNarrowDesktop ? '' : f.age].filter(Boolean).join(' ')}`,
-            afterTone: f.isFailure ? ('error' as const) : undefined,
-          }
-        : { ...plain, after: [plain.after, isNarrowDesktop ? '' : plain.age].filter(Boolean).join('') || undefined }
+      return { ...plain, after: [plain.after, isNarrowDesktop ? '' : plain.age].filter(Boolean).join('') || undefined }
     }
     // The selected row gets a blue background, or a bar where the palette has
     // no selection color, and reads top to bottom:
@@ -3427,7 +3449,7 @@ export const register: Register = on => {
 
       return (
         <Box flexDirection="column">
-          {row.head ? headLine(row.head, pal.age) : null}
+          {row.head ? headLine(headOf(row, row.head), pal.age) : null}
           {/* Only `after` shrinks when the line is too long: a shrunk `before` would wrap mid-path. */}
           <Box flexDirection="row">
             {line.before ? (
@@ -3455,7 +3477,7 @@ export const register: Register = on => {
     // A closed desktop row drawn by its Client, at the columns listRow draws an open row's handle and text.
     const rowClientProps = (row: Row, tree?: TreePos): RowProps => {
       const line = closedLine(row)
-      const columns = tree ? ROW_COLUMNS.tree : ROW_COLUMNS.flat
+      const columns = columnsFor(tree)
 
       return {
         handleAt: columns.handleAt,
@@ -3465,7 +3487,11 @@ export const register: Register = on => {
         title: line.text.trim(),
         after: line.after ? unbroken(line.after) : '',
         head: row.head
-          ? { label: row.head.label, color: pal.tone[row.head.tone] ?? pal.mark[row.head.tone], age: row.head.age }
+          ? {
+              label: row.head.label,
+              color: pal.tone[row.head.tone] ?? pal.mark[row.head.tone],
+              age: headOf(row, row.head).age,
+            }
           : null,
         padY: DESKTOP_ROW_PAD,
         maxLines: row.hasSecondLine ? 2 : 1,
@@ -3487,7 +3513,7 @@ export const register: Register = on => {
     // `tree` places the row as a section's child; without it, as in Findings, the
     // handle sits in the 4 columns after the bar.
     const listRow = (row: Row, tree?: TreePos) => {
-      const columns = tree ? ROW_COLUMNS.tree : ROW_COLUMNS.flat
+      const columns = columnsFor(tree)
       const index = indexOf.get(row.id) ?? -1
       const isSelected = index === at
       // On desktop a Client takes a click on every cell of the row, where a Button takes one only on its label.
@@ -3517,17 +3543,11 @@ export const register: Register = on => {
             onSubmit={(value: string, e) => sendTyped($, row.id, value, e.surface)}
           />
         ) : null
-      const lastText = lastActionText(row.id, row)
+      const f = feedbackLabel(row.id, row)
+      const titleAfter = (row.head ? null : pressedAge(row)) ?? row.titleAfter
       const status = [
         ...(row.fold?.note ? [{ text: row.fold.note, color: pal.muted }] : []),
-        ...(lastText
-          ? [
-              {
-                text: lastText.text,
-                color: lastText.isFailure ? pal.tone.error : pal.muted,
-              },
-            ]
-          : []),
+        ...(f && !f.age ? [{ text: f.text, color: f.isFailure ? pal.tone.error : pal.muted }] : []),
       ]
 
       return (
@@ -3561,10 +3581,10 @@ export const register: Register = on => {
           </Box>
           {isSelected ? (
             <Box flexDirection="column" flexShrink={1} flexGrow={1} paddingRight={1} paddingY={space.rowPad}>
-              {row.head ? headLine(row.head, pal.muted) : null}
+              {row.head ? headLine(headOf(row, row.head), pal.muted) : null}
               <Text wrap="wrap">
                 <Text bold>{row.title}</Text>
-                {row.titleAfter ? <Text color={pal.muted}>{unbroken(row.titleAfter)}</Text> : null}
+                {titleAfter ? <Text color={pal.muted}>{unbroken(titleAfter)}</Text> : null}
               </Text>
               {row.subtitle}
               {row.body ? <Box marginTop={blankLine}>{row.body}</Box> : null}
@@ -3939,7 +3959,7 @@ export const register: Register = on => {
     // A group's title: its name, and how many of its items are open. An empty
     // group's own line says it has none, so its title has no count.
     const groupTitle = (title: string, count: number) => (
-      <Box paddingLeft={2}>
+      <Box paddingLeft={look === 'desktop' ? ROW_COLUMNS.desktop.handleAt : 2}>
         <Text>
           <Text bold>{title}</Text>
           {count > 0 ? <Text color={pal.muted}> {count}</Text> : null}
@@ -3997,7 +4017,7 @@ export const register: Register = on => {
             width="100%"
             props={
               {
-                inset: 4,
+                inset: ROW_COLUMNS.desktop.handleAt,
                 count,
                 isUnfolded,
                 padY: DESKTOP_ROW_PAD,
@@ -4102,7 +4122,7 @@ export const register: Register = on => {
     )
     const settledRow = ({ settled: r, state }: Extract<Entry, { settled: RowView }>, pos?: TreePos) => {
       const undo = r.actions.find(a => a.press.action === 'undo')?.press ?? null
-      const columns = pos ? ROW_COLUMNS.tree : ROW_COLUMNS.flat
+      const columns = columnsFor(pos)
       const content = settledContent(
         r.title,
         state.label,

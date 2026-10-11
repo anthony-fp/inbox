@@ -122,7 +122,7 @@ test('a press reads Queued until Codex takes its message as a prompt, then ✓',
   )
   // UserPromptSubmit carries the message the tab queued.
   const arrived = notePrompt(s, s.sent[0]!.text, 200).state
-  assert.deepEqual(viewOf(arrived, 200).needsYou.questions[0]?.feedback, { is: 'done', label: 'Explain', at: 100 })
+  assert.deepEqual(viewOf(arrived, 200).needsYou.questions[0]?.feedback, { is: 'done', label: 'Explained', at: 100 })
 })
 
 test('a press whose message fails to send is undone, and its row says why with [Try again]', async () => {

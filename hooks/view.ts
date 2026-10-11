@@ -201,7 +201,25 @@ export function feedbackOf(
   if (delivery?.state === 'queued') return { is: 'queued', label: last.text, at: last.at }
   if (delivery?.state === 'failed') return { is: 'notSent', reason: delivery.reason, retry: retryOf(id, last) }
 
-  return { is: 'done', label: last.text, at: last.at }
+  return { is: 'done', label: DONE_LABELS[last.action]?.(last.text) ?? last.text, at: last.at }
+}
+
+/**
+ * What a row reads after a ✓ once a press went through, in the past tense: "Addressed", not "Address". An answer
+ * reads as the option chosen, and a step as its own label.
+ */
+const DONE_LABELS: Record<string, (text: string) => string> = {
+  address: () => 'Addressed',
+  discuss: () => 'Discussed',
+  explain: () => 'Explained',
+  dismiss: () => 'Dismissed',
+  type: () => 'Replied',
+  'thread-address': () => 'Addressed',
+  'thread-discuss': () => 'Discussed',
+  'thread-draft': () => 'Drafted a reply',
+  'pr-conflicts': () => 'Asked to resolve conflicts',
+  // "Address all 3 threads"
+  'pr-address-all': text => text.replace(/^Address\b/, 'Addressed'),
 }
 
 /** Feedback that reports a failure, which a row draws in red. */

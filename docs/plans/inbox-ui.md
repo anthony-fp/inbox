@@ -79,7 +79,7 @@ A row has two forms:
 | PR block | PRs | Always open: `#12 title`, readiness, one line of facts | PR actions |
 | PR check | PRs, inside the PR block | Two lines: `✗ Failing check`, then the check's name. Status only, with no Fix. | Open log |
 | Review thread | PRs | Two lines: `◦ Review thread · 2h ago`, with the comment count and "outdated" when they apply, then `api.ts:40 latest comment` | Comments as Markdown |
-| Review thread, sent | PRs | Folds to `✓ Address` and the latest comment's first line | Unfolds when a newer comment arrives |
+| Review thread, sent | PRs | Folds to `✓ Review thread · Addressed 4h ago`, then the latest comment's first line | Unfolds when a newer comment arrives |
 | Review thread, lines changed | PRs | Folds with no ✓, noted `Lines changed since this comment · still open on GitHub` | Nothing says the change fixed it, so it gets no ✓ |
 | Stop | Top of the band and pane | One red line: what stopped and what to do | Nothing |
 | Settled | Where the row was | `✓ Done · just now` with the leave bar | [Undo], after a Mark |
@@ -116,8 +116,8 @@ Every press is one of five kinds. The kind decides what the screen shows at once
 
 | Kind | What it does | What shows at once |
 |---|---|---|
-| **Talk** | Sends a message asking Claude to talk or draft. The row's work is not given away. | The row stays open and in the count. Its age becomes `✓ Explain · just now`. The button reads "Explain again". |
-| **Hand-off** | Sends a message that gives the work to Claude. | The row leaves the count and shows `✓ Address · just now`, until the re-entry rule below brings it back. One keeps today's behavior: a PR block, which is always open, records `✓ Resolve conflicts` on the block. |
+| **Talk** | Sends a message asking Claude to talk or draft. The row's work is not given away. | The row stays open and in the count. Its age becomes `✓ Explained just now`, in the past tense, on the row's top line, open or closed: the kind line where the row has one, else the title's line. The button reads "Explain again". |
+| **Hand-off** | Sends a message that gives the work to Claude. | The row leaves the count and shows `✓ Addressed just now` where its age was, until the re-entry rule below brings it back. A PR block, which is always open, records `✓ Asked to resolve conflicts` on the block. |
 | **Local** | Opens or copies on the person's machine. | A note on the row at once: `Opening settings.json…` or `Copying npm test…`. The result replaces it: `✓ Opened settings.json`, or in red, `Could not open settings.json: it was moved`. |
 | **Mark** | Changes state only, and sends nothing. | The row settles in place with the Mark's own label, `✓ Done` or `✓ Dismissed`, and an [Undo] button, then leaves after 5.12 s. |
 | **View** | Changes only what is on screen, or reloads it. | The change itself: a view opens or closes, a row unfolds, a tab switches, a status reads `Refreshing PRs`. |

@@ -182,7 +182,7 @@ test('a session saved by an older build loads converted, as the mod converts its
   })
   // The old Explain reads as today's, on the question it was pressed on.
   const question = viewOf(s, 2).needsYou.questions[0]
-  assert.equal(question && question.feedback && feedbackText(question.feedback, 'html'), '✓ Explain')
+  assert.equal(question && question.feedback && feedbackText(question.feedback, 'html'), '✓ Explained')
   assert.ok(question?.actions.some(a => a.label === 'Explain again'))
   // Its arrival changes no row.
   assert.deepEqual(
