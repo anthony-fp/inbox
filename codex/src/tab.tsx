@@ -85,6 +85,7 @@ type Row = {
   handleTone?: Tone
   /** A finding's kind, which sets its handle's color and size. */
   kind?: Finding['kind']
+  /** Open, a line above the title, as a finding's kind and age. It carries the age, so the title line drops it. */
   meta?: JSX.Element
   title: string
   /** Muted text after the title, such as an age. */
@@ -471,8 +472,12 @@ function findingRow(v: View, r: RowView, f: Finding): Row {
     kind: f.kind,
     ...(isHandedOff ? { fold: {} } : {}),
     title: f.title,
-    // The line above already shows the age.
-    meta: <span class={`tone-${badge.tone}`}>{badge.label}</span>,
+    meta: (
+      <>
+        <span class={`tone-${badge.tone}`}>{badge.label}</span>
+        <span class="muted"> · {ago(v.at - f.at)}</span>
+      </>
+    ),
     line: { text: f.title, after: ` · ${ago(v.at - f.at)}` },
     body: (
       <div>
@@ -750,7 +755,9 @@ function ListRow({
   const last = isFeedbackShown(row) ? lastText(row, now) : null
   const line = last
     ? { ...plain, after: ` · ${last}`, afterTone: isFailure(row.feedback) ? ('error' as const) : undefined }
-    : plain
+    : isSelected && row.meta
+      ? { ...plain, after: undefined }
+      : plain
   // A closed row keeps its panel drawn while it collapses, so the panel can fade out.
   const isClosing = !isSelected && closingRows.has(row.id)
 
@@ -763,6 +770,7 @@ function ListRow({
     >
       {handle}
       <div class="content">
+        {isSelected && row.meta ? <div class="meta">{row.meta}</div> : null}
         {/* Open, the line does nothing, so it leaves the focus order. */}
         <button
           type="button"
@@ -795,7 +803,6 @@ function Panel({ row, isClosing }: { row: Row; isClosing: boolean }) {
 
   return (
     <div class={isClosing ? 'panel closing' : 'panel'} inert={isClosing}>
-      {row.meta ? <div class="meta">{row.meta}</div> : null}
       {row.body ? <div class="body">{row.body}</div> : null}
       {notes.length > 0 ? <div class="tight">{notes}</div> : null}
       {/* The row's answers and main action, then its follow-ups, on one line that wraps. An open field replaces the
@@ -1051,6 +1058,7 @@ function NeedsYou({ v, lists, now }: { v: View; lists: Lists; now: number }) {
     ) : (
       <div class="empty">
         <div class="title">Nothing needs you.</div>
+        <div class="muted">Codex's questions and the tasks only you can do show up here.</div>
       </div>
     )
 

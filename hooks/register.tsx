@@ -2948,7 +2948,7 @@ export const register: Register = on => {
       meta: (
         <Text wrap="truncate-end">
           <Text color={pal.tone[FINDING_BADGES[finding.kind].tone]}>{FINDING_BADGES[finding.kind].label}</Text>
-          <Text color={pal.muted}> {ago(now - finding.at)}</Text>
+          <Text color={pal.muted}> · {ago(now - finding.at)}</Text>
         </Text>
       ),
       line: { text: finding.title, age: ` · ${ago(now - finding.at)}` },
@@ -4154,7 +4154,8 @@ export const register: Register = on => {
             ),
           ]
         : []
-      if (isNothing && groups.length === 0 && !stop && unread.length === 0) return emptyState('Nothing needs you.')
+      if (isNothing && groups.length === 0 && !stop && unread.length === 0)
+        return emptyState('Nothing needs you.', "Claude's questions and the tasks only you can do show up here.")
       // A stop shows above the list. An API error can be resumed from here; the other stops
       // need a fix outside the session first, so they only say what it is.
       const outside = stop
