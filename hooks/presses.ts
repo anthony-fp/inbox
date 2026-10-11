@@ -260,9 +260,32 @@ export type Effect =
  */
 export type PressResult = { ledger: Ledger; last: LastAction | null; effects: Effect[] } | { stale: true }
 
-/** Whether a close can be undone: the person's own Done or Dismiss, which sent nothing. */
-export function isUndoable(how: Closed['how']): boolean {
-  return how === 'done' || how === 'dismissed'
+/** Whether a close can be undone: the person's own Done or Dismiss, while it has sent nothing. */
+export function isUndoable(c: Pick<Closed, 'how' | 'isSentToAgent'>): boolean {
+  return (c.how === 'done' || c.how === 'dismissed') && !c.isSentToAgent
+}
+
+/**
+ * The message that tells an idle agent the person did tasks it waits on, with their ids, or null when none should
+ * go now. The agent waits on a task it raised in its latest reply, with no prompt since; a prompt since would have
+ * carried the close. Each Done waits out `windowMs`, while its row offers Undo, so Done presses in a row go as one message.
+ */
+export function doneWake(
+  ledger: Ledger,
+  ctx: { now: number; windowMs: number; isTurnRunning: boolean },
+): { text: string; ids: string[] } | null {
+  if (ctx.isTurnRunning) return null
+  const waited = ledger.closed.filter(
+    c => c.how === 'done' && c.outcome === 'done' && !c.isSentToAgent && c.item?.turn === ledger.turn,
+  )
+  if (waited.length === 0 || waited.some(c => ctx.now - c.at < ctx.windowMs)) return null
+
+  return { text: messages.done(waited.map(c => c.ask)), ids: waited.map(c => c.id) }
+}
+
+/** Marks Done closes as sent to the agent, so Undo leaves them closed. */
+export function markSentToAgent(ledger: Ledger, ids: string[]): Ledger {
+  return { ...ledger, closed: ledger.closed.map(c => (ids.includes(c.id) ? { ...c, isSentToAgent: true } : c)) }
 }
 
 /** What a row reads after a press that found it gone or changed. */
@@ -563,9 +586,9 @@ function pressed(
     // Only the person's own Done or Dismiss undoes, so an old drawing cannot reopen an answered, expired or agent-closed row.
     if (ledger.items.some(i => i.id === p.id) || ledger.findings.some(f => f.id === p.id)) return stale
     const closed = ledger.closed.findLast(c => c.id === p.id)
-    if (closed?.item && isUndoable(closed.how)) return { ...unchanged, ledger: reopenItem(ledger, p.id) }
+    if (closed?.item && isUndoable(closed)) return { ...unchanged, ledger: reopenItem(ledger, p.id) }
     const closedFinding = ledger.closedFindings.findLast(f => f.id === p.id)
-    if (closedFinding && isUndoable(closedFinding.how)) return { ...unchanged, ledger: reopenFinding(ledger, p.id) }
+    if (closedFinding && isUndoable(closedFinding)) return { ...unchanged, ledger: reopenFinding(ledger, p.id) }
     return stale
   }
 
@@ -670,6 +693,8 @@ export const messages = {
   },
   run: (item: Item, command: string) => `For "${item.ask}", run this:\n\`\`\`\n${command}\n\`\`\``,
   taskReply: (item: Item, words: string) => `Re the task you left for me, "${item.ask}": ${words}`,
+  /** Tells the agent the person did tasks it was waiting on. */
+  done: (asks: string[]) => (asks.length === 1 ? `Done: ${asks[0]}` : `Done:\n${asks.map(a => `- ${a}`).join('\n')}`),
   /** Sends a finding back to the agent: to fix it, to talk it through first, or with the person's own words. */
   finding: (finding: Finding, how: 'address' | 'discuss' | 'typed', words = '') => {
     const opening =

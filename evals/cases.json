@@ -1137,5 +1137,121 @@
         "open": "i7"
       }
     ]
+  },
+  {
+    "name": "done-message-blocked-task",
+    "about": "A Done message for a task the agent waited on adds nothing and keeps the open question.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 10,
+      "card": {
+        "goal": "Ship the reports export",
+        "done": ["Export streams rows"],
+        "now": "Waiting on sign in to npm so the agent can publish",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [
+        {
+          "id": "i9",
+          "kind": "question",
+          "label": null,
+          "ask": "Should the nightly import job email failures to you or post them in #ops?",
+          "options": ["Email me", "Post in #ops"],
+          "rec": "Post in #ops",
+          "helps": [],
+          "turn": 5,
+          "at": 1
+        }
+      ],
+      "findings": [],
+      "closed": [
+        {
+          "id": "i8",
+          "kind": "task",
+          "ask": "Sign in to npm so the agent can publish",
+          "outcome": "done",
+          "how": "done",
+          "at": 2
+        }
+      ],
+      "batchTurn": 5
+    },
+    "exchange": {
+      "person": "Done: Sign in to npm so the agent can publish",
+      "turn": 6,
+      "press": {
+        "id": "i8",
+        "action": "done"
+      },
+      "reply": "Published reports-export 1.4.0 to npm.",
+      "activity": ["$ npm publish → + reports-export@1.4.0"]
+    },
+    "checks": [
+      {
+        "open": "i9"
+      },
+      {
+        "added": 0
+      }
+    ]
+  },
+  {
+    "name": "done-message-independent-task",
+    "about": "A Done message for a task that blocked nothing adds nothing and keeps the open question.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 10,
+      "card": {
+        "goal": "Ship the reports export",
+        "done": ["Export streams rows"],
+        "now": "Waiting on check the export page in the light theme",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [
+        {
+          "id": "i9",
+          "kind": "question",
+          "label": null,
+          "ask": "Should the nightly import job email failures to you or post them in #ops?",
+          "options": ["Email me", "Post in #ops"],
+          "rec": "Post in #ops",
+          "helps": [],
+          "turn": 5,
+          "at": 1
+        }
+      ],
+      "findings": [],
+      "closed": [
+        {
+          "id": "i8",
+          "kind": "task",
+          "ask": "Check the export page in the light theme",
+          "outcome": "done",
+          "how": "done",
+          "at": 2
+        }
+      ],
+      "batchTurn": 5
+    },
+    "exchange": {
+      "person": "Done: Check the export page in the light theme",
+      "turn": 6,
+      "press": {
+        "id": "i8",
+        "action": "done"
+      },
+      "reply": "Thanks for checking the light theme.",
+      "activity": []
+    },
+    "checks": [
+      {
+        "open": "i9"
+      },
+      {
+        "added": 0
+      }
+    ]
   }
 ]

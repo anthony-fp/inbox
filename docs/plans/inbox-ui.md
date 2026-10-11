@@ -121,10 +121,12 @@ Every press is one of five kinds. The kind decides what the screen shows at once
 | **Talk** | Sends a message asking Claude to talk or draft. The row's work is not given away. | The row stays open and in the count. Its age becomes `✓ Explained just now`, in the past tense, on the row's top line, open or closed: the kind line where the row has one, else the title's line. The button reads "Explain again". |
 | **Hand-off** | Sends a message that gives the work to Claude. | The row leaves the count and shows `✓ Addressed just now` where its age was, until the re-entry rule below brings it back. A PR block, which is always open, records `✓ Asked to resolve conflicts` on the block. |
 | **Local** | Opens or copies on the person's machine. | A note on the row at once: `Opening settings.json…` or `Copying npm test…`. The result replaces it: `✓ Opened settings.json`, or in red, `Could not open settings.json: it was moved`. |
-| **Mark** | Changes state only, and sends nothing. | The row settles in place with the Mark's own label, `✓ Done` or `✓ Dismissed`, and an [Undo] button, then leaves after 5.12 s. |
+| **Mark** | Changes state, and sends nothing while it can be undone. | The row settles in place with the Mark's own label, `✓ Done` or `✓ Dismissed`, and an [Undo] button, then leaves after 5.12 s. |
 | **View** | Changes only what is on screen, or reloads it. | The change itself: a view opens or closes, a row unfolds, a tab switches, a status reads `Refreshing PRs`. |
 
 The View kind covers [Open inbox], the tab buttons, [All 7 options], the Closed fold, Show demo and Hide demo, Reply in chat, Undo and Retry. [Try again] repeats a failed press, so it takes that press's kind.
+
+**Done on a task** can tell the agent after its Undo ends. When the agent is idle and waits on the task, one message goes out once the row leaves: `Done: <ask>`. Done presses on several tasks in a row go as one message. [Done on a task](done-wake.md) has the rule.
 
 **Answering a question** is a Mark and a send together. The row settles as `✓ Yes, rename`, and `Re "<ask>": <answer>` goes to Claude. It has no Undo, because the message is already on its way.
 

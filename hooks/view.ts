@@ -514,7 +514,7 @@ export function inboxView({
         is: 'settled',
         label: capitalized(closed.outcome),
         at,
-        canUndo: isUndoable(closed.how),
+        canUndo: isUndoable(closed),
         // Dismissed, expired or closed by the agent: drawn muted, as the Closed fold draws it.
         isLapsed: isLapsed(closed),
         // Queued only while the answer press that closed the row waits to reach Claude. Claude's own close sends nothing.

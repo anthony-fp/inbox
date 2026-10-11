@@ -374,6 +374,51 @@ test('a question’s handle is the number a typed answer reaches, and the band c
   expect(sidebarLines().at(-1)).toBe('9 · Ship it?')
 })
 
+test('Done on a task Claude just left tells Claude once Undo ends, and a task from an earlier reply or one already read stays silent', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const reply = async (text: string, answer: string, turnId: string) => {
+    await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
+    await $.turn.start({ text, turnId })
+    await $.turn.complete({ answer, durationMs: 5, isAborted: false, turnId, reason: 'answer' })
+    await clock.settle()
+  }
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  ledgerReply = 'NEW: do | - | Water the plants | - | -'
+  await reply('plan the day', 'Water the plants when you can.', 't1')
+  ledgerReply = ['NEW: do | - | Sign in to npm | - | -', 'NEW: do | - | Approve the deploy | - | -'].join('\n')
+  await reply('publish it', 'Sign in to npm and approve the deploy, then I publish.', 't2')
+  const pane = await $.ui.mount(PANE)
+  const done = async (id: string) => {
+    await pane.press({ key: `select-${id}` })
+    await clock.advance(PRESS_GUARD_MS)
+    await pane.press({ key: `done-${id}` })
+    await clock.settle()
+  }
+
+  await done('i2')
+  await clock.advance(SETTLED_MS / 2)
+  await done('i3')
+  await clock.advance(SETTLED_MS / 2)
+  expect(sent).toEqual([])
+  expect(await pane.find({ key: 'undo-i3' })).toBeDefined()
+  await clock.advance(SETTLED_MS / 2)
+  expect(sent).toEqual(['Done:\n- Sign in to npm\n- Approve the deploy'])
+
+  await reply('thanks', 'Published.', 't3')
+  await done('i1')
+  await clock.advance(SETTLED_MS)
+  expect(sent).toHaveLength(1)
+
+  ledgerReply = 'NEW: do | - | Rotate the key | - | -'
+  await reply('next', 'Rotate the key, then I redeploy.', 't4')
+  await done('i4')
+  await $.prompt.submit({ text: 'done, go ahead', wait: false, origin: { kind: 'composer' } })
+  await clock.advance(SETTLED_MS)
+  expect(sent).toHaveLength(1)
+})
+
 test('a task handed to Claude folds and leaves the count until Claude’s reply leaves it open, whatever it opens or copies meanwhile', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])

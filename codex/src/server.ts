@@ -9,7 +9,9 @@ import { access, stat } from 'node:fs/promises'
 import {
   applyPress,
   demoRecord,
+  doneWake,
   localPath,
+  markSentToAgent,
   noteText,
   openCommands,
   runLocalEffects,
@@ -27,6 +29,7 @@ import {
 import { noteToolCall, viewOf } from './core'
 import type { TabView } from './core'
 import { demoState } from './demo'
+import { SETTLE_WINDOW_MS } from './settle'
 import { readState, updateState } from './state'
 import type { SessionState } from './state'
 import { CODEX, INBOX_DESCRIPTION, inboxToolText, VIEW_DESCRIPTION } from './texts'
@@ -164,6 +167,32 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     return /Queued message (\S+)/.exec(r.stdout)?.[1] ?? null
   }
 
+  /**
+   * Tells an idle Codex the person did tasks it waits on, as `doneWake` decides. It sends under the session's lock,
+   * so an Undo lands before or after it, and the closes it names are marked sent either way, so a failing
+   * `codex queue` is not retried at every poll. Codex then reads them beside the next prompt.
+   */
+  async function wakeForDone(id: string) {
+    const check = (s: SessionState) =>
+      doneWake(s.ledger, { now: now(), windowMs: SETTLE_WINDOW_MS, isTurnRunning: s.turn.person !== null })
+    if (!check(await readState(dir, id))) return
+    await updateState(dir, id, async s => {
+      const wake = check(s)
+      if (!wake) return s
+      const ledger = markSentToAgent(s.ledger, wake.ids)
+      const queuedId = await queue(s, wake.text).catch(() => undefined)
+      if (queuedId === undefined) return { ...s, ledger }
+      const sent = {
+        text: wake.text,
+        press: { id: wake.ids[0] ?? '', action: 'done' as const },
+        at: now(),
+        row: null,
+        queuedId,
+      }
+      return { ...s, ledger, sent: [...s.sent, sent].slice(-MAX_SENT) }
+    })
+  }
+
   /** The tab page to show: the dev build's while it runs, else this handler's own, which a reinstall replaces. */
   const currentPage = async () => (await deps.devPage?.()) ?? deps.tabHtml
 
@@ -247,6 +276,9 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     }).catch((err: unknown) => {
       error = `Not sent: ${err instanceof Error ? err.message : String(err)}`
     })
+    // A server restart loses the timer; the tab's next poll checks again.
+    if (pressed.r && p.action === 'done')
+      setTimeout(() => void wakeForDone(id).catch(() => undefined), SETTLE_WINDOW_MS).unref()
     if (pressed.r)
       await runLocalEffects(
         hostFor(f => updateState(dir, id, f)),
@@ -328,6 +360,7 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
       }
       case 'inbox_view': {
         if (args.demo === true) return { ...text('Inbox demo'), structuredContent: await served(demoOf(id), id) }
+        await wakeForDone(id).catch(() => undefined)
         const s = await updateState(dir, id, s => ({ ...s, tabSeenAt: now() }))
         return { ...text('Inbox view'), structuredContent: await served(s, id) }
       }

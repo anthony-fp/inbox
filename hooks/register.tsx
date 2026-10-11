@@ -103,8 +103,10 @@ import {
   capitalized,
   clipLabel,
   demoRecord,
+  doneWake,
   localLast,
   localPath,
+  markSentToAgent,
   openCommands,
   pendingResult,
   prSteps,
@@ -1878,6 +1880,23 @@ async function perform(
 }
 
 /**
+ * Tells an idle agent the person did tasks it waits on, as `doneWake` decides. The closes are marked sent first, so
+ * an Undo pressed during the send leaves them closed. A send that does not enter keeps the mark, and Claude reads
+ * them beside the next prompt.
+ */
+async function wakeForDone($: EngineInterface) {
+  const now = await $.clock.now()
+  let wake: ReturnType<typeof doneWake> = null
+  await commitLedger($, l => {
+    wake = doneWake(l, { now, windowMs: SETTLED_MS, isTurnRunning })
+    return wake ? markSentToAgent(l, wake.ids) : l
+  })
+  const sending = wake as ReturnType<typeof doneWake>
+  if (!sending) return
+  await send($, sending.text, { id: sending.ids[0] ?? '', action: 'done' })
+}
+
+/**
  * Runs a press from the pane, by click or key. A row press goes through
  * `applyPress` on the ledger, a PR press through `applyPrPress`. The row's last
  * action records it, then opens and copies run and their result replaces the
@@ -1947,6 +1966,11 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
   ])
   // The sidebar line stops counting a handed-off row at once.
   if (lasts.some(l => l.kind === 'handoff')) void publishStatus($)
+  if (!('ref' in p) && p.action === 'done')
+    void $.clock
+      .sleep(SETTLED_MS)
+      .then(() => wakeForDone($))
+      .catch(() => undefined)
   if ('ref' in p && p.action === 'pr-dismiss') {
     redrawWhileLeaving($, SETTLED_MS)
     leavePr($, p.ref, now)
@@ -2649,6 +2673,8 @@ export const register: Register = on => {
     // No dialog outlives the turn that raised it.
     await closeDialogs($, null)
     if (!isOn) return r
+    // A Done pressed during the turn waited for it to end.
+    void wakeForDone($).catch(() => undefined)
     void followNewRows($).catch(() => undefined)
     if (e.reason !== 'answer' || e.answer.trim() === '') return r
 

@@ -312,8 +312,8 @@ export type Exchange = {
   screen: string
 }
 
-/** A prompt the mod sent for an item: an answer, an Explain, or a Run. */
-export type Press = { id: string; action: 'answer' | 'explain' | 'run' }
+/** A prompt the mod sent for an item: an answer, an Explain, a Run, or the message for a Done. */
+export type Press = { id: string; action: 'answer' | 'explain' | 'run' | 'done' }
 
 export type Update = {
   card: Omit<Card, 'updatedAt'>

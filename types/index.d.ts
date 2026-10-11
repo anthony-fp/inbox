@@ -55,6 +55,8 @@ export type Closed = {
   at: number
   /** The item as it was while open, so it can be reopened; missing on a record saved before the mod kept it. */
   item?: Item
+  /** A Done whose message went to the agent, which Undo can no longer take back. */
+  isSentToAgent?: true
 }
 
 /** The rows that just appeared in the pane, and when, so each draws a bar for a moment. */
@@ -64,7 +66,7 @@ export type Arrival = { ids: string[]; at: number }
  * What a press does, which decides what its row shows at once. Talk asks Claude
  * to talk or draft; Hand-off gives Claude the row's work, so the row folds;
  * Local opens or copies on the person's machine; Mark changes state and sends
- * nothing, or closes a question with its answer; View changes only the screen.
+ * nothing while it can be undone, or closes a question with its answer; View changes only the screen.
  */
 export type PressKind = 'talk' | 'handoff' | 'local' | 'mark' | 'view'
 

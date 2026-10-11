@@ -7,7 +7,7 @@ import type { Feedback } from '../../hooks/view'
 import { noteHook, notePrompt, viewOf } from '../src/core'
 import type { View } from '../src/core'
 import { makeServer, tabUri } from '../src/server'
-import { PRESS_TIMEOUT_MS } from '../src/settle'
+import { PRESS_TIMEOUT_MS, SETTLE_WINDOW_MS } from '../src/settle'
 import { readState, updateState } from '../src/state'
 import { fakeRunner, tempDir } from './helpers'
 
@@ -430,4 +430,72 @@ test('an open still pending after the press timeout shows nothing on its row, an
   assert.equal(view.lastActions.i1?.result, undefined)
   const saved = await readState(dir, 's1')
   assert.deepEqual([saved.lastActions.i1?.result, saved.lastActions.i2?.result], [pending(staleAt), pending(100)])
+})
+
+test('Done on a task Codex just left queues one message once Undo ends, unless a turn runs, and Undo then reads stale', async () => {
+  const dir = tempDir()
+  const task = (id: string, ask: string, turn: number) => ({
+    id,
+    kind: 'task' as const,
+    label: null,
+    ask,
+    options: [],
+    rec: null,
+    helps: [],
+    turn,
+    at: 1,
+  })
+  await updateState(dir, 's1', s => ({
+    ...s,
+    root: '/repo',
+    cliPath: '/apps/codex',
+    ledger: {
+      ...s.ledger,
+      turn: 2,
+      nextId: 3,
+      items: [task('i1', 'Water the plants', 1), task('i2', 'Sign in to npm', 2)],
+    },
+  }))
+  let t = 100
+  const runner = fakeRunner(() => ({ code: 0, stdout: 'Queued message q1\n', stderr: '' }))
+  const handle = makeServer({
+    dir,
+    now: () => t,
+    exec: runner.exec,
+    tabHtml: '<html></html>',
+    fallbackCli: async () => 'codex',
+  })
+  const call = (name: string, args: Record<string, unknown>) =>
+    handle({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name, arguments: args, _meta: { thread_id: 's1' } },
+    }) as Promise<{
+      result: { structuredContent: { note: string | null } }
+    }>
+  const poll = () => call('inbox_view', {})
+
+  await call('inbox_press', { press: { action: 'done', id: 'i1' }, thread: 's1' })
+  await call('inbox_press', { press: { action: 'done', id: 'i2' }, thread: 's1' })
+  await updateState(dir, 's1', s => ({ ...s, turn: { ...s.turn, person: 'keep going' } }))
+  t += SETTLE_WINDOW_MS
+  await poll()
+  assert.deepEqual(runner.calls, [])
+
+  await updateState(dir, 's1', s => ({ ...s, turn: { ...s.turn, person: null } }))
+  await poll()
+  await poll()
+  assert.deepEqual(runner.calls, [['/apps/codex', 'queue', '--thread', 's1', '--message', 'Done: Sign in to npm']])
+  const undo = await call('inbox_press', { press: { action: 'undo', id: 'i2' }, thread: 's1' })
+  assert.equal(undo.result.structuredContent.note, 'stale')
+  const s = await readState(dir, 's1')
+  assert.deepEqual(
+    s.ledger.closed.map(c => [c.id, c.isSentToAgent ?? false]),
+    [
+      ['i1', false],
+      ['i2', true],
+    ],
+  )
+  assert.deepEqual(notePrompt(s, s.sent[0]!.text, t).state.turn.press, { id: 'i2', action: 'done' })
 })
