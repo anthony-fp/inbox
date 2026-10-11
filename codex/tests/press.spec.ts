@@ -10,6 +10,8 @@ import type { Item, LocalResult } from '../../types'
 import { followTo, isShownEmpty, newRows } from '../src/arrivals'
 import { endTurn, noteHook, notePrompt, noteToolCall, viewOf } from '../src/core'
 import { demoState } from '../src/demo'
+import { ROW_STATE_MS, stepRow } from '../src/rows'
+import type { RowState, RowTarget } from '../src/rows'
 import { drawnSettled, EXIT_MS, SETTLE_WINDOW_MS, settledIds, settledSeen } from '../src/settle'
 import { emptyState, NOTHING_HEARD } from '../src/state'
 import type { SessionState } from '../src/state'
@@ -537,4 +539,63 @@ test('the tab moves from an empty Needs you to Findings when a poll brings a fin
   assert.equal(followed({ ...withFinding, ledger: withItems().ledger }), null)
   // The same rows in the next poll are not new.
   assert.deepEqual(newRows(next.seen, viewOf(withFinding, 30)).added, { needsYou: [], findings: [] })
+})
+
+const ROW_STATES: RowState[] = [
+  'entering',
+  'closed',
+  'opening',
+  'open',
+  'closing',
+  'settling',
+  'settled',
+  'undoing',
+  'leaving',
+]
+const ROW_TARGETS: RowTarget[] = ['closed', 'open', 'settled', 'undoing', 'gone']
+const RESTS: Record<RowTarget, RowState | null> = {
+  closed: 'closed',
+  open: 'open',
+  settled: 'settled',
+  undoing: 'undoing',
+  gone: null,
+}
+
+test('every row state reaches every target, and a row drawing its panel keeps it until its height has shrunk over it', () => {
+  const withPanel = new Set<RowState>(['opening', 'open', 'closing', 'settling'])
+  for (const state of ROW_STATES)
+    for (const target of ROW_TARGETS) {
+      const first = stepRow({ state, since: 0 }, target, 0)
+      // A panel showing goes only to a state that keeps it while the row shrinks: closing, settling or leaving.
+      if (withPanel.has(state) && first)
+        assert.ok(
+          withPanel.has(first.state) || first.state === 'leaving',
+          `${state} toward ${target} dropped its panel as ${first.state}`,
+        )
+      // With time passing, the row comes to rest in its target's form within two moves, or is removed.
+      let track = first
+      for (let n = 0; n < 2 && track && track.state !== RESTS[target]; n++)
+        track = stepRow(track, target, track.since + ROW_STATE_MS[track.state])
+      assert.equal(track?.state ?? null, RESTS[target], `${state} toward ${target}`)
+    }
+})
+
+test('a row turned around mid-move starts the new move at once, and with reduced motion every move ends as it starts', () => {
+  assert.equal(stepRow({ state: 'closing', since: 0 }, 'open', 50)?.state, 'opening')
+  assert.equal(stepRow({ state: 'opening', since: 0 }, 'closed', 50)?.state, 'closing')
+  assert.equal(stepRow({ state: 'settling', since: 0 }, 'open', 50)?.state, 'opening')
+  // A move that has not had its time keeps its start, so its animation is not restarted.
+  const closing = { state: 'closing' as const, since: 0 }
+  assert.equal(stepRow(closing, 'closed', 50), closing)
+  for (const state of ROW_STATES)
+    for (const target of ROW_TARGETS)
+      assert.equal(
+        stepRow({ state, since: 0 }, target, 0, false, true)?.state ?? null,
+        RESTS[target],
+        `${state} toward ${target}`,
+      )
+  // A row the view just brought in grows, unless motion is reduced.
+  assert.equal(stepRow(undefined, 'closed', 0, true)?.state, 'entering')
+  assert.equal(stepRow(undefined, 'closed', 0, true, true)?.state, 'closed')
+  assert.equal(stepRow(undefined, 'open', 0)?.state, 'open')
 })

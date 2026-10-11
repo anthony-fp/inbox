@@ -30,7 +30,9 @@ import { followTo, isShownEmpty, newRows } from './arrivals'
 import type { Group, SeenRows, Tab } from './arrivals'
 import type { TabView as View } from './core'
 import type { PressReply } from './server'
-import { drawnSettled, EXIT_MS, leavingSettled, POLL_MS, PRESS_TIMEOUT_MS, settledIds, settledSeen } from './settle'
+import { isMoving, ROW_STATE_MS, stepRow } from './rows'
+import type { RowState, RowTarget, RowTrack } from './rows'
+import { drawnSettled, EXIT_MS, POLL_MS, PRESS_TIMEOUT_MS, settledIds, settledSeen } from './settle'
 
 type Tone = 'needsYou' | 'findings' | 'done' | 'error'
 
@@ -144,18 +146,28 @@ let seen = new Map<string, number>()
 // The row ids the tab has seen, and when each row new to it appeared. A new row draws a bar for NEW_ROW_MS.
 let rowsSeen: SeenRows = null
 const arrived = new Map<string, number>()
-// Rows that arrived since the last draw, which grow in when they are first drawn.
+// Rows and Closed lists that arrived since the last draw, which grow in when they are first drawn.
 const entering = new Set<string>()
 // Settled rows whose Undo press is out. They stay drawn, and their Undo fill stops, until it answers.
 const undoing = new Set<string>()
-// When each leaving row's exit started. It stays drawn for EXIT_MS from then.
-const leftAt = new Map<string, number>()
 // Closed folds still drawn while their list collapses.
 const closingFolds = new Set<Group>()
-/** Rows closed by opening another, drawn with their panel until it has collapsed. */
-const closingRows = new Set<string>()
-/** Each tab's row drawn open by the last draw, so the draw that opens another knows which one closes. */
-const drawnOpen = new Map<Tab, string>()
+// Each drawn row's state in the machine in rows.ts, by row id. The rows of a tab not shown have none.
+const tracks = new Map<string, RowTrack>()
+// What each row last drew, so a row that leaves the view fades where it was.
+const lastEntry = new Map<string, Entry>()
+// Each row as it last drew open, so a row closing or settling keeps that panel while its height shrinks over it.
+const lastOpen = new Map<string, Row>()
+// Leaving rows that were open when they left, which keep their panel while they fade.
+const leftOpen = new Set<string>()
+// Each list's row ids in the order the last draw drew them, so a leaving row keeps its place.
+const lastOrder = new Map<Group, string[]>()
+// When the last row step ran. A row whose track starts then entered its state in this draw.
+let stepAt = 0
+// The shown tab's open row as of the last row step.
+let openRowId: string | undefined
+// The lists the last row step returned, which the draw shows.
+let drawnLists: Lists | null = null
 // Each view request takes the next number, and a reply older than the view shown is dropped.
 let requested = 0
 let shown = 0
@@ -221,7 +233,6 @@ function applyView(next: View, seq: number) {
   readAt = Date.now()
   const before = seen
   seen = settledSeen(seen, settledIds(next), Date.now())
-  for (const id of leftAt.keys()) if (!seen.has(id)) leftAt.delete(id)
   // A row seen settled for the first time starts to leave once SETTLED_MS passes, and is gone EXIT_MS later.
   if ([...seen.keys()].some(id => !before.has(id))) {
     drawIn(SETTLED_MS)
@@ -538,7 +549,81 @@ function settledIn(entries: Entry[]): Set<string> {
 
 /** The settled rows drawn in place now. */
 function shownSettled(): Set<string> {
-  return drawnSettled(seen, Date.now(), undoing, leftAt)
+  return drawnSettled(seen, Date.now(), undoing)
+}
+
+function entryId(x: Entry): string {
+  return 'row' in x ? x.row.id : x.settled.id
+}
+
+const LIST_KEYS = { question: 'questions', task: 'tasks', finding: 'findings' } as const
+
+/**
+ * Moves each row the shown tab draws one step through the machine in rows.ts, and returns the lists to draw: the
+ * view's rows, with each leaving row in the place it last drew. Rows of a tab not shown are forgotten, so they show
+ * their form at once when it shows. Each move into a moving state draws again when the move is due to end.
+ */
+function stepLists(v: View): Lists {
+  const now = Date.now()
+  stepAt = now
+  const lists = listsOf(v, shownSettled())
+  const rows = lists.byTab[tab]
+  openRowId = rows[selectedIndex(rows, tab, v)]?.id
+  const groups: Group[] = tab === 'needsYou' ? ['question', 'task'] : ['finding']
+  const drawnIds = new Set<string>()
+  for (const group of groups) {
+    const listed = lists[LIST_KEYS[group]]
+    const listedIds = new Set(listed.map(entryId))
+    const entries = [...listed]
+    // A row the last draw drew that the view no longer lists here leaves from the place it drew.
+    for (const [n, id] of (lastOrder.get(group) ?? []).entries()) {
+      const last = lastEntry.get(id)
+      if (!listedIds.has(id) && last && tracks.has(id)) entries.splice(Math.min(n, entries.length), 0, last)
+    }
+    const kept: Entry[] = []
+    for (const x of entries) {
+      const id = entryId(x)
+      const before = tracks.get(id)
+      const target: RowTarget = !listedIds.has(id)
+        ? 'gone'
+        : 'settled' in x
+          ? undoing.has(id)
+            ? 'undoing'
+            : 'settled'
+          : id === openRowId
+            ? 'open'
+            : 'closed'
+      const track = stepRow(before, target, now, entering.has(id), reducedMotion.matches)
+      if (!track) {
+        forget(id)
+        continue
+      }
+      if (track !== before) {
+        const wasOpen = !!before && ['opening', 'open', 'closing', 'settling'].includes(before.state)
+        if (track.state === 'leaving' && wasOpen) leftOpen.add(id)
+        else leftOpen.delete(id)
+        if (isMoving(track.state)) drawIn(ROW_STATE_MS[track.state])
+      }
+      tracks.set(id, track)
+      lastEntry.set(id, x)
+      if ('row' in x && (track.state === 'open' || track.state === 'opening')) lastOpen.set(id, x.row)
+      drawnIds.add(id)
+      kept.push(x)
+    }
+    lastOrder.set(group, kept.map(entryId))
+    lists[LIST_KEYS[group]] = kept
+  }
+  for (const id of [...tracks.keys()]) if (!drawnIds.has(id)) forget(id)
+  for (const group of ['question', 'task', 'finding'] as const) if (!groups.includes(group)) lastOrder.delete(group)
+
+  return lists
+}
+
+function forget(id: string) {
+  tracks.delete(id)
+  lastEntry.delete(id)
+  lastOpen.delete(id)
+  leftOpen.delete(id)
 }
 
 /** Undo on a settled row: the row comes back open and selected, reading "✓ Undo" as other presses read their result. */
@@ -563,11 +648,7 @@ async function undo(r: RowView) {
       drawIn(SETTLED_MS)
     }
     // A row held past its time leaves the way any row does, with its exit.
-    if (at !== undefined && !isTimeLeft) {
-      seen.set(r.id, Date.now() - SETTLED_MS)
-      leftAt.delete(r.id)
-      drawIn(EXIT_MS)
-    }
+    if (at !== undefined && !isTimeLeft) seen.set(r.id, Date.now() - SETTLED_MS)
     draw()
   }
 }
@@ -583,25 +664,6 @@ function selectedIndex(rows: Row[], t: Tab, v: View): number {
   const id = s ? s.id : ((t === 'needsYou' ? v.needsYou.topId : null) ?? rows[0]?.id)
 
   return id ? rows.findIndex(r => r.id === id) : -1
-}
-
-/**
- * Called as a tab's lists draw, before their rows. When the open row changed, by a click, a key or a poll that moved
- * the default, the row drawn open before keeps its panel while it collapses. Only a panel on screen collapses: one
- * on a tab not shown, or of a row no longer listed, has nothing to animate.
- */
-function noteOpenRow(t: Tab, rows: Row[], openId: string | undefined) {
-  const was = drawnOpen.get(t)
-  if (openId) closingRows.delete(openId)
-  if (openId) drawnOpen.set(t, openId)
-  else drawnOpen.delete(t)
-  if (!was || was === openId || reducedMotion.matches || !rows.some(r => r.id === was)) return
-  if (!document.querySelector(`[data-motion="${CSS.escape(was)}"] .panel:not(.closing)`)) return
-  closingRows.add(was)
-  // The collapse removes it when it ends; this covers a collapse that never ran.
-  setTimeout(() => {
-    if (closingRows.delete(was)) draw()
-  }, MOVE_MS + 150)
 }
 
 /** Opens a row. Its buttons ignore clicks for PRESS_GUARD_MS, and draw again once that ends. */
@@ -734,17 +796,20 @@ function isNew(id: string): boolean {
 function ListRow({
   row,
   tone,
-  isSelected,
+  state,
   onSelect,
   now,
 }: {
   row: Row
   /** The tab's color, for the bar of a row that just appeared. */
   tone: Tone
-  isSelected: boolean
+  state: RowState
   onSelect: () => void
   now: number
 }) {
+  // A row growing in, or leaving, draws the form it arrived in or left from.
+  const isSelected = state === 'opening' || state === 'open' || (state === 'entering' && row.id === openRowId)
+  const isClosing = state === 'closing' || (state === 'leaving' && leftOpen.has(row.id))
   const bar = isNew(row.id) ? ` new tone-bar-${tone}` : ''
   // A number a typed reply reaches, as "1)", draws as a badge holding the number.
   const number = /^(\d+)\)$/.exec(row.handle)?.[1]
@@ -760,8 +825,6 @@ function ListRow({
   const line = last
     ? { ...plain, after: `${DOT}${last}`, afterTone: isFailure(row.feedback) ? ('error' as const) : undefined }
     : plain
-  // A closed row keeps its panel drawn while its height collapses over it.
-  const isClosing = !isSelected && closingRows.has(row.id)
 
   // The same elements draw the row open and closed, so its line stays put and only the panel under it comes and goes.
   // Closed, the whole row takes the click; the button keeps it in the focus order, and its click reaches the row.
@@ -849,9 +912,12 @@ function Panel({ row, isClosing }: { row: Row; isClosing: boolean }) {
   )
 }
 
-function SettledView({ settled: r }: Extract<Entry, { settled: RowView }>) {
+function SettledView({ settled: r, rowState }: { settled: RowView; rowState: RowState }) {
   const { state } = r
   if (state.is !== 'settled') return null
+  // A row that settled while open keeps the panel it last drew while its height shrinks over it.
+  const panel =
+    rowState === 'settling' || (rowState === 'leaving' && leftOpen.has(r.id)) ? lastOpen.get(r.id) : undefined
   const start = seen.get(r.id) ?? Date.now()
   const isUndoing = undoing.has(r.id)
   // Green only for what the person got: Done and answers. Dismissed, expired and agent closes are muted.
@@ -859,86 +925,80 @@ function SettledView({ settled: r }: Extract<Entry, { settled: RowView }>) {
   const error = errors.get(r.id)
 
   return (
-    <div class="row settled">
-      {/* The ✓ waits for an answer's message to reach Codex. */}
-      <span class={isGood ? 'mark done' : 'mark'}>{state.isQueued ? '' : '✓'}</span>
-      {/* An error wraps, so none of it is cut. */}
-      <div class={error ? 'settled-line wraps' : 'settled-line'}>
-        <span class="what">{r.title}</span>
-        <span class="outcome-label">
-          {DOT}
-          {state.isQueued ? `Queued: ${state.label}` : state.label}
-        </span>
-        {error ? (
-          <span class="tone-error">
+    <>
+      <div class="row settled">
+        {/* The ✓ waits for an answer's message to reach Codex. */}
+        <span class={isGood ? 'mark done' : 'mark'}>{state.isQueued ? '' : '✓'}</span>
+        {/* An error wraps, so none of it is cut. */}
+        <div class={error ? 'settled-line wraps' : 'settled-line'}>
+          <span class="what">{r.title}</span>
+          <span class="outcome-label">
             {DOT}
-            {error}
+            {state.isQueued ? `Queued: ${state.label}` : state.label}
           </span>
+          {error ? (
+            <span class="tone-error">
+              {DOT}
+              {error}
+            </span>
+          ) : null}
+        </div>
+        {state.canUndo ? (
+          <button type="button" class="key undo" disabled={isUndoing} onClick={() => void undo(r)}>
+            {/* The delay is set once, when it is drawn: the animation keeps its own time after that. */}
+            <span
+              key={start}
+              class={isUndoing ? 'time-left paused' : 'time-left'}
+              style={{ animationDuration: `${SETTLED_MS}ms` }}
+              ref={el => {
+                if (el && !el.style.animationDelay) el.style.animationDelay = `-${Math.max(0, Date.now() - start)}ms`
+              }}
+            />
+            {isUndoing ? null : <Icon name="undo" />}
+            {isUndoing ? 'Undoing…' : 'Undo'}
+          </button>
         ) : null}
       </div>
-      {state.canUndo ? (
-        <button type="button" class="key undo" disabled={isUndoing} onClick={() => void undo(r)}>
-          {/* The delay is set once, when it is drawn: the animation keeps its own time after that. */}
-          <span
-            key={start}
-            class={isUndoing ? 'time-left paused' : 'time-left'}
-            style={{ animationDuration: `${SETTLED_MS}ms` }}
-            ref={el => {
-              if (el && !el.style.animationDelay) el.style.animationDelay = `-${Math.max(0, Date.now() - start)}ms`
-            }}
-          />
-          {isUndoing ? null : <Icon name="undo" />}
-          {isUndoing ? 'Undoing…' : 'Undo'}
-        </button>
+      {panel ? (
+        <div class="row settling-panel">
+          <span class="mark" />
+          <div class="content">
+            <Panel row={panel} isClosing />
+          </div>
+        </div>
       ) : null}
-    </div>
+    </>
   )
 }
 
-/** A list's rows, with the rows that just closed in their places. */
-function Entries({
-  v,
-  entries,
-  group,
-  all,
-  now,
-}: {
-  v: View
-  entries: Entry[]
-  group: Group
-  all: Row[]
-  now: number
-}) {
+/** A list's rows, with the rows that just closed and the rows leaving in their places. */
+function Entries({ entries, group, all, now }: { entries: Entry[]; group: Group; all: Row[]; now: number }) {
   const t: Tab = group === 'finding' ? 'findings' : 'needsYou'
-  const at = selectedIndex(all, t, v)
-  noteOpenRow(t, all, all[at]?.id)
   if (entries.length === 0) return null
-  const leaving = leavingSettled(seen, Date.now(), undoing)
 
-  // One element per row, keyed by its id whether it is open or settled, so its height can move between the two.
+  // One element per row, keyed by its id in every state, so its height can move between them.
   return (
     <div class="list">
-      {entries.map(x =>
-        'row' in x ? (
-          <div class="entry" key={x.row.id} data-motion={x.row.id}>
-            <ListRow
-              row={x.row}
-              tone={t}
-              now={now}
-              isSelected={all.indexOf(x.row) === at}
-              onSelect={() => select(t, all, all.indexOf(x.row))}
-            />
+      {entries.map(x => {
+        const id = entryId(x)
+        const state = tracks.get(id)?.state ?? ('row' in x ? 'closed' : 'settled')
+
+        return (
+          <div class={state === 'leaving' ? 'entry leaving' : 'entry'} key={id} data-motion={id}>
+            {'row' in x ? (
+              <ListRow
+                row={x.row}
+                tone={t}
+                state={state}
+                now={now}
+                onSelect={() => select(t, all, all.indexOf(x.row))}
+              />
+            ) : (
+              <SettledView settled={x.settled} rowState={state} />
+            )}
           </div>
-        ) : (
-          <div
-            class={leaving.has(x.settled.id) ? 'entry leaving' : 'entry'}
-            key={x.settled.id}
-            data-motion={x.settled.id}
-          >
-            <SettledView settled={x.settled} />
-          </div>
-        ),
-      )}
+        )
+      })}
     </div>
   )
 }
@@ -980,13 +1040,14 @@ function ItemGroup({
   const closed = itemsClosed(v, kind, entries)
   // A group with no open, settled or closed items is left out.
   if (entries.length === 0 && closed.length === 0) return null
-  const rows = entries.flatMap(x => ('row' in x ? [x.row] : []))
+  // A leaving row no longer counts.
+  const rows = entries.flatMap(x => ('row' in x && tracks.get(x.row.id)?.state !== 'leaving' ? [x.row] : []))
 
   return (
     <section>
       {/* A row handed to Codex stays listed but leaves the count. */}
       <GroupTitle title={title} count={rows.filter(r => !r.fold).length} />
-      <Entries v={v} entries={entries} group={kind} all={all} now={now} />
+      <Entries entries={entries} group={kind} all={all} now={now} />
       <ClosedFold group={kind} closed={closed} now={now} />
     </section>
   )
@@ -1117,7 +1178,7 @@ function Findings({ v, lists, now }: { v: View; lists: Lists; now: number }) {
     <main>
       <section>
         {isNothing ? <div class="group-title empty-line">No open findings.</div> : null}
-        <Entries v={v} entries={lists.findings} group="finding" all={lists.byTab.findings} now={now} />
+        <Entries entries={lists.findings} group="finding" all={lists.byTab.findings} now={now} />
         <ClosedFold group="finding" closed={closed} now={now} />
       </section>
     </main>
@@ -1210,7 +1271,7 @@ function App(): ComponentChildren {
     )
   const v = view
   const now = v.at
-  const lists = listsOf(v, shownSettled())
+  const lists = drawnLists ?? listsOf(v, shownSettled())
 
   return (
     <>
@@ -1272,6 +1333,14 @@ function run(el: HTMLElement, frames: Keyframe[], timing: KeyframeAnimationOptio
   a.oncancel = done
 }
 
+/**
+ * A row entry's content height, which an animation of its own height does not change, as its scroll height does
+ * while the animation holds it taller than its content. The entry's children stack with no gaps or padding.
+ */
+function contentHeight(el: HTMLElement): number {
+  return [...el.children].reduce((sum, child) => sum + child.getBoundingClientRect().height, 0)
+}
+
 type Look = { height: number; opacity: number }
 
 /** Animates the element from one height and opacity to another, then leaves it clipped toward `to.height`. */
@@ -1281,9 +1350,10 @@ function tween(el: HTMLElement, from: Look, to: Look, timing: KeyframeAnimationO
 }
 
 /**
- * Animates what a draw changed. A row in `entering` grows in, a leaving row fades and collapses, and an
- * element whose height changed moves there from where it was, mid-animation included, fading back in if it
- * was fading out. A draw that changed nothing animates nothing.
+ * Animates what a draw changed. A row that entered a moving state in this draw starts that state's animation:
+ * `entering` grows in, `closing` and `settling` shrink over the panel they keep, and `leaving` fades and collapses.
+ * Each starts from the height the row is drawn at, mid-animation included. A row that came to rest drops the end
+ * height its move held. Any other element whose height changed, as an open row whose note appears, moves there.
  */
 function animateDraw(before: Heights) {
   if (reducedMotion.matches) {
@@ -1295,70 +1365,73 @@ function animateDraw(before: Heights) {
     const was = before.get(key)
     // A fold closing runs its own exit.
     if (el.dataset.closing) continue
+    const track = tracks.get(key)
+    const isFresh = !was || was.el !== el
+    // Mid-animation, a move starts from where the row is drawn now. At rest, from its height before the draw.
+    const from = () => (el.getAnimations().length > 0 || isFresh ? el.getBoundingClientRect().height : was.height)
+    if (track && track.since === stepAt) {
+      if (track.state === 'entering') {
+        tween(el, { height: 0, opacity: 0 }, { height: contentHeight(el), opacity: 1 }, ENTER)
+        continue
+      }
+      if (track.state === 'closing' || track.state === 'settling') {
+        collapse(el, from())
+        continue
+      }
+      if (track.state === 'leaving') {
+        const height = from()
+        const opacity = Number(getComputedStyle(el).opacity)
+        for (const a of el.getAnimations()) a.cancel()
+        tween(el, { height, opacity }, { height: 0, opacity: 0 }, EXIT)
+        continue
+      }
+      if (!isMoving(track.state)) {
+        // The move came to rest, and the panel it held its height over is gone: the row takes its content's height.
+        for (const a of el.getAnimations()) a.cancel()
+        el.style.overflow = ''
+        delete el.dataset.to
+        continue
+      }
+    }
+    // A closing, settling or leaving row runs its own animation to its end.
+    if (track && (track.state === 'closing' || track.state === 'settling' || track.state === 'leaving')) continue
+    // A Closed list's scroll height is its content's: only its own close shrinks it, which runs apart from this.
+    const target = track ? contentHeight(el) : el.scrollHeight
+    if (isFresh) {
+      // A Closed list that just unfolded grows in.
+      if (!track && entering.delete(key)) tween(el, { height: 0, opacity: 0 }, { height: target, opacity: 1 }, ENTER)
+      continue
+    }
     const anims = el.getAnimations()
-    if (el.classList.contains('leaving')) {
-      if (el.dataset.leaving) continue
-      el.dataset.leaving = '1'
-      leftAt.set(key, Date.now())
-      drawIn(EXIT_MS)
-      const height = el.getBoundingClientRect().height
-      const opacity = Number(getComputedStyle(el).opacity)
-      for (const a of anims) a.cancel()
-      tween(el, { height, opacity }, { height: 0, opacity: 0 }, EXIT)
-      continue
-    }
-    delete el.dataset.leaving
-    const panel = el.querySelector<HTMLElement>('.panel.closing')
-    if (panel) {
-      if (!el.dataset.collapsing) collapse(el, key, panel, was?.el === el ? was.height : undefined)
-      continue
-    }
-    delete el.dataset.collapsing
-    // The content's own height, which a running animation's clip does not change.
-    const target = el.scrollHeight
-    if (!was || was.el !== el) {
-      if (!entering.delete(key)) continue
-      tween(el, { height: 0, opacity: 0 }, { height: target, opacity: 1 }, ENTER)
-      continue
-    }
     if (anims.length > 0 && Math.abs(Number(el.dataset.to) - target) < 1) continue
-    // Mid-animation, start from where it is drawn now. At rest, from its height before the draw.
-    const height = anims.length > 0 ? el.getBoundingClientRect().height : was.height
+    const height = from()
     const opacity = anims.length > 0 ? Number(getComputedStyle(el).opacity) : 1
     for (const a of anims) a.cancel()
     if (Math.abs(height - target) < 1 && opacity > 0.99) continue
     tween(el, { height, opacity }, { height: target, opacity: 1 }, MOVE)
   }
-  // Rows that arrived on another tab grow in when that tab shows them, not later.
+  // Rows that arrived on another tab show at once when that tab shows them, not later.
   entering.clear()
 }
 
 /**
- * Shrinks a row whose panel is closing down to its line, then removes the panel. The animation holds its end
- * until the draw that removes the panel, so the panel never shows again for a frame at full height.
+ * Shrinks a closing or settling row over the panel it keeps, to the height it has without it. The animation holds
+ * that end until the draw that removes the panel cancels it, so the panel never shows again for a frame.
  */
-function collapse(el: HTMLElement, key: string, panel: HTMLElement, before: number | undefined) {
-  el.dataset.collapsing = '1'
-  const height = el.getAnimations().length > 0 ? el.getBoundingClientRect().height : (before ?? el.scrollHeight)
-  // The closing row keeps its open line until the panel goes, so its end height is measured as it will draw then.
+function collapse(el: HTMLElement, from: number) {
+  const panel = el.querySelector<HTMLElement>('.settling-panel') ?? el.querySelector<HTMLElement>('.panel.closing')
+  // A closing row keeps its open line until the panel goes, so its end height is measured as it will draw then.
   const row = el.querySelector<HTMLElement>('.row.closing')
   row?.classList.remove('closing')
-  panel.style.display = 'none'
-  const target = el.scrollHeight
-  panel.style.display = ''
+  if (panel) panel.style.display = 'none'
+  const target = contentHeight(el)
+  if (panel) panel.style.display = ''
   row?.classList.add('closing')
   for (const a of el.getAnimations()) a.cancel()
   el.style.overflow = 'hidden'
   el.dataset.to = String(target)
-  const a = el.animate([{ height: `${height}px` }, { height: `${target}px` }], { ...MOVE, fill: 'forwards' })
-  a.onfinish = () => {
-    closingRows.delete(key)
+  el.animate([{ height: `${from}px` }, { height: `${target}px` }], { ...MOVE, fill: 'forwards' }).onfinish = () =>
     draw()
-    a.cancel()
-    if (el.getAnimations().length > 0) return
-    el.style.overflow = ''
-    delete el.dataset.to
-  }
 }
 
 /**
@@ -1412,6 +1485,7 @@ function draw() {
     root.textContent = ''
   }
   const before = measure()
+  drawnLists = view ? stepLists(view) : null
   render(<App />, root)
   animateDraw(before)
   if (focusTyping && typing) {
