@@ -4128,6 +4128,22 @@ export const register: Register = on => {
     // closed items. It cannot be selected. `undo` is that press. An answer
     // whose message has not reached Claude reads "Queued: <answer>" instead. A
     // lapsed close, such as Dismissed, Expired or one by Claude, reads muted.
+    // Undo on a row that just closed. In the terminal its fill drains as its time runs out, as the Codex tab's does,
+    // on the redraws the leave bar already takes. Desktop's native button draws no fill, so its time drains below.
+    const undoButton = (undo: RowPress | PrPress, at: number) => {
+      const key = `undo-${pressRowId(undo)}`
+      const onPress = (press: { surface: UiPressArgument['surface'] }) => runPress($, undo, press.surface)
+      if (look !== 'terminal') return <Button key={key} label="↺ Undo" onPress={onPress} />
+      const cells = [...' ↺ Undo ']
+      const filled = Math.ceil((Math.max(0, SETTLED_MS - (now - at)) / SETTLED_MS) * cells.length)
+
+      return (
+        <Button key={key} onPress={onPress}>
+          <Text backgroundColor={pal.divider}>{cells.slice(0, filled).join('')}</Text>
+          <Text>{cells.slice(filled).join('')}</Text>
+        </Button>
+      )
+    }
     const settledContent = (
       what: string,
       outcome: string,
@@ -4145,15 +4161,9 @@ export const register: Register = on => {
           <Text wrap="wrap" color={isQueued || isLapsed ? pal.muted : pal.tone.done}>
             {isQueued ? `Queued: ${outcome}` : outcome}
           </Text>
-          {undo ? (
-            <Button
-              key={`undo-${pressRowId(undo)}`}
-              label={look === 'desktop' ? '↺ Undo' : 'Undo'}
-              onPress={press => runPress($, undo, press.surface)}
-            />
-          ) : null}
+          {undo ? undoButton(undo, at) : null}
         </Box>
-        {leaveBar(at, isLapsed)}
+        {undo ? null : leaveBar(at, isLapsed)}
         {/* On desktop the time Undo has left drains in a Client of its own, which ticks without redrawing the pane. */}
         {undo && hasClient ? (
           <Box marginTop={0.5}>
