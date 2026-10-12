@@ -2341,15 +2341,19 @@ function desktopTabSizes(
   columns: number,
 ): { widths: number[]; gap: number; hasCounts: boolean } {
   const steps = [
-    { padding: 2, gap: 1, hasCounts: true },
     { padding: 1, gap: 1, hasCounts: true },
-    { padding: 1, gap: 0, hasCounts: true },
-    { padding: 1, gap: 0, hasCounts: false },
+    { padding: 0, gap: 1, hasCounts: true },
+    { padding: 0, gap: 0, hasCounts: true },
+    { padding: 0, gap: 0, hasCounts: false },
   ]
   const sizes = steps.map(({ padding, gap, hasCounts }) => ({
     widths: tabs.map(t => {
       const text = hasCounts && t.count > 0 ? `${t.label}${TAB_COUNT_GAP}${t.count}` : t.label
-      return Math.ceil(text.length / DESKTOP_CHARS_PER_CELL) + 1 + 2 * padding
+      // A tab's rounded frame insets its label FRAME_INSET_PT on each side, so its width adds those columns,
+      // rounded up, to what the label needs. Narrower, the label wraps inside the tab.
+      return (
+        Math.ceil(text.length / DESKTOP_CHARS_PER_CELL) + Math.ceil((2 * FRAME_INSET_PT) / DESKTOP_CELL_PT) + padding
+      )
     }),
     gap,
     hasCounts,
@@ -4211,7 +4215,8 @@ export const register: Register = on => {
               })}
         </Box>
         <Box flexDirection={isStatusBelow ? 'column' : 'row'} columnGap={2}>
-          <Text dimColor>{status}</Text>
+          {/* Desktop draws dimColor as plain text, so the status takes the ages' dimmer gray there. */}
+          {look === 'desktop' ? <Text color={pal.age}>{status}</Text> : <Text dimColor>{status}</Text>}
           {look === 'desktop' ? null : statusLines}
         </Box>
       </Box>
@@ -4297,15 +4302,22 @@ export const register: Register = on => {
         </Box>
       )
     // A tab's sections, a line apart. On desktop a hairline rule parts each from the one above, so the sections read
-    // apart without cards; the tabs' own line already parts the first from the tabs.
-    const sections = (list: JSX.Element[]) => (
+    // apart without cards; the tabs' own line already parts the first from the tabs. `space` is the room on each
+    // side of a rule, in the tree's half lines.
+    const sections = (list: JSX.Element[], space = 1) => (
       <Box flexDirection="column" flexGrow={1} gap={look === 'desktop' ? 0 : 1}>
         {look === 'desktop'
           ? list.flatMap((el, n) =>
               n === 0
                 ? [el]
                 : [
-                    <Box key={`rule-${n}`} marginTop={1} height={1 / DESKTOP_LINE_PT} backgroundColor={pal.divider} />,
+                    <Box
+                      key={`rule-${n}`}
+                      marginTop={space}
+                      marginBottom={space - blankLine}
+                      height={1 / DESKTOP_LINE_PT}
+                      backgroundColor={pal.divider}
+                    />,
                     el,
                   ],
             )
@@ -4929,7 +4941,8 @@ export const register: Register = on => {
           })}
         </Box>
       ) : (
-        sections(prGroups.map(prBlock))
+        // A PR block is denser than a list, with its buttons last, so its rules take a full line on each side.
+        sections(prGroups.map(prBlock), 2)
       )
 
     const move = (step: number) => {
