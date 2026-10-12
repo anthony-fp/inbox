@@ -417,7 +417,7 @@
       }
       /*
        * Actions are Codex's own pill buttons, size sm, in three levels: the one primary action is filled, the
-       * others are outlined, and the follow-ups are plain text, with Dismiss at the far right. Keys are an
+       * others are outlined, and the follow-ups are plain text, with Dismiss last. Keys are an
        * extra, so no key text shows.
        */
       .keys {
@@ -471,9 +471,6 @@
       .key.ghost:not(:disabled):hover {
         background: none;
         color: var(--text);
-      }
-      .key.dismiss {
-        margin-left: auto;
       }
       .actions {
         display: flex;
@@ -545,12 +542,9 @@
         padding-top: calc(var(--row-pad) / 2);
         padding-bottom: calc(var(--row-pad) / 2);
       }
+      /* A closed item's outcome stays quieter than any open row. */
       .outcome {
-        font-weight: 600;
-      }
-      .outcome.lapsed {
-        font-weight: 400;
-        color: var(--muted);
+        color: var(--age);
       }
       .settled-head {
         display: flex;

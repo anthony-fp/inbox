@@ -2766,10 +2766,9 @@ export const register: Register = on => {
     // The terminal draws a row's age in its side column, so no line repeats it.
     const isAgeInSide = look === 'terminal'
     const isAgeDropped = isNarrowDesktop || isAgeInSide
-    // Desktop wraps " · 12m ago" as one unit after a title, not as "12m" and "ago" on two lines: past its first
+    // " · Addressed" wraps as one unit after a title, not with the dot left at a line's end: past its first
     // character, a space becomes a no-break space and an en space a figure space, about as wide and unbreakable.
-    const unbroken = (after: string) =>
-      look === 'desktop' ? after.replace(/(?<=.)[ \u2002]/gs, c => (c === ' ' ? '\u00a0' : '\u2007')) : after
+    const unbroken = (after: string) => after.replace(/(?<=.)[ \u2002]/gs, c => (c === ' ' ? '\u00a0' : '\u2007'))
     // Inline above the prompt, the pane takes its room from the conversation, so
     // it drops the section cards, the tab panels and the blank lines between parts.
     const isInline = e.props.placement === 'inline'
@@ -3143,9 +3142,10 @@ export const register: Register = on => {
       const props: LinksProps = {
         links: more.map(a => {
           const label = desktopLabel(a)
-          return { key: a.key, label, width: Math.ceil(label.length / DESKTOP_CHARS_PER_CELL) + 1 }
+          // A fractional width, not one rounded up to whole cells, so the gap after each link looks the same.
+          return { key: a.key, label, width: label.length / DESKTOP_CHARS_PER_CELL + 0.5 }
         }),
-        gap: 1,
+        gap: 1.5,
         isGuarded: isOpenGuarded,
         colors: { muted: pal.muted, hover: null },
       }
@@ -3308,9 +3308,11 @@ export const register: Register = on => {
     )
     // Desktop draws text in a proportional font, where a run of ─ sized in cells overflows the
     // row and wraps into a second line, so there the rows sit flush and each pads itself.
-    const divided = (rowEls: JSX.Element[], group: string, isTree: boolean) =>
+    // `isBarred(n)` says element n draws a just-closed row's draining bar, which stands in for the rule after it:
+    // a rule under the bar would draw two dashed lines in a row.
+    const divided = (rowEls: JSX.Element[], group: string, isTree: boolean, isBarred = (_n: number) => false) =>
       rowEls.flatMap((el, n) =>
-        n === 0 || isInline || look === 'desktop'
+        n === 0 || isInline || look === 'desktop' || isBarred(n - 1)
           ? [el]
           : [
               isTree ? (
@@ -3382,8 +3384,12 @@ export const register: Register = on => {
       // `before` is text, so it counts in characters, as the title does.
       const budget = Math.floor((e.props.bodyColumns - 3 - inset - side - buttonFrame) * perCell) - before
       // In the terminal a row's own `after`, such as who asked, is its muted meta line. A press's, which starts with
-      // the dot, stays on the title's line.
-      const meta = look === 'terminal' && line.after && !LEADING_DOT.test(line.after) ? line.after : null
+      // the dot, stays on the title's line while the title fits beside it, and otherwise takes the meta line too.
+      const isAfterCutting = line.after !== undefined && line.text.trim().length > budget - line.after.length
+      const meta =
+        look === 'terminal' && line.after && (!LEADING_DOT.test(line.after) || isAfterCutting)
+          ? line.after.replace(LEADING_DOT, '')
+          : null
       const room = Math.max(12, budget - (meta ? 0 : (line.after?.length ?? 0)))
       const text = line.text.trim()
       const space = text.lastIndexOf(' ', room)
@@ -4044,17 +4050,15 @@ export const register: Register = on => {
         <Box flexDirection={isStatusBelow ? 'column' : 'row'} columnGap={2}>
           {/* Desktop draws dimColor as plain text, so the status takes the ages' dimmer gray there. */}
           {look === 'desktop' ? <Text color={pal.age}>{status}</Text> : <Text dimColor>{status}</Text>}
-          {look === 'desktop' ? null : statusLines}
         </Box>
       </Box>
     )
-    // On desktop each takes its own line under the tab row, so the status beside the tabs never moves for one.
-    const desktopStatusLines =
-      look === 'desktop' && statusLines.some(Boolean) ? (
-        <Box flexDirection="column" paddingX={1} paddingTop={1}>
-          {statusLines}
-        </Box>
-      ) : null
+    // Each takes its own line under the tab row, so the status beside the tabs never moves for one.
+    const statusBlock = statusLines.some(Boolean) ? (
+      <Box flexDirection="column" paddingX={isInline ? 2 : 1} paddingTop={1}>
+        {statusLines}
+      </Box>
+    ) : null
     // The footer's one line opens the list of keys as a drawer above it. The
     // drawer is absolute, so it covers the rows above instead of moving the line.
     const footer = (
@@ -4130,7 +4134,7 @@ export const register: Register = on => {
     // apart without cards; the tabs' own line already parts the first from the tabs. `space` is the room on each
     // side of a rule, in the tree's half lines.
     const sections = (list: JSX.Element[], space = 1) => (
-      <Box flexDirection="column" flexGrow={1} gap={look === 'desktop' ? 0 : 1}>
+      <Box flexDirection="column" flexGrow={1} gap={look === 'desktop' ? 0 : isInline ? 1 : 2}>
         {look === 'desktop'
           ? list.flatMap((el, n) =>
               n === 0
@@ -4148,18 +4152,8 @@ export const register: Register = on => {
                     el,
                   ],
             )
-          : // The terminal parts sections with a rule from the text column, as desktop's hairline does.
-            list.flatMap((el, n) =>
-              n === 0
-                ? [el]
-                : [
-                    <Box key={`rule-${n}`} paddingLeft={2} overflow="hidden">
-                      {/* The body's padding and the inset leave this many columns. */}
-                      <Text color={pal.line}>{'─'.repeat(Math.max(0, e.props.bodyColumns - 5))}</Text>
-                    </Box>,
-                    el,
-                  ],
-            )}
+          : // The terminal parts sections with two blank lines: a rule would read as one more of its row rules.
+            list}
       </Box>
     )
     // A blank line in the tree, but for its │: under a title, so the children
@@ -4205,7 +4199,7 @@ export const register: Register = on => {
                 <Text wrap="wrap" color={pal.muted}>
                   {d.ask}
                 </Text>
-                <Text wrap="wrap" bold={!isLapsed(d)} color={isLapsed(d) ? pal.muted : undefined}>
+                <Text wrap="wrap" color={pal.age}>
                   {outcomeText(d)}
                 </Text>
               </Box>
@@ -4395,6 +4389,9 @@ export const register: Register = on => {
         </Box>
       )
     }
+    // A just-closed row with no Undo, whose draining bar shows under it.
+    const isBarred = (x: Entry | undefined) =>
+      x !== undefined && !('row' in x) && !x.settled.actions.some(a => a.press.action === 'undo')
     const settledRow = ({ settled: r, state }: Extract<Entry, { settled: RowView }>, pos?: TreePos) => {
       const undo = r.actions.find(a => a.press.action === 'undo')?.press ?? null
       if (look === 'desktop') {
@@ -4465,6 +4462,7 @@ export const register: Register = on => {
           ),
           g.kind,
           true,
+          n => isBarred(entries[n]),
         )
         const tail = closedFold(
           g.kind,
@@ -4577,6 +4575,7 @@ export const register: Register = on => {
             ),
             g.kind,
             true,
+            n => isBarred(g.entries[n]),
           ),
         ]),
       )
@@ -4898,7 +4897,7 @@ export const register: Register = on => {
           </Box>
         ) : null}
         {tabs}
-        {desktopStatusLines}
+        {statusBlock}
         {/* ▔ draws at the top of its cell, so the rule touches the tabs' bottom edge
             and the rest of its row stands in for the blank line above the content.
             It takes the unselected tabs' color, so they read as resting on it. */}

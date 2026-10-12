@@ -889,7 +889,7 @@ test('a finding Claude records while the pane shows an empty tab brings the pane
   expect(sent.at(-1)).toContain('Please address this finding you recorded:\nIssue: Retry loop never backs off')
   // It folds to what was sent and leaves the finding count. It stays listed.
   await clock.settle()
-  expect(await pane.find({ text: /Handed off/ })).toBeDefined()
+  expect(await pane.find({ text: /Handed\soff/ })).toBeDefined()
   expect(await band.find({ text: /Findings 1/ })).toBeUndefined()
   await clock.advance(9000)
   expect(await pane.find({ text: /Retry loop never backs off/ })).toBeDefined()
@@ -977,7 +977,7 @@ test('t opens a field for the person’s own words: a question’s words go to C
   // [Send] sends them as the answer.
   await pane.press({ key: 'send-i1' })
   expect(sent.at(-1)).toBe('Re "Use Node or Python?": Deno, actually')
-  expect((await pane.find({ key: 'row-i1' }))?.text).toContain('✓ Replied')
+  expect((await pane.find({ key: 'row-i1' }))?.text).toMatch(/✓\sReplied/)
   await $.tool.call({ tool: 'mcp__inbox__close', id: 'i1', answer: 'Deno' } as never)
   await clock.settle()
   expect(await pane.find({ key: 'row-i1' })).toBeUndefined()
@@ -1067,18 +1067,18 @@ test('a press during a turn reads Queued until its prompt enters, and one that w
   submitAnswer = 'hold'
   await pane.press({ key: 'explain-i1-key' })
   await clock.settle()
-  expect(await pane.find({ text: /^\u2002·\u2002Queued: Explain$/ })).toBeDefined()
+  expect(await pane.find({ text: /^\u2002·\sQueued:\sExplain$/ })).toBeDefined()
   await pane.press({ key: 'select-i2' })
   await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'typekey-i2' })
   await pane.input({ key: 'type-i2', text: 'yes' })
   await clock.settle()
-  expect(await pane.find({ text: /Queued: Reply/ })).toBeDefined()
+  expect(await pane.find({ text: /Queued:\sReply/ })).toBeDefined()
   // The turn ends and both prompts enter.
   await arrive($)
   await clock.settle()
   await pane.press({ key: 'select-i1' })
-  expect(await pane.find({ text: /^\u2002·\u2002✓ Explained$/ })).toBeDefined()
+  expect(await pane.find({ text: /^\u2002·\s✓\sExplained$/ })).toBeDefined()
   expect(await pane.find({ text: /Queued/ })).toBeUndefined()
 
   // A hook refuses a typed answer: the question opens again, and the words go back into its field.
@@ -1158,7 +1158,7 @@ test('Claude closes an item or finding that no longer applies, by the id it read
   submitAnswer = 'hold'
   await pane.press({ key: 'explain-i1-key' })
   await clock.settle()
-  expect(await pane.find({ text: /^\u2002·\u2002Queued: Explain/ })).toBeDefined()
+  expect(await pane.find({ text: /^\u2002·\sQueued:\sExplain/ })).toBeDefined()
   // The user answered i1 in their own message: it closes with their answer, shown in place.
   // No answer of the person's waits to reach Claude, so it settles with a ✓, though the Explain is still queued.
   expect((await close({ id: 'i1', answer: 'Deno' })).result).toBe(
@@ -1431,10 +1431,10 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   submitAnswer = 'hold'
   await pane.press({ key: 'retry-T1' })
   await clock.settle()
-  expect(await pane.find({ text: /^\u2002·\u2002Queued: Address$/ })).toBeDefined()
+  expect(await pane.find({ text: /^\u2002·\sQueued:\sAddress$/ })).toBeDefined()
   await arrive($)
   await clock.settle()
-  expect(await pane.find({ text: /^\u2002·\u2002Addressed$/ })).toBeDefined()
+  expect(await pane.find({ text: /^\u2002·\sAddressed$/ })).toBeDefined()
 
   // Sent to Claude, the thread folds out of the count, and keeps its keys, until the reviewer answers.
   expect((await pane.find({ key: 'address-T1-key' }))?.props.label).toBe('Address again')
@@ -1806,7 +1806,7 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   expect(await pane.find({ text: SAMPLE })).toBeDefined()
   await clock.advance(SETTLED_MS)
   expect(await pane.find({ text: SAMPLE })).toBeUndefined()
-  expect(await pane.find({ text: /✓ Explain/ })).toBeDefined()
+  expect(await pane.find({ text: /✓\sExplain/ })).toBeDefined()
 
   // A typed reply hands the task off on the copy: it folds and leaves the count.
   await pane.press({ key: 'typekey-d17' })

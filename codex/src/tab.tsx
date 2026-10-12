@@ -5,7 +5,7 @@
 import { render } from 'preact'
 import type { ComponentChildren, JSX } from 'preact'
 
-import { ago, closedState, isLapsed } from '../../hooks/ledger'
+import { ago, closedState } from '../../hooks/ledger'
 import type { ClosedState } from '../../hooks/ledger'
 import { CLOSED_MARKS } from '../../hooks/view'
 import {
@@ -1022,14 +1022,6 @@ function feedbackLabel(row: Row): string | null {
   return f.is === 'done' && row.handleTone === 'done' ? f.label : feedbackText(f, 'codex')
 }
 
-/** The feedback with its age. A note, a Local result and a message not sent read alone, with no age. */
-function lastText(row: Row, now: number): string | null {
-  const f = row.feedback
-  if (!f) return null
-
-  return hasAge(f) ? `${feedbackLabel(row)}${DOT}${ago(now - f.at)}` : feedbackLabel(row)
-}
-
 /** A row's note while it shows. */
 function noteOf(id: string): string | null {
   const n = notes.get(id)
@@ -1069,10 +1061,13 @@ function ListRow({
   const bar = isNew(row.id) ? ` new tone-bar-${tone}` : ''
   const handle = <span class={`mark ${row.handleTone ?? row.kind ?? ''}`}>{row.handle}</span>
 
-  // A row's last action reads after its title, as "✓ Discuss · 1m ago", and takes the place of its side age. It is muted unless it failed: a done row's ✓ is already green.
-  // A press still out reads there too, as "Sending…", so nothing under the line moves while it runs.
+  // A row's last action reads under its title, as "✓ Discuss", and its age, when it has one, takes the side column, so
+  // the ages stay one column. It is muted unless it failed: a done row's ✓ is already green. A press still out reads
+  // there too, as "Sending…", so nothing under the line moves while it runs.
   const pending = sending.get(row.id)
-  const last = pending ?? (isFeedbackShown(row) ? lastText(row, now) : null)
+  const f = isFeedbackShown(row) ? row.feedback : null
+  const last = pending ?? (f ? feedbackLabel(row) : null)
+  const side = pending ? null : f && hasAge(f) ? shortAgo(now - f.at) : last ? null : row.age
   const afterTone = !pending && isFailure(row.feedback) ? 'error' : undefined
 
   // The same elements draw the row open and closed, so its line stays put and only the panel under it comes and goes.
@@ -1107,7 +1102,7 @@ function ListRow({
         </button>
         {isSelected || isClosing ? <Panel row={row} isClosing={isClosing} /> : null}
       </div>
-      <span class="side">{last ? null : row.age}</span>
+      <span class="side">{side}</span>
     </div>
   )
 }
@@ -1265,7 +1260,6 @@ function itemsClosed(v: View, kind: 'question' | 'task', entries: Entry[]): Clos
     id: d.id,
     ask: d.ask,
     outcome: d.outcome,
-    isLapsed: isLapsed(d),
     state: closedState(d),
     at: d.at,
   }))
@@ -1311,8 +1305,6 @@ type ClosedLine = {
   id: string
   ask: string
   outcome: string
-  /** Closed without the person deciding it: dismissed, expired, or overtaken by the work. */
-  isLapsed: boolean
   state: ClosedState
   at: number
 }
@@ -1368,7 +1360,7 @@ function ClosedFold({
                 <span class="mark">{CLOSED_MARKS[d.state]}</span>
                 <div class="content tight">
                   <div class="muted">{d.ask}</div>
-                  <div class={d.isLapsed ? 'outcome lapsed' : 'outcome'}>{capitalized(d.outcome)}</div>
+                  <div class="outcome">{capitalized(d.outcome)}</div>
                 </div>
                 <span class="side">{shortAgo(now - d.at)}</span>
               </div>
@@ -1442,7 +1434,6 @@ function Findings({ v, lists, now }: { v: View; lists: Lists; now: number }) {
     id: f.id,
     ask: f.title,
     outcome: f.outcome,
-    isLapsed: isLapsed(f),
     state: closedState(f),
     at: f.closedAt,
   }))

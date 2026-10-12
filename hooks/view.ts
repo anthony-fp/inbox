@@ -226,7 +226,11 @@ export function feedbackOf(
   if (delivery?.state === 'queued') return { is: 'queued', label: last.text, at: last.at }
   if (delivery?.state === 'failed') return { is: 'notSent', reason: delivery.reason, retry: retryOf(id, last) }
 
-  return { is: 'done', label: DONE_LABELS[last.action]?.(last.text) ?? last.text, at: last.at }
+  // A step's own label is an instruction, as "Run load script", so a step handed to the agent says it was.
+  const isHandedStep = last.kind === 'handoff' && last.action.startsWith('step-')
+  const label = DONE_LABELS[last.action]?.(last.text) ?? (isHandedStep ? `Handed off: ${last.text}` : last.text)
+
+  return { is: 'done', label, at: last.at }
 }
 
 /**
