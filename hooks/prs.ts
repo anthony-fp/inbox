@@ -261,7 +261,6 @@ export function readiness(
   const changed = waiting.filter(t => t.isLinesChanged && !isSent(pr, t)).length
   const isPresent = (b: string | null): b is string => b !== null
   const onYou = [
-    pr.isDraft ? 'draft' : null,
     pr.mergeable === 'CONFLICTING' ? `conflicts with ${pr.base}` : null,
     failing > 0 ? plural(failing, 'failing check', 'failing checks') : null,
     pr.reviewDecision === 'CHANGES_REQUESTED' ? 'changes requested' : null,
@@ -274,7 +273,9 @@ export function readiness(
     pending > 0 ? `${pending} ${pending === 1 ? 'check' : 'checks'} running` : null,
   ].filter(isPresent)
 
-  if (onYou.length > 0) return result(pr.isDraft ? 'draft' : 'blocked', 'Blocked', onYou)
+  // A draft waits on its author whatever else it has, so it reads as a draft, with its other reasons.
+  if (pr.isDraft) return result('draft', 'Draft', [...onYou, ...onOthers])
+  if (onYou.length > 0) return result('blocked', 'Blocked', onYou)
   if (onOthers.length > 0) return result('waiting', 'Waiting', onOthers)
   const isApproved = pr.reviewDecision === 'APPROVED'
 
