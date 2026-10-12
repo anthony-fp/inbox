@@ -229,6 +229,30 @@ const DESKTOP_TAB_PAD = '\u00a0'.repeat(3)
 // A text line in the Claude app pane, in points: a one-line row padded by half a line above and below
 // measured 37.8 pt (2026-10-10).
 const DESKTOP_LINE_PT = 19
+// One column of `bodyColumns` in the Claude app pane, in points: 15.8 px at 2x (2026-10-09).
+const DESKTOP_CELL_PT = 7.9
+// The desktop Undo button's width, in columns.
+const UNDO_CELLS = 9
+/**
+ * The desktop Undo button: a pill whose fill drains from `fraction` of its width to nothing over `leftMs`. The
+ * app draws an Svg as an image, which runs SMIL animation, so the fill moves without the pane redrawing. An
+ * image cannot read the app's theme, so its grays are translucent and its text follows the color scheme.
+ */
+function undoSvg(fraction: number, leftMs: number): string {
+  const w = UNDO_CELLS * DESKTOP_CELL_PT
+  const h = DESKTOP_LINE_PT
+  const filled = (w * fraction).toFixed(1)
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
+    `<style>text{fill:#1f1f1e}@media (prefers-color-scheme: dark){text{fill:#ececea}}</style>` +
+    `<clipPath id="pill"><rect width="${w}" height="${h}" rx="${h / 2}"/></clipPath>` +
+    `<g clip-path="url(#pill)"><rect width="${w}" height="${h}" fill="rgba(128,128,128,0.14)"/>` +
+    `<rect width="${filled}" height="${h}" fill="rgba(128,128,128,0.32)">` +
+    `<animate attributeName="width" from="${filled}" to="0" dur="${leftMs}ms" fill="freeze"/></rect></g>` +
+    `<text x="${w / 2}" y="${h / 2}" dominant-baseline="central" text-anchor="middle" ` +
+    `font-family="-apple-system, system-ui, sans-serif" font-size="12">↺ Undo</text></svg>`
+  )
+}
 /**
  * A desktop row's padding above and below its text, in a Client's lines: the shared ROW_PAD_PT. The rows sit
  * flush. A Box in the hooks tree counts padding in half lines, so it pads twice this.
@@ -4138,28 +4162,32 @@ export const register: Register = on => {
     // lapsed close, such as Dismissed, Expired or one by Claude, reads muted.
     // Undo on a row that just closed, with a fill that drains as its time runs out, as the Codex tab's does. The
     // terminal redraws it on the steps the leave bar already takes. Desktop's native button draws no fill, so there
-    // a Client draws it and ticks on its own, and its click presses the same handler.
+    // it is an Svg pill whose fill animates on its own, under a Client that takes its clicks.
     const undoButton = (undo: RowPress | PrPress, at: number) => {
       const key = `undo-${pressRowId(undo)}`
       const label = ' ↺ Undo '
       const onPress = (press: { surface: UiPressArgument['surface'] }) => runPress($, undo, press.surface)
-      if (hasClient) {
+      if (hasClient && 'Svg' in elements) {
         followUpPresses.set(key, onPress)
+        const leftMs = Math.max(0, SETTLED_MS - (now - at))
         return (
-          <elements.Client
-            key={`${key}-${at}`}
-            module="./undo-client.tsx"
-            width={Math.ceil(label.length / DESKTOP_CHARS_PER_CELL) + 1}
-            props={
-              {
-                pressKey: key,
-                label,
-                startedAt: at,
-                totalMs: SETTLED_MS,
-                colors: { rest: null, fill: pal.divider, hover: pal.divider, text: null },
-              } satisfies UndoProps
-            }
-          />
+          <Box key={`${key}-${at}`} width={UNDO_CELLS} height={1}>
+            <elements.Svg
+              source={undoSvg(leftMs / SETTLED_MS, leftMs)}
+              alt="Undo"
+              width={UNDO_CELLS * DESKTOP_CELL_PT}
+              height={DESKTOP_LINE_PT}
+            />
+            <Box position="absolute" top={0} left={0}>
+              <elements.Client
+                key={key}
+                module="./undo-client.tsx"
+                width={UNDO_CELLS}
+                height={1}
+                props={{ pressKey: key, hover: 'rgba(128, 128, 128, 0.22)' } satisfies UndoProps}
+              />
+            </Box>
+          </Box>
         )
       }
       if (look !== 'terminal') return <Button key={key} label="↺ Undo" onPress={onPress} />
