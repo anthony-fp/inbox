@@ -3639,6 +3639,7 @@ export const register: Register = on => {
       outline,
       padY = space.rowPad,
       isCentered = false,
+      indent = 0,
       children,
     }: {
       key?: string
@@ -3649,6 +3650,8 @@ export const register: Register = on => {
       padY?: number
       /** Centers the parts on each other, for a one-line row whose side is taller than its text, as Undo is. */
       isCentered?: boolean
+      /** Columns before the mark, for a line nested under another. */
+      indent?: number
       children: JSX.Element | (JSX.Element | null)[]
     }) => (
       <Box
@@ -3660,7 +3663,7 @@ export const register: Register = on => {
         paddingY={padY}
         {...(fill ? { backgroundColor: fill } : {})}
       >
-        <Box width={DESKTOP_MARK_CELLS} flexShrink={0}>
+        <Box width={indent + DESKTOP_MARK_CELLS} flexShrink={0} paddingLeft={indent}>
           {mark}
         </Box>
         <Box flexDirection="column" flexShrink={1} flexGrow={1}>
@@ -4208,15 +4211,19 @@ export const register: Register = on => {
     // A closed item or finding under the open ones: what was asked, then how it closed and when.
     const closedRow = (d: ClosedLine, pos: TreePos) =>
       look === 'desktop'
-        ? desktopFrame({
+        ? // Nested under its fold line, with its mark at the fold's text and half a row's padding, so the
+          // closed items read as the fold's group.
+          desktopFrame({
             key: `closed-${d.id}`,
-            mark: <Text color={pal.muted}>{CLOSED_MARKS[closedState(d)]}</Text>,
+            indent: DESKTOP_MARK_CELLS,
+            padY: space.rowPad / 2,
+            mark: <Text color={pal.age}>{CLOSED_MARKS[closedState(d)]}</Text>,
             side: <Text color={pal.age}>{shortAgo(now - d.at)}</Text>,
             children: [
               <Text wrap="wrap" color={pal.muted}>
                 {d.ask}
               </Text>,
-              <Text wrap="wrap" color={pal.muted}>
+              <Text wrap="wrap" color={pal.age}>
                 {outcomeText(d)}
               </Text>,
             ],
