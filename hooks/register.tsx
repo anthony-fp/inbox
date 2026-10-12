@@ -3483,8 +3483,6 @@ export const register: Register = on => {
           Math.floor((e.props.bodyColumns - 3 - inset) * (look === 'desktop' ? DESKTOP_CLIP_CHARS_PER_CELL : 1)) - 1,
         ),
       )
-    // The terminal truncates the settled ask itself.
-    const oneLine = (text: string, inset: number) => (look === 'desktop' ? clipLine(text, inset) : text)
     // A closed row's one line: `before` muted, the title, then `after`. A row's last action takes the place of
     // its age, as "✓ Discuss 1m ago". A narrow desktop pane drops the age, not the action.
     const closedLine = (row: Row) => {
@@ -4209,20 +4207,46 @@ export const register: Register = on => {
       inset: number,
       isQueued = false,
       isLapsed = false,
-    ) => (
-      <Box flexDirection="column">
-        <Text wrap="truncate-end" color={pal.muted}>
-          {oneLine(what, inset)}
-        </Text>
-        <Box flexDirection="row" columnGap={2}>
-          <Text wrap="wrap" color={isQueued || isLapsed ? pal.muted : pal.tone.done}>
-            {isQueued ? `Queued: ${outcome}` : outcome}
+    ) => {
+      if (look === 'desktop') {
+        // One line, as the Codex tab draws it: the ask, its outcome muted after it, and Undo at the right.
+        const after = `${DOT}${isQueued ? `Queued: ${outcome}` : outcome}`
+        const reserved = Math.ceil(after.length / DESKTOP_CHARS_PER_CELL) + (undo ? UNDO_CELLS + 1 : 0)
+        return (
+          <Box flexDirection="column">
+            <Box flexDirection="row" alignItems="center">
+              <Box flexGrow={1} flexShrink={1}>
+                <Text wrap="truncate-end">
+                  {clipLine(what, inset + reserved)}
+                  <Text color={pal.muted}>{after}</Text>
+                </Text>
+              </Box>
+              {undo ? (
+                <Box flexShrink={0} paddingLeft={1}>
+                  {undoButton(undo, at)}
+                </Box>
+              ) : null}
+            </Box>
+            {undo ? null : leaveBar(at, isLapsed)}
+          </Box>
+        )
+      }
+
+      return (
+        <Box flexDirection="column">
+          <Text wrap="truncate-end" color={pal.muted}>
+            {what}
           </Text>
-          {undo ? undoButton(undo, at) : null}
+          <Box flexDirection="row" columnGap={2}>
+            <Text wrap="wrap" color={isQueued || isLapsed ? pal.muted : pal.tone.done}>
+              {isQueued ? `Queued: ${outcome}` : outcome}
+            </Text>
+            {undo ? undoButton(undo, at) : null}
+          </Box>
+          {undo ? null : leaveBar(at, isLapsed)}
         </Box>
-        {undo ? null : leaveBar(at, isLapsed)}
-      </Box>
-    )
+      )
+    }
     const settledRow = ({ settled: r, state }: Extract<Entry, { settled: RowView }>, pos?: TreePos) => {
       const undo = r.actions.find(a => a.press.action === 'undo')?.press ?? null
       const columns = columnsFor(pos)
