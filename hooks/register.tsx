@@ -277,17 +277,46 @@ function toneSvg(tone: ToneName, mark: string, label: string, cells: number): st
   const [lightMark, darkMark] = tone === 'error' ? [LIGHT_TONES.errorMark, DARK_TONES.errorMark] : [light, dark]
   const w = cells * DESKTOP_CELL_PT
   const h = DESKTOP_LINE_PT
-  const text = (cls: string, x: number, body: string) =>
-    body ? `<text class="${cls}" x="${x}" y="${h / 2}" dominant-baseline="central">${escapeXml(body)}</text>` : ''
+  const shape = markShape(mark, h / 2)
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
-    `<style>text{font-family:-apple-system,system-ui,sans-serif;font-size:14px}` +
-    `.mark{fill:${lightMark}}.label{fill:${light}}` +
-    `@media (prefers-color-scheme: dark){.mark{fill:${darkMark}}.label{fill:${dark}}}</style>` +
-    text('mark', 0, mark) +
-    text('label', mark ? 2 * DESKTOP_CELL_PT : 0, label) +
+    `<style>text{font-family:-apple-system,system-ui,sans-serif;font-size:14px;fill:currentColor}` +
+    `.mark{color:${lightMark}}.label{color:${light}}` +
+    `@media (prefers-color-scheme: dark){.mark{color:${darkMark}}.label{color:${dark}}}</style>` +
+    (shape === null
+      ? `<text class="mark" x="0" y="${h / 2}" dominant-baseline="central">${escapeXml(mark)}</text>`
+      : `<g class="mark">${shape}</g>`) +
+    (label
+      ? `<text class="label" x="${mark ? 2 * DESKTOP_CELL_PT : 0}" y="${h / 2}" dominant-baseline="central">` +
+        `${escapeXml(label)}</text>`
+      : '') +
     `</svg>`
   )
+}
+/**
+ * A row mark drawn as a shape, 8 pt square and centered on `midY`, so it looks the same whatever font the Svg
+ * falls back to. The app's own font cannot load in an Svg, and the system font's ✓ is a thin "v". Null for a mark
+ * with no shape here, which draws as text.
+ */
+function markShape(mark: string, midY: number): string | null {
+  const t = midY - 4
+  const stroke = 'fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"'
+  switch (mark) {
+    case '✓':
+      return `<polyline points="0.6,${t + 4.4} 3,${t + 6.8} 7.4,${t + 1.4}" ${stroke}/>`
+    case '✕':
+    case '✗':
+      return `<path d="M1,${t + 1} L7,${t + 7} M7,${t + 1} L1,${t + 7}" ${stroke}/>`
+    case '▲':
+      return `<polygon points="4,${t + 0.6} 7.8,${t + 7.4} 0.2,${t + 7.4}" fill="currentColor"/>`
+    case '✦':
+      return (
+        `<path d="M4,${t} Q4.6,${t + 3.4} 8,${t + 4} Q4.6,${t + 4.6} 4,${t + 8} ` +
+        `Q3.4,${t + 4.6} 0,${t + 4} Q3.4,${t + 3.4} 4,${t} Z" fill="currentColor"/>`
+      )
+    default:
+      return null
+  }
 }
 function escapeXml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
