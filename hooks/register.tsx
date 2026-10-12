@@ -4386,9 +4386,7 @@ export const register: Register = on => {
           {children}
         </Box>
       ) : (
-        <Box flexDirection="column" paddingY={blankLine} backgroundColor={isInline ? undefined : pal.card}>
-          {children}
-        </Box>
+        <Box flexDirection="column">{children}</Box>
       )
     // A tab's sections, a line apart. On desktop a hairline rule parts each from the one above, so the sections read
     // apart without cards; the tabs' own line already parts the first from the tabs. `space` is the room on each
@@ -4412,7 +4410,18 @@ export const register: Register = on => {
                     el,
                   ],
             )
-          : list}
+          : // The terminal parts sections with a rule from the text column, as desktop's hairline does.
+            list.flatMap((el, n) =>
+              n === 0
+                ? [el]
+                : [
+                    <Box key={`rule-${n}`} paddingLeft={2} overflow="hidden">
+                      {/* The body's padding and the inset leave this many columns. */}
+                      <Text color={pal.line}>{'─'.repeat(Math.max(0, e.props.bodyColumns - 5))}</Text>
+                    </Box>,
+                    el,
+                  ],
+            )}
       </Box>
     )
     // A blank line in the tree, but for its │: under a title, so the children
@@ -5159,7 +5168,7 @@ export const register: Register = on => {
         {isInline || look === 'desktop' ? null : (
           <Text color={pal.tab ?? pal.divider}>{'▔'.repeat(e.props.bodyColumns)}</Text>
         )}
-        <Box flexDirection="column" paddingX={1} paddingTop={look === 'desktop' ? blankLine : 0} flexGrow={1}>
+        <Box flexDirection="column" paddingX={1} paddingTop={blankLine} flexGrow={1}>
           {tab === 'findings' ? findingsView() : tab === 'prs' ? prsView() : needsYouView()}
         </Box>
         {/* Desktop takes no keys: a Button's hotkey does nothing there, so it gets neither the list of keys nor the hidden Buttons. */}
