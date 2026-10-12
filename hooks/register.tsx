@@ -4750,72 +4750,80 @@ export const register: Register = on => {
       // The status word carries its color and its reasons are muted, one per line, so the title stays the loudest
       // line. On desktop the word says the status, so it needs no mark.
 
-      return section([
-        <Box paddingLeft={1}>
-          <Text wrap="wrap">
-            <Text color={look === 'desktop' ? pal.mark.prs : pal.tone.prs}>{`#${pr.number}\u2002`}</Text>
-            <Text bold>{pr.title}</Text>
-          </Text>
-        </Box>,
-        ...titleGap(false),
-        treeRow(
-          null,
-          look === 'desktop' ? null : <Text color={tone ? pal.mark[tone] : pal.muted}>{mark}</Text>,
-          <Box flexDirection="column">
-            <Text color={tone ? pal.tone[tone] : pal.muted}>{statusHead}</Text>
-            {reasonList.map(r => (
-              <Text color={pal.muted} wrap="wrap">
-                {r}
+      const titleLine = (
+        <Text wrap="wrap">
+          <Text color={look === 'desktop' ? pal.mark.prs : pal.tone.prs}>{`#${pr.number}\u2002`}</Text>
+          <Text bold>{pr.title}</Text>
+        </Text>
+      )
+      const statusBlock = (
+        <Box flexDirection="column">
+          {/* Desktop's palette names few tones, so a status falls back to its mark's color there. */}
+          <Text color={tone ? (pal.tone[tone] ?? pal.mark[tone]) : pal.muted}>{statusHead}</Text>
+          {reasonList.map(r => (
+            <Text color={pal.muted} wrap="wrap">
+              {r}
+            </Text>
+          ))}
+          {/* The next poll is minutes away, and desktop has no key to refresh with. */}
+          {pr.error ? (
+            <Box flexDirection="column">
+              <Text color={pal.tone.error} wrap="wrap">
+                Last refresh failed: {pr.error}
               </Text>
-            ))}
-            {/* The next poll is minutes away, and desktop has no key to refresh with. */}
-            {pr.error ? (
-              <Box flexDirection="column">
-                <Text color={pal.tone.error} wrap="wrap">
-                  Last refresh failed: {pr.error}
-                </Text>
-                {prState.isFetching ? <Text color={pal.muted}>Refreshing…</Text> : null}
-                <Box flexDirection="row">
-                  <Button key={`refresh-${pr.ref}`} label="Retry" onPress={() => void findPrs($)} />
-                </Box>
+              {prState.isFetching ? <Text color={pal.muted}>Refreshing…</Text> : null}
+              <Box flexDirection="row">
+                <Button key={`refresh-${pr.ref}`} label="Retry" onPress={() => void findPrs($)} />
               </Box>
-            ) : null}
-            <Box
-              flexDirection="row"
-              flexWrap="wrap"
-              columnGap={space.buttonGap}
-              rowGap={look === 'desktop' ? 1 : 0}
-              marginTop={blankLine}
-            >
-              {/* On desktop the first action, the one that moves the PR on, is the primary button. Dismiss is quiet. */}
-              {prActions.map((a, n) =>
-                a.key.startsWith('dismiss-') ? (
-                  <Button key={a.key} plain dimColor label={a.label} onPress={a.onPress} />
-                ) : look === 'desktop' ? (
-                  <Button
-                    key={a.key}
-                    label={desktopLabel(a)}
-                    {...(n === 0 ? { variant: 'primary' as const } : {})}
-                    onPress={a.onPress}
-                  />
-                ) : (
-                  <Button key={a.key} label={a.label} onPress={a.onPress} />
-                ),
-              )}
             </Box>
-            {prLast ? (
-              <Box marginTop={look === 'desktop' ? 1 : 0}>
-                <Text color={prLast.isFailure ? pal.tone.error : pal.muted} wrap="wrap">
-                  {prLast.text}
-                </Text>
-              </Box>
-            ) : null}
-          </Box>,
-          undefined,
-          0,
-          // Desktop has no tree lines to show the status is not one of the rows, so it starts at the title's column.
-          look === 'desktop' ? 1 : undefined,
-        ),
+          ) : null}
+          <Box
+            flexDirection="row"
+            flexWrap="wrap"
+            columnGap={space.buttonGap}
+            rowGap={look === 'desktop' ? 1 : 0}
+            marginTop={blankLine}
+          >
+            {/* On desktop the first action, the one that moves the PR on, is the primary button. Dismiss is quiet. */}
+            {prActions.map((a, n) =>
+              a.key.startsWith('dismiss-') ? (
+                <Button key={a.key} plain dimColor label={a.label} onPress={a.onPress} />
+              ) : look === 'desktop' ? (
+                <Button
+                  key={a.key}
+                  label={desktopLabel(a)}
+                  {...(n === 0 ? { variant: 'primary' as const } : {})}
+                  onPress={a.onPress}
+                />
+              ) : (
+                <Button key={a.key} label={a.label} onPress={a.onPress} />
+              ),
+            )}
+          </Box>
+          {prLast ? (
+            <Box marginTop={look === 'desktop' ? 1 : 0}>
+              <Text color={prLast.isFailure ? pal.tone.error : pal.muted} wrap="wrap">
+                {prLast.text}
+              </Text>
+            </Box>
+          ) : null}
+        </Box>
+      )
+
+      // On desktop the title, status and actions start at the rows' text column, as group titles do there, so the
+      // block and its rows share one edge.
+      return section([
+        ...(look === 'desktop'
+          ? [
+              desktopFrame({ key: `pr-title-${pr.ref}`, padY: 0, children: titleLine }),
+              ...titleGap(false),
+              desktopFrame({ key: `pr-status-${pr.ref}`, padY: 0, children: statusBlock }),
+            ]
+          : [
+              <Box paddingLeft={1}>{titleLine}</Box>,
+              ...titleGap(false),
+              treeRow(null, <Text color={tone ? pal.mark[tone] : pal.muted}>{mark}</Text>, statusBlock),
+            ]),
         // Threads come first: a thread waits on the person, and a failing check usually on Claude.
         ...prRowGroup('Review threads', threads, `${pr.ref}-threads`),
         ...prRowGroup('Failing checks', checks, `${pr.ref}-checks`),
