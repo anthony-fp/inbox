@@ -566,7 +566,8 @@ const DESKTOP_PALETTE: Palette = {
   key: 'remember',
   line: 'subtle',
   divider: 'rgba(128, 128, 128, 0.25)',
-  tone: {},
+  // Text keeps the app's own color, except a failure, which reads in the app's red.
+  tone: { error: 'error' },
   // Counts and kind marks keep their status colors, so a count or a finding's kind reads at a glance.
   // PRs take the app's blue, `suggestion`, so the PR count and each PR's number match.
   mark: { needsYou: NEEDS_YOU, issue: NEEDS_YOU, findings: FINDINGS, prs: 'suggestion', done: DONE, error: 'error' },
@@ -3799,8 +3800,15 @@ export const register: Register = on => {
         paddingY={padY}
         {...(fill ? { backgroundColor: fill } : {})}
       >
-        {/* A hung mark sits a column left, in the frame's inset, so a full column parts it from the text. */}
-        <Box width={indent + DESKTOP_MARK_CELLS + (isMarkHung ? 0 : 1)} flexShrink={0} paddingLeft={indent}>
+        {/* A hung mark sits a column left, in the frame's inset, so a full column parts it from the text. Centered,
+            the column is one line tall, so it centers on the text's line: with no height it would center at the
+            row's middle and the mark would hang below the text. */}
+        <Box
+          width={indent + DESKTOP_MARK_CELLS + (isMarkHung ? 0 : 1)}
+          {...(isCentered ? { height: 1 } : {})}
+          flexShrink={0}
+          paddingLeft={indent}
+        >
           {mark ? (
             <Box position="absolute" top={0} left={isMarkHung ? indent - 1 : indent}>
               {mark}
