@@ -233,24 +233,30 @@ const DESKTOP_LINE_PT = 19
 const DESKTOP_CELL_PT = 7.9
 // The desktop Undo button's width, in columns.
 const UNDO_CELLS = 9
+// The app's own buttons, measured in the pane (2026-10-11): 23 pt tall, corners of 6 pt, a 14 px label, and in
+// the dark appearance a 10% white fill and #f0efec text.
+const UNDO_HEIGHT_PT = 23
 /**
- * The desktop Undo button: a pill whose fill drains from `fraction` of its width to nothing over `leftMs`. The
- * app draws an Svg as an image, which runs SMIL animation, so the fill moves without the pane redrawing. An
- * image cannot read the app's theme, so its grays are translucent and its text follows the color scheme.
+ * The desktop Undo button, drawn to look like the app's own buttons. The part of its fill that is time left is
+ * the button's full fill, and the part used up is half as strong. The used-up part grows from `1 - fraction` to
+ * the whole width over `leftMs`. The app draws an Svg as an image, which runs SMIL animation, so the fill moves
+ * without the pane redrawing. An image cannot read the app's theme, so it follows the color scheme instead.
  */
 function undoSvg(fraction: number, leftMs: number): string {
   const w = UNDO_CELLS * DESKTOP_CELL_PT
-  const h = DESKTOP_LINE_PT
-  const filled = (w * fraction).toFixed(1)
+  const h = UNDO_HEIGHT_PT
+  const left = (w * fraction).toFixed(1)
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
-    `<style>text{fill:#1f1f1e}@media (prefers-color-scheme: dark){text{fill:#ececea}}</style>` +
-    `<clipPath id="pill"><rect width="${w}" height="${h}" rx="${h / 2}"/></clipPath>` +
-    `<g clip-path="url(#pill)"><rect width="${w}" height="${h}" fill="rgba(128,128,128,0.14)"/>` +
-    `<rect width="${filled}" height="${h}" fill="rgba(128,128,128,0.32)">` +
-    `<animate attributeName="width" from="${filled}" to="0" dur="${leftMs}ms" fill="freeze"/></rect></g>` +
+    `<style>.used{fill:rgba(0,0,0,0.035)}.left{fill:rgba(0,0,0,0.07)}text{fill:#1f1f1e}` +
+    `@media (prefers-color-scheme: dark){.used{fill:rgba(255,255,255,0.05)}.left{fill:rgba(255,255,255,0.1)}` +
+    `text{fill:#f0efec}}</style>` +
+    `<clipPath id="shape"><rect width="${w}" height="${h}" rx="6"/></clipPath>` +
+    `<g clip-path="url(#shape)"><rect class="used" width="${w}" height="${h}"/>` +
+    `<rect class="left" width="${left}" height="${h}">` +
+    `<animate attributeName="width" from="${left}" to="0" dur="${leftMs}ms" fill="freeze"/></rect></g>` +
     `<text x="${w / 2}" y="${h / 2}" dominant-baseline="central" text-anchor="middle" ` +
-    `font-family="-apple-system, system-ui, sans-serif" font-size="12">↺ Undo</text></svg>`
+    `font-family="-apple-system, system-ui, sans-serif" font-size="14">↺ Undo</text></svg>`
   )
 }
 /**
@@ -4169,20 +4175,20 @@ export const register: Register = on => {
         followUpPresses.set(key, onPress)
         const leftMs = Math.max(0, SETTLED_MS - (now - at))
         return (
-          <Box key={`${key}-${at}`} width={UNDO_CELLS} height={1}>
+          <Box key={`${key}-${at}`} width={UNDO_CELLS} height={UNDO_HEIGHT_PT / DESKTOP_LINE_PT}>
             <elements.Svg
               source={undoSvg(leftMs / SETTLED_MS, leftMs)}
               alt="Undo"
               width={UNDO_CELLS * DESKTOP_CELL_PT}
-              height={DESKTOP_LINE_PT}
+              height={UNDO_HEIGHT_PT}
             />
             <Box position="absolute" top={0} left={0}>
               <elements.Client
                 key={key}
                 module="./undo-client.tsx"
                 width={UNDO_CELLS}
-                height={1}
-                props={{ pressKey: key, hover: 'rgba(128, 128, 128, 0.22)' } satisfies UndoProps}
+                height={UNDO_HEIGHT_PT / DESKTOP_LINE_PT}
+                props={{ pressKey: key, hover: 'rgba(128, 128, 128, 0.12)' } satisfies UndoProps}
               />
             </Box>
           </Box>
