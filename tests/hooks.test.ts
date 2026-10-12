@@ -692,7 +692,7 @@ test('last actions an earlier build saved convert once by the table, and a task 
   // Findings' Closed fold stays open across the reloads. The closed finding shows there once it has settled.
   await clock.advance(SETTLED_MS)
   await pane.press({ key: 'tab-findings' })
-  expect((await pane.find({ key: 'fold-finding' }))?.props.label).toBe('▾ 1 Closed')
+  expect((await pane.find({ key: 'fold-finding' }))?.props.label).toBe('▾ 1 closed')
 })
 
 test('the band is [Open inbox] and the counts, the same while working and after 15 idle minutes', async ($, on) => {
@@ -1187,7 +1187,7 @@ test('Claude closes an item or finding that no longer applies, by the id it read
   await pane.press({ key: 'tab-findings' })
   expect(await pane.find({ key: 'row-f3' })).toBeUndefined()
   expect(await pane.find({ text: /^No open findings\.$/ })).toBeDefined()
-  expect((await pane.find({ key: 'fold-finding' }))?.props.label).toBe('▸ 1 Closed')
+  expect((await pane.find({ key: 'fold-finding' }))?.props.label).toBe('▸ 1 closed')
   await pane.press({ key: 'fold-finding' })
   expect(await pane.find({ text: /^README is stale$/ })).toBeDefined()
   expect(await pane.find({ text: /^Closed by Claude: fixed$/ })).toBeDefined()
@@ -1248,7 +1248,7 @@ test('Dismiss settles a question in place with Undo, which brings it back open a
   // Once its time in place ends, it leaves for the Closed fold, and no other row opens in its place.
   await clock.advance(SETTLED_MS)
   expect(await pane.find({ key: 'settled-i1' })).toBeUndefined()
-  expect((await pane.find({ key: 'fold-question' }))?.props.label).toBe('▸ 1 Closed')
+  expect((await pane.find({ key: 'fold-question' }))?.props.label).toBe('▸ 1 closed')
   expect(await pane.find({ key: 'explain-i2-key' })).toBeUndefined()
   // j opens the one row left.
   await pane.press({ key: 'next' })
@@ -1782,7 +1782,7 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   expect((await $.command.run({ command: 'inbox', args: 'demo' } as never)).text).toContain('Showing sample entries')
   const pane = await $.ui.mount(PANE)
   const band = await $.ui.mount({ plugin: 'inbox', surface: 'terminal', ...BAND })
-  expect(await pane.find({ text: 'Showing sample entries. Presses here send nothing.' })).toBeDefined()
+  expect(await pane.find({ text: 'Sample entries. Presses send nothing.' })).toBeDefined()
   expect(await pane.find({ text: /Use Node or Python/ })).toBeUndefined()
   // The band marks the sample counts as the demo's.
   expect(await band.find({ text: /^Demo: Needs you 7/ })).toBeDefined()
@@ -1855,7 +1855,7 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   await pane.press({ key: 'tab-needsYou' })
   expect(await pane.find({ text: /Use Node or Python/ })).toBeDefined()
   expect(await pane.find({ key: 'explain-i1-key' })).toBeDefined()
-  expect(await pane.find({ text: /Showing sample entries/ })).toBeUndefined()
+  expect(await pane.find({ text: /Sample entries\./ })).toBeUndefined()
   expect(await pane.find({ text: SAMPLE })).toBeUndefined()
   expect(await band.find({ text: /Needs you 2/ })).toBeDefined()
   expect(stored.get('s:session-1')).toBe(saved)

@@ -129,6 +129,10 @@ import {
   TABS,
   CLOSED_MARKS,
   FINDING_GROUPS,
+  DEMO_NOTICE,
+  closedTotal,
+  earlierLabel,
+  foldLabel,
   feedbackOf,
   feedbackText,
   hasAge,
@@ -208,9 +212,6 @@ const LEAVE_BAR_STEPS = LEAVE_BAR_CELLS * 2
 const DRAW_IN_MS = 200
 const DRAW_IN_STEPS = 4
 const DEMO = atom({ plugin: 'inbox', key: 'demo' } as const, null as DemoCopy | null)
-const DEMO_BANNER = 'Showing sample entries. Presses here send nothing.'
-// The desktop pane's shorter notice, which fits one line beside Hide demo.
-const DESKTOP_DEMO_NOTE = 'Sample entries. Presses send nothing.'
 const TOOLS_REFUSED_TEXT =
   "Claude cannot record or close items here: your organization's settings block the inbox's tools."
 const PR_POLL_MS = 2 * 60_000
@@ -4350,7 +4351,7 @@ export const register: Register = on => {
         <Box paddingLeft={2}>
           <Text>
             <Text bold>{title}</Text>
-            {count > 0 ? <Text color={pal.muted}> {count}</Text> : null}
+            {count > 0 ? <Text color={pal.muted}>{`${DOT}${count}`}</Text> : null}
           </Text>
         </Box>
       )
@@ -4464,7 +4465,7 @@ export const register: Register = on => {
               props={
                 {
                   markCells: DESKTOP_MARK_CELLS,
-                  count,
+                  label: foldLabel(count),
                   isUnfolded,
                   padY: DESKTOP_ROW_PAD,
                   colors: {
@@ -4487,7 +4488,7 @@ export const register: Register = on => {
               plain
               dimColor
               key={`fold-${kind}`}
-              label={`${isUnfolded ? '▾' : '▸'} ${count} Closed`}
+              label={`${isUnfolded ? '▾' : '▸'} ${foldLabel(count)}`}
               onPress={() =>
                 void update($, UNFOLDED, u => (u.includes(kind) ? u.filter(k => k !== kind) : [...u, kind]))
               }
@@ -4496,15 +4497,36 @@ export const register: Register = on => {
           `fold-row-${kind}`,
         )
       )
-    // The fold row and, unfolded, the closed items under it; nothing when none closed.
-    const closedFold = (kind: Item['kind'] | 'finding', closed: ClosedLine[], isUnfolded: boolean) =>
-      closed.length === 0
+    // The fold row, which counts every close, and, unfolded, the closed items it lists, then how many it leaves
+    // out; nothing when none closed.
+    const closedFold = (kind: Item['kind'] | 'finding', closed: ClosedLine[], total: number, isUnfolded: boolean) => {
+      const earlier = earlierLabel(total, closed.length)
+      return closed.length === 0
         ? []
         : [
             ...(space.isFoldGapped ? titleGap(false) : []),
-            foldRow(kind, closed.length, isUnfolded),
-            ...(isUnfolded ? closed.map((d, n) => closedRow(d, childPos(n, closed.length))) : []),
+            foldRow(kind, total, isUnfolded),
+            ...(isUnfolded ? closed.map((d, n) => closedRow(d, childPos(n, closed.length + (earlier ? 1 : 0)))) : []),
+            ...(isUnfolded && earlier
+              ? [
+                  look === 'desktop'
+                    ? desktopFrame({
+                        key: `earlier-${kind}`,
+                        indent: DESKTOP_MARK_CELLS,
+                        isMarkHung: false,
+                        padY: space.rowPad / 2,
+                        children: <Text color={pal.age}>{earlier}</Text>,
+                      })
+                    : treeRow(
+                        childPos(closed.length, closed.length + 1),
+                        null,
+                        <Text color={pal.age}>{earlier}</Text>,
+                        `earlier-${kind}`,
+                      ),
+                ]
+              : []),
           ]
+    }
     // A row that just closed stays where it was, with a ✓ and its outcome, and
     // [Undo] after the person's own Done or Dismiss, until it joins its list's
     // closed items. It cannot be selected. `undo` is that press. An answer
@@ -4670,7 +4692,12 @@ export const register: Register = on => {
           g.kind,
           true,
         )
-        const tail = closedFold(g.kind, closed, isUnfolded)
+        const tail = closedFold(
+          g.kind,
+          closed,
+          closedTotal(view.needsYou.closed[g.list], settledIn(entries)),
+          isUnfolded,
+        )
 
         // A row handed to Claude stays listed but leaves the count.
         return [
@@ -4791,7 +4818,12 @@ export const register: Register = on => {
                       </Box>,
                     ]
                   : []),
-                ...closedFold('finding', closed, unfolded.includes('finding')),
+                ...closedFold(
+                  'finding',
+                  closed,
+                  closedTotal(view.findings.closed, settledIn(findingEntries)),
+                  unfolded.includes('finding'),
+                ),
               ]),
             ]
           : []
@@ -5055,21 +5087,20 @@ export const register: Register = on => {
     // k and the selected row's keys are Buttons in a hidden Box.
     const drawn = (
       <Box flexDirection="column" minHeight={isInline ? undefined : e.props.scroll.bodyRows} backgroundColor={pal.body}>
-        {isDemo && look === 'desktop' ? (
-          // Desktop keeps the notice quiet, on one line with its button, as the app words a passing note.
-          <Box flexDirection="row" alignItems="center" columnGap={2} paddingX={1} marginBottom={blankLine}>
+        {isDemo ? (
+          // The notice is quiet, on one line with its button, as each app words a passing note.
+          <Box
+            flexDirection="row"
+            alignItems="center"
+            columnGap={2}
+            paddingX={isInline ? 2 : 1}
+            marginBottom={blankLine}
+          >
             <Box flexGrow={1} flexShrink={1}>
               <Text wrap="wrap" color={pal.muted}>
-                {DESKTOP_DEMO_NOTE}
+                {DEMO_NOTICE}
               </Text>
             </Box>
-            <Button key="hide-demo" label="Hide demo" onPress={() => void setDemo($, false)} />
-          </Box>
-        ) : isDemo ? (
-          <Box flexDirection="row" flexWrap="wrap" columnGap={2} paddingX={isInline ? 2 : 1} marginBottom={blankLine}>
-            <Text wrap="wrap" bold color={pal.tone.needsYou}>
-              {DEMO_BANNER}
-            </Text>
             <Button key="hide-demo" label="Hide demo" onPress={() => void setDemo($, false)} />
           </Box>
         ) : null}

@@ -12,7 +12,8 @@ export type FoldProps = {
   /** The mark column's width, in columns: the label starts where the rows' text does. The hooks module draws the
    * chevron there. */
   markCells: number
-  count: number
+  /** The line's text, `foldLabel` in hooks/view.ts. */
+  label: string
   isUnfolded: boolean
   /** Lines of padding above and below the text. The hover covers it. */
   padY: number
@@ -55,7 +56,7 @@ const Fold: ClientModule<FoldProps, State> = (props, surface) => {
     ...(background ? { backgroundColor: background } : {}),
     children: [
       Box({ width: props.markCells, flexShrink: 0 }),
-      Text({ ...(color ? { color } : {}), children: `${props.count} closed` }),
+      Text({ ...(color ? { color } : {}), children: props.label }),
     ],
   })
 }
