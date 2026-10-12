@@ -21,13 +21,17 @@ import type { HelpStep, RowPress } from '../../hooks/presses'
 import {
   allRows,
   closedShown,
+  closedTotal,
+  DEMO_NOTICE,
   DOT,
+  earlierLabel,
   drawnLists,
   emptyText,
   entryId,
   ROW_TABS,
   FINDING_GROUPS,
   feedbackText,
+  foldLabel,
   hasAge,
   isFailure,
   isGuarded,
@@ -145,7 +149,9 @@ let readError: string | null = null
  * What the tab says about the server it talks to: why a newer build of it did not load, or that its fingerprint
  * still differs from this page's while the page cannot replace itself. Null when neither holds.
  */
-let serverNote: string | null = null
+let serverNote: { text: string; isReloadable: boolean } | null = null
+// Whether the first read has taken long enough to say "Loading…". A read that answers sooner shows nothing in between.
+let isLoadingShown = false
 // Polls that failed in a row while a view shows, and when the shown view was read.
 let pollFailures = 0
 let readAt = 0
@@ -335,6 +341,9 @@ function follow(v: View, added: Record<Tab, string[]>) {
   selection[to] = null
 }
 
+/** How long the first read may take before the tab says it is loading, so a fast one shows no flash. */
+const LOADING_DELAY_MS = 300
+
 /** How long a view read may go unanswered before it counts as failed, so a lost answer cannot stop the polls. */
 const READ_TIMEOUT_MS = 3 * POLL_MS
 
@@ -346,9 +355,12 @@ async function read() {
     const isPageOld = next.devPage !== PAGE
     if (isPageOld) void swapPage()
     serverNote = next.serverLoadError
-      ? `The inbox server could not load its new build, so it still runs the last one. ${next.serverLoadError}`
+      ? {
+          text: `The inbox server could not load its new build, so it still runs the last one. ${next.serverLoadError}`,
+          isReloadable: false,
+        }
       : next.serverBuild !== SERVER_BUILD && !isPageOld
-        ? 'This tab and the inbox server are from different builds. Close the Inbox tab and open it again.'
+        ? { text: 'This tab and the inbox server are from different builds.', isReloadable: true }
         : null
     applyView(next, seq)
   } catch (err) {
@@ -867,7 +879,11 @@ function ListRow({
           {...(isSelected ? { tabIndex: -1, 'aria-disabled': true } : { 'aria-expanded': false })}
         >
           <span class="text">{row.title}</span>
-          {last ? <span class={`after ${afterTone ? `tone-${afterTone}` : ''}`}>{`${DOT}${last}`}</span> : null}
+          {last ? (
+            <span class={`after ${afterTone ? `tone-${afterTone}` : ''}`}>
+              {isSelected || isClosing ? `${DOT}${last}` : last}
+            </span>
+          ) : null}
         </button>
         {isSelected || isClosing ? <Panel row={row} isClosing={isClosing} /> : null}
       </div>
@@ -940,8 +956,7 @@ function SettledView({ settled: r, panel }: { settled: RowView; panel: Row | und
       <span class="mark">{state.isQueued ? '' : '✓'}</span>
       <div class="content">
         <div class="settled-head">
-          {/* An error wraps, so none of it is cut. */}
-          <div class={error ? 'settled-line wraps' : 'settled-line'}>
+          <div class="settled-line">
             <span class="what">{r.title}</span>
             <span class="outcome-label">
               {DOT}
@@ -1061,7 +1076,12 @@ function ItemGroup({
       {/* A row handed to Codex stays listed but leaves the count. */}
       <GroupTitle title={title} count={rows.filter(r => !r.fold).length} />
       <Entries entries={entries} group={kind} all={all} now={now} />
-      <ClosedFold group={kind} closed={closed} now={now} />
+      <ClosedFold
+        group={kind}
+        closed={closed}
+        total={closedTotal(v.needsYou.closed[kind === 'question' ? 'questions' : 'tasks'], settledIn(entries))}
+        now={now}
+      />
     </section>
   )
 }
@@ -1097,8 +1117,20 @@ function inlineHtml(text: string) {
   })
 }
 
-function ClosedFold({ group, closed, now }: { group: Group; closed: ClosedLine[]; now: number }) {
-  if (closed.length === 0) return null
+function ClosedFold({
+  group,
+  closed,
+  total,
+  now,
+}: {
+  group: Group
+  closed: ClosedLine[]
+  /** Every close the fold keeps, which its label counts. `closed` lists the newest few. */
+  total: number
+  now: number
+}) {
+  if (total === 0) return null
+  const earlier = earlierLabel(total, closed.length)
   const isUnfolded = unfolded.has(group)
   const isListed = isUnfolded || closingFolds.has(group)
 
@@ -1106,7 +1138,7 @@ function ClosedFold({ group, closed, now }: { group: Group; closed: ClosedLine[]
     <>
       <button type="button" class="fold" data-fold={group} onClick={() => toggleFold(group)}>
         <Icon name={isUnfolded ? 'down' : 'right'} />
-        {closed.length} Closed
+        {foldLabel(total)}
       </button>
       {isListed ? (
         <div class="list closed-list" data-motion={`closed-${group}`}>
@@ -1122,6 +1154,7 @@ function ClosedFold({ group, closed, now }: { group: Group; closed: ClosedLine[]
               </div>
             </div>
           ))}
+          {earlier ? <div class="earlier muted">{earlier}</div> : null}
         </div>
       ) : null}
     </>
@@ -1220,7 +1253,12 @@ function Findings({ v, lists, now }: { v: View; lists: Lists; now: number }) {
       {closed.length > 0 ? (
         <section>
           {isNothing ? <div class="group-title empty-line">No open findings.</div> : null}
-          <ClosedFold group="finding" closed={closed} now={now} />
+          <ClosedFold
+            group="finding"
+            closed={closed}
+            total={closedTotal(v.findings.closed, settledIn(lists.findings))}
+            now={now}
+          />
         </section>
       ) : null}
     </main>
@@ -1270,7 +1308,13 @@ function TabBar({ v, now }: { v: View; now: number }) {
         ))}
       </div>
       <div class="status">{status}</div>
-      {serverNote ? <div class="status-line tone-error">{serverNote}</div> : null}
+      {serverNote ? (
+        serverNote.isReloadable ? (
+          <ErrorStrip text={serverNote.text} reload={() => location.reload()} />
+        ) : (
+          <div class="status-line tone-error">{serverNote.text}</div>
+        )
+      ) : null}
       {error ? <div class="status-line tone-error">{error}</div> : null}
       {lineNote && Date.now() - lineNote.at < SETTLED_MS ? (
         <div class={lineNote.isError ? 'status-line tone-error' : 'status-line muted'}>{lineNote.text}</div>
@@ -1296,20 +1340,25 @@ async function toggleDemo() {
   await read()
 }
 
+/** An error with a Reload button, which runs `reload`. */
+function ErrorStrip({ text, reload }: { text: string; reload: () => void }) {
+  return (
+    <div class="error-strip">
+      <span>{text}</span>
+      <button type="button" class="key" onClick={reload}>
+        Reload
+      </button>
+    </div>
+  )
+}
+
 function App({ lists }: { lists: Lists | null }): ComponentChildren {
   if (!view || !lists)
     return readError !== null ? (
-      <div class="notice">
-        Could not read the inbox. {readError}{' '}
-        <button type="button" class="key" onClick={() => void read()}>
-          Try again
-        </button>
-      </div>
-    ) : (
-      <div class="notice">
-        <span class="muted">Loading…</span>
-      </div>
-    )
+      <ErrorStrip text={`Could not read the inbox. ${readError}`} reload={() => void read()} />
+    ) : isLoadingShown ? (
+      <div class="notice muted">Loading…</div>
+    ) : null
   const v = view
   const now = v.at
 
@@ -1317,8 +1366,8 @@ function App({ lists }: { lists: Lists | null }): ComponentChildren {
     <>
       {isDemo ? (
         <div class="demo-note">
-          <span>Showing sample entries. Presses here send nothing.</span>
-          <button type="button" class="key" onClick={() => void toggleDemo()}>
+          <span>{DEMO_NOTICE}</span>
+          <button type="button" class="key ghost" onClick={() => void toggleDemo()}>
             Hide demo
           </button>
         </div>
@@ -1575,11 +1624,6 @@ function wakeForMoves() {
 }
 
 function draw() {
-  // The page's "Loading…" text is not Preact's, so it goes before the first draw.
-  if (root.className) {
-    root.className = ''
-    root.textContent = ''
-  }
   const before = measure()
   const step = view ? stepLists(view) : null
   lastLists = step?.lists ?? null
@@ -1656,5 +1700,11 @@ request('ui/initialize', {
     void poll()
   })
   .catch(() => {
-    root.textContent = 'The inbox could not connect to Codex.'
+    readError = 'The inbox could not connect to Codex.'
+    draw()
   })
+
+setTimeout(() => {
+  isLoadingShown = true
+  if (!view && readError === null) draw()
+}, LOADING_DELAY_MS)

@@ -100,10 +100,26 @@
       }
       .notice {
         padding: 10px 16px;
+        overflow-wrap: anywhere;
+      }
+      .error-strip {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-basis: 100%;
+        margin: 4px 0 0;
+        padding: 8px 12px;
+        border-radius: 6px;
+        background: color-mix(in srgb, var(--error) 12%, var(--bg));
         color: var(--error);
         overflow-wrap: anywhere;
       }
-      .notice .key {
+      #app > .error-strip {
+        margin: 12px 12px 0;
+      }
+      .error-strip .key {
+        flex: none;
         color: var(--text);
       }
 
@@ -247,8 +263,10 @@
         flex-direction: column;
         gap: 0;
       }
+      /* A closed row's last action reads under its title, so it never squeezes the title. */
       .line {
         display: flex;
+        flex-direction: column;
         width: 100%;
         min-width: 0;
       }
@@ -262,8 +280,6 @@
         -webkit-box-orient: vertical;
       }
       .line .after {
-        flex: none;
-        white-space: pre;
         color: var(--muted);
       }
       .row.collapsed .line .after:not(.tone-error) {
@@ -471,33 +487,14 @@
           background-color: var(--selected);
         }
       }
+      /* The title and its outcome wrap, so neither is cut in the middle. */
       .settled-line {
-        display: flex;
         flex: 1;
         min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .settled-line.wraps {
-        display: block;
-        white-space: normal;
-      }
-      .settled .what {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        overflow-wrap: anywhere;
       }
       .settled .outcome-label {
-        flex: none;
-        max-width: 50%;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: pre;
         color: var(--muted);
-      }
-      .settled-line.wraps .outcome-label {
-        white-space: normal;
       }
       /* Undo's fill is the time it has left. The pill keeps the line's height, so the row does not grow. */
       .key.undo {
@@ -569,16 +566,28 @@
         color: var(--text);
         background: var(--hover);
       }
+      /* One line: the notice, with Hide demo at the right. */
       .demo-note {
         display: flex;
-        flex-wrap: wrap;
         align-items: center;
-        gap: 4px 12px;
-        margin: 12px 12px 0;
-        padding: 6px 12px;
-        border-radius: 6px;
-        background: var(--raised);
-        color: var(--text);
+        justify-content: space-between;
+        gap: 6px;
+        padding: 8px 12px 0;
+        font-size: 11px;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .demo-note .key {
+        flex: none;
+        padding: 0;
+      }
+      .demo-note span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .earlier {
+        padding: 2px 14px 2px var(--text-x);
       }
       /*
        * Motion, with the Codex app's own timing, only for what enters or leaves. Hover, press and
@@ -616,7 +625,7 @@
     </style>
   </head>
   <body>
-    <div id="app" class="notice muted">Loading…</div>
+    <div id="app"></div>
     <script>
       /*TAB_SCRIPT*/
     </script>
