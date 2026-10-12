@@ -1029,9 +1029,7 @@ test('a press on a question Claude closed since the draw sends nothing and says 
   await clock.advance(9000)
   expect(await pane.find({ text: stale })).toBeUndefined()
 
-  // The pressed row left, so no row is open until the person opens one.
-  expect(await pane.find({ key: 'typekey-i2' })).toBeUndefined()
-  await pane.press({ key: 'select-i2' })
+  // The pressed row left, so the row in its place opens.
   await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'typekey-i2' })
   beforeAct = close('i2')
@@ -1248,14 +1246,12 @@ test('Dismiss settles a question in place with Undo, which brings it back open a
   expect((await pane.find({ key: 'dismiss-i1' }))?.props.dimColor).toBeUndefined()
   await pane.press({ key: 'dismiss-i1' })
   expect(await pane.find({ key: 'settled-i1' })).toBeDefined()
-  // Once its time in place ends, it leaves for the Closed fold, and no other row opens in its place.
+  // Once its time in place ends, it leaves for the Closed fold, and the row in its place opens, its buttons dim a moment.
   await clock.advance(SETTLED_MS)
   expect(await pane.find({ key: 'settled-i1' })).toBeUndefined()
   expect((await pane.find({ key: 'fold-question' }))?.props.label).toBe('▸ 1 closed')
-  expect(await pane.find({ key: 'explain-i2-key' })).toBeUndefined()
-  // j opens the one row left.
-  await pane.press({ key: 'next' })
   expect(await pane.find({ key: 'explain-i2-key' })).toBeDefined()
+  expect((await pane.find({ key: 'dismiss-i2' }))?.props.dimColor).toBe(true)
 })
 
 test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, its buttons send its conflicts and thread and say so, and its failing check waits on the person', async ($, on) => {

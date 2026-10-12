@@ -170,6 +170,7 @@ import {
   SETTLED_MS,
   settledIn,
   settledRowIds,
+  allRows,
   shortAgo,
 } from './view'
 import type { DrawnEntry, InboxView, ModLook, PlannedKey, RowView } from './view'
@@ -973,6 +974,7 @@ function redrawWhileLeaving($: EngineInterface, waitMs: number) {
       await $.clock.sleep(Math.min(step, left))
       await Promise.all([update($, LAST_ACTIONS, a => ({ ...a })), update($, DEMO, d => d && { ...d })])
     }
+    await openLeftRows($)
   })().catch(() => undefined)
 }
 
@@ -1424,13 +1426,51 @@ async function setFoldHover($: EngineInterface, kind: string, isHover: boolean) 
 
 /**
  * The open row's position, or -1 when none is open. A tab with no row opened in
- * this conversation draws `top` open. Once the open row leaves, none is open:
- * a row opening under the pointer would catch a second click.
+ * this conversation draws `top` open. While the open row shows as just closed,
+ * none is open. Once it leaves, the row now in its place opens, and
+ * `openLeftRows` then guards that row's buttons as a click would.
  */
-function selectedIndex(ids: string[], cursor: Cursor, top: string | null): number {
-  if (cursor.id !== null) return ids.indexOf(cursor.id)
+function selectedIndex(ids: string[], cursor: Cursor, top: string | null, isSettled: (id: string) => boolean): number {
+  if (cursor.id !== null) {
+    const at = ids.indexOf(cursor.id)
+    if (at >= 0 || isSettled(cursor.id)) return at
+    return ids.length === 0 ? -1 : Math.min(cursor.index, ids.length - 1)
+  }
 
   return cursor.openedAt === 0 && top !== null ? ids.indexOf(top) : -1
+}
+
+/**
+ * Moves each tab's cursor off a row that has left to the row now in its place, opened now, so its buttons ignore
+ * clicks for PRESS_GUARD_MS as a row a click opened does. The redraw that removes a row calls this.
+ */
+async function openLeftRows($: EngineInterface) {
+  const { ledger, prViews: prState, lastActions, view, now } = await drawnState($)
+  const prViews = drawnPrs(prState, ledger.prs, lastActions, now)
+    .filter(x => !x.isSettled)
+    .map(x => x.pr)
+  const ids = tabRowIds(view, prViews)
+  const settled = new Set(settledRowIds(allRows(view)))
+  let isMoved = false
+  await update($, SELECTION, s => {
+    const moved = Object.fromEntries(
+      (Object.keys(s) as Tab[]).map(t => {
+        const c = s[t]
+        const list = ids[t]
+        if (c.id === null || list.includes(c.id) || settled.has(c.id)) return [t, c]
+        isMoved = true
+        const index = Math.min(c.index, list.length - 1)
+        return [t, index < 0 ? NO_CURSOR : { id: list[index]!, index, openedAt: now }]
+      }),
+    ) as Record<Tab, Cursor>
+    return isMoved ? moved : s
+  })
+  // The opened row's buttons draw dim while guarded; a fresh value redraws them once the guard ends.
+  if (isMoved)
+    void $.clock
+      .sleep(PRESS_GUARD_MS)
+      .then(() => update($, SELECTION, s => ({ ...s })))
+      .catch(() => undefined)
 }
 
 /**
@@ -3099,7 +3139,8 @@ export const register: Register = on => {
     const ids = rows[tab].map(r => r.id)
     const indexOf = new Map(ids.map((id, n) => [id, n]))
     const cursor = selection[tab]
-    const at = selectedIndex(ids, cursor, topRow(tab, ids, view))
+    const settledIds = new Set(settledRowIds(allRows(view)))
+    const at = selectedIndex(ids, cursor, topRow(tab, ids, view), id => settledIds.has(id))
     // The open row's buttons ignore clicks for a moment after it opens, and draw dim meanwhile.
     const isOpenGuarded = isGuarded(cursor.openedAt, now)
     const isNew = (id: string) => arrival !== null && arrival.ids.includes(id) && now - arrival.at < NEW_ROW_MS

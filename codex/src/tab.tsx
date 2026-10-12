@@ -180,7 +180,8 @@ let readAt = 0
 let tab: ShownTab = 'needsYou'
 // Each tab's open row, and when a click or key opened it; 0 when it was open by default when pressed.
 // Null until a row opens there: the tab then draws its top row open.
-const selection: Record<ShownTab, { id: string; openedAt: number } | null> = {
+// `index` is the row's place when it opened, so the row in that place opens once it leaves.
+const selection: Record<ShownTab, { id: string; openedAt: number; index?: number } | null> = {
   needsYou: null,
   findings: null,
   prs: null,
@@ -919,22 +920,31 @@ async function undo(r: RowView) {
  */
 function selectedIndex(rows: Row[], t: ShownTab, v: View): number {
   const s = selection[t]
+  if (s) {
+    const at = rows.findIndex(r => r.id === s.id)
+    // While the open row still draws, as one just closed or leaving, none is open. Once it is gone, the row now in
+    // its place opens, guarded as a click would open it.
+    if (at >= 0 || drawnRows.has(s.id) || rows.length === 0) return at
+    const index = Math.min(s.index ?? 0, rows.length - 1)
+    open(t, rows[index]!.id, index)
+    return index
+  }
   // In Needs you the top row that counts, else the first, as when every task is handed off.
-  const id = s ? s.id : ((t === 'needsYou' ? v.needsYou.topId : null) ?? rows[0]?.id)
+  const id = (t === 'needsYou' ? v.needsYou.topId : null) ?? rows[0]?.id
 
   return id ? rows.findIndex(r => r.id === id) : -1
 }
 
 /** Opens a row. Its buttons ignore clicks for PRESS_GUARD_MS, and draw again once that ends. */
-function open(t: ShownTab, id: string) {
-  selection[t] = { id, openedAt: Date.now() }
+function open(t: ShownTab, id: string, index?: number) {
+  selection[t] = { id, openedAt: Date.now(), ...(index === undefined ? {} : { index }) }
   drawIn(PRESS_GUARD_MS)
 }
 
 function select(t: ShownTab, rows: Row[], index: number) {
   const row = rows[index]
   if (!row) return
-  open(t, row.id)
+  open(t, row.id, index)
   draw()
 }
 
