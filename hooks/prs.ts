@@ -312,13 +312,14 @@ const HTML_TAG =
   /<\/?(?:a|b|br|code|details|div|em|h[1-6]|hr|i|img|kbd|li|ol|p|pre|span|strong|sub|summary|sup|table|tbody|td|th|thead|tr|ul)\b[^>]*>/g
 
 /**
- * A review comment's Markdown without the HTML that review bots add, and with
- * each image as its alt text, so a bot's `![P1 Badge](…)` reads "P1".
+ * A review comment's Markdown without the HTML and the feedback line that review bots add, and with each image as
+ * its alt text, so a bot's `![P1 Badge](…)` reads "P1".
  */
 export function readableComment(body: string): string {
   return body
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(HTML_TAG, '')
+    .replace(/^[^\S\n]*Useful\?[^\S\n]+React[^\S\n]+with[^\S\n]+👍[^\S\n]*\/[^\S\n]*👎\.?[^\S\n]*$/gmu, '')
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, (_, alt: string) => alt.replace(/\s*badge$/i, ''))
     .trim()
 }
