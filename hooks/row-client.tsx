@@ -12,11 +12,10 @@ import type { ClientModule } from 'claude-code'
  */
 
 export type RowProps = {
-  /** The mark column's width, in columns. */
+  /** The mark column's width, in columns. It stays empty: the hooks module draws the mark. */
   markCells: number
   /** The side column's width, in columns. */
   sideCells: number
-  handle: string
   /** Muted, before the title, such as a review thread's path. */
   before: string
   title: string
@@ -38,7 +37,6 @@ export type RowProps = {
   newBar: string | null
   /** A null color is the theme's own. */
   colors: {
-    handle: string | null
     muted: string | null
     after: string | null
     /** `after` on a row under the pointer or pressed. */
@@ -120,14 +118,8 @@ const Row: ClientModule<RowProps, State> = (props, surface) => {
     paddingY: props.padY,
     ...(background ? { backgroundColor: background } : {}),
     children: [
-      // The mark hangs a column left, into the frame's inset, so a full column parts it from the text: a 2-column
-      // box pulled a column left by its margin.
-      Box({
-        width: props.markCells + 1,
-        marginLeft: -1,
-        flexShrink: 0,
-        children: Text({ ...colored(props.colors.handle), children: props.handle }),
-      }),
+      // The hooks module draws the row's mark over this region, hung into the frame's inset, which a Client clips.
+      Box({ width: props.markCells, flexShrink: 0 }),
       Box({
         flexDirection: 'column',
         flexShrink: 1,

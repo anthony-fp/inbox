@@ -3629,7 +3629,6 @@ export const register: Register = on => {
       return {
         markCells: DESKTOP_MARK_CELLS,
         sideCells: DESKTOP_SIDE_CELLS,
-        handle: row.handle,
         before: row.line?.before ?? '',
         title: text.trim(),
         after: f?.age ? f.text : (row.line?.after ?? '').replace(DOT, '').trim(),
@@ -3642,7 +3641,6 @@ export const register: Register = on => {
         fallbackColumns: e.props.bodyColumns - 2,
         newBar: isNew(row.id) ? pal.mark[tab] : null,
         colors: {
-          handle: row.handleTone ? pal.mark[row.handleTone] : null,
           muted: pal.muted,
           after: f?.isFailure ? (pal.tone.error ?? null) : pal.muted,
           afterHover: f?.isFailure ? (pal.tone.error ?? null) : pal.muted,
@@ -3725,6 +3723,18 @@ export const register: Register = on => {
               width="100%"
               props={rowClientProps(row)}
             />
+            {/* A Client clips its frame's inset, so the mark hangs there from here, at the frame's own spot. */}
+            {row.handle ? (
+              <Box
+                position="absolute"
+                top={0}
+                left={0}
+                paddingLeft={(FRAME_INSET_PT - DESKTOP_CELL_PT) / DESKTOP_CELL_PT}
+                paddingTop={space.rowPad}
+              >
+                <Text color={row.handleTone ? pal.mark[row.handleTone] : undefined}>{row.handle}</Text>
+              </Box>
+            ) : null}
           </Box>
         )
       const { keys, more } = isSelected ? rowActions(row) : { keys: [], more: [] }
