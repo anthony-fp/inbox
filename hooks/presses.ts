@@ -125,11 +125,11 @@ export function isHandedOff(
 }
 
 /**
- * Whether a finding's row is out of the list because Fix handed it to the agent: until the agent's reply applies,
- * unless the person pressed Undo. The finding stays open in the ledger, so the agent can still close it.
+ * Whether Fix or Do it handed a finding to the agent: its row settles, then lists in the Closed fold, unless the
+ * person pressed Undo or the message failed. The finding stays open in the ledger, so the agent can still close it.
  */
-export function isFixHandedOff(last: LastAction | undefined, turns: Turns): last is LastAction {
-  return last?.action === 'address' && !last.isKept && isHandedOff(last, turns)
+export function isFixSent(last: LastAction | undefined): last is LastAction {
+  return last?.action === 'address' && !last.isKept && last.delivery?.state !== 'failed'
 }
 
 /** A press on a question, task or finding row, in every host. An answer names its option by text. */

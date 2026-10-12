@@ -352,7 +352,7 @@ test('the tab reads Updating… while exchanges wait for the inbox model, and sh
   assert.equal(viewOf(s, 60).status.changedAt, 1)
 })
 
-test('Fix hands a finding off: it settles and leaves the list until an applied turn leaves it open; Discuss keeps it open; a close moves it to Closed', () => {
+test('Fix hands a finding off: it settles as the choice made, then lists in the Closed fold though an applied turn leaves it open; Discuss keeps it open; a close moves it to Closed', () => {
   const w = withItems()
   const s = {
     ...w,
@@ -375,15 +375,16 @@ test('Fix hands a finding off: it settles and leaves the list until an applied t
     [['f3', 'settled', null]],
   )
   assert.equal(folded.count, 0)
-  // The turn the message started ends, and its update applies with the finding still open.
+  assert.equal(folded.rows[0]?.state.is === 'settled' && folded.rows[0].state.label, 'Fix')
   const started = notePrompt(sent, 'Please address this finding you recorded:', 70).state
   const applied = { ...started, presence: { ...started.presence, turnsApplied: started.presence.turnsStarted } }
-  const back = viewOf(applied, 80).findings
+  const moved = viewOf(applied, 80 + SETTLE_WINDOW_MS).findings
+  assert.deepEqual(moved.rows, [])
+  assert.equal(moved.count, 0)
   assert.deepEqual(
-    back.rows.map(r => [r.id, r.state.is]),
-    [['f3', 'open']],
+    moved.closed.map(f => [f.id, f.outcome]),
+    [['f3', 'Fix']],
   )
-  assert.equal(back.count, 1)
   // Discuss talks it through, and it stays open and counted.
   const discussed = viewOf(after(s, { action: 'discuss', id: 'f3' }), 60).findings
   assert.deepEqual(

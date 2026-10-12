@@ -1598,7 +1598,7 @@ async function followNewRows($: EngineInterface, isOpening = false) {
       !isUnread &&
       !unfolded.some(kind => ledger.closed.some(d => d.kind === kind)),
     findings:
-      view.findings.rows.length === 0 && !unfolded.some(kind => ledger.closedFindings.some(f => f.kind === kind)),
+      view.findings.rows.length === 0 && !unfolded.some(kind => view.findings.closed.some(f => f.kind === kind)),
     prs: prs.length === 0 && !prState.isFetching,
   }[tab]
   const to = followTo(

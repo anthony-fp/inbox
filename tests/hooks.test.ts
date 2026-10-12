@@ -858,7 +858,7 @@ test('a reload that cuts off the end-of-turn hook catches up on load', async ($,
   expect(await pane.find({ text: /Push the branch to origin\?/ })).toBeDefined()
 })
 
-test('a finding Claude records while the pane shows an empty tab brings the pane to it, and Fix hands it to Claude, settles its row and leaves the list until Claude’s reply leaves it open', async ($, on) => {
+test('a finding Claude records while the pane shows an empty tab brings the pane to it, and Fix hands it to Claude, settles its row as the choice made, and moves it to the Closed fold even when Claude’s reply leaves it open', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])
   on('ui.panes', () => ({ value: [{ id: 'inbox', title: 'Inbox', isShown: true, isFocused: true, isPlaced: true }] }))
@@ -888,22 +888,24 @@ test('a finding Claude records while the pane shows an empty tab brings the pane
   await pane.press({ key: 'address-f1' })
   expect(sent.at(-1)).toContain('Please address this finding you recorded:\nIssue: Retry loop never backs off')
   await clock.settle()
-  expect(await pane.find({ text: /Handed\soff/ })).toBeDefined()
+  expect(await pane.find({ key: 'settled-f1' })).toBeDefined()
+  expect(await pane.find({ text: /^Fix$/ })).toBeDefined()
   expect(await pane.find({ key: 'undo-f1' })).toBeDefined()
   expect(await band.find({ text: /Findings 1/ })).toBeUndefined()
   await clock.advance(9000)
-  expect(await pane.find({ text: /Retry loop never backs off/ })).toBeUndefined()
+  expect(await pane.find({ key: 'settled-f1' })).toBeUndefined()
+  expect(await pane.find({ text: /1 closed/ })).toBeDefined()
 
-  // Claude's reply leaves it open, so once that turn's update applies it waits on the person again.
   await $.turn.start({ text: sent.at(-1) ?? '', turnId: 't1' })
   await $.turn.complete({ answer: 'Added a backoff.', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
   await clock.settle()
-  expect(await band.find({ text: /Findings 1/ })).toBeDefined()
+  expect(await band.find({ text: /Findings 1/ })).toBeUndefined()
   await pane.press({ key: 'tab-findings' })
   await clock.settle()
-  expect((await pane.find({ key: 'address-f1-key' }))?.props.label).toBe('Fix again')
+  expect(await pane.find({ key: 'address-f1-key' })).toBeUndefined()
+  expect(await pane.find({ text: /1 closed/ })).toBeDefined()
 
-  // A finding recorded while Findings shows draws its bar in place, without a jump, and the open row stays open.
+  // A finding recorded while Findings shows draws its bar in place, without a jump.
   await $.tool.call({
     tool: 'mcp__inbox__record_finding',
     kind: 'opportunity',
@@ -912,7 +914,6 @@ test('a finding Claude records while the pane shows an empty tab brings the pane
   })
   await clock.settle()
   expect(await pane.find({ key: 'new-f4' })).toBeDefined()
-  expect(await pane.find({ key: 'address-f1-key' })).toBeDefined()
   await clock.advance(NEW_ROW_MS)
   expect(await pane.find({ key: 'new-f4' })).toBeUndefined()
 })

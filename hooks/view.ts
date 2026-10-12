@@ -22,7 +22,7 @@ import {
   actionId,
   capitalized,
   clipLabel,
-  isFixHandedOff,
+  isFixSent,
   isHandedOff,
   isUndoable,
   noteText,
@@ -255,6 +255,9 @@ export function feedbackOf(
  * What a row reads after a ✓ once a press went through, in the past tense: "Addressed", not "Address". An answer
  * reads as the option chosen, and a step as its own label.
  */
+/** The Fix button's label for a finding, which its settled and closed rows read as the choice made. */
+const fixLabel = (f: Pick<Finding, 'kind'>) => (f.kind === 'opportunity' ? 'Do it' : 'Fix')
+
 const DONE_LABELS: Record<string, (text: string) => string> = {
   address: () => 'Handed off',
   discuss: () => 'Discussed',
@@ -394,7 +397,7 @@ function actionsOf(
   if (!item)
     return [
       // Only the label names the kind. The press and the message it sends are Address's for both.
-      action({ action: 'address', id }, row.finding?.kind === 'opportunity' ? 'Do it' : 'Fix', 'handoff'),
+      action({ action: 'address', id }, row.finding ? fixLabel(row.finding) : 'Fix', 'handoff'),
       action({ action: 'discuss', id }, 'Discuss', 'talk'),
       action({ action: 'type', id, text: '' }, 'Reply', 'handoff'),
       action({ action: 'dismiss', id }, 'Dismiss', 'mark'),
@@ -564,8 +567,16 @@ export function inboxView({
   const settledItems = new Map(
     ledger.closed.filter(d => d.item && isSettling(d.at) && !isOpen(d.id)).map(d => [d.id, d] as const),
   )
+  // A finding Fix sent already settled and moved to the Closed fold, so the agent's close does not list it again.
+  const isFixSettled = (id: string) => {
+    const last = lastActions[id]
+
+    return isFixSent(last) && !isSettling(last.at)
+  }
   const settledFindings = new Map(
-    ledger.closedFindings.filter(f => isSettling(f.closedAt) && !isOpen(f.id)).map(f => [f.id, f] as const),
+    ledger.closedFindings
+      .filter(f => isSettling(f.closedAt) && !isOpen(f.id) && !isFixSettled(f.id))
+      .map(f => [f.id, f] as const),
   )
   const placed = [...settledFindings.keys()].reduce(reopenFinding, [...settledItems.keys()].reduce(reopenItem, ledger))
   const { questions, tasks } = needsYouOrder(placed)
@@ -592,10 +603,11 @@ export function inboxView({
 
     const last = lastActions[id]
     // Fix settles the row as an answer does, though the finding stays open until the agent closes it.
-    if (isFixHandedOff(last, turns) && ledger.findings.some(f => f.id === id))
+    const sent = ledger.findings.find(f => f.id === id)
+    if (sent && isFixSent(last))
       return {
         is: 'settled',
-        label: 'Handed off',
+        label: fixLabel(sent),
         at: last.at,
         canUndo: true,
         isQueued: last.delivery?.state === 'queued',
@@ -638,8 +650,8 @@ export function inboxView({
   const kinds = Object.keys(FINDING_GROUPS) as Finding['kind'][]
   const byGroup = (a: Finding, b: Finding) => kinds.indexOf(a.kind) - kinds.indexOf(b.kind)
   const findingRows = [...placed.findings]
-    // A finding Fix handed off leaves the list once it has settled.
-    .filter(f => !(isFixHandedOff(lastActions[f.id], turns) && !isSettling(lastActions[f.id]!.at)))
+    // A finding Fix sent leaves the list once it has settled, for the Closed fold.
+    .filter(f => !isFixSettled(f.id))
     .reverse()
     .sort(byGroup)
     .map(finding =>
@@ -655,6 +667,10 @@ export function inboxView({
       }),
     )
   const closed = [...ledger.closed].reverse()
+  // Listed in the Closed fold as the person's choice, while the ledger keeps them open for the agent to close.
+  const fixesSent: ClosedFinding[] = ledger.findings
+    .filter(f => isFixSettled(f.id))
+    .map(f => ({ ...f, how: 'answered', outcome: fixLabel(f), closedAt: lastActions[f.id]!.at }))
 
   return {
     needsYou: {
@@ -667,7 +683,7 @@ export function inboxView({
     findings: {
       count: findingRows.filter(r => r.state.is === 'open').length,
       rows: findingRows,
-      closed: [...ledger.closedFindings].reverse(),
+      closed: [...ledger.closedFindings, ...fixesSent].sort((a, b) => b.closedAt - a.closedAt),
     },
     status,
   }
