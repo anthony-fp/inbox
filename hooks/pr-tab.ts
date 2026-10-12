@@ -180,11 +180,6 @@ export function drawnPrs(
   )
 }
 
-/** A PR that waits on nobody and is not ready: the tab lists it as one line under "Nothing to do". */
-export function isQuietPr(pr: PrView, isSent: IsThreadSent): boolean {
-  return !prNeedsYou(pr, isSent) && readiness(pr, isSent).status !== 'ready'
-}
-
 /** The tone each status word draws in: Blocked waits on the person, Ready is done, and Waiting has none. */
 export const PR_TONES: Record<PrStatus, 'needsYou' | 'done' | 'findings' | 'error' | null> = {
   ready: 'done',

@@ -73,7 +73,7 @@ Each PR is a section:
 3. One primary action that moves the PR on, such as Resolve conflicts, and Open PR.
 4. Review threads, with the comment as the title and `@author · file:line` as the meta line.
 5. Failing checks, collapsed to one line: `2 failing: plugin tests, lint`. Selecting it shows the rows with Open log. A check row says little until i231 adds the annotation text.
-6. PRs with nothing to do go last, one line each, under `Nothing to do · 2`.
+6. Every PR is a full block, in order: those that wait on you first, then those that wait on others, then finished ones. Each keeps its Open PR button.
 
 Threads come before checks because a thread needs the person and a failing check usually needs Claude.
 
@@ -137,7 +137,7 @@ In it:
 - Findings grouped into Issues and Opportunities, one line each (decision 1).
 - The shared demo notice, `Questions · 4` labels, and a fold that counts every close, with an `N earlier` line.
 - Ages in a side column in the terminal and Codex, as on desktop.
-- The PR block in the terminal and desktop: review threads before failing checks under group titles, the verdict's reasons one per line, a quiet Dismiss, and PRs that wait on nobody as one line each under `Nothing to do`.
+- The PR block in the terminal and desktop: review threads before failing checks under group titles, the verdict's reasons one per line, a quiet Dismiss. Every PR is a full block with its Open PR button.
 - Terminal sections parted by a rule instead of cards (decision 3).
 - Fix and Do it labels on findings (decision 7). Explain keeps its key but leaves the row's buttons in the terminal and Codex (decision 6). Desktop takes no keys, so it still draws Explain.
 - Codex: flat sections, the row grid, neutral selection, three button levels, `(recommended)`, a delayed loading line, and an error strip with Reload.

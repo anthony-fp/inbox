@@ -51,7 +51,6 @@ import {
   drawnPrs,
   fetchTracked,
   isDismissing,
-  isQuietPr,
   isTracked,
   linkedPrs,
   PR_TONES,
@@ -4829,38 +4828,6 @@ export const register: Register = on => {
         ...prRowGroup('Failing checks', checks, `${pr.ref}-checks`),
       ])
     }
-    const isQuiet = (g: { pr: PrView; isSettled: boolean }) => !g.isSettled && isQuietPr(g.pr, isThreadSent)
-    // "#33 Title · Waiting": the title opens the PR.
-    const quietPrs = (prs: PrView[]) =>
-      section([
-        groupTitle('Nothing to do', prs.length),
-        ...titleGap(false),
-        ...prs.map(pr => {
-          const { status, head } = readiness(pr, isThreadSent)
-          const tone = PR_STATUSES[status].tone
-          const number = `#${pr.number}\u2002`
-          const room = Math.max(
-            12,
-            e.props.bodyColumns - 6 - number.length - DOT.length - head.length - columnsFor(null).textAt,
-          )
-          const line = (
-            <Box flexDirection="row" key={`quiet-${pr.ref}`}>
-              <Text color={look === 'desktop' ? pal.mark.prs : pal.tone.prs}>{number}</Text>
-              <Button
-                plain
-                key={`quiet-open-${pr.ref}`}
-                label={clipLabel(pr.title, room)}
-                onPress={prPress({ action: 'pr-open', ref: pr.ref })}
-              />
-              <Text color={pal.muted}>{DOT}</Text>
-              <Text color={tone ? pal.tone[tone] : pal.muted}>{head}</Text>
-            </Box>
-          )
-          return look === 'desktop'
-            ? desktopFrame({ key: `quiet-${pr.ref}`, padY: 0, children: line })
-            : treeRow(null, null, line, `quiet-${pr.ref}`)
-        }),
-      ])
     const prsView = () =>
       prGroups.length === 0 ? (
         <Box flexDirection="column" flexGrow={1}>
@@ -4872,14 +4839,7 @@ export const register: Register = on => {
         </Box>
       ) : (
         // A PR block is denser than a list, with its buttons last, so its rules take a full line on each side.
-        // PRs that wait on nobody, neither blocked nor ready, are one line each at the end.
-        sections(
-          [
-            ...prGroups.filter(g => !isQuiet(g)).map(prBlock),
-            ...(prGroups.some(isQuiet) ? [quietPrs(prGroups.filter(isQuiet).map(g => g.pr))] : []),
-          ],
-          2,
-        )
+        sections(prGroups.map(prBlock), 2)
       )
 
     const move = (step: number) => {

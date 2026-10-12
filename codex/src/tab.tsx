@@ -46,7 +46,7 @@ import {
 } from '../../hooks/view'
 import { ROW_PAD_PT } from '../../hooks/layout'
 import type { DrawnEntry, DrawnLists, Feedback, PlannedKey, RowView } from '../../hooks/view'
-import { isQuietPr, PR_TONES, prCheckId, prMarkId, prRetryOf, prThreadId, threadSentIn } from '../../hooks/pr-tab'
+import { PR_TONES, prCheckId, prMarkId, prRetryOf, prThreadId, threadSentIn } from '../../hooks/pr-tab'
 import type { PrPress } from '../../hooks/pr-tab'
 import {
   commentLine,
@@ -787,18 +787,15 @@ function prSettledStart(v: View, pr: PrView): number {
 
 type PrBlockPlan = { pr: PrView; isSettled: boolean; threads: Row[]; checks: Row[] }
 
-/** The PRs as the tab draws them: each block in order, then the PRs that wait on nobody. */
-function prPlan(v: View): { blocks: PrBlockPlan[]; quiet: PrView[]; rows: Row[] } {
-  const isSent = threadSentIn(v.lastActions)
+/** The PRs as the tab draws them: each block in order. */
+function prPlan(v: View): { blocks: PrBlockPlan[]; rows: Row[] } {
   const blocks: PrBlockPlan[] = []
-  const quiet: PrView[] = []
   for (const { pr, isSettled } of v.prs.drawn) {
     if (isSettled) {
       const id = prMarkId(pr.ref)
       if (undoing.has(id) || Date.now() - prSettledStart(v, pr) < SETTLED_MS)
         blocks.push({ pr, isSettled, threads: [], checks: [] })
-    } else if (isQuietPr(pr, isSent)) quiet.push(pr)
-    else
+    } else
       blocks.push({
         pr,
         isSettled,
@@ -807,7 +804,7 @@ function prPlan(v: View): { blocks: PrBlockPlan[]; quiet: PrView[]; rows: Row[] 
       })
   }
 
-  return { blocks, quiet, rows: blocks.flatMap(b => [...b.threads, ...b.checks]) }
+  return { blocks, rows: blocks.flatMap(b => [...b.threads, ...b.checks]) }
 }
 
 /** The PR rows the keys and clicks move through: each block's threads, then its checks. */
@@ -1671,8 +1668,8 @@ function PrRows({
 const PRS_HINT = 'Your PRs show here when this conversation opens or links one, or when your branch has one.'
 
 function Prs({ v, now }: { v: View; now: number }) {
-  const { blocks, quiet, rows } = prPlan(v)
-  if (blocks.length === 0 && quiet.length === 0)
+  const { blocks, rows } = prPlan(v)
+  if (blocks.length === 0)
     return (
       <div class="empty">
         <div class="title">{v.isFetchingPrs ? 'Checking for PRs…' : 'No PRs'}</div>
@@ -1698,39 +1695,6 @@ function Prs({ v, now }: { v: View; now: number }) {
           <PrBlock {...b} v={v} openId={openId} all={rows} now={now} />
         ),
       )}
-      {quiet.length > 0 ? (
-        <section>
-          <GroupTitle title="Nothing to do" count={quiet.length} />
-          {quiet.map(pr => {
-            const { status, head } = readiness(pr, isSent)
-            const tone = PR_TONES[status]
-
-            return (
-              <div class="quiet-line">
-                <span class="tone-prs">#{pr.number}</span>
-                <button
-                  type="button"
-                  class="link"
-                  onClick={() =>
-                    void act(
-                      prMarkId(pr.ref),
-                      { action: 'pr-open', ref: pr.ref },
-                      undefined,
-                      opening(`PR #${pr.number}`),
-                    )
-                  }
-                >
-                  {pr.title}
-                </button>
-                <span class="status">
-                  <span class="muted">{DOT}</span>
-                  <span class={tone ? `tone-${tone}` : 'muted'}>{head}</span>
-                </span>
-              </div>
-            )
-          })}
-        </section>
-      ) : null}
     </main>
   )
 }
