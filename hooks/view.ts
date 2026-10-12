@@ -30,10 +30,10 @@ export const CHOICE_KEYS = [...'abcfghilm']
 /** The dot between parts of a drawn line, as "title · 3m ago". En spaces, wider than a space, set it apart. */
 export const DOT = '\u2002·\u2002'
 
-/** A finding's kind as the Findings tab draws it: a mark before its name, both in the kind's tone. */
-export const FINDING_BADGES: Record<Finding['kind'], { label: string; mark: string; tone: 'issue' | 'done' }> = {
-  issue: { label: 'Issue', mark: '▲', tone: 'issue' },
-  opportunity: { label: 'Opportunity', mark: '✦', tone: 'done' },
+/** The Findings tab's groups, one per kind, in the order it lists them, and each kind's mark, drawn in its tone. */
+export const FINDING_GROUPS: Record<Finding['kind'], { title: string; mark: string; tone: 'issue' | 'done' }> = {
+  issue: { title: 'Issues', mark: '▲', tone: 'issue' },
+  opportunity: { title: 'Opportunities', mark: '✦', tone: 'done' },
 }
 
 /** The mark before a row in a Closed fold, by how it ended. */
@@ -388,6 +388,8 @@ export type DrawnLists<R> = {
   questions: DrawnEntry<R>[]
   tasks: DrawnEntry<R>[]
   findings: DrawnEntry<R>[]
+  /** `findings` split by kind, in `FINDING_GROUPS` order. A kind with no entries is left out. */
+  findingGroups: { kind: Finding['kind']; title: string; entries: DrawnEntry<R>[] }[]
   byTab: { needsYou: R[]; findings: R[] }
 }
 
@@ -408,12 +410,17 @@ export function drawnLists<R>(
     })
   const questions = entries(v.needsYou.questions)
   const tasks = entries(v.needsYou.tasks)
-  const findings = entries(v.findings.rows)
+  const findingGroups = (Object.keys(FINDING_GROUPS) as Finding['kind'][]).flatMap(kind => {
+    const kindEntries = entries(v.findings.rows.filter(r => r.finding?.kind === kind))
+    return kindEntries.length === 0 ? [] : [{ kind, title: FINDING_GROUPS[kind].title, entries: kindEntries }]
+  })
+  const findings = findingGroups.flatMap(g => g.entries)
 
   return {
     questions,
     tasks,
     findings,
+    findingGroups,
     byTab: { needsYou: [...rowsIn(questions), ...rowsIn(tasks)], findings: rowsIn(findings) },
   }
 }

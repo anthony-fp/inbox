@@ -26,7 +26,7 @@ import {
   emptyText,
   entryId,
   ROW_TABS,
-  FINDING_BADGES,
+  FINDING_GROUPS,
   feedbackText,
   hasAge,
   isFailure,
@@ -103,8 +103,6 @@ type Row = {
   handleTone?: Tone
   /** A finding's kind, which sets its handle's color and size. */
   kind?: Finding['kind']
-  /** A line above the title, as a finding's kind and age, drawn open and closed. */
-  meta?: JSX.Element
   title: string
   /** Muted text after the title, such as an age. */
   titleAfter?: string
@@ -538,27 +536,18 @@ function itemRow(v: View, r: RowView, item: Item): Row {
 }
 
 function findingRow(v: View, r: RowView, f: Finding): Row {
-  const badge = FINDING_BADGES[f.kind]
-  // A finding handed to Codex folds, as a task does, until Codex's reply leaves it open.
+  // A finding's group title says its kind. Handed to Codex, it folds, as a task does, until Codex's reply leaves it open.
   const isHandedOff = r.state.is === 'handedOff'
   const id = f.id
 
   return {
     id,
-    handle: isHandedOff ? '✓' : badge.mark,
+    handle: isHandedOff ? '✓' : FINDING_GROUPS[f.kind].mark,
     handleTone: isHandedOff ? 'done' : undefined,
     kind: f.kind,
     ...(isHandedOff ? { fold: {} } : {}),
     title: f.title,
-    meta: (
-      <>
-        <span class={`tone-${badge.tone}`}>{badge.label}</span>
-        <span class="muted age">
-          {DOT}
-          {ago(v.at - f.at)}
-        </span>
-      </>
-    ),
+    titleAfter: `${DOT}${ago(v.at - f.at)}`,
     line: { text: f.title },
     body: (
       <div>
@@ -852,7 +841,6 @@ function ListRow({
     >
       {handle}
       <div class="content">
-        {row.meta ? <div class="meta">{row.meta}</div> : null}
         {/* Open, the line does nothing, so it leaves the focus order. */}
         <button
           type="button"
@@ -1204,14 +1192,27 @@ function Findings({ v, lists, now }: { v: View; lists: Lists; now: number }) {
       </div>
     )
 
-  // With closed findings still shown, the empty text is one line above them.
+  // Closed findings are one fold under both groups. With none open, the empty text is one line above it.
   return (
     <main>
-      <section>
-        {isNothing ? <div class="group-title empty-line">No open findings.</div> : null}
-        <Entries entries={lists.findings} group="finding" all={lists.byTab.findings} now={now} />
-        <ClosedFold group="finding" closed={closed} now={now} />
-      </section>
+      {lists.findingGroups.map(g => {
+        // A leaving row no longer counts, and a row handed to Codex stays listed but leaves the count.
+        const rows = g.entries.flatMap(x =>
+          'row' in x && drawnRows.get(x.row.id)?.track.state !== 'leaving' ? [x.row] : [],
+        )
+        return (
+          <section>
+            <GroupTitle title={g.title} count={rows.filter(r => !r.fold).length} />
+            <Entries entries={g.entries} group="finding" all={lists.byTab.findings} now={now} />
+          </section>
+        )
+      })}
+      {closed.length > 0 ? (
+        <section>
+          {isNothing ? <div class="group-title empty-line">No open findings.</div> : null}
+          <ClosedFold group="finding" closed={closed} now={now} />
+        </section>
+      ) : null}
     </main>
   )
 }

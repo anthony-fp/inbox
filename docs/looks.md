@@ -51,7 +51,7 @@ Change a rule in its owner. Do not change it in a reader.
 | --- | --- | --- |
 | Needs you order and count | `hooks/view.ts:needsYouOrder`, `hooks/view.ts:inboxView` | All three looks, the band and the status line |
 | Question handles | `hooks/ledger.ts:questionNumbers`, read by `hooks/view.ts:inboxView` | The terminal look only. It draws `1)` or `•`. Desktop and Codex draw no handle on a question. |
-| Finding handles and badges | `hooks/view.ts:FINDING_BADGES` | All three looks. Each draws the mark as the handle, and a handed-off finding draws ✓ instead. |
+| Finding groups and handles | `hooks/view.ts:FINDING_GROUPS`, `hooks/view.ts:drawnLists` | All three looks. Each lists findings under an Issues and an Opportunities title and draws the kind's mark as the handle. A handed-off finding draws ✓ instead. |
 | Row state | `hooks/view.ts:RowState`, `hooks/presses.ts:isHandedOff` | All three looks |
 | Feedback text | `hooks/view.ts:feedbackText`, `hooks/view.ts:feedbackOf` | Terminal and desktop through the pane, Codex through the tab |
 | Done labels | `hooks/view.ts:DONE_LABELS` | All three looks |

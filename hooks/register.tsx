@@ -128,7 +128,7 @@ import {
   ROW_TABS,
   TABS,
   CLOSED_MARKS,
-  FINDING_BADGES,
+  FINDING_GROUPS,
   feedbackOf,
   feedbackText,
   hasAge,
@@ -3146,20 +3146,16 @@ export const register: Register = on => {
         typeHint: item.kind === 'task' ? 'Your reply to Claude' : 'Your answer',
       }
     }
-    // A finding's handle is its kind's mark, ▲ or ✦. Handed to Claude, it folds, as a task does, until Claude's
-    // reply leaves it open.
+    // A finding's handle is its kind's mark, ▲ or ✦, and its group's title says the kind. Handed to Claude, it
+    // folds, as a task does, until Claude's reply leaves it open.
     const findingRow = (r: RowView, finding: Finding): Row => ({
       id: finding.id,
       at: finding.at,
       ...(r.state.is === 'handedOff'
         ? { handle: '✓', handleTone: 'done' as const, fold: {} }
-        : { handle: FINDING_BADGES[finding.kind].mark, handleTone: FINDING_BADGES[finding.kind].tone }),
+        : { handle: FINDING_GROUPS[finding.kind].mark, handleTone: FINDING_GROUPS[finding.kind].tone }),
       title: finding.title,
-      head: {
-        label: FINDING_BADGES[finding.kind].label,
-        tone: FINDING_BADGES[finding.kind].tone,
-        age: `${DOT}${ago(now - finding.at)}`,
-      },
+      titleAfter: `${DOT}${ago(now - finding.at)}`,
       line: { text: finding.title },
       body: (
         <Box flexDirection="column" rowGap={blankLine}>
@@ -4759,21 +4755,38 @@ export const register: Register = on => {
         outcome: f.outcome,
       }))
       if (findingEntries.length === 0 && closed.length === 0) return emptyState(emptyText('findings', 'Claude'))
-      // With closed findings still shown, the empty text is one line above them.
-      const open =
-        findingEntries.length > 0
-          ? divided(
-              findingEntries.map(x => ('row' in x ? listRow(x.row) : settledRow(x))),
-              'findings',
-              false,
-            )
-          : [
-              <Box paddingLeft={2}>
-                <Text color={pal.muted}>No open findings.</Text>
-              </Box>,
+      // A row handed to Claude stays listed but leaves the count.
+      const groups = lists.findingGroups.map(g =>
+        section([
+          groupTitle(g.title, rowsIn(g.entries).filter(r => !r.fold).length),
+          ...titleGap(),
+          ...divided(
+            g.entries.map((x, n) =>
+              'row' in x ? listRow(x.row, childPos(n, g.entries.length)) : settledRow(x, childPos(n, g.entries.length)),
+            ),
+            g.kind,
+            true,
+          ),
+        ]),
+      )
+      // Closed findings are one fold under both groups. With none open, the empty text is one line above it.
+      const tail =
+        closed.length > 0
+          ? [
+              section([
+                ...(findingEntries.length === 0
+                  ? [
+                      <Box paddingLeft={2}>
+                        <Text color={pal.muted}>No open findings.</Text>
+                      </Box>,
+                    ]
+                  : []),
+                ...closedFold('finding', closed, unfolded.includes('finding')),
+              ]),
             ]
+          : []
 
-      return section([...open, ...closedFold('finding', closed, unfolded.includes('finding'))])
+      return sections([...groups, ...tail])
     }
 
     // A PR the person just dismissed keeps its title, settled, with [Undo], until it leaves.
