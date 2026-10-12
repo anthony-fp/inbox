@@ -269,7 +269,8 @@ function undoSvg(fraction: number, leftMs: number): string {
 function chevronSvg(isUnfolded: boolean): string {
   const w = FRAME_INSET_PT + DESKTOP_MARK_CELLS * DESKTOP_CELL_PT
   const h = 2 * ROW_PAD_PT + DESKTOP_LINE_PT
-  const x = FRAME_INSET_PT + 0.5
+  // At the column left of the mark column, where the rows' marks hang.
+  const x = FRAME_INSET_PT - DESKTOP_CELL_PT + 0.5
   const y = h / 2
   const points = isUnfolded
     ? `${x},${y - 2} ${x + 3.5},${y + 1.5} ${x + 7},${y - 2}`
@@ -3688,8 +3689,13 @@ export const register: Register = on => {
         paddingY={padY}
         {...(fill ? { backgroundColor: fill } : {})}
       >
+        {/* The mark hangs a column left, into the frame's inset, so a full column parts it from the text. */}
         <Box width={indent + DESKTOP_MARK_CELLS} flexShrink={0} paddingLeft={indent}>
-          {mark}
+          {mark ? (
+            <Box position="absolute" top={0} left={indent - 1}>
+              {mark}
+            </Box>
+          ) : null}
         </Box>
         <Box flexDirection="column" flexShrink={1} flexGrow={1}>
           {children}

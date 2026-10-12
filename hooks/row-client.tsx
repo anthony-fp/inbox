@@ -120,10 +120,18 @@ const Row: ClientModule<RowProps, State> = (props, surface) => {
     paddingY: props.padY,
     ...(background ? { backgroundColor: background } : {}),
     children: [
+      // The mark hangs a column left, into the frame's inset, so a full column parts it from the text.
       Box({
         width: props.markCells,
         flexShrink: 0,
-        children: Text({ ...colored(props.colors.handle), children: props.handle }),
+        children: props.handle
+          ? Box({
+              position: 'absolute',
+              top: 0,
+              left: -1,
+              children: Text({ ...colored(props.colors.handle), children: props.handle }),
+            })
+          : [],
       }),
       Box({
         flexDirection: 'column',
