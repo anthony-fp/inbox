@@ -3351,7 +3351,10 @@ export const register: Register = on => {
         columnGap={space.buttonGap}
         rowGap={look === 'desktop' ? 1 : 0}
       >
-        {keys.map(keyedButton(rowId))}
+        {/* Desktop leads with the main action, so a task's Done keeps its place whatever step button follows. */}
+        {(look === 'desktop' ? [...keys.filter(k => k.isMain), ...keys.filter(k => !k.isMain)] : keys).map(
+          keyedButton(rowId),
+        )}
         {look === 'terminal' && keys.length > 0 && more.length > 0 ? <Text color={pal.muted}>·</Text> : null}
         {more.length > 0 ? (followUpLinks(rowId, more) ?? more.map(keyedButton(rowId, true))) : null}
       </Box>
