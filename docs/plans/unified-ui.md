@@ -128,6 +128,29 @@ These two would reverse choices Pete made, so they are listed only as options. N
 - Show the status line only while updating or failing.
 - Hide ages under 1 hour at rest.
 
+## On the `ideal-layout` branch
+
+The branch builds this structure for Pete to try before any of it merges into `revamp`.
+
+In it:
+
+- Findings grouped into Issues and Opportunities, one line each (decision 1).
+- The shared demo notice, `Questions · 4` labels, and a fold that counts every close, with an `N earlier` line.
+- Ages in a side column in the terminal and Codex, as on desktop.
+- The PR block in the terminal and desktop: review threads before failing checks under group titles, the verdict's reasons one per line, a quiet Dismiss, and PRs that wait on nobody as one line each under `Nothing to do`.
+- Terminal sections parted by a rule instead of cards (decision 3).
+- Fix and Do it labels on findings (decision 7). Explain keeps its key but leaves the row's buttons in the terminal and Codex (decision 6). Desktop takes no keys, so it still draws Explain.
+- Codex: flat sections, the row grid, neutral selection, three button levels, `(recommended)`, a delayed loading line, and an error strip with Reload.
+- Desktop: failures in the app's red (f233), and the settled ✓ on its text's line (f234).
+
+Held back:
+
+- Decision 2, the terminal's tree rails and per-row rules. Pete chose "Not yet".
+- Decision 4, a Codex PRs tab, which needs the `gh` spike.
+- Decision 5, counting a blocked PR in Needs you, which can change model-read text.
+- Failing checks collapsed to one line. The group title now says the count, so this matters less.
+- The layout tokens, the outline test and the contrast check. They follow once Pete approves the layout.
+
 ## Implementation
 
 The goal: a change to the structure is made once, and a look that does not follow it fails a check.
