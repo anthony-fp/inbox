@@ -194,7 +194,7 @@ export const PR_TONES: Record<PrStatus, 'needsYou' | 'done' | 'findings' | 'erro
 export type PrPress =
   | { action: 'thread-address' | 'thread-draft' | 'thread-discuss' | 'thread-open'; ref: string; thread: string }
   | { action: 'pr-conflicts' | 'pr-address-all' | 'pr-merge' | 'pr-open' | 'pr-dismiss' | 'pr-undo'; ref: string }
-  | { action: 'log'; ref: string; check: string }
+  | { action: 'check-fix' | 'log'; ref: string; check: string }
 
 /**
  * A press's outcome as the runner applies it: the ledger after it, the last
@@ -206,7 +206,7 @@ export type Applied =
 
 /** The row a PR press was drawn on, which keys its last action and its note. */
 export function prRowId(p: PrPress): string {
-  if (p.action === 'log') return checkRowId(p.ref, p.check)
+  if ('check' in p) return checkRowId(p.ref, p.check)
   if ('thread' in p) return threadRowId(p.ref, p.thread)
 
   return prMarkId(p.ref)
@@ -220,9 +220,11 @@ export function prRetryOf(
   last: LastAction | undefined,
   ref: string,
   thread: string | null,
+  check: string | null = null,
 ): { press: PrPress; kind: PressKind } | null {
   if (last?.delivery?.state !== 'failed') return null
   const a = last.action
+  if (check !== null) return a === 'check-fix' ? { press: { action: a, ref, check }, kind: last.kind } : null
   if (thread !== null && (a === 'thread-address' || a === 'thread-draft' || a === 'thread-discuss'))
     return { press: { action: a, ref, thread }, kind: last.kind }
   if (thread === null && (a === 'pr-conflicts' || a === 'pr-address-all' || a === 'pr-merge'))
@@ -323,6 +325,14 @@ export function applyPrPress(
         ledger: { ...ledger, prs: ledger.prs.filter(r => r !== p.ref) },
         lasts: { [markId]: record('mark', p.action, 'Dismissed') },
       })
+    case 'check-fix': {
+      const check = pr.checks.find(c => c.name === p.check && c.bucket === 'fail')
+      if (!check) return stale
+      return applied({
+        lasts: { [prCheckId(pr, check)]: record('handoff', p.action, 'Fix') },
+        effects: [send(prompts.fixCheck(pr, check))],
+      })
+    }
     case 'log': {
       const check = pr.checks.find(c => c.name === p.check)
       if (!check) return stale

@@ -2988,6 +2988,27 @@ export const register: Register = on => {
       line: { text: c.name },
       body: null,
       keys: () => [
+        ...[prRetryOf(lastActions[prCheckId(pr, c)], pr.ref, null, c.name)].flatMap(retry =>
+          retry
+            ? [
+                {
+                  key: `retry-${pr.ref}-${c.name}`,
+                  label: 'Try again',
+                  icon: '↻',
+                  kind: retry.kind,
+                  onPress: prPress(retry.press),
+                },
+              ]
+            : [],
+        ),
+        {
+          key: `fix-${pr.ref}-${c.name}`,
+          label: again(prCheckId(pr, c), 'check-fix', 'Fix'),
+          isMain: true,
+          hotkey: 'a',
+          kind: 'handoff',
+          onPress: prPress({ action: 'check-fix', ref: pr.ref, check: c.name }),
+        },
         {
           key: `log-${pr.ref}-${c.name}`,
           label: 'Open log',

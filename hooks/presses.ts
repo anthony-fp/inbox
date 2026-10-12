@@ -139,7 +139,7 @@ export type RowPress =
   | { action: 'explain' | 'done' | 'dismiss' | 'address' | 'discuss' | 'undo'; id: string }
   | { action: 'step'; id: string; step: number; label: string }
 
-/** The action ids of the mod's PR presses: on a review thread, on a PR block, and a check's Open log. */
+/** The action ids of the mod's PR presses: on a review thread, on a PR block, and a check's Fix and Open log. */
 export type PrActionId =
   | 'thread-address'
   | 'thread-draft'
@@ -150,6 +150,7 @@ export type PrActionId =
   | 'pr-merge'
   | 'pr-open'
   | 'pr-dismiss'
+  | 'check-fix'
   | 'log'
 
 /** The id a press's last action stores, the same in every host: `explain`, `step-2`, `thread-address`. */

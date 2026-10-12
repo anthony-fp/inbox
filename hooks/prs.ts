@@ -410,6 +410,11 @@ export const prompts = {
       "Check that it is still mergeable, merge it with the repo's usual merge method, and tell me the result.",
       'If it is not mergeable, or merging would need a bypass or a force, stop and tell me instead.',
     ].join(NL),
+  fixCheck: (pr: PrView, c: PrCheck) =>
+    [
+      `The ${c.workflow ? `${c.workflow} / ` : ''}${c.name} check failed on PR #${pr.number} (${pr.url}). Read its log${c.url ? ` (${c.url})` : ''}, find the cause, fix it in code, and verify.`,
+      'Ask me before you push, and tell me what failed and what you changed.',
+    ].join(NL),
   discuss: (pr: PrView, t: PrThread) =>
     [
       `Let's talk through this review comment on PR #${pr.number} (${pr.url}) before changing anything.`,

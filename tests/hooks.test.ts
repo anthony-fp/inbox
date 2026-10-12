@@ -1402,10 +1402,13 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   expect(failed).not.toBe(muted)
   ghAnswers.pop()
 
-  // The failing check follows the thread. It offers its log and no Fix, so it waits on the person until it passes.
   await pane.press({ key: 'next' })
   await clock.settle()
-  expect(await pane.find({ key: 'fix-acme/greet#12-test-key' })).toBeUndefined()
+  await clock.advance(PRESS_GUARD_MS)
+  await pane.press({ key: 'fix-acme/greet#12-test-key' })
+  expect(sent.at(-1)).toContain('The test check failed on PR #12')
+  await clock.settle()
+  expect((await pane.find({ key: 'fix-acme/greet#12-test-key' }))?.props.label).toMatch(/Fix again$/)
   await pane.press({ key: 'log-acme/greet#12-test-key' })
   await clock.settle()
   expect(ran.at(-1)).toEqual(['open', 'https://github.com/acme/greet/actions/runs/7/job/1'])

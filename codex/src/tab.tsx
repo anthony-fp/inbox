@@ -761,6 +761,7 @@ function prCheckRow(v: View, pr: PrView, c: PrCheck): Row {
       ? `Failed after ${took(c.finishedAt - c.startedAt)}`
       : 'Failed'
   const target = c.url ? 'the log' : `PR #${pr.number}`
+  const retry = prRetryOf(v.lastActions[id], pr.ref, null, c.name)
 
   return {
     id,
@@ -772,6 +773,22 @@ function prCheckRow(v: View, pr: PrView, c: PrCheck): Row {
     age: c.finishedAt === undefined ? undefined : shortAgo(v.at - c.finishedAt),
     body: <div class="muted">{ran}</div>,
     keys: [
+      ...(retry
+        ? [
+            {
+              label: 'Try again',
+              emphasis: 'normal' as const,
+              icon: 'retry' as const,
+              run: () => void act(id, retry.press),
+            },
+          ]
+        : []),
+      {
+        hotkey: 'a',
+        label: again(v, id, 'check-fix', 'Fix'),
+        emphasis: 'primary',
+        run: () => void act(id, { action: 'check-fix', ref: pr.ref, check: c.name }),
+      },
       {
         hotkey: 'o',
         label: 'Open log',
