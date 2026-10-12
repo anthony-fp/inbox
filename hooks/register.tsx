@@ -3942,13 +3942,18 @@ export const register: Register = on => {
     // half a line below them, so it does not read as the first tab's caption.
     // Desktop draws the tabs in a Client, whose region takes the pointer over each whole tab.
     // The tabs Box pads the bar by 1 column on each side, and puts 3 between the tabs and the status.
-    const tabSizes = desktopTabSizes(
-      TABS.map(({ id, label }) => ({ label, count: tabCounts[id] })),
-      e.props.bodyColumns - 2,
-    )
-    const tabsWidth = tabSizes.widths.reduce((sum, w) => sum + w, 0) + tabSizes.gap * (tabSizes.widths.length - 1)
-    const isStatusBelow =
-      look === 'desktop' && tabsWidth + 3 + Math.ceil(status.length / DESKTOP_CHARS_PER_CELL) + 2 > e.props.bodyColumns
+    // The tabs narrow before the status leaves their row, and take their full width again once it has.
+    const statusCells = 3 + Math.ceil(status.length / DESKTOP_CHARS_PER_CELL)
+    const sizesIn = (columns: number) => {
+      const sizes = desktopTabSizes(
+        TABS.map(({ id, label }) => ({ label, count: tabCounts[id] })),
+        columns,
+      )
+      return { sizes, width: sizes.widths.reduce((sum, w) => sum + w, 0) + sizes.gap * (sizes.widths.length - 1) }
+    }
+    const beside = sizesIn(e.props.bodyColumns - 2 - statusCells)
+    const isStatusBelow = look === 'desktop' && beside.width > e.props.bodyColumns - 2 - statusCells
+    const tabSizes = isStatusBelow ? sizesIn(e.props.bodyColumns - 2).sizes : beside.sizes
     const tabProps: TabsProps | null = hasClient
       ? {
           tabs: TABS.map(({ id, label }, n) => ({
@@ -4175,19 +4180,24 @@ export const register: Register = on => {
         </Box>
       )
     const section = (children: JSX.Element | JSX.Element[]) => (
-      <Box flexDirection="column" paddingY={blankLine} backgroundColor={isInline ? undefined : pal.card}>
+      <Box
+        flexDirection="column"
+        // Desktop rows pad themselves, so a section adds only the space above its label.
+        {...(look === 'desktop' ? { paddingTop: blankLine } : { paddingY: blankLine })}
+        backgroundColor={isInline ? undefined : pal.card}
+      >
         {children}
       </Box>
     )
     // A blank line in the tree, but for its │: under a title, so the children
     // do not crowd it, and between two-line entries, so they read apart. Inline
     // it is left out, so callers spread what this returns.
-    // On desktop a blank line is 38 px, twice a card's padding; an empty Box padded by 1 is 19 px, which matches it.
+    // Desktop rows pad themselves, so a label needs no gap under it.
     const titleGap = (hasChildren = true) =>
       isInline
         ? []
         : look === 'desktop'
-          ? [<Box paddingTop={1} />]
+          ? []
           : [
               <Box paddingLeft={1}>
                 <Text color={pal.line}>{hasChildren ? '│' : ' '}</Text>
@@ -4782,7 +4792,17 @@ export const register: Register = on => {
     // k and the selected row's keys are Buttons in a hidden Box.
     const drawn = (
       <Box flexDirection="column" minHeight={isInline ? undefined : e.props.scroll.bodyRows} backgroundColor={pal.body}>
-        {isDemo ? (
+        {isDemo && look === 'desktop' ? (
+          // Desktop keeps the notice quiet, on one line with its button, as the app words a passing note.
+          <Box flexDirection="row" alignItems="center" columnGap={2} paddingX={1} marginBottom={blankLine}>
+            <Box flexGrow={1} flexShrink={1}>
+              <Text wrap="wrap" color={pal.muted}>
+                {DEMO_BANNER}
+              </Text>
+            </Box>
+            <Button key="hide-demo" label="Hide demo" onPress={() => void setDemo($, false)} />
+          </Box>
+        ) : isDemo ? (
           <Box flexDirection="row" flexWrap="wrap" columnGap={2} paddingX={isInline ? 2 : 1} marginBottom={blankLine}>
             <Text wrap="wrap" bold color={pal.tone.needsYou}>
               {DEMO_BANNER}
