@@ -323,8 +323,9 @@
         font-family: var(--mono);
       }
       /*
-       * Actions are Codex's own pill buttons, size sm: the recommended option is solid, the row's other
-       * answers are a soft gray fill, and the follow-ups are plain text. Keys are an extra, so no key text shows.
+       * Actions are Codex's own pill buttons, size sm, in three levels: the one primary action is filled, the
+       * others are outlined, and the follow-ups are plain text, with Dismiss at the far right. Keys are an
+       * extra, so no key text shows.
        */
       .keys {
         display: flex;
@@ -339,14 +340,15 @@
         gap: 5px;
         min-height: 26px;
         padding: 3px 11px;
+        border: 1px solid color-mix(in oklab, var(--text) 28%, transparent);
         border-radius: 999px;
-        background: var(--soft);
+        background: transparent;
         font-weight: 400;
         text-align: center;
         white-space: nowrap;
       }
       .key:not(:disabled):hover {
-        background: var(--soft-hover);
+        background: var(--soft);
       }
       .key:focus-visible {
         outline-width: 2px;
@@ -354,6 +356,7 @@
         border-radius: 999px;
       }
       .key.primary {
+        border-color: transparent;
         background: var(--text);
         color: var(--bg);
       }
@@ -365,9 +368,10 @@
         width: 14px;
         height: 14px;
       }
-      /* A follow-up is plain text: muted, the text color under the pointer, with no fill and no padding. */
+      /* A follow-up is plain text: muted, the text color under the pointer, with no fill, border or padding. */
       .key.ghost {
-        padding: 0;
+        padding: 0 4px;
+        border-color: transparent;
         background: none;
         color: var(--muted);
       }
@@ -375,16 +379,8 @@
         background: none;
         color: var(--text);
       }
-      .keys.follow-ups {
-        column-gap: 16px;
-      }
-      .key-groups {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px 16px;
-      }
-      .key-groups > .keys {
-        min-width: 0;
+      .key.dismiss {
+        margin-left: auto;
       }
       .actions {
         display: flex;
@@ -506,6 +502,7 @@
       /* Undo's fill is the time it has left. The pill keeps the line's height, so the row does not grow. */
       .key.undo {
         flex: none;
+        border-color: transparent;
         position: relative;
         isolation: isolate;
         overflow: hidden;
