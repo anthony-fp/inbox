@@ -150,6 +150,7 @@ import {
   CLOSED_MARKS,
   FINDING_GROUPS,
   DEMO_NOTICE,
+  groupEmptyText,
   closedTotal,
   earlierLabel,
   foldLabel,
@@ -4103,6 +4104,15 @@ export const register: Register = on => {
     // A group's title: its name, and how many of its items are open. An empty
     // group's own line says it has none, so its title has no count.
     // Desktop draws a group's title at the rows' text column.
+    // A group's empty line, at its rows' text column.
+    const groupEmpty = (title: string) =>
+      look === 'desktop'
+        ? desktopFrame({
+            key: `empty-${title}`,
+            children: <Text color={pal.muted}>{groupEmptyText(title)}</Text>,
+          })
+        : // A blank mark keeps the text at the rows' column.
+          treeRow('last', <Text> </Text>, <Text color={pal.muted}>{groupEmptyText(title)}</Text>, `empty-${title}`)
     const groupTitle = (title: string, count: number) =>
       look === 'desktop' ? (
         desktopFrame({
@@ -4449,11 +4459,11 @@ export const register: Register = on => {
       )
     }
     const needsYouView = () => {
-      // A group with no open, settled or closed items is left out.
+      // Every group shows, with its empty line while it has nothing open, unless the inbox could not be read.
       const groups = needsYouGroups.flatMap(g => {
         const { entries } = g
         const closed = closedShown(view.needsYou.closed[g.list], settledIn(entries))
-        if (entries.length === 0 && closed.length === 0) return []
+        if (isUnread) return []
         const isUnfolded = unfolded.includes(g.kind)
         // The group's children in order: its open items, then the fold row and, unfolded, the closed items.
         const open = divided(
@@ -4475,12 +4485,15 @@ export const register: Register = on => {
         return [
           section([
             groupTitle(g.title, g.rows.filter(r => !r.fold).length),
-            ...(open.length > 0 ? [...titleGap(), ...open] : []),
+            ...titleGap(),
+            ...(open.length > 0 ? open : [groupEmpty(g.title)]),
             ...tail,
           ]),
         ]
       })
-      const isNothing = needsYouGroups.every(g => g.entries.length === 0)
+      const isNothing = needsYouGroups.every(
+        g => g.entries.length === 0 && closedTotal(view.needsYou.closed[g.list], settledIn(g.entries)) === 0,
+      )
       // A saved session the store could not read is unknown, not empty, so it never reads as "Nothing needs you."
       const unread = isUnread
         ? [
@@ -4496,8 +4509,8 @@ export const register: Register = on => {
             ),
           ]
         : []
-      if (isNothing && groups.length === 0 && !stop && unread.length === 0)
-        return emptyState(emptyText('needsYou', 'Claude'))
+      // A tab that has never had anything keeps its centered text, whose hint says what comes here.
+      if (isNothing && !stop && unread.length === 0) return emptyState(emptyText('needsYou', 'Claude'))
       // A stop shows above the list. An API error can be resumed from here; the other stops
       // need a fix outside the session first, so they only say what it is.
       const outside = stop
@@ -4539,19 +4552,7 @@ export const register: Register = on => {
           ]
         : []
 
-      // With closed items or a stop still shown, the empty text is one line above them.
-      const nothing =
-        isNothing && unread.length === 0
-          ? [
-              section(
-                <Box paddingLeft={2}>
-                  <Text color={pal.muted}>{emptyText('needsYou', 'Claude').title}</Text>
-                </Box>,
-              ),
-            ]
-          : []
-
-      return sections([...outside, ...unread, ...nothing, ...groups])
+      return sections([...outside, ...unread, ...groups])
     }
 
     // A finding stays listed until Claude closes it or the person dismisses it. Then it settles and moves to Closed.
@@ -4569,6 +4570,7 @@ export const register: Register = on => {
         section([
           groupTitle(g.title, rowsIn(g.entries).filter(r => !r.fold).length),
           ...titleGap(),
+          ...(g.entries.length === 0 ? [groupEmpty(g.title)] : []),
           ...divided(
             g.entries.map((x, n) =>
               'row' in x ? listRow(x.row, childPos(n, g.entries.length)) : settledRow(x, childPos(n, g.entries.length)),
@@ -4579,18 +4581,11 @@ export const register: Register = on => {
           ),
         ]),
       )
-      // Closed findings are one fold under both groups. With none open, the empty text is one line above it.
+      // Closed findings are one fold under both groups.
       const tail =
         closed.length > 0
           ? [
               section([
-                ...(findingEntries.length === 0
-                  ? [
-                      <Box paddingLeft={2}>
-                        <Text color={pal.muted}>No open findings.</Text>
-                      </Box>,
-                    ]
-                  : []),
                 ...closedFold(
                   'finding',
                   closed,

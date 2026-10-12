@@ -27,6 +27,7 @@ import {
   earlierLabel,
   drawnLists,
   emptyText,
+  groupEmptyText,
   entryId,
   TABS,
   FINDING_GROUPS,
@@ -1280,8 +1281,6 @@ function ItemGroup({
 }) {
   const title = kind === 'question' ? 'Questions' : 'Tasks'
   const closed = itemsClosed(v, kind, entries)
-  // A group with no open, settled or closed items is left out.
-  if (entries.length === 0 && closed.length === 0) return null
   // A leaving row no longer counts.
   const rows = entries.flatMap(x => ('row' in x && drawnRows.get(x.row.id)?.track.state !== 'leaving' ? [x.row] : []))
 
@@ -1289,6 +1288,7 @@ function ItemGroup({
     <section>
       {/* A row handed to Codex stays listed but leaves the count. */}
       <GroupTitle title={title} count={rows.filter(r => !r.fold).length} />
+      {entries.length === 0 ? <div class="group-empty">{groupEmptyText(title)}</div> : null}
       <Entries entries={entries} group={kind} all={all} now={now} />
       <ClosedFold
         group={kind}
@@ -1407,7 +1407,7 @@ function NeedsYou({ v, lists, now }: { v: View; lists: Lists; now: number }) {
       </div>
     )
 
-  // With closed items still shown, the empty text is one line above them.
+  // A tab that has had items keeps both groups, each with its empty line while it has nothing open.
   return (
     <main>
       {notHeard ? (
@@ -1416,10 +1416,6 @@ function NeedsYou({ v, lists, now }: { v: View; lists: Lists; now: number }) {
             {notHeard[0]}
             <div class="muted">{notHeard[1]}</div>
           </div>
-        </section>
-      ) : isNothing ? (
-        <section>
-          <div class="group-title empty-line">{emptyText('needsYou', 'Codex').title}</div>
         </section>
       ) : null}
       <ItemGroup v={v} kind="question" entries={lists.questions} all={all} now={now} />
@@ -1446,7 +1442,7 @@ function Findings({ v, lists, now }: { v: View; lists: Lists; now: number }) {
       </div>
     )
 
-  // Closed findings are one fold under both groups. With none open, the empty text is one line above it.
+  // Closed findings are one fold under both groups.
   return (
     <main>
       {lists.findingGroups.map(g => {
@@ -1457,13 +1453,13 @@ function Findings({ v, lists, now }: { v: View; lists: Lists; now: number }) {
         return (
           <section>
             <GroupTitle title={g.title} count={rows.filter(r => !r.fold).length} />
+            {g.entries.length === 0 ? <div class="group-empty">{groupEmptyText(g.title)}</div> : null}
             <Entries entries={g.entries} group="finding" all={lists.byTab.findings} now={now} />
           </section>
         )
       })}
       {closed.length > 0 ? (
         <section>
-          {isNothing ? <div class="group-title empty-line">No open findings.</div> : null}
           <ClosedFold
             group="finding"
             closed={closed}

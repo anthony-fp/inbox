@@ -1186,7 +1186,8 @@ test('Claude closes an item or finding that no longer applies, by the id it read
   // The closed finding leaves its list for the Findings tab's own Closed fold.
   await pane.press({ key: 'tab-findings' })
   expect(await pane.find({ key: 'row-f3' })).toBeUndefined()
-  expect(await pane.find({ text: /^No open findings\.$/ })).toBeDefined()
+  expect(await pane.find({ text: 'No open issues' })).toBeDefined()
+  expect(await pane.find({ text: 'No open opportunities' })).toBeDefined()
   expect((await pane.find({ key: 'fold-finding' }))?.props.label).toBe('▸ 1 closed')
   await pane.press({ key: 'fold-finding' })
   expect(await pane.find({ text: /^README is stale$/ })).toBeDefined()

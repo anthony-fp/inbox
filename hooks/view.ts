@@ -189,6 +189,14 @@ export function shortAgo(ms: number): string {
   return age === 'just now' ? 'now' : age.replace(/ ago$/, '')
 }
 
+/**
+ * The line in place of a group's rows while it has none open, as "No open questions". A tab keeps every group, so
+ * it keeps its shape whatever is open.
+ */
+export function groupEmptyText(title: string): string {
+  return `No open ${title.toLowerCase()}`
+}
+
 /** The line above a demo's rows. */
 export const DEMO_NOTICE = 'Sample entries. Presses send nothing.'
 
@@ -418,7 +426,7 @@ export type DrawnLists<R> = {
   questions: DrawnEntry<R>[]
   tasks: DrawnEntry<R>[]
   findings: DrawnEntry<R>[]
-  /** `findings` split by kind, in `FINDING_GROUPS` order. A kind with no entries is left out. */
+  /** `findings` split by kind, in `FINDING_GROUPS` order. Every kind has a group, empty or not. */
   findingGroups: { kind: Finding['kind']; title: string; entries: DrawnEntry<R>[] }[]
   byTab: { needsYou: R[]; findings: R[] }
 }
@@ -440,10 +448,11 @@ export function drawnLists<R>(
     })
   const questions = entries(v.needsYou.questions)
   const tasks = entries(v.needsYou.tasks)
-  const findingGroups = (Object.keys(FINDING_GROUPS) as Finding['kind'][]).flatMap(kind => {
-    const kindEntries = entries(v.findings.rows.filter(r => r.finding?.kind === kind))
-    return kindEntries.length === 0 ? [] : [{ kind, title: FINDING_GROUPS[kind].title, entries: kindEntries }]
-  })
+  const findingGroups = (Object.keys(FINDING_GROUPS) as Finding['kind'][]).map(kind => ({
+    kind,
+    title: FINDING_GROUPS[kind].title,
+    entries: entries(v.findings.rows.filter(r => r.finding?.kind === kind)),
+  }))
   const findings = findingGroups.flatMap(g => g.entries)
 
   return {
