@@ -1,14 +1,15 @@
 import type { ClientModule } from 'claude-code'
 
 /**
- * A list's "N closed ›" line in the desktop pane. A Button takes a click only
+ * A list's "N closed" line in the desktop pane. A Button takes a click only
  * on its label, so the line is drawn here instead: this region gets the
  * pointer over every cell of the line, draws the hover, and posts the fold
  * state the click asks for to the hooks module, which sets it.
  */
 
 export type FoldProps = {
-  /** The mark column's width, in columns: the label starts where the rows' text does. */
+  /** The mark column's width, in columns: the label starts where the rows' text does. The hooks module draws the
+   * chevron there. */
   markCells: number
   count: number
   isUnfolded: boolean
@@ -18,38 +19,25 @@ export type FoldProps = {
   colors: { rest: string | null; text: string | null; hover: string | null; hoverText: string | null }
 }
 
-/** `pending` is the state the last click asked for. It draws over the props for `PENDING_MS`. */
-type State = { hover: boolean; pending: { isUnfolded: boolean; seq: number } | null }
-
-/** How long a click's state draws over the props. If the post was lost, the arrow turns back after this. */
-const PENDING_MS = 1000
+type State = { hover: boolean }
 
 const Fold: ClientModule<FoldProps, State> = (props, surface) => {
   const { Box, Text } = surface.elements
   const hover = surface.state?.hover ?? false
-  const isUnfolded = surface.state?.pending?.isUnfolded ?? props.isUnfolded
   // Reads the state when an event arrives: two events can both arrive before the next call.
-  const now = (): State => surface.state ?? { hover: false, pending: null }
   const set = (next: State) => {
-    const was = now()
-    if (next.hover !== was.hover || next.pending !== was.pending) surface.setState(next)
+    if (next.hover !== (surface.state?.hover ?? false)) surface.setState(next)
   }
   surface.onPointer(e => {
-    if (e.type === 'leave') return set({ ...now(), hover: false })
+    if (e.type === 'leave') return set({ hover: false })
     // While a button is held, moves arrive past the region's edges too. `surface.rows` rounds the
     // padded height down, so the padding is added back.
     const inside = e.x >= 0 && e.x < surface.columns && e.y >= 0 && e.y < surface.rows + 2 * props.padY
     if (e.type === 'down' && e.button === 'left') {
       // The target comes from the drawn props, so a second click before the redraw asks for the same state.
-      const target = !props.isUnfolded
-      const seq = (now().pending?.seq ?? 0) + 1
-      set({ hover: true, pending: { isUnfolded: target, seq } })
-      surface.post({ isUnfolded: target })
-      const stop = surface.every(PENDING_MS, () => {
-        stop()
-        if (now().pending?.seq === seq) set({ ...now(), pending: null })
-      })
-    } else if (e.type === 'up' || e.type === 'move' || e.type === 'enter') set({ ...now(), hover: inside })
+      set({ hover: true })
+      surface.post({ isUnfolded: !props.isUnfolded })
+    } else if (e.type === 'up' || e.type === 'move' || e.type === 'enter') set({ hover: inside })
   })
 
   const background = hover ? props.colors.hover : props.colors.rest
@@ -64,7 +52,7 @@ const Fold: ClientModule<FoldProps, State> = (props, surface) => {
     ...(background ? { backgroundColor: background } : {}),
     children: [
       Box({ width: props.markCells, flexShrink: 0 }),
-      Text({ ...(color ? { color } : {}), children: `${props.count} closed ${isUnfolded ? '⌄' : '›'}` }),
+      Text({ ...(color ? { color } : {}), children: `${props.count} closed` }),
     ],
   })
 }

@@ -263,6 +263,24 @@ function undoSvg(fraction: number, leftMs: number): string {
   )
 }
 /**
+ * The chevron in a desktop fold line's mark column: right while folded, down while unfolded. It is an Svg, the
+ * only icon the pane can draw, sized to the fold line, so it sits in the mark column at the line's middle.
+ */
+function chevronSvg(isUnfolded: boolean): string {
+  const w = FRAME_INSET_PT + DESKTOP_MARK_CELLS * DESKTOP_CELL_PT
+  const h = 2 * ROW_PAD_PT + DESKTOP_LINE_PT
+  const x = FRAME_INSET_PT + 0.5
+  const y = h / 2
+  const points = isUnfolded
+    ? `${x},${y - 2} ${x + 3.5},${y + 1.5} ${x + 7},${y - 2}`
+    : `${x + 1.5},${y - 3.5} ${x + 5},${y} ${x + 1.5},${y + 3.5}`
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
+    `<style>polyline{stroke:#6f6e6a}@media (prefers-color-scheme: dark){polyline{stroke:#c3c2b8}}</style>` +
+    `<polyline points="${points}" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+  )
+}
+/**
  * A desktop row's padding above and below its text, in a Client's lines: the shared ROW_PAD_PT. The rows sit
  * flush. A Box in the hooks tree counts padding in half lines, so it pads twice this.
  */
@@ -279,7 +297,9 @@ const ROW_COLUMNS = {
   desktop: { lead: 1, handleAt: 1, textAt: 3 },
 } as const
 // A desktop list line's mark column and its side column, for the age, in columns. See docs/plans/desktop-layout.md.
-const DESKTOP_MARK_CELLS = 2
+const DESKTOP_MARK_CELLS = 1
+// How far a row frame's transparent border insets its content, in points: 13.2 pt, measured in the pane (2026-10-11).
+const FRAME_INSET_PT = 13.2
 const DESKTOP_SIDE_CELLS = 5
 const SELECTED_GAP_PT = 3
 /** An age for the desktop side column: "12m", or "now". */
@@ -4258,26 +4278,37 @@ export const register: Register = on => {
     // On desktop a Client takes a click on every cell of the line, where a Button takes one only on its label.
     const foldRow = (kind: Item['kind'] | 'finding', count: number, isUnfolded: boolean) =>
       hasClient ? (
+        // The chevron Svg sits under the Client, which takes the clicks, as Undo's does.
         <Box key={`fold-row-${kind}`} flexDirection="row" overflow="hidden">
-          <elements.Client
-            key={`fold-${kind}`}
-            module="./fold-client.tsx"
-            width="100%"
-            props={
-              {
-                markCells: DESKTOP_MARK_CELLS,
-                count,
-                isUnfolded,
-                padY: DESKTOP_ROW_PAD,
-                colors: {
-                  rest: isInline ? null : (pal.card ?? null),
-                  text: pal.muted,
-                  hover: pal.raised,
-                  hoverText: pal.raisedText ?? null,
-                },
-              } satisfies FoldProps
-            }
-          />
+          {'Svg' in elements ? (
+            <elements.Svg
+              source={chevronSvg(isUnfolded)}
+              alt={isUnfolded ? 'Unfolded' : 'Folded'}
+              width={FRAME_INSET_PT + DESKTOP_MARK_CELLS * DESKTOP_CELL_PT}
+              height={2 * ROW_PAD_PT + DESKTOP_LINE_PT}
+            />
+          ) : null}
+          <Box position="absolute" top={0} left={0} width="100%">
+            <elements.Client
+              key={`fold-${kind}`}
+              module="./fold-client.tsx"
+              width="100%"
+              props={
+                {
+                  markCells: DESKTOP_MARK_CELLS,
+                  count,
+                  isUnfolded,
+                  padY: DESKTOP_ROW_PAD,
+                  colors: {
+                    rest: isInline ? null : (pal.card ?? null),
+                    text: pal.muted,
+                    hover: pal.raised,
+                    hoverText: pal.raisedText ?? null,
+                  },
+                } satisfies FoldProps
+              }
+            />
+          </Box>
         </Box>
       ) : (
         // One Button for the arrow and the count; the two spaces put the count where other rows' text starts.
