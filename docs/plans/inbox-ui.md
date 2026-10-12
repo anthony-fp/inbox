@@ -80,7 +80,7 @@ A row has two forms:
 | Finding | Findings | Two lines in every client: `▲ Issue · 3m ago` or `✦ Opportunity · 3m ago`, then the title | Detail, "Relevant file: path" |
 | PR block | PRs | Always open: `#12 title`, readiness, one line of facts | PR actions |
 | PR check | PRs, inside the PR block | Two lines: `✗ Failing check`, then the check's name. | Fix, Open log |
-| Review thread | PRs | Two lines: `◦ Review thread · 2h ago`, with the comment count and "outdated" when they apply, then `api.ts:40 latest comment` | Comments as Markdown |
+| Review thread | PRs | Two lines: `◦ Review thread · 2h ago`, with the comment count and "outdated" when they apply, then `api.ts:40 latest comment` | Comments as Markdown, and the file:line as a link to the comment. Open comment opens the same page |
 | Review thread, sent | PRs | Folds to `✓ Review thread · Addressed 4h ago`, then the latest comment's first line | Unfolds when a newer comment arrives |
 | Review thread, lines changed | PRs | Folds with no ✓, noted `Lines changed since this comment · still open on GitHub` | Nothing says the change fixed it, so it gets no ✓ |
 | Stop | Top of the band and pane | One red line: what stopped and what to do | Nothing |

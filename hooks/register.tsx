@@ -2789,7 +2789,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const elements = $.ui.resolve(e)
-    const { Box, Button, Markdown, Text } = elements
+    const { Box, Button, Link, Markdown, Text } = elements
     // Desktop draws every Button as a native button, and only clicks reach the pane: no letters, key hints or hidden hotkeys.
     const look = lookOf(e.surface)
     paneLook = look
@@ -3026,7 +3026,10 @@ export const register: Register = on => {
         <Box flexDirection="column">
           {rest ? <Markdown text={clipLabel(rest, 1200)} /> : null}
           <Text color={pal.muted} wrap="wrap">
-            {threadWhere(t)}
+            {/* As Open comment does, it opens the latest reply, else the first comment. */}
+            <Link href={t.reply?.url || t.url}>
+              <Text underline>{threadWhere(t)}</Text>
+            </Link>
             {DOT}@{t.author}
           </Text>
           {t.reply ? (
@@ -3093,7 +3096,7 @@ export const register: Register = on => {
           },
           {
             key: `open-${t.id}`,
-            label: 'Open',
+            label: 'Open comment',
             icon: '↗',
             hotkey: 'o',
             kind: 'local',

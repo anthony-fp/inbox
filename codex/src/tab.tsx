@@ -702,7 +702,12 @@ function prThreadRow(v: View, pr: PrView, t: PrThread): Row {
     body: (
       <div>
         {rest ? <p class="quote">{inlineHtml(clipLabel(rest, 1200))}</p> : null}
-        <p class="muted">{`${where}${DOT}@${t.author}`}</p>
+        <p class="muted">
+          <button type="button" class="link" onClick={press('thread-open', opening('the comment'))}>
+            {where}
+          </button>
+          {`${DOT}@${t.author}`}
+        </p>
         {t.reply ? (
           <p class="quote">
             <b>@{t.reply.author}:</b> {inlineHtml(clipLabel(readableComment(t.reply.body), 1200))}
@@ -735,7 +740,7 @@ function prThreadRow(v: View, pr: PrView, t: PrThread): Row {
       },
       {
         hotkey: 'o',
-        label: 'Open',
+        label: 'Open comment',
         emphasis: 'normal',
         icon: 'open',
         run: press('thread-open', opening('the comment')),
