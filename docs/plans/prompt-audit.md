@@ -247,7 +247,17 @@ Two other wordings were dropped:
 - **Telling the agent to ask "Ready to start on <todo>. Proceed?"** It made Sonnet ask about its own findings too, in 5 or 6 of 6 runs against 0 of 6 before.
 - **A `NEW`-line rule for todos.** It made Sonnet close or ask about findings in other cases. The separate `TODO:` line, with the code check, did not.
 
-`dismissed-question-stays-closed` is flaky on Sonnet with or without this change: 7 of 10 before, 5 of 10 after. Its failures come from `NEW` lines for the reply's own question, not from `TODO:` lines.
+The first `TODO:` rule also made Sonnet ask a dismissed question again: 9 of 10 runs kept it closed without the rule, 2 to 4 of 10 with it. A shorter rule kept it closed in 10 of 10. Sonnet then wrote `TODO:` lines for work the reply had just done, so code drops a todo whose key words the reply mostly names.
+
+**A finding the person sets aside stays open.** `FIXED` now asks for the change that fixed the finding, and says that a person setting it aside is not a fix.
+
+| Case, 10 runs | Sonnet before | Sonnet after | Codex before | Codex after |
+| --- | --- | --- | --- | --- |
+| A finding the person set aside stays open | 7 | 10 | 4 | 10 |
+| A finding the person put off stays open | 10 | 10 | 10 | 10 |
+| A finding the person or agent fixed closes | 20 of 20 | 20 of 20 | 20 of 20 | 20 of 20 |
+
+**An unrelated question stays open.** Sonnet closed an open question as "no longer applies: not part of this work" in up to 8 of 10 runs of `done-message-independent-task`. The `CLOSED` rule now says an item outside the current work still applies, and that case kept the question in 9 of 10. Sonnet still varies here: 1 of 3 in a later full run.
 
 ## Proposed order
 

@@ -142,8 +142,8 @@ GOAL: what this session is for, at most 12 words. Keep the previous goal unless 
 DONE: one finished outcome, at most 8 words. Up to 4 DONE lines, oldest first, keeping the most recent. Outcomes, not activity: "PR #12 opened", not "ran gh".
 NOW: where the work stands at the end of this reply, at most 12 words. Name what it waits on, if anything. "-" when no work has started.
 RUNNING: something still running that the person may open, as "name: URL or port". Dev servers, simulators, background jobs. Omit anything the agent stopped. Zero or more lines.
-CLOSED: <id> | the outcome, at most 8 words, in one of three forms. When the person answered in <person>, write their answer. Otherwise write "done: <what the agent did>" when the work is done, or "no longer applies: <why>". An option the agent picked on its own, or an option the work made moot, is not the person's answer: write it in the "done:" or "no longer applies:" form. One line for each item in <open> the person answered in <person> (including "all recommended", "go", "yes to all", numbered answers), or that the reply or <activity> shows is done or no longer applies. A person asking what an item means has not answered it, and a reply explaining it does not close it. When <person> asks to run an item's command and the reply says it ran, that item is done. So is an item whose command the person ran themselves, per <person>, when its output shows it worked.
-FIXED: <id> | what fixed it, at most 8 words. One line for each finding in <findings> that the reply, <activity> or <person> shows was fixed. Never for a finding the person puts off or sets aside: it stays open until they dismiss it.
+CLOSED: <id> | the outcome, at most 8 words, in one of three forms. When the person answered in <person>, write their answer. Otherwise write "done: <what the agent did>" when the work is done, or "no longer applies: <why>". An option the agent picked on its own, or an option the work made moot, is not the person's answer: write it in the "done:" or "no longer applies:" form. One line for each item in <open> the person answered in <person> (including "all recommended", "go", "yes to all", numbered answers), or that the reply or <activity> shows is done or no longer applies. A person asking what an item means has not answered it, and a reply explaining it does not close it. When <person> asks to run an item's command and the reply says it ran, that item is done. So is an item whose command the person ran themselves, per <person>, when its output shows it worked. An item that has nothing to do with this exchange stays open: being outside the current work does not make it no longer apply.
+FIXED: <id> | the change that fixed it, at most 8 words. One line for each finding in <findings> whose problem the reply, <activity> or <person> shows was fixed by a change to the work. Only a change fixes a finding. When the person puts a finding off, sets it aside or says it does not matter, write no FIXED line: it stays open until they dismiss it.
 ASKED: <id> | <item>
   For a finding in <findings> that a NEW line or an item in <open> asks the person about. item: "new N" for the Nth NEW line in your answer, or an id from <open>. The item takes the finding's place, so the person sees it once.
 NEW: <kind> | <label> | <ask> | <options> | <rec>
@@ -168,7 +168,7 @@ HELP: <item> | <kind> | <value> | <name>
   name: what a copy, command or link is, at most 3 words ("settings snippet", "removal command", "token page"), or "-".
   Use only paths, commands, text and URLs that appear in <reply> or <activity>. Never invent one.
 TODO: <work>
-  One line for each todo in <person> that the reply neither takes up nor asks about. A todo is work the person sets aside for later, as in "todo: X" or "later, let's X". Nothing else is a todo, and work already in <open> or <findings> is not one, even when the person puts it off. work: what to start, at most 12 words, worded to follow "Ready to start on".
+  For a todo in <person>: work the person sets aside for later, as in "todo: X", and the reply leaves undone. work: at most 12 words, worded to follow "Ready to start on".
 
 Write plainly. No jargon, no filler, no markdown.`
 }
@@ -649,7 +649,7 @@ export function parseReply(text: string, source: string | null = null): Update |
       }
       added.push(item)
       newLines.push(item)
-    } else if (key === 'TODO' && value) {
+    } else if (key === 'TODO' && value && !isTakenUp(value, source)) {
       todos.push(value)
     } else if (key === 'UPDATE') {
       const [target, options, rec] = value.split('|').map(dash)
@@ -682,6 +682,17 @@ export function parseReply(text: string, source: string | null = null): Update |
   return seen === 0
     ? null
     : { card: { ...card, done: card.done.slice(-4) }, closed, added, helped, updated, asked, todos }
+}
+
+/**
+ * Whether the reply already names most of a todo's key words, as "Added --verbose" does for "add a --verbose flag".
+ * The model writes TODO lines for work the reply just did.
+ */
+function isTakenUp(work: string, reply: string | null): boolean {
+  const key = [...keyWords(work)]
+  const said = new Set(words(reply ?? ''))
+
+  return key.length > 0 && key.filter(w => said.has(w)).length * 2 >= key.length
 }
 
 /** The question a todo the person set aside becomes. */

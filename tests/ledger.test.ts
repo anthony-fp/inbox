@@ -69,16 +69,17 @@ describe('parseReply', () => {
     expect(lettered?.rec).toBe('A: Cancel button')
   })
 
-  test('a TODO line becomes a question about starting it, unless it rewords an open finding', () => {
+  test('a TODO line becomes a question about starting it, unless it rewords an open finding or the reply did it', () => {
     const u = parseReply(
       [
         'TODO: caching the product API responses.',
         'TODO: add install steps to the README',
+        'TODO: add a --verbose flag',
         'NEW: decide | - | Which port? | 3000 / 3001 | -',
         'HELP: new 1 | link | https://example.com/ports | ports page',
         'TODO: -',
       ].join('\n'),
-      'See https://example.com/ports',
+      'Added --verbose. See https://example.com/ports',
     )!
     const finding = {
       id: 'f4',
