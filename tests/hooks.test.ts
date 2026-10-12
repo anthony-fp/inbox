@@ -340,7 +340,7 @@ test('a question’s handle is the number a typed answer reaches, and the band c
   const band = await $.ui.mount({ plugin: 'inbox', surface: 'terminal', ...BAND })
   const handle = async (id: string) => (await pane.find({ key: `select-${id}` }))?.props.label
   // The latest reply's questions lead, numbered as a typed answer reaches them, and older ones take a bullet.
-  expect(await pane.find({ key: 'explain-i3' })).toBeDefined()
+  expect(await pane.find({ key: 'explain-i3-key' })).toBeDefined()
   expect([await handle('i3'), await handle('i5'), await handle('i1'), await handle('i2')]).toEqual([
     '1)',
     '2)',
@@ -734,8 +734,8 @@ test('the band is [Open inbox] and the counts, the same while working and after 
   panesOpened = []
   await standing.press({ key: 'open-inbox' })
   expect(panesOpened).toEqual(['inbox'])
-  expect(await pane.find({ key: 'explain-i1' })).toBeDefined()
-  expect(await pane.find({ key: 'explain-i2' })).toBeUndefined()
+  expect(await pane.find({ key: 'explain-i1-key' })).toBeDefined()
+  expect(await pane.find({ key: 'explain-i2-key' })).toBeUndefined()
 })
 
 test('resumed into a conversation it cannot fork yet, it catches up from the transcript before any reply', async ($, on) => {
@@ -794,13 +794,13 @@ test('after a failed update, the next reply catches up over the whole conversati
   // An open item says how long it has waited.
   expect(await pane.find({ text: /\u2002·\u2002just now/ })).toBeDefined()
   // Only the selected item shows its actions; Next moves the selection.
-  expect(await pane.find({ key: 'explain-i2' })).toBeUndefined()
+  expect(await pane.find({ key: 'explain-i2-key' })).toBeUndefined()
   await pane.press({ key: 'next' })
-  expect(await pane.find({ key: 'explain-i2' })).toBeDefined()
+  expect(await pane.find({ key: 'explain-i2-key' })).toBeDefined()
   await pane.press({ key: 'previous' })
   // Explain asks Claude about the item and leaves it open.
   await clock.advance(PRESS_GUARD_MS)
-  await pane.press({ key: 'explain-i1' })
+  await pane.press({ key: 'explain-i1-key' })
   expect(sent.at(-1)).toContain('"Use Node or Python?"\nOptions: Node / Python')
   expect(await pane.find({ text: /Use Node or Python\?/ })).toBeDefined()
 
@@ -889,7 +889,7 @@ test('a finding Claude records while the pane shows an empty tab brings the pane
   expect(sent.at(-1)).toContain('Please address this finding you recorded:\nIssue: Retry loop never backs off')
   // It folds to what was sent and leaves the finding count. It stays listed.
   await clock.settle()
-  expect(await pane.find({ text: /Addressed just now/ })).toBeDefined()
+  expect(await pane.find({ text: /Handed off just now/ })).toBeDefined()
   expect(await band.find({ text: /Findings 1/ })).toBeUndefined()
   await clock.advance(9000)
   expect(await pane.find({ text: /Retry loop never backs off/ })).toBeDefined()
@@ -898,7 +898,7 @@ test('a finding Claude records while the pane shows an empty tab brings the pane
   await $.turn.start({ text: sent.at(-1) ?? '', turnId: 't1' })
   await $.turn.complete({ answer: 'Added a backoff.', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
   await clock.settle()
-  expect((await pane.find({ key: 'address-f1-key' }))?.props.label).toBe('Address again')
+  expect((await pane.find({ key: 'address-f1-key' }))?.props.label).toBe('Fix again')
   expect(await band.find({ text: /Findings 1/ })).toBeDefined()
 
   // A finding recorded while Findings shows draws its bar in place, without a jump, and the open row stays open.
@@ -1065,7 +1065,7 @@ test('a press during a turn reads Queued until its prompt enters, and one that w
 
   // A turn runs, so the mod's prompts wait behind it.
   submitAnswer = 'hold'
-  await pane.press({ key: 'explain-i1' })
+  await pane.press({ key: 'explain-i1-key' })
   await clock.settle()
   expect(await pane.find({ text: /^\u2002·\u2002Queued: Explain just now$/ })).toBeDefined()
   await pane.press({ key: 'select-i2' })
@@ -1156,7 +1156,7 @@ test('Claude closes an item or finding that no longer applies, by the id it read
   await pane.press({ key: 'tab-needsYou' })
   // An Explain waits behind the running turn.
   submitAnswer = 'hold'
-  await pane.press({ key: 'explain-i1' })
+  await pane.press({ key: 'explain-i1-key' })
   await clock.settle()
   expect(await pane.find({ text: /^\u2002·\u2002Queued: Explain/ })).toBeDefined()
   // The user answered i1 in their own message: it closes with their answer, shown in place.
@@ -1218,7 +1218,7 @@ test('Dismiss settles a question in place with Undo, which brings it back open a
   expect(await pane.find({ key: 'settled-i1' })).toBeDefined()
   expect(await pane.find({ text: /^Dismissed$/ })).toBeDefined()
   // No other row opens in its place, where a second click would land.
-  expect(await pane.find({ key: 'explain-i2' })).toBeUndefined()
+  expect(await pane.find({ key: 'explain-i2-key' })).toBeUndefined()
   expect(await prompt('carry on')).toContain(closedLine)
   // A reload while it settles still shows it.
   await start()
@@ -1249,10 +1249,10 @@ test('Dismiss settles a question in place with Undo, which brings it back open a
   await clock.advance(SETTLED_MS)
   expect(await pane.find({ key: 'settled-i1' })).toBeUndefined()
   expect((await pane.find({ key: 'fold-question' }))?.props.label).toBe('▸ 1 Closed')
-  expect(await pane.find({ key: 'explain-i2' })).toBeUndefined()
+  expect(await pane.find({ key: 'explain-i2-key' })).toBeUndefined()
   // j opens the one row left.
   await pane.press({ key: 'next' })
-  expect(await pane.find({ key: 'explain-i2' })).toBeDefined()
+  expect(await pane.find({ key: 'explain-i2-key' })).toBeDefined()
 })
 
 test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, its buttons send its conflicts and thread and say so, and its failing check waits on the person', async ($, on) => {
@@ -1800,7 +1800,7 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   // Explain says so on its row, then shows its ✓.
   await pane.press({ key: 'title-d17' })
   await clock.advance(PRESS_GUARD_MS)
-  await pane.press({ key: 'explain-d17' })
+  await pane.press({ key: 'explain-d17-key' })
   expect(await pane.find({ text: SAMPLE })).toBeDefined()
   await clock.advance(SETTLED_MS)
   expect(await pane.find({ text: SAMPLE })).toBeUndefined()
@@ -1854,7 +1854,7 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   // [Hide demo] brings back the session's own rows, which no sample press touched.
   await pane.press({ key: 'tab-needsYou' })
   expect(await pane.find({ text: /Use Node or Python/ })).toBeDefined()
-  expect(await pane.find({ key: 'explain-i1' })).toBeDefined()
+  expect(await pane.find({ key: 'explain-i1-key' })).toBeDefined()
   expect(await pane.find({ text: /Showing sample entries/ })).toBeUndefined()
   expect(await pane.find({ text: SAMPLE })).toBeUndefined()
   expect(await band.find({ text: /Needs you 2/ })).toBeDefined()
@@ -2177,8 +2177,8 @@ test('every row and action in the demo is drawn in the terminal and desktop look
     now: 1_000_000,
   })
   const TITLE_START = 20
-  const expectedLabels = (row: (typeof view.findings.rows)[number]) => {
-    const { keys, more } = rowKeyPlan(row, true)
+  const expectedLabels = (row: (typeof view.findings.rows)[number], look: 'terminal' | 'desktop') => {
+    const { keys, more } = rowKeyPlan(row, true, look === 'terminal')
     return [...keys, ...more].flatMap(k => {
       if (k.slot === 'retry') return ['Try again']
       if (k.slot === 'allOptions') return []
@@ -2230,6 +2230,8 @@ test('every row and action in the demo is drawn in the terminal and desktop look
         await clock.advance(PRESS_GUARD_MS)
         if (look === 'terminal' && (await pane.find({ key: `select-${row.id}` }))) {
           await pane.press({ key: `select-${row.id}` })
+        } else if (look === 'terminal' && (await pane.find({ key: `title-${row.id}` }))) {
+          await pane.press({ key: `title-${row.id}` })
         } else if (look === 'desktop' && (await pane.find({ key: `select-${row.id}` }))) {
           await pane.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: `select-${row.id}` })
         }
@@ -2241,7 +2243,7 @@ test('every row and action in the demo is drawn in the terminal and desktop look
         )
         expect(isTitleDrawn, `${look} ${tab.id} row ${row.id} draws its title`).toBe(true)
         if (row.state.is !== 'open') continue
-        for (const w of expectedLabels(row))
+        for (const w of expectedLabels(row, look))
           expect(controls.includes(w), `${look} ${tab.id} row ${row.id} draws "${w}"`).toBe(true)
       }
     }

@@ -507,7 +507,7 @@ function rowKeys(r: RowView): { keys: Key[]; more: Key[] } {
       }
     }
   }
-  const { keys, more } = rowKeyPlan(r, optionsShown.has(id))
+  const { keys, more } = rowKeyPlan(r, optionsShown.has(id), true)
 
   return { keys: keys.map(key), more: more.map(key) }
 }

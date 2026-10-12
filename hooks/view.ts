@@ -227,7 +227,7 @@ export function feedbackOf(
  * reads as the option chosen, and a step as its own label.
  */
 const DONE_LABELS: Record<string, (text: string) => string> = {
-  address: () => 'Addressed',
+  address: () => 'Handed off',
   discuss: () => 'Discussed',
   explain: () => 'Explained',
   dismiss: () => 'Dismissed',
@@ -333,7 +333,7 @@ const ACTION_KEYS: Partial<Record<RowPress['action'], string>> = {
  * A settled row offers only Undo, and only after the person's own Done or Dismiss.
  */
 function actionsOf(
-  row: { id: string; item: Item | null; steps: HelpStep[] },
+  row: { id: string; item: Item | null; finding: Finding | null; steps: HelpStep[] },
   last: LastAction | undefined,
   state: RowState,
 ): ActionView[] {
@@ -364,7 +364,8 @@ function actionsOf(
   const stepActions = steps.map((s, n) => action({ action: 'step', id, step: n, label: s.label }, s.label, stepKind(s)))
   if (!item)
     return [
-      action({ action: 'address', id }, 'Address', 'handoff'),
+      // Only the label names the kind. The press and the message it sends are Address's for both.
+      action({ action: 'address', id }, row.finding?.kind === 'opportunity' ? 'Do it' : 'Fix', 'handoff'),
       action({ action: 'discuss', id }, 'Discuss', 'talk'),
       action({ action: 'type', id, text: '' }, 'Reply', 'handoff'),
       action({ action: 'dismiss', id }, 'Dismiss', 'mark'),
@@ -478,15 +479,21 @@ export type PlannedKey =
 /**
  * A row's actions as keys. `keys` finish the row: [Try again] first when a send failed, then options and steps,
  * the first 9 shown on letters, then Done for a task and Address for a finding. `more` are the other ways to
- * respond: your own words, Explain or Discuss, and Dismiss. A question's folded options show only with
- * `isAllShown`, and until then [All N options] follows the last option shown.
+ * respond: your own words, Discuss, and Dismiss. Where the look `hasKeys`, `hidden` keeps Explain's key without
+ * drawing it, so it does not crowd the row's answers. Desktop takes no keys, so it draws Explain in `more`. A question's folded options show only with `isAllShown`, and until then [All N options] follows
+ * the last option shown.
  */
-export function rowKeyPlan(r: RowView, isAllShown: boolean): { keys: PlannedKey[]; more: ActionKey[] } {
+export function rowKeyPlan(
+  r: RowView,
+  isAllShown: boolean,
+  hasKeys: boolean,
+): { keys: PlannedKey[]; more: ActionKey[]; hidden: ActionKey[] } {
   const shown = r.actions.filter(a => isAllShown || !a.isFolded)
   const folded = r.actions.length - shown.length
   const lastOption = shown.map(a => a.press.action).lastIndexOf('answer')
   const keys: PlannedKey[] = []
   const more: ActionKey[] = []
+  const hidden: ActionKey[] = []
   const retry = r.feedback?.is === 'notSent' ? r.feedback.retry : null
   if (retry) {
     const kind = r.actions.find(a => actionId(a.press) === actionId(retry))?.kind ?? 'talk'
@@ -500,10 +507,15 @@ export function rowKeyPlan(r: RowView, isAllShown: boolean): { keys: PlannedKey[
       keys.push({ slot: 'choice', action: { ...a, press }, ...hotkey })
       if (n === lastOption && folded > 0)
         keys.push({ slot: 'allOptions', count: r.actions.filter(x => x.press.action === 'answer').length })
-    } else if (a.hotkey) (a.isFollowUp ? more : keys).push({ slot: 'action', action: a, hotkey: a.hotkey })
+    } else if (a.hotkey)
+      (press.action === 'explain' && hasKeys ? hidden : a.isFollowUp ? more : keys).push({
+        slot: 'action',
+        action: a,
+        hotkey: a.hotkey,
+      })
   }
 
-  return { keys, more }
+  return { keys, more, hidden }
 }
 
 export function inboxView({
@@ -580,18 +592,24 @@ export function inboxView({
   const questionRows = questions.map(itemRow)
   const taskRows = tasks.map(itemRow)
   const counted = [...questionRows, ...taskRows].filter(r => r.state.is === 'open')
-  const findingRows = [...placed.findings].reverse().map(finding =>
-    rowOf({
-      id: finding.id,
-      type: 'finding',
-      handle: '•',
-      title: finding.title,
-      at: finding.at,
-      item: null,
-      finding,
-      steps: [],
-    }),
-  )
+  // Newest first within each kind, in the order the Findings tab groups them.
+  const kinds = Object.keys(FINDING_GROUPS) as Finding['kind'][]
+  const byGroup = (a: Finding, b: Finding) => kinds.indexOf(a.kind) - kinds.indexOf(b.kind)
+  const findingRows = [...placed.findings]
+    .reverse()
+    .sort(byGroup)
+    .map(finding =>
+      rowOf({
+        id: finding.id,
+        type: 'finding',
+        handle: '•',
+        title: finding.title,
+        at: finding.at,
+        item: null,
+        finding,
+        steps: [],
+      }),
+    )
   const closed = [...ledger.closed].reverse()
 
   return {

@@ -2263,7 +2263,12 @@ function stepIcon(step: HelpStep | undefined): string | undefined {
 }
 
 /** A question, task or finding's keys, in the order `rowKeyPlan` sets, as the pane's actions. */
-function rowKeyActions($: EngineInterface, r: RowView, isAllShown: boolean): { keys: KeyAction[]; more: KeyAction[] } {
+function rowKeyActions(
+  $: EngineInterface,
+  look: ModLook,
+  r: RowView,
+  isAllShown: boolean,
+): { keys: KeyAction[]; more: KeyAction[]; hidden: KeyAction[] } {
   const { id, item, finding } = r
   const keyAction = (k: PlannedKey): KeyAction => {
     switch (k.slot) {
@@ -2325,9 +2330,9 @@ function rowKeyActions($: EngineInterface, r: RowView, isAllShown: boolean): { k
       }
     }
   }
-  const { keys, more } = rowKeyPlan(r, isAllShown)
+  const { keys, more, hidden } = rowKeyPlan(r, isAllShown, look !== 'desktop')
 
-  return { keys: keys.map(keyAction), more: more.map(keyAction) }
+  return { keys: keys.map(keyAction), more: more.map(keyAction), hidden: hidden.map(keyAction) }
 }
 
 /** A closed item, or a closed finding by its title, as its list's Closed fold draws it. */
@@ -3117,6 +3122,8 @@ export const register: Register = on => {
       keys: () => KeyAction[]
       /** Actions that talk about the row or drop it, after `keys`: past a muted dot in the terminal, on their own line on desktop. */
       moreKeys?: () => KeyAction[]
+      /** Keys the selected row takes without drawing them, as Explain's. */
+      hiddenKeys?: () => KeyAction[]
       /** For a row that takes the person's own words: what its field says while empty. */
       typeHint?: string
       /** What sending those words does: closes a question, or hands a task or finding off. */
@@ -3141,8 +3148,9 @@ export const register: Register = on => {
         ...(item.at === null ? {} : { at: item.at }),
         hasSecondLine: item.kind === 'question',
         body: null,
-        keys: () => rowKeyActions($, r, optionsShown.includes(r.id)).keys,
-        moreKeys: () => rowKeyActions($, r, optionsShown.includes(r.id)).more,
+        keys: () => rowKeyActions($, look, r, optionsShown.includes(r.id)).keys,
+        moreKeys: () => rowKeyActions($, look, r, optionsShown.includes(r.id)).more,
+        hiddenKeys: () => rowKeyActions($, look, r, optionsShown.includes(r.id)).hidden,
         typeHint: item.kind === 'task' ? 'Your reply to Claude' : 'Your answer',
       }
     }
@@ -3170,8 +3178,9 @@ export const register: Register = on => {
         </Box>
       ),
       typeHint: 'Your reply to Claude',
-      keys: () => rowKeyActions($, r, true).keys,
-      moreKeys: () => rowKeyActions($, r, true).more,
+      keys: () => rowKeyActions($, look, r, true).keys,
+      moreKeys: () => rowKeyActions($, look, r, true).more,
+      hiddenKeys: () => rowKeyActions($, look, r, true).hidden,
     })
     const isThreadSent = threadSentIn(lastActions)
     // A PR action labeled "… again" once it was its row's last action, unless its message failed to send.
@@ -3471,12 +3480,13 @@ export const register: Register = on => {
       ) : null
     }
     // The selected row's keys, for both the key row it draws and the hidden bindings.
-    const rowActions = (row: Row): { keys: KeyAction[]; more: KeyAction[] } => {
-      if (Input && row.typeHint && typing === row.id) return { keys: [], more: [] }
+    const rowActions = (row: Row): { keys: KeyAction[]; more: KeyAction[]; hidden: KeyAction[] } => {
+      if (Input && row.typeHint && typing === row.id) return { keys: [], more: [], hidden: [] }
 
       return {
         keys: pressable(row.keys()),
         more: pressable(row.moreKeys?.() ?? []),
+        hidden: row.hiddenKeys?.() ?? [],
       }
     }
     // Under the open field: Send sends the row's draft, and Cancel closes the field and keeps the draft.
@@ -5036,7 +5046,7 @@ export const register: Register = on => {
 
     const selectedRow = rows[tab][at]
     const selectedActions = selectedRow ? rowActions(selectedRow) : null
-    const rowKeys = selectedActions ? [...selectedActions.keys, ...selectedActions.more] : []
+    const rowKeys = selectedActions ? [...selectedActions.keys, ...selectedActions.more, ...selectedActions.hidden] : []
 
     // Docked, the pane takes at least the window's height, so the footer sits at
     // its bottom edge until the content is taller than the window. The engine has
