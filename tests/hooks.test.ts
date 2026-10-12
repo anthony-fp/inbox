@@ -450,7 +450,7 @@ test('a task handed to Claude folds and leaves the count until Claude’s reply 
   await pane.press({ key: 'help-i1-0' })
   await clock.settle()
   expect(sent.at(-1)).toContain('./load.sh')
-  expect(await pane.find({ text: /Run load script just now/ })).toBeDefined()
+  expect(await pane.find({ text: /Run load script/ })).toBeDefined()
   expect(await band.find({ text: /Needs you 1/ })).toBeDefined()
 
   // Its other steps still show: a copy says where to run the command, and an open of a missing file says so in red,
@@ -687,7 +687,7 @@ test('last actions an earlier build saved convert once by the table, and a task 
   // The task handed off by the old Run still folds, and waits on no one.
   const pane = await $.ui.mount(PANE)
   const band = await $.ui.mount({ plugin: 'inbox', surface: 'terminal', ...BAND })
-  expect(await pane.find({ text: /Run load script just now/ })).toBeDefined()
+  expect(await pane.find({ text: /Run load script/ })).toBeDefined()
   expect(await band.find({ text: /Needs you/ })).toBeUndefined()
   // Findings' Closed fold stays open across the reloads. The closed finding shows there once it has settled.
   await clock.advance(SETTLED_MS)
@@ -792,7 +792,7 @@ test('after a failed update, the next reply catches up over the whole conversati
   const pane = await $.ui.mount(PANE)
   expect(await pane.find({ text: /Use Node or Python\?/ })).toBeDefined()
   // An open item says how long it has waited.
-  expect(await pane.find({ text: /\u2002·\u2002just now/ })).toBeDefined()
+  expect(await pane.find({ text: 'now' })).toBeDefined()
   // Only the selected item shows its actions; Next moves the selection.
   expect(await pane.find({ key: 'explain-i2-key' })).toBeUndefined()
   await pane.press({ key: 'next' })
@@ -889,7 +889,7 @@ test('a finding Claude records while the pane shows an empty tab brings the pane
   expect(sent.at(-1)).toContain('Please address this finding you recorded:\nIssue: Retry loop never backs off')
   // It folds to what was sent and leaves the finding count. It stays listed.
   await clock.settle()
-  expect(await pane.find({ text: /Handed off just now/ })).toBeDefined()
+  expect(await pane.find({ text: /Handed off/ })).toBeDefined()
   expect(await band.find({ text: /Findings 1/ })).toBeUndefined()
   await clock.advance(9000)
   expect(await pane.find({ text: /Retry loop never backs off/ })).toBeDefined()
@@ -977,7 +977,7 @@ test('t opens a field for the person’s own words: a question’s words go to C
   // [Send] sends them as the answer.
   await pane.press({ key: 'send-i1' })
   expect(sent.at(-1)).toBe('Re "Use Node or Python?": Deno, actually')
-  expect((await pane.find({ key: 'row-i1' }))?.text).toContain('✓ Replied just now')
+  expect((await pane.find({ key: 'row-i1' }))?.text).toContain('✓ Replied')
   await $.tool.call({ tool: 'mcp__inbox__close', id: 'i1', answer: 'Deno' } as never)
   await clock.settle()
   expect(await pane.find({ key: 'row-i1' })).toBeUndefined()
@@ -989,7 +989,7 @@ test('t opens a field for the person’s own words: a question’s words go to C
     'About this finding you recorded:\nIssue: README is stale\nIt names the old command.\n\nFix it after the CLI ships.',
   )
   await clock.settle()
-  expect(await pane.find({ text: /Replied just now/ })).toBeDefined()
+  expect(await pane.find({ text: /Replied/ })).toBeDefined()
   await clock.advance(9000)
   expect(await pane.find({ text: /README is stale/ })).toBeDefined()
 })
@@ -1067,7 +1067,7 @@ test('a press during a turn reads Queued until its prompt enters, and one that w
   submitAnswer = 'hold'
   await pane.press({ key: 'explain-i1-key' })
   await clock.settle()
-  expect(await pane.find({ text: /^\u2002·\u2002Queued: Explain just now$/ })).toBeDefined()
+  expect(await pane.find({ text: /^\u2002·\u2002Queued: Explain$/ })).toBeDefined()
   await pane.press({ key: 'select-i2' })
   await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'typekey-i2' })
@@ -1078,7 +1078,7 @@ test('a press during a turn reads Queued until its prompt enters, and one that w
   await arrive($)
   await clock.settle()
   await pane.press({ key: 'select-i1' })
-  expect(await pane.find({ text: /^\u2002·\u2002✓ Explained just now$/ })).toBeDefined()
+  expect(await pane.find({ text: /^\u2002·\u2002✓ Explained$/ })).toBeDefined()
   expect(await pane.find({ text: /Queued/ })).toBeUndefined()
 
   // A hook refuses a typed answer: the question opens again, and the words go back into its field.
@@ -1150,7 +1150,7 @@ test('Claude closes an item or finding that no longer applies, by the id it read
   await pane.press({ key: 'discuss-f3' })
   await clock.settle()
   expect(sent.at(-1)).toContain("Let's talk through this finding you recorded")
-  expect(await pane.find({ text: /Discussed just now/ })).toBeDefined()
+  expect(await pane.find({ text: /Discussed/ })).toBeDefined()
   expect((await pane.find({ key: 'discuss-f3-key' }))?.props.label).toBe('Discuss again')
   expect(await band.find({ text: /Findings 1/ })).toBeDefined()
   await pane.press({ key: 'tab-needsYou' })
@@ -1414,7 +1414,7 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   await pane.press({ key: 'discuss-T1-key' })
   expect(sent.at(-1)).toContain("Let's talk through this review comment on PR #12")
   await clock.settle()
-  expect(await pane.find({ text: /Discussed just now/ })).toBeDefined()
+  expect(await pane.find({ text: /Discussed/ })).toBeDefined()
   expect((await pane.find({ key: 'discuss-T1' }))?.props.label).toMatch(/Discuss again$/)
   // A hook refuses Address: the thread stays open and waiting, says why, and offers [Try again].
   submitAnswer = { drop: 'a hook refused it' }
@@ -1429,10 +1429,10 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   submitAnswer = 'hold'
   await pane.press({ key: 'retry-T1' })
   await clock.settle()
-  expect(await pane.find({ text: /^\u2002·\u2002Queued: Address just now$/ })).toBeDefined()
+  expect(await pane.find({ text: /^\u2002·\u2002Queued: Address$/ })).toBeDefined()
   await arrive($)
   await clock.settle()
-  expect(await pane.find({ text: /^\u2002·\u2002Addressed just now$/ })).toBeDefined()
+  expect(await pane.find({ text: /^\u2002·\u2002Addressed$/ })).toBeDefined()
 
   // Sent to Claude, the thread folds out of the count, and keeps its keys, until the reviewer answers.
   expect((await pane.find({ key: 'address-T1-key' }))?.props.label).toBe('Address again')

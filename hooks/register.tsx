@@ -369,6 +369,8 @@ const DESKTOP_MARK_CELLS = 1
 // How far a row frame's transparent border insets its content, in points: 13.2 pt, measured in the pane (2026-10-11).
 const FRAME_INSET_PT = 13.2
 const DESKTOP_SIDE_CELLS = 5
+// The terminal row's side column: a short age, as "27m", with a cell on each side.
+const TERMINAL_SIDE_CELLS = 5
 const SELECTED_GAP_PT = 3
 /** An age for the desktop side column: "12m", or "now". */
 // The terminal's `after` follows a row's title on its line, after a dot; desktop draws it on its own line.
@@ -3026,6 +3028,9 @@ export const register: Register = on => {
     const Input = 'Input' in elements && (look === 'terminal' || DESKTOP_TYPING) ? elements.Input : null
     // Narrow, the desktop pane puts its status under the tabs and drops closed rows' ages.
     const isNarrowDesktop = look === 'desktop' && e.props.bodyColumns < DESKTOP_WIDE_AT
+    // The terminal draws a row's age in its side column, so no line repeats it.
+    const isAgeInSide = look === 'terminal'
+    const isAgeDropped = isNarrowDesktop || isAgeInSide
     // Desktop wraps " · 12m ago" as one unit after a title, not as "12m" and "ago" on two lines: past its first
     // character, a space becomes a no-break space and an en space a figure space, about as wide and unbreakable.
     const unbroken = (after: string) =>
@@ -3530,11 +3535,11 @@ export const register: Register = on => {
     const pressedAge = (row: Row) => {
       const f = feedbackLabel(row.id, row)
 
-      return f?.age ? `${DOT}${[f.text, isNarrowDesktop ? '' : f.age].filter(Boolean).join(' ')}` : null
+      return f?.age ? `${DOT}${[f.text, isAgeDropped ? '' : f.age].filter(Boolean).join(' ')}` : null
     }
     const headOf = (row: Row, head: NonNullable<Row['head']>) => ({
       ...head,
-      age: `${pressedAge(row) ?? head.age}${head.notes ?? ''}`,
+      age: `${pressedAge(row) ?? (isAgeInSide ? '' : head.age)}${head.notes ?? ''}`,
     })
     // A section's children hang from its title like a directory listing. A
     // child's row has a 1-column bar, 3 columns for the tree, 3 for its marker,
@@ -3632,11 +3637,11 @@ export const register: Register = on => {
       if (f && !(row.head && f.age))
         return {
           ...plain,
-          after: `${DOT}${[f.text, isNarrowDesktop ? '' : f.age].filter(Boolean).join(' ')}`,
+          after: `${DOT}${[f.text, isAgeDropped ? '' : f.age].filter(Boolean).join(' ')}`,
           afterTone: f.isFailure ? ('error' as const) : undefined,
         }
 
-      return { ...plain, after: [plain.after, isNarrowDesktop ? '' : plain.age].filter(Boolean).join('') || undefined }
+      return { ...plain, after: [plain.after, isAgeDropped ? '' : plain.age].filter(Boolean).join('') || undefined }
     }
     // The selected row gets a blue background, or a bar where the palette has
     // no selection color, and reads top to bottom:
@@ -3657,10 +3662,11 @@ export const register: Register = on => {
     const unselectedLine = (row: Row, onPress: (press: UiPressArgument) => void, inset: number) => {
       const line = closedLine(row)
       const before = line.before?.length ?? 0
-      const width = e.props.bodyColumns - 3 - inset - before
+      const side = isAgeInSide ? TERMINAL_SIDE_CELLS : 0
+      const width = e.props.bodyColumns - 3 - inset - side - before
       const perCell = look === 'desktop' ? DESKTOP_CHARS_PER_CELL : 1
       // `before` is text, so it counts in characters, as the title does.
-      const budget = Math.floor((e.props.bodyColumns - 3 - inset - buttonFrame) * perCell) - before
+      const budget = Math.floor((e.props.bodyColumns - 3 - inset - side - buttonFrame) * perCell) - before
       const room = Math.max(12, budget - (line.after?.length ?? 0))
       const text = line.text.trim()
       const space = text.lastIndexOf(' ', room)
@@ -3827,6 +3833,20 @@ export const register: Register = on => {
     )
     // `tree` places the row as a section's child; without it, as in Findings, the
     // handle sits in the 4 columns after the bar.
+    // A selected terminal row's first line, with its age at the right. Its keys below take the full width.
+    const withSideAge = (row: Row, line: JSX.Element) =>
+      isAgeInSide ? (
+        <Box flexDirection="row">
+          <Box flexGrow={1} flexShrink={1}>
+            {line}
+          </Box>
+          <Box width={TERMINAL_SIDE_CELLS - 1} flexShrink={0} justifyContent="flex-end">
+            <Text color={pal.age}>{sideAge(row)}</Text>
+          </Box>
+        </Box>
+      ) : (
+        line
+      )
     const listRow = (row: Row, tree?: TreePos) => {
       const columns = columnsFor(tree)
       const index = indexOf.get(row.id) ?? -1
@@ -3874,7 +3894,7 @@ export const register: Register = on => {
           />
         ) : null
       const f = feedbackLabel(row.id, row)
-      const titleAfter = (row.head ? null : pressedAge(row)) ?? row.titleAfter
+      const titleAfter = (row.head ? null : pressedAge(row)) ?? (isAgeInSide ? undefined : row.titleAfter)
       const status = [
         ...(row.fold?.note ? [{ text: row.fold.note, color: pal.muted }] : []),
         ...(f && !f.age ? [{ text: f.text, color: f.isFailure ? pal.tone.error : pal.muted }] : []),
@@ -3976,11 +3996,13 @@ export const register: Register = on => {
           </Box>
           {isSelected ? (
             <Box flexDirection="column" flexShrink={1} flexGrow={1} paddingRight={1} paddingY={space.rowPad}>
-              {row.head ? headLine(headOf(row, row.head), pal.muted) : null}
-              <Text wrap="wrap">
-                <Text bold>{row.title}</Text>
-                {titleAfter ? <Text color={pal.muted}>{unbroken(titleAfter)}</Text> : null}
-              </Text>
+              {row.head ? withSideAge(row, headLine(headOf(row, row.head), pal.muted)) : null}
+              {(row.head ? (el: JSX.Element) => el : (el: JSX.Element) => withSideAge(row, el))(
+                <Text wrap="wrap">
+                  <Text bold>{row.title}</Text>
+                  {titleAfter ? <Text color={pal.muted}>{unbroken(titleAfter)}</Text> : null}
+                </Text>,
+              )}
               {row.subtitle}
               {row.body ? <Box marginTop={blankLine}>{row.body}</Box> : null}
               {status.length > 0 ? (
@@ -4004,6 +4026,17 @@ export const register: Register = on => {
               )}
             </Box>
           )}
+          {isAgeInSide && !isSelected ? (
+            <Box
+              width={TERMINAL_SIDE_CELLS}
+              flexShrink={0}
+              justifyContent="flex-end"
+              paddingRight={1}
+              paddingTop={isSelected ? space.rowPad : 0}
+            >
+              <Text color={pal.age}>{sideAge(row)}</Text>
+            </Box>
+          ) : null}
           {tree ? branch(tree, isSelected ? blankLine : 0) : null}
           {/* What select() scrolls into view. Drawn on the selected row alone, so the key exists
           only once that row has redrawn expanded. */}
@@ -4428,16 +4461,18 @@ export const register: Register = on => {
         : treeRow(
             pos,
             <Text color={pal.muted}>{CLOSED_MARKS[closedState(d)]}</Text>,
-            <Box flexDirection="column">
-              <Text wrap="wrap" color={pal.muted}>
-                {d.ask}
-              </Text>
-              <Text wrap="wrap">
-                <Text bold={!isLapsed(d)} color={isLapsed(d) ? pal.muted : undefined}>
+            <Box flexDirection="row">
+              <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+                <Text wrap="wrap" color={pal.muted}>
+                  {d.ask}
+                </Text>
+                <Text wrap="wrap" bold={!isLapsed(d)} color={isLapsed(d) ? pal.muted : undefined}>
                   {outcomeText(d)}
                 </Text>
-                <Text color={pal.age}>{unbroken(`${DOT}${ago(now - d.at)}`)}</Text>
-              </Text>
+              </Box>
+              <Box width={TERMINAL_SIDE_CELLS} flexShrink={0} justifyContent="flex-end" paddingRight={1}>
+                <Text color={pal.age}>{shortAgo(now - d.at)}</Text>
+              </Box>
             </Box>,
             `closed-${d.id}`,
             1,
