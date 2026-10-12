@@ -4205,12 +4205,12 @@ export const register: Register = on => {
     // A blank line in the tree, but for its │: under a title, so the children
     // do not crowd it, and between two-line entries, so they read apart. Inline
     // it is left out, so callers spread what this returns.
-    // Desktop rows pad themselves, so a label needs no gap under it.
+    // On desktop, ROW_PAD_PT under a title sets it apart from its first row, counted in the tree's half lines.
     const titleGap = (hasChildren = true) =>
       isInline
         ? []
         : look === 'desktop'
-          ? []
+          ? [<Box paddingTop={(2 * ROW_PAD_PT) / DESKTOP_LINE_PT} />]
           : [
               <Box paddingLeft={1}>
                 <Text color={pal.line}>{hasChildren ? '│' : ' '}</Text>
