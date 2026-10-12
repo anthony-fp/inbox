@@ -24,6 +24,7 @@ import {
   tasksRunBy,
   upgradeLedger,
 } from '../hooks/ledger'
+import { parseInline } from '../hooks/inline'
 import type { Item } from '../types'
 
 const REPLY = `GOAL: Move annotation queue logic into a tested reducer
@@ -734,5 +735,25 @@ describe('statusLine', () => {
     expect(stopKindOf('rate_limit', 'API Error: Server is temporarily limiting requests (not your usage limit)')).toBe(
       'api-error',
     )
+  })
+})
+
+describe('parseInline', () => {
+  test('reads bold, italic, strikethrough, code and https links, and leaves unmatched markers as text', () => {
+    expect(parseInline('Run `npm **test**`, **not *this***, ~~old~~ and [docs](https://example.com/a).')).toEqual([
+      { text: 'Run ' },
+      { text: 'npm **test**', code: true },
+      { text: ', ' },
+      { text: 'not ', bold: true },
+      { text: 'this', bold: true, italic: true },
+      { text: ', ' },
+      { text: 'old', strike: true },
+      { text: ' and ' },
+      { text: 'docs', link: 'https://example.com/a' },
+      { text: '.' },
+    ])
+    expect(parseInline('a ** b, 2 * 3 * 4, snake_case_name, [x](javascript:alert(1)) and `open')).toEqual([
+      { text: 'a ** b, 2 * 3 * 4, snake_case_name, [x](javascript:alert(1)) and `open' },
+    ])
   })
 })

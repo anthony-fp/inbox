@@ -155,6 +155,7 @@ import {
 } from './tools'
 import type { CountdownProps } from './countdown-client'
 import { followTo, recordRows } from './arrivals'
+import { parseInline } from './inline'
 import type { RowRecord } from './arrivals'
 import { ROW_PAD_PT } from './layout'
 import type { FoldProps } from './fold-client'
@@ -2938,6 +2939,24 @@ export const register: Register = on => {
     const shownPrs = drawnPrs(prState, ledger.prs, lastActions, now)
     const prViews = shownPrs.map(x => x.pr)
     const pal = paletteFor(theme, look)
+    // Text an agent wrote, with its inline markdown drawn as styles. A link draws its label, then its URL, since
+    // neither pane documents a Link inside a line of Text.
+    const inlineText = (text: string) =>
+      parseInline(text).map((s, n) => (
+        <Text key={String(n)}>
+          <Text
+            bold={s.bold}
+            italic={s.italic}
+            strikethrough={s.strike}
+            underline={s.link ? true : undefined}
+            // Claude Code's own color for inline code.
+            color={s.code ? 'permission' : undefined}
+          >
+            {s.text}
+          </Text>
+          {s.link ? <Text color={pal.muted}>{` ${s.link}`}</Text> : null}
+        </Text>
+      ))
     // `inverse: false` keeps the engine from inverting the line under the pointer inside the panel.
     const raise = {
       dimColor: false,
@@ -3016,7 +3035,7 @@ export const register: Register = on => {
       line: { text: finding.title },
       body: (
         <Box flexDirection="column" rowGap={blankLine}>
-          <Text wrap="wrap">{finding.detail}</Text>
+          <Text wrap="wrap">{inlineText(finding.detail)}</Text>
           {finding.path ? (
             <Text wrap="wrap">
               <Text color={pal.muted}>Relevant file: </Text>

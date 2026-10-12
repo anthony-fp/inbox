@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
 /** The shared modules: the files in hooks/ that both hosts import. GLOSSARY.md defines them. */
-const SHARED = ['arrivals', 'demo', 'layout', 'ledger', 'presses', 'prs', 'tools', 'view']
+const SHARED = ['arrivals', 'demo', 'inline', 'layout', 'ledger', 'presses', 'prs', 'tools', 'view']
 // hooks/ledger.ts imports a type from the engine. It is erased from the bundle, but the Codex type check then
 // needs the types only an interactive Claude session writes. Step 5 of docs/plans/three-looks.md moves it out.
 const ENGINE_TYPE_IMPORTS = ['ledger']

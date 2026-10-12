@@ -1,38 +1,40 @@
 # Rich text in finding details
 
-Status: proposed.
+Status: built for finding details. Asks, outcomes and titles stay plain.
 
-## Recommendation
+## What it does
 
-Render a finding's detail with inline markdown: bold, italic, inline code, strikethrough and https links. Parse it once in shared code, and draw the result in each client with its own styles. Keep asks, outcomes and titles plain for now.
+A finding's detail draws its inline markdown: bold, italic, strikethrough, inline code and https links. `parseInline` in `hooks/inline.ts` turns the text into styled spans. Each client draws the spans with its own styles. An unmatched marker stays as text.
+
+The models were not told to write markdown. Details already carry it, as the agents write it on their own.
 
 ## What each client can draw
 
 - **Claude terminal and desktop panes.** `Text` takes `bold`, `italic`, `underline`, `strikethrough`, `color` and `backgroundColor`, and a `Text` can nest inside a wrapping `Text`. Desktop draws each as a styled span, in a proportional font. So both panes can draw every style above.
 - **The engine's `Markdown` element.** It draws text the way an assistant reply is drawn, with links, tables and code fences. The PR block already uses it. How it lays out inside a tree row, and whether desktop link clicks reach it, is untested.
-- **Codex tab.** Plain HTML. Preact escapes text, so `<b>`, `<i>`, `<code>`, `<s>` and `<a>` built from parsed spans are safe. Links take only `https:`.
+- **Codex tab.** Plain HTML. Preact escapes text, so elements built from parsed spans are safe.
 
 Markdown has no underline, so underline stays out.
 
-## Design
+## How each client draws it
 
-- **A shared parser.** `hooks/inline.ts` exports `parseInline(text)`, which returns spans: `{ text, bold?, italic?, code?, strike?, link? }`. An unmatched marker stays literal text. No dependency: the mod imports nothing from npm, and the Codex bundle already includes `hooks/`.
-- **Claude panes.** Draw each span as a nested `Text`. Inline code takes the file-name color the finding row already uses. Draw a link as its text, plus a `Link` for https.
-- **Codex tab.** Draw each span as its HTML element.
-- **Text that is compared or clipped stays plain.** `restates` and `keyWords` compare asks, and the clip helpers can cut a `**` pair in half. A `stripInline` helper gives them plain text. Details are parsed after any clip.
+- **Claude panes.** Each span is a nested `Text`. Inline code takes Claude Code's own code color, as the file name does.
+- **Codex tab.** Each span is an element: `<b>`, `<i>`, `<s>` and `<code>`, which takes the file name's look. Preact escapes the text, so no HTML gets through.
+- **Links, in every client.** The label is underlined, then the URL follows in muted text. Neither Claude pane documents a `Link` inside a line of text, and a plain anchor's click in the Codex tab's frame is untested.
 
 ## What the models are told today
 
 - The `record_finding` description asks for "why it matters and what you would do, in one or two sentences". It says nothing about markdown, so details may already carry it.
 - The inbox model's rules end with "No markdown". That covers asks and outcomes, which stay plain.
 
-Allowing markdown in details is text a model reads, so it needs an A/B run first.
+Asking the models to write markdown would change text they read, so it would need an A/B run first.
 
-## Tests
+## Checked
 
-- `parseInline` on paired, unmatched and nested markers, and on a link with a non-https scheme.
-- A clipped detail still draws.
-- HTML in a detail comes out escaped in the Codex tab.
+- `parseInline` has a test for each style, nesting, and unmatched markers.
+- The Codex test page drew every style.
+- A live terminal pane drew bold, strikethrough, code color and underline. Italic could not be seen there, since the tmux terminal type has no italics.
+- Desktop is not checked yet.
 
 ## Risks
 

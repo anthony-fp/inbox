@@ -41,6 +41,7 @@ import { ROW_PAD_PT } from '../../hooks/layout'
 import type { DrawnEntry, DrawnLists, Feedback, PlannedKey, RowView } from '../../hooks/view'
 import type { Finding, Item, RowNote } from '../../types'
 import { followTo } from '../../hooks/arrivals'
+import { parseInline } from '../../hooks/inline'
 import { isShownEmpty, newRows, TAB_IDS, TAB_OF } from './arrivals'
 import type { Group, SeenRows, Tab } from './arrivals'
 import type { TabView as View } from './core'
@@ -558,13 +559,11 @@ function findingRow(v: View, r: RowView, f: Finding): Row {
     line: { text: f.title },
     body: (
       <div>
-        <p>{f.detail}</p>
+        <p>{inlineHtml(f.detail)}</p>
         {f.path ? (
           <p>
             <span class="muted">Relevant file: </span>
-            <code class="file" title={f.path}>
-              {baseName(f.path)}
-            </code>
+            <code title={f.path}>{baseName(f.path)}</code>
           </p>
         ) : null}
       </div>
@@ -1073,6 +1072,25 @@ type ClosedLine = {
 }
 
 /** A list's closed items or findings behind `▸ N Closed`, each with how it closed and when. */
+/** Text an agent wrote, with its inline markdown as elements. Preact escapes each span's text, so no HTML gets through. */
+function inlineHtml(text: string) {
+  return parseInline(text).map(s => {
+    let node: ComponentChildren = s.code ? <code>{s.text}</code> : s.text
+    if (s.italic) node = <i>{node}</i>
+    if (s.bold) node = <b>{node}</b>
+    if (s.strike) node = <s>{node}</s>
+    // As in the Claude panes: the label, then its URL. A plain anchor's click in the tab's frame is untested.
+    return s.link ? (
+      <>
+        <u>{node}</u>
+        <span class="muted"> {s.link}</span>
+      </>
+    ) : (
+      node
+    )
+  })
+}
+
 function ClosedFold({ group, closed, now }: { group: Group; closed: ClosedLine[]; now: number }) {
   if (closed.length === 0) return null
   const isUnfolded = unfolded.has(group)
