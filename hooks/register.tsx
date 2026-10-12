@@ -485,14 +485,14 @@ const THEME_KEY_PALETTE: Palette = {
   mark: { needsYou: NEEDS_YOU, issue: NEEDS_YOU, findings: FINDINGS, prs: PRS, done: DONE, error: 'error' },
 }
 // The desktop app picks its own light or dark appearance, which the mod cannot read, and Claude Code's theme does
-// not follow it. Theme keys resolve to the app's colors, so the desktop pane draws only in theme keys. The app keeps
-// its sections on its own background and marks a selected row with a warm gray, as its sidebar does, and
-// `userMessageBackground` draws that gray, its message bubble's, in either appearance. Its counts and marks are
-// muted, with color left for errors.
+// not follow it. Theme keys resolve to the app's colors, so the desktop pane draws text in theme keys. The app keeps
+// its sections on its own background and marks a selected row with a warm gray, #ecebe8 on its light page. No theme
+// key draws that gray, so a translucent warm gray does: about #edece9 over the light pane and #2d2b29 over the dark
+// one. Counts and marks are muted, with color left for errors. The app refuses an hsl() alpha or color-mix() color.
 const DESKTOP_PALETTE: Palette = {
-  raised: 'userMessageBackground',
+  raised: 'rgba(128, 120, 105, 0.14)',
   raisedText: 'text',
-  selection: 'userMessageBackground',
+  selection: 'rgba(128, 120, 105, 0.14)',
   muted: 'inactive',
   age: 'inactive',
   key: 'remember',
