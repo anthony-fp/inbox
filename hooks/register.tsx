@@ -147,6 +147,7 @@ import {
   SETTLED_MS,
   settledIn,
   settledRowIds,
+  shortAgo,
 } from './view'
 import type { DrawnEntry, InboxView, ModLook, PlannedKey, RowView } from './view'
 import {
@@ -372,17 +373,12 @@ const DESKTOP_SIDE_CELLS = 5
 // The terminal row's side column: a short age, as "27m", with a cell on each side.
 const TERMINAL_SIDE_CELLS = 5
 const SELECTED_GAP_PT = 3
-/** An age for the desktop side column: "12m", or "now". */
 // The terminal's `after` follows a row's title on its line, after a dot; desktop draws it on its own line.
 const LEADING_DOT = new RegExp(`^${DOT}`)
 /** How long something ran: "41s", "3m 52s". */
 function took(ms: number): string {
   const secs = Math.max(0, Math.round(ms / 1000))
   return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`
-}
-function shortAgo(ms: number): string {
-  const age = ago(ms)
-  return age === 'just now' ? 'now' : age.replace(/ ago$/, '')
 }
 // Theme keys, so the colors follow the person's Claude Code theme.
 const NEEDS_YOU = 'warning'

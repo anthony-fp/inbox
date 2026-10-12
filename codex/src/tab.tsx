@@ -21,13 +21,17 @@ import type { HelpStep, RowPress } from '../../hooks/presses'
 import {
   allRows,
   closedShown,
+  closedTotal,
+  DEMO_NOTICE,
   DOT,
+  earlierLabel,
   drawnLists,
   emptyText,
   entryId,
   ROW_TABS,
   FINDING_GROUPS,
   feedbackText,
+  foldLabel,
   hasAge,
   isFailure,
   isGuarded,
@@ -36,6 +40,7 @@ import {
   rowKeyPlan,
   SETTLED_MS,
   settledIn,
+  shortAgo,
 } from '../../hooks/view'
 import { ROW_PAD_PT } from '../../hooks/layout'
 import type { DrawnEntry, DrawnLists, Feedback, PlannedKey, RowView } from '../../hooks/view'
@@ -52,8 +57,22 @@ import { drawnSettled, POLL_MS, PRESS_TIMEOUT_MS, settledIds, settledSeen } from
 
 type Tone = 'needsYou' | 'issue' | 'findings' | 'done' | 'error'
 
+/**
+ * How loudly an action draws: `primary` is a filled button, at most one per row; `normal` an outlined button; `quiet`
+ * plain text.
+ */
+type Emphasis = 'primary' | 'normal' | 'quiet'
+
 /** One of a row's actions, with the key that presses it while the tab has focus, if it has one. */
-type Key = { hotkey?: string; label: string; isPrimary?: boolean; icon?: IconName; run: () => void }
+type Key = {
+  hotkey?: string
+  label: string
+  emphasis: Emphasis
+  /** Drawn at the far right of the action row. */
+  isDismiss?: boolean
+  icon?: IconName
+  run: () => void
+}
 
 /**
  * Outline icons in the style of Codex's own: a 24-unit box drawn at 14 px, stroked in the text color, so they
@@ -104,16 +123,14 @@ type Row = {
   /** A finding's kind, which sets its handle's color and size. */
   kind?: Finding['kind']
   title: string
-  /** Muted text after the title, such as an age. */
-  titleAfter?: string
-  /** The unselected line, when it differs from the title and its age. */
-  line?: { text: string; after?: string; afterTone?: Tone }
-  /** Unselected, the title may take a second line. */
-  hasSecondLine?: boolean
+  /** How long ago the row appeared, in the side column. */
+  age?: string
   body?: JSX.Element | null
   keys: Key[]
-  /** Actions that talk about the row or drop it, after `keys` and a muted dot. */
+  /** Actions that talk about the row or drop it, after `keys`. */
   more: Key[]
+  /** Actions with a key and no button, so a key press still reaches them. */
+  hidden: Key[]
   /** The row no longer waits on the person, so its group's count leaves it out. Selected, it also shows `note`. */
   fold?: { note?: string }
   typing?: { hint: string; send: (text: string) => void }
@@ -132,7 +149,9 @@ let readError: string | null = null
  * What the tab says about the server it talks to: why a newer build of it did not load, or that its fingerprint
  * still differs from this page's while the page cannot replace itself. Null when neither holds.
  */
-let serverNote: string | null = null
+let serverNote: { text: string; isReloadable: boolean } | null = null
+// Whether the first read has taken long enough to say "Loading…". A read that answers sooner shows nothing in between.
+let isLoadingShown = false
 // Polls that failed in a row while a view shows, and when the shown view was read.
 let pollFailures = 0
 let readAt = 0
@@ -322,6 +341,9 @@ function follow(v: View, added: Record<Tab, string[]>) {
   selection[to] = null
 }
 
+/** How long the first read may take before the tab says it is loading, so a fast one shows no flash. */
+const LOADING_DELAY_MS = 300
+
 /** How long a view read may go unanswered before it counts as failed, so a lost answer cannot stop the polls. */
 const READ_TIMEOUT_MS = 3 * POLL_MS
 
@@ -333,9 +355,12 @@ async function read() {
     const isPageOld = next.devPage !== PAGE
     if (isPageOld) void swapPage()
     serverNote = next.serverLoadError
-      ? `The inbox server could not load its new build, so it still runs the last one. ${next.serverLoadError}`
+      ? {
+          text: `The inbox server could not load its new build, so it still runs the last one. ${next.serverLoadError}`,
+          isReloadable: false,
+        }
       : next.serverBuild !== SERVER_BUILD && !isPageOld
-        ? 'This tab and the inbox server are from different builds. Close the Inbox tab and open it again.'
+        ? { text: 'This tab and the inbox server are from different builds.', isReloadable: true }
         : null
     applyView(next, seq)
   } catch (err) {
@@ -465,15 +490,16 @@ function startTyping(id: string) {
 }
 
 /** A row's keys, in the order `rowKeyPlan` sets, as the tab's buttons. */
-function rowKeys(r: RowView): { keys: Key[]; more: Key[] } {
+function rowKeys(r: RowView): { keys: Key[]; more: Key[]; hidden: Key[] } {
   const { id, item } = r
   const key = (k: PlannedKey): Key => {
     switch (k.slot) {
       case 'retry':
-        return { label: 'Try again', icon: 'retry', run: () => void act(id, k.press) }
+        return { label: 'Try again', emphasis: 'normal', icon: 'retry', run: () => void act(id, k.press) }
       case 'allOptions':
         return {
           label: `All ${k.count} options`,
+          emphasis: 'quiet',
           run: () => {
             optionsShown.add(id)
             draw()
@@ -484,7 +510,12 @@ function rowKeys(r: RowView): { keys: Key[]; more: Key[] } {
         const p = a.press
         const lettered = hotkey ? { hotkey } : {}
         if (p.action === 'answer')
-          return { ...lettered, label: a.label, isPrimary: a.isPrimary, run: () => void act(id, p) }
+          return {
+            ...lettered,
+            label: a.isPrimary ? `${a.label} (recommended)` : a.label,
+            emphasis: a.isPrimary ? 'primary' : 'normal',
+            run: () => void act(id, p),
+          }
         const step = r.steps[p.step]
         // An open or copy shows its pending note, as the pane does, until the server answers.
         const pending =
@@ -495,6 +526,7 @@ function rowKeys(r: RowView): { keys: Key[]; more: Key[] } {
         return {
           ...lettered,
           label: a.label,
+          emphasis: 'normal',
           ...(icon ? { icon } : {}),
           run: () => void act(id, p, undefined, pending),
         }
@@ -503,13 +535,21 @@ function rowKeys(r: RowView): { keys: Key[]; more: Key[] } {
         const { action: a, hotkey } = k
         const p = a.press
         const run = p.action === 'type' ? () => startTyping(id) : () => void act(id, p)
-        return { hotkey, label: a.label, ...(p.action === 'done' ? { icon: 'check' as const } : {}), run }
+        const isHandOff = p.action === 'done' || p.action === 'address'
+        return {
+          hotkey,
+          label: a.label,
+          emphasis: isHandOff ? 'primary' : p.action === 'type' ? 'normal' : 'quiet',
+          ...(p.action === 'dismiss' ? { isDismiss: true } : {}),
+          ...(p.action === 'done' ? { icon: 'check' as const } : {}),
+          run,
+        }
       }
     }
   }
-  const { keys, more } = rowKeyPlan(r, optionsShown.has(id), true)
+  const { keys, more, hidden } = rowKeyPlan(r, optionsShown.has(id), true)
 
-  return { keys: keys.map(key), more: more.map(key) }
+  return { keys: keys.map(key), more: more.map(key), hidden: hidden.map(key) }
 }
 
 function itemRow(v: View, r: RowView, item: Item): Row {
@@ -524,8 +564,7 @@ function itemRow(v: View, r: RowView, item: Item): Row {
     handleTone: isHandedOff ? 'done' : undefined,
     ...(isHandedOff ? { fold: {} } : {}),
     title: item.ask,
-    titleAfter: item.at === null ? undefined : `${DOT}${ago(v.at - item.at)}`,
-    hasSecondLine: isQuestion,
+    age: item.at === null ? undefined : shortAgo(v.at - item.at),
     ...rowKeys(r),
     typing: {
       hint: isQuestion ? 'Your answer' : 'Your reply to Codex',
@@ -547,8 +586,7 @@ function findingRow(v: View, r: RowView, f: Finding): Row {
     kind: f.kind,
     ...(isHandedOff ? { fold: {} } : {}),
     title: f.title,
-    titleAfter: `${DOT}${ago(v.at - f.at)}`,
-    line: { text: f.title },
+    age: shortAgo(v.at - f.at),
     body: (
       <div>
         <p>{inlineHtml(f.detail)}</p>
@@ -700,10 +738,10 @@ function isOpenGuarded(): boolean {
 }
 
 /** The selected row's keys. */
-function rowActions(row: Row): { keys: Key[]; more: Key[] } {
-  if (row.typing && typing === row.id) return { keys: [], more: [] }
+function rowActions(row: Row): { keys: Key[]; more: Key[]; hidden: Key[] } {
+  if (row.typing && typing === row.id) return { keys: [], more: [], hidden: [] }
 
-  return { keys: row.keys, more: row.more }
+  return { keys: row.keys, more: row.more, hidden: row.hidden }
 }
 
 // ── Drawing ─────────────────────────────────────────────────────────────────
@@ -712,11 +750,11 @@ function rowActions(row: Row): { keys: Key[]; more: Key[] } {
  * One of the open row's actions. A click right after the row opened does
  * nothing; its key works at once. Keys are an extra, so no key text shows.
  */
-function KeyButton({ k, isGhost = false }: { k: Key; isGhost?: boolean }) {
+function KeyButton({ k }: { k: Key }) {
   return (
     <button
       type="button"
-      class={k.isPrimary ? 'key primary' : isGhost ? 'key ghost' : 'key'}
+      class={`${k.emphasis === 'primary' ? 'key primary' : k.emphasis === 'quiet' ? 'key ghost' : 'key'}${k.isDismiss ? ' dismiss' : ''}`}
       disabled={isOpenGuarded()}
       onClick={() => {
         if (!isOpenGuarded()) k.run()
@@ -819,18 +857,11 @@ function ListRow({
   const bar = isNew(row.id) ? ` new tone-bar-${tone}` : ''
   const handle = <span class={`mark ${row.handleTone ?? row.kind ?? ''}`}>{row.handle}</span>
 
-  const plain = row.line ?? { text: row.title, after: row.titleAfter }
-  // A row's last action takes the place of its age, as "✓ Discuss 1m ago". It is muted unless it failed: a done row's ✓ is already green.
+  // A row's last action reads after its title, as "✓ Discuss · 1m ago", and takes the place of its side age. It is muted unless it failed: a done row's ✓ is already green.
   // A press still out reads there too, as "Sending…", so nothing under the line moves while it runs.
   const pending = sending.get(row.id)
   const last = pending ?? (isFeedbackShown(row) ? lastText(row, now) : null)
-  const line = last
-    ? {
-        ...plain,
-        after: `${DOT}${last}`,
-        afterTone: !pending && isFailure(row.feedback) ? ('error' as const) : undefined,
-      }
-    : plain
+  const afterTone = !pending && isFailure(row.feedback) ? 'error' : undefined
 
   // The same elements draw the row open and closed, so its line stays put and only the panel under it comes and goes.
   // Closed, the whole row takes the click; the button keeps it in the focus order, and its click reaches the row.
@@ -847,13 +878,16 @@ function ListRow({
           class="line"
           {...(isSelected ? { tabIndex: -1, 'aria-disabled': true } : { 'aria-expanded': false })}
         >
-          <span class={row.hasSecondLine ? 'text two' : 'text'}>{line.text}</span>
-          {line.after ? (
-            <span class={`after ${line.afterTone ? `tone-${line.afterTone}` : ''}`}>{line.after}</span>
+          <span class="text">{row.title}</span>
+          {last ? (
+            <span class={`after ${afterTone ? `tone-${afterTone}` : ''}`}>
+              {isSelected || isClosing ? `${DOT}${last}` : last}
+            </span>
           ) : null}
         </button>
         {isSelected || isClosing ? <Panel row={row} isClosing={isClosing} /> : null}
       </div>
+      <span class="side">{last ? null : row.age}</span>
     </div>
   )
 }
@@ -861,6 +895,10 @@ function ListRow({
 /** An open row's details under its line: its kind, body, notes, actions and copy box. */
 function Panel({ row, isClosing }: { row: Row; isClosing: boolean }) {
   const { keys, more } = rowActions(row)
+  // Filled and outlined buttons lead, then the plain-text actions, with Dismiss at the far right.
+  const actions = [...keys, ...more]
+  const buttons = actions.filter(k => k.emphasis !== 'quiet')
+  const quiet = actions.filter(k => k.emphasis === 'quiet')
   const copied = copies.get(row.id)
   const note = noteOf(row.id)
   const isTyping = !!row.typing && typing === row.id
@@ -875,23 +913,11 @@ function Panel({ row, isClosing }: { row: Row; isClosing: boolean }) {
       {row.body ? <div class="body">{row.body}</div> : null}
       {notes.length > 0 ? <div class="tight">{notes}</div> : null}
       <div class="actions">
-        {/* Each group wraps as a whole: the follow-ups move to the next line together, never split across two. */}
-        {keys.length > 0 || more.length > 0 ? (
-          <div class="key-groups">
-            {keys.length > 0 ? (
-              <div class="keys">
-                {keys.map(k => (
-                  <KeyButton k={k} />
-                ))}
-              </div>
-            ) : null}
-            {more.length > 0 ? (
-              <div class="keys follow-ups">
-                {more.map(k => (
-                  <KeyButton k={k} isGhost />
-                ))}
-              </div>
-            ) : null}
+        {actions.length > 0 ? (
+          <div class="keys">
+            {[...buttons, ...quiet.filter(k => !k.isDismiss), ...quiet.filter(k => k.isDismiss)].map(k => (
+              <KeyButton k={k} />
+            ))}
           </div>
         ) : null}
         {isTyping ? <TypeField row={row} /> : null}
@@ -930,8 +956,7 @@ function SettledView({ settled: r, panel }: { settled: RowView; panel: Row | und
       <span class="mark">{state.isQueued ? '' : '✓'}</span>
       <div class="content">
         <div class="settled-head">
-          {/* An error wraps, so none of it is cut. */}
-          <div class={error ? 'settled-line wraps' : 'settled-line'}>
+          <div class="settled-line">
             <span class="what">{r.title}</span>
             <span class="outcome-label">
               {DOT}
@@ -1003,8 +1028,13 @@ function Entries({ entries, group, all, now }: { entries: Entry[]; group: Group;
 function GroupTitle({ title, count }: { title: string; count: number }) {
   return (
     <div class="group-title">
-      {title}
-      {count > 0 ? <span class="count">{count}</span> : null}
+      <b>{title}</b>
+      {count > 0 ? (
+        <span class="count">
+          {DOT}
+          {count}
+        </span>
+      ) : null}
     </div>
   )
 }
@@ -1046,7 +1076,12 @@ function ItemGroup({
       {/* A row handed to Codex stays listed but leaves the count. */}
       <GroupTitle title={title} count={rows.filter(r => !r.fold).length} />
       <Entries entries={entries} group={kind} all={all} now={now} />
-      <ClosedFold group={kind} closed={closed} now={now} />
+      <ClosedFold
+        group={kind}
+        closed={closed}
+        total={closedTotal(v.needsYou.closed[kind === 'question' ? 'questions' : 'tasks'], settledIn(entries))}
+        now={now}
+      />
     </section>
   )
 }
@@ -1082,8 +1117,20 @@ function inlineHtml(text: string) {
   })
 }
 
-function ClosedFold({ group, closed, now }: { group: Group; closed: ClosedLine[]; now: number }) {
-  if (closed.length === 0) return null
+function ClosedFold({
+  group,
+  closed,
+  total,
+  now,
+}: {
+  group: Group
+  closed: ClosedLine[]
+  /** Every close the fold keeps, which its label counts. `closed` lists the newest few. */
+  total: number
+  now: number
+}) {
+  if (total === 0) return null
+  const earlier = earlierLabel(total, closed.length)
   const isUnfolded = unfolded.has(group)
   const isListed = isUnfolded || closingFolds.has(group)
 
@@ -1091,7 +1138,7 @@ function ClosedFold({ group, closed, now }: { group: Group; closed: ClosedLine[]
     <>
       <button type="button" class="fold" data-fold={group} onClick={() => toggleFold(group)}>
         <Icon name={isUnfolded ? 'down' : 'right'} />
-        {closed.length} Closed
+        {foldLabel(total)}
       </button>
       {isListed ? (
         <div class="list closed-list" data-motion={`closed-${group}`}>
@@ -1101,17 +1148,13 @@ function ClosedFold({ group, closed, now }: { group: Group; closed: ClosedLine[]
                 <span class="mark">{CLOSED_MARKS[d.state]}</span>
                 <div class="content tight">
                   <div class="muted">{d.ask}</div>
-                  <div>
-                    <span class={d.isLapsed ? 'outcome lapsed' : 'outcome'}>{capitalized(d.outcome)}</span>
-                    <span class="muted age">
-                      {DOT}
-                      {ago(now - d.at)}
-                    </span>
-                  </div>
+                  <div class={d.isLapsed ? 'outcome lapsed' : 'outcome'}>{capitalized(d.outcome)}</div>
                 </div>
+                <span class="side">{shortAgo(now - d.at)}</span>
               </div>
             </div>
           ))}
+          {earlier ? <div class="earlier muted">{earlier}</div> : null}
         </div>
       ) : null}
     </>
@@ -1210,7 +1253,12 @@ function Findings({ v, lists, now }: { v: View; lists: Lists; now: number }) {
       {closed.length > 0 ? (
         <section>
           {isNothing ? <div class="group-title empty-line">No open findings.</div> : null}
-          <ClosedFold group="finding" closed={closed} now={now} />
+          <ClosedFold
+            group="finding"
+            closed={closed}
+            total={closedTotal(v.findings.closed, settledIn(lists.findings))}
+            now={now}
+          />
         </section>
       ) : null}
     </main>
@@ -1260,7 +1308,13 @@ function TabBar({ v, now }: { v: View; now: number }) {
         ))}
       </div>
       <div class="status">{status}</div>
-      {serverNote ? <div class="status-line tone-error">{serverNote}</div> : null}
+      {serverNote ? (
+        serverNote.isReloadable ? (
+          <ErrorStrip text={serverNote.text} reload={() => location.reload()} />
+        ) : (
+          <div class="status-line tone-error">{serverNote.text}</div>
+        )
+      ) : null}
       {error ? <div class="status-line tone-error">{error}</div> : null}
       {lineNote && Date.now() - lineNote.at < SETTLED_MS ? (
         <div class={lineNote.isError ? 'status-line tone-error' : 'status-line muted'}>{lineNote.text}</div>
@@ -1286,20 +1340,25 @@ async function toggleDemo() {
   await read()
 }
 
+/** An error with a Reload button, which runs `reload`. */
+function ErrorStrip({ text, reload }: { text: string; reload: () => void }) {
+  return (
+    <div class="error-strip">
+      <span>{text}</span>
+      <button type="button" class="key" onClick={reload}>
+        Reload
+      </button>
+    </div>
+  )
+}
+
 function App({ lists }: { lists: Lists | null }): ComponentChildren {
   if (!view || !lists)
     return readError !== null ? (
-      <div class="notice">
-        Could not read the inbox. {readError}{' '}
-        <button type="button" class="key" onClick={() => void read()}>
-          Try again
-        </button>
-      </div>
-    ) : (
-      <div class="notice">
-        <span class="muted">Loading…</span>
-      </div>
-    )
+      <ErrorStrip text={`Could not read the inbox. ${readError}`} reload={() => void read()} />
+    ) : isLoadingShown ? (
+      <div class="notice muted">Loading…</div>
+    ) : null
   const v = view
   const now = v.at
 
@@ -1307,8 +1366,8 @@ function App({ lists }: { lists: Lists | null }): ComponentChildren {
     <>
       {isDemo ? (
         <div class="demo-note">
-          <span>Showing sample entries. Presses here send nothing.</span>
-          <button type="button" class="key" onClick={() => void toggleDemo()}>
+          <span>{DEMO_NOTICE}</span>
+          <button type="button" class="key ghost" onClick={() => void toggleDemo()}>
             Hide demo
           </button>
         </div>
@@ -1565,11 +1624,6 @@ function wakeForMoves() {
 }
 
 function draw() {
-  // The page's "Loading…" text is not Preact's, so it goes before the first draw.
-  if (root.className) {
-    root.className = ''
-    root.textContent = ''
-  }
   const before = measure()
   const step = view ? stepLists(view) : null
   lastLists = step?.lists ?? null
@@ -1626,8 +1680,8 @@ document.addEventListener('keydown', e => {
   }
   const row = rows[at]
   if (!row) return
-  const { keys, more } = rowActions(row)
-  const k = [...keys, ...more].find(x => x.hotkey === e.key)
+  const { keys, more, hidden } = rowActions(row)
+  const k = [...keys, ...more, ...hidden].find(x => x.hotkey === e.key)
   if (k) {
     e.preventDefault()
     k.run()
@@ -1646,5 +1700,11 @@ request('ui/initialize', {
     void poll()
   })
   .catch(() => {
-    root.textContent = 'The inbox could not connect to Codex.'
+    readError = 'The inbox could not connect to Codex.'
+    draw()
   })
+
+setTimeout(() => {
+  isLoadingShown = true
+  if (!view && readError === null) draw()
+}, LOADING_DELAY_MS)

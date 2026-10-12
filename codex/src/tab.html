@@ -18,10 +18,10 @@
         --sans: var(--font-sans, -apple-system, system-ui, sans-serif);
         --mono: var(--font-mono, ui-monospace, 'SF Mono', Menlo, monospace);
         /* Surfaces are mixed from the host's colors, so they follow its theme. */
-        --card: color-mix(in srgb, var(--text) 4.5%, var(--bg));
         --raised: color-mix(in srgb, var(--text) 9%, var(--bg));
-        --selected: color-mix(in srgb, #4c9aff 20%, var(--card));
-        /* A closed row's age, dimmer than --muted and still 4.5:1 on the card. */
+        /* The open row: a neutral surface one step above the page, in the family of the hover fill. */
+        --selected: color-mix(in srgb, var(--text) 6%, var(--bg));
+        /* A closed row's age, dimmer than --muted and still 4.5:1 on the page. */
         --age: color-mix(in srgb, var(--muted) 90%, var(--bg));
         --hover: color-mix(in srgb, var(--key) 14%, transparent);
         --soft: color-mix(in oklab, var(--text) 8%, transparent);
@@ -41,9 +41,8 @@
           --text: var(--color-text-primary, #ececec);
           --muted: var(--color-text-secondary, #a8a8a8);
           /*TONES:dark*/
-          --card: color-mix(in srgb, var(--text) 5.5%, var(--bg));
           --raised: color-mix(in srgb, var(--text) 11%, var(--bg));
-          --selected: color-mix(in srgb, #7fa6d9 15%, var(--card));
+          --selected: color-mix(in srgb, var(--text) 8%, var(--bg));
           --age: color-mix(in srgb, var(--muted) 85%, var(--bg));
           --soft: color-mix(in oklab, var(--text) 12%, transparent);
           --soft-hover: color-mix(in oklab, var(--text) 14%, transparent);
@@ -52,9 +51,8 @@
       :root[data-theme='dark'] {
         color-scheme: dark;
         /*TONES:dark*/
-        --card: color-mix(in srgb, var(--text) 5.5%, var(--bg));
         --raised: color-mix(in srgb, var(--text) 11%, var(--bg));
-        --selected: color-mix(in srgb, #7fa6d9 15%, var(--card));
+        --selected: color-mix(in srgb, var(--text) 8%, var(--bg));
         --age: color-mix(in srgb, var(--muted) 85%, var(--bg));
         --soft: color-mix(in oklab, var(--text) 12%, transparent);
         --soft-hover: color-mix(in oklab, var(--text) 14%, transparent);
@@ -102,10 +100,26 @@
       }
       .notice {
         padding: 10px 16px;
+        overflow-wrap: anywhere;
+      }
+      .error-strip {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-basis: 100%;
+        margin: 4px 0 0;
+        padding: 8px 12px;
+        border-radius: 6px;
+        background: color-mix(in srgb, var(--error) 12%, var(--bg));
         color: var(--error);
         overflow-wrap: anywhere;
       }
-      .notice .key {
+      #app > .error-strip {
+        margin: 12px 12px 0;
+      }
+      .error-strip .key {
+        flex: none;
         color: var(--text);
       }
 
@@ -153,26 +167,38 @@
       main {
         display: flex;
         flex-direction: column;
-        gap: 8px;
-        padding: 12px 12px 4px;
+        padding: 8px 0 4px;
       }
+      /* Sections sit on the page. A hairline separates them, starting at the text column. */
       section {
-        background: var(--card);
-        border-radius: 8px;
+        position: relative;
         padding: 10px 0;
       }
+      section + section::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: var(--text-x);
+        right: 0;
+        height: 1px;
+        background: var(--soft);
+      }
       .group-title {
-        padding: 0 14px 6px var(--mark-x);
-        font-weight: 500;
+        padding: 0 14px 6px var(--text-x);
+      }
+      .group-title b {
+        font-weight: 600;
       }
       .group-title .count {
         color: var(--muted);
-        margin-left: 6px;
+        white-space: pre;
       }
 
       /* Rows. */
+      /* Three columns: the mark, the text, and the age. */
       .row {
-        display: flex;
+        display: grid;
+        grid-template-columns: calc(var(--text-x) - var(--mark-x)) minmax(0, 1fr) auto;
         padding: var(--row-pad) 14px var(--row-pad) var(--mark-x);
       }
       /* An open row keeps a closed row's padding, so its line does not move as it opens. */
@@ -191,8 +217,7 @@
       }
       /* Marks center in a badge's width, so a ?, a • and a number line up. */
       .mark {
-        flex: none;
-        width: calc(var(--text-x) - var(--mark-x));
+        align-self: start;
         padding-right: 8px;
         text-align: center;
         color: var(--muted);
@@ -209,8 +234,17 @@
       .mark.error {
         color: var(--error-mark);
       }
+      .side {
+        align-self: start;
+        margin-left: 12px;
+        color: var(--age);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .row.collapsed:hover .side {
+        color: var(--muted);
+      }
       .content {
-        flex: 1;
         min-width: 0;
         display: flex;
         flex-direction: column;
@@ -229,35 +263,29 @@
         flex-direction: column;
         gap: 0;
       }
+      /* A closed row's last action reads under its title, so it never squeezes the title. */
       .line {
         display: flex;
+        flex-direction: column;
         width: 100%;
         min-width: 0;
       }
+      /* A closed row's title wraps to two lines, then clips. */
       .line .text {
         min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .line .text.two {
-        white-space: normal;
         display: -webkit-box;
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
       }
       .line .after {
-        flex: none;
-        white-space: pre;
         color: var(--muted);
       }
-      .row.collapsed .line .after:not(.tone-error),
-      .row.collapsed .meta .age,
-      .closed-list .age {
+      .row.collapsed .line .after:not(.tone-error) {
         color: var(--age);
       }
-      .row.collapsed:hover .line .after:not(.tone-error),
-      .row.collapsed:hover .meta .age {
+      .row.collapsed:hover .line .after:not(.tone-error) {
         color: var(--muted);
       }
       .line .after.tone-error {
@@ -271,11 +299,12 @@
       .row.selected .line .text,
       .row.closing .line .text {
         display: inline;
-        white-space: normal;
+        font-weight: 600;
       }
       .row.selected .line .after,
       .row.closing .line .after {
         white-space: normal;
+        font-weight: 400;
       }
       .row.collapsed:hover {
         background-color: var(--row-hover);
@@ -310,8 +339,9 @@
         font-family: var(--mono);
       }
       /*
-       * Actions are Codex's own pill buttons, size sm: the recommended option is solid, the row's other
-       * answers are a soft gray fill, and the follow-ups are plain text. Keys are an extra, so no key text shows.
+       * Actions are Codex's own pill buttons, size sm, in three levels: the one primary action is filled, the
+       * others are outlined, and the follow-ups are plain text, with Dismiss at the far right. Keys are an
+       * extra, so no key text shows.
        */
       .keys {
         display: flex;
@@ -326,14 +356,15 @@
         gap: 5px;
         min-height: 26px;
         padding: 3px 11px;
+        border: 1px solid color-mix(in oklab, var(--text) 28%, transparent);
         border-radius: 999px;
-        background: var(--soft);
+        background: transparent;
         font-weight: 400;
         text-align: center;
         white-space: nowrap;
       }
       .key:not(:disabled):hover {
-        background: var(--soft-hover);
+        background: var(--soft);
       }
       .key:focus-visible {
         outline-width: 2px;
@@ -341,6 +372,7 @@
         border-radius: 999px;
       }
       .key.primary {
+        border-color: transparent;
         background: var(--text);
         color: var(--bg);
       }
@@ -352,9 +384,10 @@
         width: 14px;
         height: 14px;
       }
-      /* A follow-up is plain text: muted, the text color under the pointer, with no fill and no padding. */
+      /* A follow-up is plain text: muted, the text color under the pointer, with no fill, border or padding. */
       .key.ghost {
-        padding: 0;
+        padding: 0 4px;
+        border-color: transparent;
         background: none;
         color: var(--muted);
       }
@@ -362,16 +395,8 @@
         background: none;
         color: var(--text);
       }
-      .keys.follow-ups {
-        column-gap: 16px;
-      }
-      .key-groups {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px 16px;
-      }
-      .key-groups > .keys {
-        min-width: 0;
+      .key.dismiss {
+        margin-left: auto;
       }
       .actions {
         display: flex;
@@ -462,37 +487,19 @@
           background-color: var(--selected);
         }
       }
+      /* The title and its outcome wrap, so neither is cut in the middle. */
       .settled-line {
-        display: flex;
         flex: 1;
         min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .settled-line.wraps {
-        display: block;
-        white-space: normal;
-      }
-      .settled .what {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        overflow-wrap: anywhere;
       }
       .settled .outcome-label {
-        flex: none;
-        max-width: 50%;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: pre;
         color: var(--muted);
-      }
-      .settled-line.wraps .outcome-label {
-        white-space: normal;
       }
       /* Undo's fill is the time it has left. The pill keeps the line's height, so the row does not grow. */
       .key.undo {
         flex: none;
+        border-color: transparent;
         position: relative;
         isolation: isolate;
         overflow: hidden;
@@ -559,16 +566,28 @@
         color: var(--text);
         background: var(--hover);
       }
+      /* One line: the notice, with Hide demo at the right. */
       .demo-note {
         display: flex;
-        flex-wrap: wrap;
         align-items: center;
-        gap: 4px 12px;
-        margin: 12px 12px 0;
-        padding: 6px 12px;
-        border-radius: 6px;
-        background: var(--raised);
-        color: var(--text);
+        justify-content: space-between;
+        gap: 6px;
+        padding: 8px 12px 0;
+        font-size: 11px;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .demo-note .key {
+        flex: none;
+        padding: 0;
+      }
+      .demo-note span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .earlier {
+        padding: 2px 14px 2px var(--text-x);
       }
       /*
        * Motion, with the Codex app's own timing, only for what enters or leaves. Hover, press and
@@ -606,7 +625,7 @@
     </style>
   </head>
   <body>
-    <div id="app" class="notice muted">Loading…</div>
+    <div id="app"></div>
     <script>
       /*TAB_SCRIPT*/
     </script>
