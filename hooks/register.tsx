@@ -4111,8 +4111,8 @@ export const register: Register = on => {
             key: `empty-${title}`,
             children: <Text color={pal.muted}>{groupEmptyText(title)}</Text>,
           })
-        : // A blank mark keeps the text at the rows' column.
-          treeRow('last', <Text> </Text>, <Text color={pal.muted}>{groupEmptyText(title)}</Text>, `empty-${title}`)
+        : // Off the tree, as the fold line is, with its text where the fold's count starts after "▸ ".
+          treeRow(null, null, <Text color={pal.muted}>{`  ${groupEmptyText(title)}`}</Text>, `empty-${title}`)
     const groupTitle = (title: string, count: number) =>
       look === 'desktop' ? (
         desktopFrame({
@@ -4485,7 +4485,7 @@ export const register: Register = on => {
         return [
           section([
             groupTitle(g.title, g.rows.filter(r => !r.fold).length),
-            ...titleGap(),
+            ...titleGap(open.length > 0),
             ...(open.length > 0 ? open : [groupEmpty(g.title)]),
             ...tail,
           ]),
@@ -4569,7 +4569,7 @@ export const register: Register = on => {
       const groups = lists.findingGroups.map(g =>
         section([
           groupTitle(g.title, rowsIn(g.entries).filter(r => !r.fold).length),
-          ...titleGap(),
+          ...titleGap(g.entries.length > 0),
           ...(g.entries.length === 0 ? [groupEmpty(g.title)] : []),
           ...divided(
             g.entries.map((x, n) =>
