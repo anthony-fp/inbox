@@ -675,9 +675,7 @@ function prThreadRow(v: View, pr: PrView, t: PrThread): Row {
   const press =
     (action: 'thread-address' | 'thread-draft' | 'thread-discuss' | 'thread-open', pending?: string) => () =>
       void act(id, { action, ref: pr.ref, thread: t.id }, undefined, pending)
-  const latest = t.reply ?? t
   const where = threadWhere(t)
-  const lead = threadWhere(t, baseName(t.path))
 
   return {
     id,
@@ -686,9 +684,11 @@ function prThreadRow(v: View, pr: PrView, t: PrThread): Row {
     ...(isSent || isChanged
       ? { fold: t.isLinesChanged ? { note: `Lines changed since this comment${DOT}still open on GitHub` } : {} }
       : {}),
-    lead,
+    // The first comment, which asks for the change, is the title open or closed; the line under it says where it
+    // sits and who asked, or the latest reply.
     title: commentLine(t.body),
     meta: [
+      threadWhere(t, baseName(t.path)),
       isChanged ? 'Lines changed' : '',
       t.reply ? `@${t.reply.author}: ${commentLine(t.reply.body)}` : `@${t.author}`,
     ]
@@ -697,11 +697,12 @@ function prThreadRow(v: View, pr: PrView, t: PrThread): Row {
     age: t.at === null ? undefined : shortAgo(v.at - t.at),
     body: (
       <div>
-        {where === lead ? null : <p class="muted">{where}</p>}
-        {t.reply ? <p class="muted">{`@${t.author}: ${clipLabel(commentLine(t.body), 200)}`}</p> : null}
-        <p class="quote">
-          <b>@{latest.author}:</b> {inlineHtml(clipLabel(readableComment(latest.body), 1200))}
-        </p>
+        <p class="muted">{`${where}${DOT}@${t.author}`}</p>
+        {t.reply ? (
+          <p class="quote">
+            <b>@{t.reply.author}:</b> {inlineHtml(clipLabel(readableComment(t.reply.body), 1200))}
+          </p>
+        ) : null}
       </div>
     ),
     keys: [
@@ -1545,7 +1546,7 @@ function PrBlock({
   now,
 }: PrBlockPlan & { v: View; openId: string | undefined; all: Row[]; now: number }) {
   const isSent = threadSentIn(v.lastActions)
-  const { status, head, reasonList } = readiness(pr, isSent)
+  const { status, head, unlisted } = readiness(pr, isSent)
   const tone = PR_TONES[status]
   const id = prMarkId(pr.ref)
   const waitingOn = threadsOnYou(pr, isSent)
@@ -1604,10 +1605,10 @@ function PrBlock({
         <span class="tone-prs num">#{pr.number}</span> {pr.title}
       </div>
       <div class="pr-status">
-        <div class={tone ? `tone-${tone}` : 'muted'}>{head}</div>
-        {reasonList.map(r => (
-          <div class="muted">{r}</div>
-        ))}
+        <div>
+          <span class={tone ? `tone-${tone}` : 'muted'}>{head}</span>
+          <span class="muted">{unlisted.map(r => `${DOT}${r}`).join('')}</span>
+        </div>
         {pr.error ? <div class="tone-error">Last refresh failed: {pr.error}</div> : null}
       </div>
       <div class="pr-actions keys">

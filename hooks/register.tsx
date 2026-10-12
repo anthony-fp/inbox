@@ -2972,15 +2972,16 @@ export const register: Register = on => {
     }
     const threadRow = (pr: PrView, t: PrThread): Row => {
       const id = prThreadId(pr, t)
-      const latest = t.reply ?? { author: t.author, body: t.body, at: t.at }
+      // Open, the row adds where the thread sits and the latest reply under the comment its title already shows.
       const comment = (
         <Box flexDirection="column">
+          <Text color={pal.muted} wrap="wrap">
+            {threadWhere(t)}
+            {DOT}@{t.author}
+          </Text>
           {t.reply ? (
-            <Text color={pal.muted} wrap="wrap">
-              @{t.author}: {clipLabel(commentLine(t.body), 200)}
-            </Text>
+            <Markdown text={`**@${t.reply.author}:** ${clipLabel(readableComment(t.reply.body), 1200)}`} />
           ) : null}
-          <Markdown text={`**@${latest.author}:** ${clipLabel(readableComment(latest.body), 1200)}`} />
         </Box>
       )
       // Sent to Claude, the thread folds to the first line of its latest comment,
@@ -2997,14 +2998,15 @@ export const register: Register = on => {
         ...(isSent || isChanged
           ? { fold: t.isLinesChanged ? { note: `Lines changed since this comment${DOT}still open on GitHub` } : {} }
           : {}),
-        title: threadWhere(t),
         // The block's "Review threads" title says the kind. The first comment, which asks for the change, is the
-        // title, and the second line says who asked or the latest reply.
+        // title open or closed, and the line under it says where it sits and who asked, or the latest reply.
+        title: commentLine(t.body),
         ...(t.at === null ? {} : { at: t.at }),
         line: {
-          before: `${threadWhere(t, baseName(t.path))} `,
+          before: '',
           text: commentLine(t.body),
           after: [
+            threadWhere(t, baseName(t.path)),
             isChanged ? 'Lines changed' : '',
             t.reply ? `@${t.reply.author}: ${commentLine(t.reply.body)}` : `@${t.author}`,
           ]
@@ -4679,7 +4681,7 @@ export const register: Register = on => {
       threads: Row[]
     }) => {
       if (isSettled) return settledPrBlock(pr)
-      const { status, head: statusHead, reasonList } = readiness(pr, isThreadSent)
+      const { status, head: statusHead, unlisted } = readiness(pr, isThreadSent)
       const { mark, tone } = PR_STATUSES[status]
       const waitingOn = threadsOnYou(pr, isThreadSent)
       // A Dismiss left on a PR that is tracked again, as one a later reply links, is over.
@@ -4746,7 +4748,7 @@ export const register: Register = on => {
           : []),
       ]
 
-      // The status word carries its color and its reasons are muted, one per line, so the title stays the loudest
+      // The status word carries its color, then the reasons no row below lists, muted, so the title stays the loudest
       // line. On desktop the word says the status, so it needs no mark.
 
       const titleLine = (
@@ -4758,12 +4760,10 @@ export const register: Register = on => {
       const statusBlock = (
         <Box flexDirection="column">
           {/* Desktop's palette names few tones, so a status falls back to its mark's color there. */}
-          <Text color={tone ? (pal.tone[tone] ?? pal.mark[tone]) : pal.muted}>{statusHead}</Text>
-          {reasonList.map(r => (
-            <Text color={pal.muted} wrap="wrap">
-              {r}
-            </Text>
-          ))}
+          <Text wrap="wrap">
+            <Text color={tone ? (pal.tone[tone] ?? pal.mark[tone]) : pal.muted}>{statusHead}</Text>
+            <Text color={pal.muted}>{unlisted.map(r => `${DOT}${r}`).join('')}</Text>
+          </Text>
           {/* The next poll is minutes away, and desktop has no key to refresh with. */}
           {pr.error ? (
             <Box flexDirection="column">

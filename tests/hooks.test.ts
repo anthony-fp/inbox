@@ -1379,7 +1379,7 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   await pane.press({ key: 'tab-prs' })
   await clock.settle()
   expect(await pane.find({ text: /Add a greeting CLI/ })).toBeDefined()
-  for (const line of ['Blocked', 'conflicts with main', '1 failing check', '1 thread waiting on you'])
+  for (const line of ['Blocked', /^\u2002·\sconflicts with main$/])
     expect(await pane.find({ text: line })).toBeDefined()
   // A blocked PR offers no Merge.
   expect(await pane.find({ key: 'merge-acme/greet#12' })).toBeUndefined()
@@ -1392,7 +1392,7 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   expect((await pane.find({ key: 'resolve-acme/greet#12' }))?.props.label).toBe('Resolve conflicts again')
 
   // Open PR reports on the block, and a failed open reads in a color, not muted as its reasons are.
-  const muted = (await pane.find({ type: 'Text', text: 'conflicts with main' }))?.props.color
+  const muted = (await pane.find({ type: 'Text', text: /conflicts with main$/ }))?.props.color
   expect(await pane.find({ text: '✓ Opened PR #12' })).toBeUndefined()
   await pane.press({ key: 'open-acme/greet#12' })
   await clock.settle()

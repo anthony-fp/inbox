@@ -247,11 +247,14 @@ function plural(count: number, one: string, many: string): string {
 export function readiness(
   pr: PrView,
   isSent: IsThreadSent = () => false,
-): { status: PrStatus; text: string; head: string; reasons: string; reasonList: string[] } {
+): { status: PrStatus; text: string; head: string; reasons: string; reasonList: string[]; unlisted: string[] } {
   const result = (status: PrStatus, head: string, reasonList: string[] = [], joint = ': ') => {
     const reasons = reasonList.join(', ')
-    return { status, text: reasons ? `${head}${joint}${reasons}` : head, head, reasons, reasonList }
+    // The PR tab lists failing checks and waiting threads as rows, so its status line names only the rest.
+    const unlisted = status === 'ready' ? [] : reasonList.filter(r => !listed.includes(r))
+    return { status, text: reasons ? `${head}${joint}${reasons}` : head, head, reasons, reasonList, unlisted }
   }
+  const listed: string[] = []
   if (pr.state === 'MERGED') return result('merged', 'Merged')
   if (pr.state !== 'OPEN') return result('closed', 'Closed')
   const { fail: failing, pending } = checkCounts(pr)
@@ -260,15 +263,16 @@ export function readiness(
   const sent = waiting.filter(t => isSent(pr, t)).length
   const changed = waiting.filter(t => t.isLinesChanged && !isSent(pr, t)).length
   const isPresent = (b: string | null): b is string => b !== null
+  const row = (r: string | null) => (r === null ? r : (listed.push(r), r))
   const onYou = [
     pr.mergeable === 'CONFLICTING' ? `conflicts with ${pr.base}` : null,
-    failing > 0 ? plural(failing, 'failing check', 'failing checks') : null,
+    row(failing > 0 ? plural(failing, 'failing check', 'failing checks') : null),
     pr.reviewDecision === 'CHANGES_REQUESTED' ? 'changes requested' : null,
-    open > 0 ? threadsWaiting(open) : null,
+    row(open > 0 ? threadsWaiting(open) : null),
   ].filter(isPresent)
   const onOthers = [
-    sent > 0 ? `${plural(sent, 'thread', 'threads')} sent to Claude` : null,
-    changed > 0 ? `${plural(changed, 'thread', 'threads')} on changed lines` : null,
+    row(sent > 0 ? `${plural(sent, 'thread', 'threads')} sent to Claude` : null),
+    row(changed > 0 ? `${plural(changed, 'thread', 'threads')} on changed lines` : null),
     pr.reviewDecision === 'REVIEW_REQUIRED' ? 'needs approval' : null,
     pending > 0 ? `${pending} ${pending === 1 ? 'check' : 'checks'} running` : null,
   ].filter(isPresent)
