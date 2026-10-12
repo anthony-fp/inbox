@@ -119,6 +119,8 @@ HELP: <item> | <kind> | <value> | <name>
     link | an https URL the person needs to visit
   name: what a copy, command or link is, at most 3 words ("settings snippet", "removal command", "token page"), or "-".
   Use only paths, commands, text and URLs that appear in <reply> or <activity>. Never invent one.
+TODO: <work>
+  One line for each todo in <person> that the reply neither takes up nor asks about. A todo is work the person sets aside for later, as in "todo: X" or "later, let's X". Nothing else is a todo, and work already in <open> or <findings> is not one, even when the person puts it off. work: what to start, at most 12 words, worded to follow "Ready to start on".
 
 Write plainly. No jargon, no filler, no markdown.`;
 }
@@ -228,7 +230,7 @@ function dash(value) {
   const v = (value ?? "").trim();
   return v === "" || v === "-" ? null : v;
 }
-var KEY_LINE = /^\s*[-*]?\s*(GOAL|DONE|NOW|RUNNING|CLOSED|FIXED|ASKED|NEW|UPDATE|HELP)\s*:\s*(.*)$/;
+var KEY_LINE = /^\s*[-*]?\s*(GOAL|DONE|NOW|RUNNING|CLOSED|FIXED|ASKED|NEW|UPDATE|HELP|TODO)\s*:\s*(.*)$/;
 function parseReply(text, source = null) {
   const blocks = source === null ? [] : codeBlocks(source);
   const card = { goal: "", done: [], now: "", running: [] };
@@ -238,6 +240,7 @@ function parseReply(text, source = null) {
   const updated = [];
   const helps = [];
   const asks = [];
+  const todos = [];
   let seen = 0;
   const lines = text.split(NL);
   const lastGoal = lines.findLastIndex((line) => KEY_LINE.exec(line)?.[1] === "GOAL");
@@ -278,6 +281,8 @@ function parseReply(text, source = null) {
       };
       added.push(item);
       newLines.push(item);
+    } else if (key === "TODO" && value) {
+      todos.push(value);
     } else if (key === "UPDATE") {
       const [target, options, rec] = value.split("|").map(dash);
       const id = target?.match(/\b(i\d+)\b/)?.[1];
@@ -303,7 +308,10 @@ function parseReply(text, source = null) {
     const item = n ? added.indexOf(newLines[Number(n[1]) - 1]) : target.match(/\b(i\d+)\b/)?.[1];
     if (item !== void 0 && item !== -1) asked.push({ id, item });
   }
-  return seen === 0 ? null : { card: { ...card, done: card.done.slice(-4) }, closed, added, helped, updated, asked };
+  return seen === 0 ? null : { card: { ...card, done: card.done.slice(-4) }, closed, added, helped, updated, asked, todos };
+}
+function todoAsk(work) {
+  return `Ready to start on ${work.replace(/[.?!\s]+$/, "")}?`;
 }
 var FILLER = /* @__PURE__ */ new Set([
   "the",
@@ -402,6 +410,20 @@ function applyUpdate(ledger, u, now, turn, promptAt = now) {
     items.push({ ...a, id: `i${nextId}`, turn, at: now });
     addedIds.push(`i${nextId}`);
     created.add(`i${nextId}`);
+    nextId += 1;
+    added += 1;
+  }
+  for (const work of u.todos) {
+    const todo = {
+      kind: "question",
+      label: null,
+      ask: todoAsk(work),
+      options: ["Proceed", "Not yet"],
+      rec: null
+    };
+    const isKnown = items.some((i) => restates(i.ask, work)) || ledger.findings.some((f) => restates(f.title, work)) || repeatsRecentlyClosed(ledger.closed, { ...todo, helps: [] }, promptAt);
+    if (isKnown) continue;
+    items.push({ ...todo, helps: [], id: `i${nextId}`, turn, at: now });
     nextId += 1;
     added += 1;
   }
