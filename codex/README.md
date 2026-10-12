@@ -70,8 +70,11 @@ tab can swap only if its own page came from a build that has this feature.
 Codex keeps a plugin's server process running across reinstalls and new
 chats. That process is a small loader, `src/server-main.ts`, which imports the
 handler, `dist/server-handler.mjs`, again whenever its file changes. So a
-build and a reinstall take effect without restarting Codex. Only a change to
-the loader itself needs Codex quit and reopened. The tab says when its page
+build and a reinstall take effect without restarting Codex. Codex still asks
+for the page by the address it read when the process started, and it drops a
+tab whose page comes back under a different address. So the server answers
+under the address Codex asked for. Only a change to the loader itself needs
+Codex quit and reopened. The tab says when its page
 and the running handler come from different builds.
 
 `../scripts/check.sh` checks the bundles are current, the types and the

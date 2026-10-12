@@ -42,7 +42,8 @@ import type { LastAction, Ledger, PrViews, RowNote } from '../../types'
 
 /**
  * The tab's address for one build of its page. Codex keeps a tab's page by its address, even across server
- * restarts, so a page changed under the same address would not show until Codex restarts.
+ * restarts, so a new build needs a new address for a new chat to load it. An open tab learns of a new build
+ * from `devPage` and swaps its page itself.
  */
 export function tabUri(tabHtml: string): string {
   return `ui://inbox/tab-${createHash('sha256').update(tabHtml).digest('hex').slice(0, 12)}`
@@ -493,8 +494,17 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
         return ok({ resources: [{ uri, name: 'Inbox', mimeType: TAB_MIME }] })
       case 'resources/templates/list':
         return ok({ resourceTemplates: [] })
-      case 'resources/read':
-        return ok({ contents: [{ uri, mimeType: TAB_MIME, text: stamped(deps.tabHtml) }] })
+      case 'resources/read': {
+        // Codex asks by the address from the tools/list it read when the server started, and drops the frame when
+        // the reply names another. A build loaded since then has a new address, so answer under the one asked for.
+        const asked = String(params?.uri ?? '')
+
+        return ok({
+          contents: [
+            { uri: asked.startsWith('ui://inbox/tab-') ? asked : uri, mimeType: TAB_MIME, text: stamped(deps.tabHtml) },
+          ],
+        })
+      }
       case 'ping':
         return ok({})
     }

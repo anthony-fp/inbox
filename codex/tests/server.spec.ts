@@ -190,6 +190,12 @@ test('the tab opens from the app-only inbox_view tool, and the model’s inbox t
     result: { contents: { uri: string }[] }
   }
   assert.equal(read.result.contents[0]?.uri, tabUri('<html></html>'))
+  const older = tabUri('<html>older</html>')
+  const readOlder = (await handle({ jsonrpc: '2.0', id: 3, method: 'resources/read', params: { uri: older } })) as {
+    result: { contents: { uri: string; text: string }[] }
+  }
+  assert.equal(readOlder.result.contents[0]?.uri, older)
+  assert.match(readOlder.result.contents[0]?.text ?? '', /<html>/)
 })
 
 test('with no dev build, the view names the installed page and inbox_tab_page serves it, so a tab from an older build replaces itself', async () => {
