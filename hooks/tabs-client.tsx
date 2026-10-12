@@ -82,9 +82,7 @@ const Tabs: ClientModule<TabsProps, State> = (props, surface) => {
         alignItems: 'center',
         justifyContent: 'center',
         ...(background ? { backgroundColor: background } : {}),
-        // Too narrow for every tab, a label is cut rather than wrapped to a second line the tab cannot show.
         children: Text({
-          wrap: 'truncate-end',
           ...(labelColor ? { color: labelColor } : {}),
           bold: isShown,
           children: tab.count > 0 ? [tab.label, TAB_COUNT_GAP, count] : tab.label,

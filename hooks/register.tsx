@@ -158,6 +158,8 @@ import { followTo, recordRows } from './arrivals'
 import { parseInline } from './inline'
 import type { RowRecord } from './arrivals'
 import { ROW_PAD_PT } from './layout'
+import { DARK_DALTONIZED_TONES, DARK_TONES, LIGHT_DALTONIZED_TONES, LIGHT_TONES, toneColors } from './tones'
+import type { ToneName } from './tones'
 import type { FoldProps } from './fold-client'
 import type { LinksProps } from './links-client'
 import type { RowProps } from './row-client'
@@ -262,6 +264,37 @@ function undoSvg(fraction: number, leftMs: number): string {
     `<text x="${w / 2}" y="${h / 2}" dominant-baseline="central" text-anchor="middle" ` +
     `font-family="-apple-system, system-ui, sans-serif" font-size="14">↺ Undo</text></svg>`
   )
+}
+/**
+ * Desktop text in a status color, as an Svg one line tall and `cells` wide. Text draws one color in both
+ * appearances, which the mod cannot read, but an Svg follows the system's light or dark setting, so this takes the
+ * shared tone for each, as the Codex tab does. It draws `mark`, then `label` two columns on, as a row's mark column
+ * and text sit; either may be ''.
+ */
+function toneSvg(tone: ToneName, mark: string, label: string, cells: number): string {
+  const { light, dark } = toneColors(tone)
+  // A marker needs only 3:1, so an error mark takes a stronger red than text could.
+  const [lightMark, darkMark] = tone === 'error' ? [LIGHT_TONES.errorMark, DARK_TONES.errorMark] : [light, dark]
+  const w = cells * DESKTOP_CELL_PT
+  const h = DESKTOP_LINE_PT
+  const text = (cls: string, x: number, body: string) =>
+    body ? `<text class="${cls}" x="${x}" y="${h / 2}" dominant-baseline="central">${escapeXml(body)}</text>` : ''
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
+    `<style>text{font-family:-apple-system,system-ui,sans-serif;font-size:14px}` +
+    `.mark{fill:${lightMark}}.label{fill:${light}}` +
+    `@media (prefers-color-scheme: dark){.mark{fill:${darkMark}}.label{fill:${dark}}}</style>` +
+    text('mark', 0, mark) +
+    text('label', mark ? 2 * DESKTOP_CELL_PT : 0, label) +
+    `</svg>`
+  )
+}
+function escapeXml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+/** The cells a label of `text` takes, counted high, so an Svg sized by it never cuts the label. */
+function labelCells(text: string): number {
+  return Math.ceil(text.length / (DESKTOP_CHARS_PER_CELL - 0.15)) + 1
 }
 /**
  * The chevron in a desktop fold line's mark column: right while folded, down while unfolded. It is an Svg, the
@@ -391,44 +424,6 @@ type Palette = {
   mark: Record<Tone, string>
 }
 
-// Hex tuned for one theme, each tone checked against the pane, the cards, the
-// selected tab and the selected row. They hold only for the theme they name.
-const DARK_AMBER = '#ffc107'
-const DARK_TONES = {
-  needsYou: DARK_AMBER,
-  issue: DARK_AMBER,
-  findings: '#cab0ff',
-  prs: '#8cc8c0',
-  done: '#7ecd8f',
-  error: '#ffa3b0',
-}
-const DARK_DALTONIZED_AMBER = '#ffcc00'
-const DARK_DALTONIZED_TONES = {
-  needsYou: DARK_DALTONIZED_AMBER,
-  issue: DARK_DALTONIZED_AMBER,
-  findings: '#cab0ff',
-  prs: '#a3c2c2',
-  done: '#82c1ff',
-  error: '#ffa3a3',
-}
-const LIGHT_AMBER = '#745417'
-const LIGHT_TONES = {
-  needsYou: LIGHT_AMBER,
-  issue: LIGHT_AMBER,
-  findings: '#7b00e8',
-  prs: '#006363',
-  done: '#25652f',
-  error: '#a5293d',
-}
-const LIGHT_DALTONIZED_AMBER = '#7a4900'
-const LIGHT_DALTONIZED_TONES = {
-  needsYou: LIGHT_DALTONIZED_AMBER,
-  issue: LIGHT_DALTONIZED_AMBER,
-  findings: '#7400db',
-  prs: '#2d5a5a',
-  done: '#005885',
-  error: '#ad0000',
-}
 const DARK_PALETTE: Palette = {
   card: '#373737',
   tab: '#373737',
@@ -436,12 +431,11 @@ const DARK_PALETTE: Palette = {
   selection: '#3b4654',
   muted: '#bdbdbd',
   age: '#a3a3a3',
-  key: '#b1b9f9',
+  key: DARK_TONES.key,
   line: '#505050',
   divider: '#444444',
   tone: DARK_TONES,
-  // A marker needs only 3:1, so a failing check's ✗ takes Claude Code's own red, which text here could not.
-  mark: { ...DARK_TONES, error: '#ff6b80' },
+  mark: { ...DARK_TONES, error: DARK_TONES.errorMark },
 }
 const LIGHT_PALETTE: Palette = {
   card: '#e6e6e6',
@@ -450,7 +444,7 @@ const LIGHT_PALETTE: Palette = {
   selection: '#b4d5ff',
   muted: '#595959',
   age: '#666666',
-  key: '#243bf5',
+  key: LIGHT_TONES.key,
   line: '#afafaf',
   divider: '#c8c8c8',
   tone: LIGHT_TONES,
@@ -492,9 +486,9 @@ const PALETTES: Record<string, Palette> = {
   dark: DARK_PALETTE,
   'dark-daltonized': {
     ...DARK_PALETTE,
-    key: '#99ccff',
+    key: DARK_DALTONIZED_TONES.key,
     tone: DARK_DALTONIZED_TONES,
-    mark: { ...DARK_DALTONIZED_TONES, error: '#ff6666' },
+    mark: { ...DARK_DALTONIZED_TONES, error: DARK_DALTONIZED_TONES.errorMark },
   },
   light: LIGHT_PALETTE,
   'light-daltonized': {
@@ -504,7 +498,7 @@ const PALETTES: Record<string, Palette> = {
     raised: '#c8c8c8',
     muted: '#545454',
     age: '#5e5e5e',
-    key: '#003ae8',
+    key: LIGHT_DALTONIZED_TONES.key,
     divider: '#c0c0c0',
     tone: LIGHT_DALTONIZED_TONES,
     mark: LIGHT_DALTONIZED_TONES,
@@ -3676,6 +3670,25 @@ export const register: Register = on => {
     }
     // A closed desktop row drawn by its Client, at the columns listRow draws an open row's handle and text.
     // The desktop side column's age: the row's last action's, or when it was asked or found.
+    // On desktop a row's toned mark, and its kind's label when the head shares the mark's tone, draw as one Svg in
+    // the shared tones. Without Svg, they stay Text in the palette's theme keys.
+    const ToneSvg = look === 'desktop' && 'Svg' in elements ? elements.Svg : null
+    const isHeadToned = (row: Row) => ToneSvg !== null && !!row.handle && row.head?.tone === row.handleTone
+    const toned = (row: Row) => {
+      if (ToneSvg === null || !row.handle || !row.handleTone) return null
+      const label = isHeadToned(row) ? (row.head?.label ?? '') : ''
+      const cells = label ? 2 + labelCells(label) : 1
+      return (
+        <Box width={cells} height={1} flexShrink={0}>
+          <ToneSvg
+            source={toneSvg(row.handleTone, row.handle, label, cells)}
+            alt={label ? `${row.handle} ${label}` : row.handle}
+            width={cells * DESKTOP_CELL_PT}
+            height={DESKTOP_LINE_PT}
+          />
+        </Box>
+      )
+    }
     const sideAge = (row: Row) => {
       const f = feedbackOf(row.id, lastActions[row.id], notes[row.id], now)
       const at = f && hasAge(f) ? f.at : row.at
@@ -3693,7 +3706,12 @@ export const register: Register = on => {
         title: text.trim(),
         after: f?.age ? f.text : (row.line?.after ?? '').replace(LEADING_DOT, '').trim(),
         side: sideAge(row),
-        head: row.head ? { label: row.head.label, color: pal.tone[row.head.tone] ?? pal.mark[row.head.tone] } : null,
+        // The hooks module draws a toned head's label in the mark's Svg, so the Client only holds its line.
+        head: row.head
+          ? isHeadToned(row)
+            ? { label: '\u00a0', color: null }
+            : { label: row.head.label, color: pal.tone[row.head.tone] ?? pal.mark[row.head.tone] }
+          : null,
         padY: DESKTOP_ROW_PAD,
         maxLines: row.hasSecondLine ? 4 : 2,
         charsPerCell: DESKTOP_CLIP_CHARS_PER_CELL,
@@ -3780,13 +3798,8 @@ export const register: Register = on => {
       if (!isSelected && hasClient)
         return (
           <Box key={`row-${row.id}`} flexDirection="row" overflow="hidden">
-            <elements.Client
-              key={`select-${row.id}`}
-              module="./row-client.tsx"
-              width="100%"
-              props={rowClientProps(row)}
-            />
-            {/* A Client clips its frame's inset, so the mark hangs there from here, at the frame's own spot. */}
+            {/* A Client clips its frame's inset, so the mark hangs there from here, at the frame's own spot. A toned
+                mark and the kind's label are an Svg, drawn first and under the Client, which takes the clicks. */}
             {row.handle ? (
               <Box
                 position="absolute"
@@ -3795,9 +3808,17 @@ export const register: Register = on => {
                 paddingLeft={(FRAME_INSET_PT - DESKTOP_CELL_PT) / DESKTOP_CELL_PT}
                 paddingTop={space.rowPad}
               >
-                <Text color={row.handleTone ? pal.mark[row.handleTone] : undefined}>{row.handle}</Text>
+                {toned(row) ?? <Text color={row.handleTone ? pal.mark[row.handleTone] : undefined}>{row.handle}</Text>}
               </Box>
             ) : null}
+            <Box position="relative" width="100%">
+              <elements.Client
+                key={`select-${row.id}`}
+                module="./row-client.tsx"
+                width="100%"
+                props={rowClientProps(row)}
+              />
+            </Box>
           </Box>
         )
       const { keys, more } = isSelected ? rowActions(row) : { keys: [], more: [] }
@@ -3848,7 +3869,9 @@ export const register: Register = on => {
       if (look === 'desktop' && isSelected)
         return desktopFrame({
           key: `row-${row.id}`,
-          mark: row.handleTone ? <Text color={pal.mark[row.handleTone]}>{row.handle}</Text> : <Text>{row.handle}</Text>,
+          mark:
+            toned(row) ??
+            (row.handleTone ? <Text color={pal.mark[row.handleTone]}>{row.handle}</Text> : <Text>{row.handle}</Text>),
           side: <Text color={pal.age}>{sideAge(row)}</Text>,
           fill: pal.selection,
           outline: isNew(row.id) ? pal.mark[tab] : null,
@@ -3857,10 +3880,13 @@ export const register: Register = on => {
           gapY: (2 * SELECTED_GAP_PT) / DESKTOP_LINE_PT,
           children: [
             <Box key={`view-${row.id}`} position="absolute" top={0} bottom={0} left={0} width={1} />,
-            row.head ? (
+            row.head && !isHeadToned(row) ? (
               <Text wrap="truncate-end" color={pal.tone[row.head.tone] ?? pal.mark[row.head.tone]}>
                 {row.head.label}
               </Text>
+            ) : row.head ? (
+              // The toned mark's Svg draws the label too, so this line only holds its place.
+              <Text> </Text>
             ) : null,
             <Text wrap="wrap">
               <Text bold>{row.title}</Text>

@@ -11,14 +11,10 @@
         --bg: var(--color-background-primary, #ffffff);
         --text: var(--color-text-primary, #1f1f1f);
         --muted: var(--color-text-secondary, #595959);
-        --key: #243bf5;
-        --amber: #745417;
+        /* The status colors, which build.mjs writes from hooks/tones.ts. */
+        /*TONES:light*/
         --needs-you: var(--amber);
         --issue: var(--amber);
-        --findings: #7b00e8;
-        --done: #25652f;
-        --error: #a5293d;
-        --error-mark: #a5293d;
         --sans: var(--font-sans, -apple-system, system-ui, sans-serif);
         --mono: var(--font-mono, ui-monospace, 'SF Mono', Menlo, monospace);
         /* Surfaces are mixed from the host's colors, so they follow its theme. */
@@ -44,12 +40,7 @@
           --bg: var(--color-background-primary, #171717);
           --text: var(--color-text-primary, #ececec);
           --muted: var(--color-text-secondary, #a8a8a8);
-          --key: #b1b9f9;
-          --amber: #ffc107;
-          --findings: #cab0ff;
-          --done: #7ecd8f;
-          --error: #ffa3b0;
-          --error-mark: #ff6b80;
+          /*TONES:dark*/
           --card: color-mix(in srgb, var(--text) 5.5%, var(--bg));
           --raised: color-mix(in srgb, var(--text) 11%, var(--bg));
           --selected: color-mix(in srgb, #7fa6d9 15%, var(--card));
@@ -60,12 +51,7 @@
       }
       :root[data-theme='dark'] {
         color-scheme: dark;
-        --key: #b1b9f9;
-        --amber: #ffc107;
-        --findings: #cab0ff;
-        --done: #7ecd8f;
-        --error: #ffa3b0;
-        --error-mark: #ff6b80;
+        /*TONES:dark*/
         --card: color-mix(in srgb, var(--text) 5.5%, var(--bg));
         --raised: color-mix(in srgb, var(--text) 11%, var(--bg));
         --selected: color-mix(in srgb, #7fa6d9 15%, var(--card));

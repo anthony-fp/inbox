@@ -74,18 +74,48 @@ async function buildTabScript(build) {
   return script
 }
 
-/** tab.html with its script inlined. */
-const tabPage = (html, script) => html.replace('/*TAB_SCRIPT*/', () => script)
+/** The CSS variables for each appearance's status colors, read from the mod's hooks/tones.ts. */
+async function toneVars() {
+  const out = await esbuild.build({
+    absWorkingDir: here,
+    entryPoints: ['../hooks/tones.ts'],
+    bundle: true,
+    format: 'esm',
+    platform: 'neutral',
+    write: false,
+    logLevel: 'warning',
+  })
+  const tones = await import(`data:text/javascript;base64,${Buffer.from(out.outputFiles[0].text).toString('base64')}`)
+  const vars = t =>
+    [
+      `--key: ${t.key};`,
+      `--amber: ${t.needsYou};`,
+      `--findings: ${t.findings};`,
+      `--done: ${t.done};`,
+      `--error: ${t.error};`,
+      `--error-mark: ${t.errorMark};`,
+    ].join(' ')
+
+  return { light: vars(tones.LIGHT_TONES), dark: vars(tones.DARK_TONES) }
+}
+
+/** tab.html with its status colors and its script inlined. */
+const tabPage = (html, script, tones) =>
+  html
+    .replaceAll('/*TONES:light*/', () => tones.light)
+    .replaceAll('/*TONES:dark*/', () => tones.dark)
+    .replace('/*TAB_SCRIPT*/', () => script)
 
 const build = await serverBuild()
+const tones = await toneVars()
 const tabScript = mode === '--dev' ? '' : await buildTabScript(build)
 
 /** Loads tab.html with `script` inlined. */
-const inlineTab = script => ({
+const inlineTab = (script, pageTones = tones) => ({
   name: 'inline-tab',
   setup(build) {
     build.onLoad({ filter: /[/\\]tab\.html$/ }, args => ({
-      contents: tabPage(readFileSync(args.path, 'utf8'), script),
+      contents: tabPage(readFileSync(args.path, 'utf8'), script, pageTones),
       loader: 'text',
     }))
   },
@@ -126,7 +156,8 @@ if (mode === '--dev') {
       const build = await serverBuild()
       const script = await buildTabScript(build)
       // The server reads the page when its time changes and keeps it, so it must never see it half written either.
-      writeFileSync(`${page}.tmp`, tabPage(readFileSync(join(here, 'src', 'tab.html'), 'utf8'), script))
+      const pageTones = await toneVars()
+      writeFileSync(`${page}.tmp`, tabPage(readFileSync(join(here, 'src', 'tab.html'), 'utf8'), script, pageTones))
       renameSync(`${page}.tmp`, page)
       // A tab opened while this runs starts from the handler's own page, so that page carries the script too.
       const server = await esbuild.build({
@@ -134,7 +165,7 @@ if (mode === '--dev') {
         absWorkingDir: here,
         entryPoints: ['src/server-handler.ts'],
         define: { SERVER_BUILD: JSON.stringify(build) },
-        plugins: [inlineTab(script)],
+        plugins: [inlineTab(script, pageTones)],
         write: false,
       })
       // The server imports the file once its time changes, so it must never see it half written.
