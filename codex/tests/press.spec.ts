@@ -352,7 +352,7 @@ test('the tab reads Updating… while exchanges wait for the inbox model, and sh
   assert.equal(viewOf(s, 60).status.changedAt, 1)
 })
 
-test('Address hands a finding off: it folds until an applied turn leaves it open; Discuss keeps it open; a close moves it to Closed', () => {
+test('Fix hands a finding off: it settles and leaves the list until an applied turn leaves it open; Discuss keeps it open; a close moves it to Closed', () => {
   const w = withItems()
   const s = {
     ...w,
@@ -372,7 +372,7 @@ test('Address hands a finding off: it folds until an applied turn leaves it open
   const folded = viewOf(sent, 60).findings
   assert.deepEqual(
     folded.rows.map(r => [r.id, r.state.is, r.feedback && feedbackText(r.feedback, 'codex')]),
-    [['f3', 'handedOff', 'Queued: Address']],
+    [['f3', 'settled', null]],
   )
   assert.equal(folded.count, 0)
   // The turn the message started ends, and its update applies with the finding still open.

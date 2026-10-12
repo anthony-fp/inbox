@@ -18,7 +18,17 @@ import type {
 } from '../types'
 import { ago, isLapsed, questionNumbers, reopenFinding, reopenItem } from './ledger'
 import type { ClosedState } from './ledger'
-import { actionId, capitalized, clipLabel, isHandedOff, isUndoable, noteText, retryOf, stepsOf } from './presses'
+import {
+  actionId,
+  capitalized,
+  clipLabel,
+  isFixHandedOff,
+  isHandedOff,
+  isUndoable,
+  noteText,
+  retryOf,
+  stepsOf,
+} from './presses'
 import type { HelpStep, RowPress } from './presses'
 
 /** A question with more options than this shows the first 4 and [All N options]. */
@@ -580,7 +590,19 @@ export function inboxView({
       }
     }
 
-    return isHandedOff(lastActions[id], turns) ? { is: 'handedOff' } : { is: 'open' }
+    const last = lastActions[id]
+    // Fix settles the row as an answer does, though the finding stays open until the agent closes it.
+    if (isFixHandedOff(last, turns) && ledger.findings.some(f => f.id === id))
+      return {
+        is: 'settled',
+        label: 'Handed off',
+        at: last.at,
+        canUndo: true,
+        isQueued: last.delivery?.state === 'queued',
+        isLapsed: false,
+      }
+
+    return isHandedOff(last, turns) ? { is: 'handedOff' } : { is: 'open' }
   }
   const rowOf = (row: Omit<RowView, 'state' | 'feedback' | 'actions'>): RowView => {
     const state = stateOf(row.id)
@@ -616,6 +638,8 @@ export function inboxView({
   const kinds = Object.keys(FINDING_GROUPS) as Finding['kind'][]
   const byGroup = (a: Finding, b: Finding) => kinds.indexOf(a.kind) - kinds.indexOf(b.kind)
   const findingRows = [...placed.findings]
+    // A finding Fix handed off leaves the list once it has settled.
+    .filter(f => !(isFixHandedOff(lastActions[f.id], turns) && !isSettling(lastActions[f.id]!.at)))
     .reverse()
     .sort(byGroup)
     .map(finding =>

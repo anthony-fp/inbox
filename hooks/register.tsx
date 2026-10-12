@@ -977,7 +977,7 @@ function redrawWhileLeaving($: EngineInterface, waitMs: number) {
 /**
  * A reload cancels the redraws that were running, so this sets them again
  * until the latest of these ends, each SETTLED_MS after its time: a close, a
- * PR's Dismiss, a Local result and a row's note. Drawn on the demo's copy
+ * PR's Dismiss, a finding's Fix, a Local result and a row's note. Drawn on the demo's copy
  * while the demo shows. It also redraws once a new-row bar still showing ends.
  */
 async function redrawAfterReload($: EngineInterface) {
@@ -987,7 +987,7 @@ async function redrawAfterReload($: EngineInterface) {
     ...ledger.closedFindings.map(f => f.closedAt),
     ...Object.values(lastActions).flatMap(a => [
       ...(a.result ? [a.result.at] : []),
-      ...(a.action === 'pr-dismiss' ? [a.at] : []),
+      ...(a.action === 'pr-dismiss' || a.action === 'address' ? [a.at] : []),
     ]),
     ...Object.values(notes).map(n => n.at),
   ]
@@ -1827,6 +1827,8 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
       .sleep(SETTLED_MS)
       .then(() => wakeForDone($))
       .catch(() => undefined)
+  // Fix settles its finding's row as a close does, so it leaves once SETTLED_MS ends.
+  if (!('ref' in p) && p.action === 'address') redrawWhileLeaving($, SETTLED_MS)
   if ('ref' in p && p.action === 'pr-dismiss') {
     redrawWhileLeaving($, SETTLED_MS)
     leavePr($, p.ref, now)
@@ -1928,7 +1930,7 @@ async function runDemoPress($: EngineInterface, p: RowPress | PrPress) {
     applied = r
     const { [rowId]: _replaced, ...notes } = d.notes
     if ('stale' in r) return { ...d, notes: { ...notes, [rowId]: { note: 'stale' as const, at: now } } }
-    isClosing = hasNewClose(d.ledger, r.ledger) || ('ref' in p && p.action === 'pr-dismiss')
+    isClosing = hasNewClose(d.ledger, r.ledger) || ('ref' in p ? p.action === 'pr-dismiss' : p.action === 'address')
     const { lasts, isSample } = demoRecord(r.lasts, r.effects)
 
     return {

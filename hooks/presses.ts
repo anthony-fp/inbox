@@ -124,6 +124,14 @@ export function isHandedOff(
   return pressed !== undefined && pressed <= turns.turnsStarted && turns.turnsApplied <= pressed
 }
 
+/**
+ * Whether a finding's row is out of the list because Fix handed it to the agent: until the agent's reply applies,
+ * unless the person pressed Undo. The finding stays open in the ledger, so the agent can still close it.
+ */
+export function isFixHandedOff(last: LastAction | undefined, turns: Turns): last is LastAction {
+  return last?.action === 'address' && !last.isKept && isHandedOff(last, turns)
+}
+
 /** A press on a question, task or finding row, in every host. An answer names its option by text. */
 export type RowPress =
   | { action: 'answer'; id: string; option: string }
@@ -592,6 +600,9 @@ function pressed(
   const unchanged = { ledger, last: null, effects: [] }
 
   if (p.action === 'undo') {
+    // Undo on a finding Fix handed off lists it again. Its message has gone, so it stays handed off.
+    if (ledger.findings.some(f => f.id === p.id) && last?.action === 'address' && !last.isKept)
+      return { ...unchanged, last: { ...last, isKept: true } }
     // Only the person's own Done or Dismiss undoes, so an old drawing cannot reopen an answered, expired or agent-closed row.
     if (ledger.items.some(i => i.id === p.id) || ledger.findings.some(f => f.id === p.id)) return stale
     const closed = ledger.closed.findLast(c => c.id === p.id)

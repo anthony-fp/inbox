@@ -84,6 +84,8 @@ export type LastAction = {
   result?: LocalResult
   /** Whether the press's message reached the agent. Missing on a press that sent nothing, and on one saved before the mod kept it, which reads as arrived. */
   delivery?: Delivery
+  /** Undo on a finding Fix handed off, which lists the row again while the agent works on it. */
+  isKept?: true
 }
 
 /**
