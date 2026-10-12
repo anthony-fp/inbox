@@ -28,6 +28,9 @@ const VIEW = JSON.stringify({
       status: 'COMPLETED',
       conclusion: 'FAILURE',
       detailsUrl: 'https://github.com/acme/greet/runs/1',
+      workflowName: 'CI',
+      startedAt: '2026-10-08T09:00:00Z',
+      completedAt: '2026-10-08T09:00:41Z',
     },
     { __typename: 'CheckRun', name: 'test', status: 'IN_PROGRESS', conclusion: '' },
     {
@@ -151,6 +154,11 @@ describe('prs', () => {
       ['lint', 'fail'],
       ['test', 'pending'],
       ['deploy/preview', 'pass'],
+    ])
+    expect(view.checks.map(c => [c.workflow, c.startedAt, c.finishedAt])).toEqual([
+      ['CI', Date.parse('2026-10-08T09:00:00Z'), Date.parse('2026-10-08T09:00:41Z')],
+      [undefined, undefined, undefined],
+      [undefined, undefined, undefined],
     ])
     const threads = readThreads(THREADS)
     // T1 is the viewer's note with a reply from sam, so it waits on the viewer.

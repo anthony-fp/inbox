@@ -68,6 +68,15 @@ type RollupEntry = {
   state?: string
   detailsUrl?: string
   targetUrl?: string
+  workflowName?: string
+  startedAt?: string
+  completedAt?: string
+}
+
+/** An ISO time as ms, or undefined when it is missing or GitHub's zero time. */
+function msOf(iso: string | undefined): number | undefined {
+  const ms = iso ? Date.parse(iso) : NaN
+  return Number.isFinite(ms) && ms > 0 ? ms : undefined
 }
 
 /** gh's check rollup as pass, fail, pending or skip; a check run and a commit status spell it differently. */
@@ -98,11 +107,18 @@ export function readView(ref: string, json: string): Omit<PrView, 'threads' | 'f
       base: String(v.baseRefName ?? ''),
       mergeable: String(v.mergeable ?? 'UNKNOWN'),
       reviewDecision: String(v.reviewDecision ?? ''),
-      checks: rollup.map(e => ({
-        name: e.name ?? e.context ?? 'check',
-        bucket: bucket(e),
-        url: e.detailsUrl ?? e.targetUrl ?? null,
-      })),
+      checks: rollup.map(e => {
+        const startedAt = msOf(e.startedAt)
+        const finishedAt = msOf(e.completedAt)
+        return {
+          name: e.name ?? e.context ?? 'check',
+          bucket: bucket(e),
+          url: e.detailsUrl ?? e.targetUrl ?? null,
+          ...(e.workflowName ? { workflow: e.workflowName } : {}),
+          ...(startedAt ? { startedAt } : {}),
+          ...(finishedAt ? { finishedAt } : {}),
+        }
+      }),
     }
   } catch {
     return null

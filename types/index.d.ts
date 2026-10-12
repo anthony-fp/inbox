@@ -126,7 +126,16 @@ export type Finding = {
 /** A finding that closed, and how, as `Closed` says it for an item. */
 export type ClosedFinding = Finding & Pick<Closed, 'how' | 'outcome'> & { closedAt: number }
 
-export type PrCheck = { name: string; bucket: 'pass' | 'fail' | 'pending' | 'skip'; url: string | null }
+export type PrCheck = {
+  name: string
+  bucket: 'pass' | 'fail' | 'pending' | 'skip'
+  url: string | null
+  /** The GitHub Actions workflow that ran it, such as "CI". Absent for a commit status, and on a check saved before the mod kept it. */
+  workflow?: string
+  /** When it started and finished, in ms; absent when GitHub gave no time. */
+  startedAt?: number
+  finishedAt?: number
+}
 
 /** An unresolved review thread, told by its first comment. */
 export type PrThread = {

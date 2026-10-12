@@ -308,6 +308,13 @@ const FRAME_INSET_PT = 13.2
 const DESKTOP_SIDE_CELLS = 5
 const SELECTED_GAP_PT = 3
 /** An age for the desktop side column: "12m", or "now". */
+// The terminal's `after` follows a row's title on its line, after a dot; desktop draws it on its own line.
+const LEADING_DOT = new RegExp(`^${DOT}`)
+/** How long something ran: "41s", "3m 52s". */
+function took(ms: number): string {
+  const secs = Math.max(0, Math.round(ms / 1000))
+  return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`
+}
 function shortAgo(ms: number): string {
   const age = ago(ms)
   return age === 'just now' ? 'now' : age.replace(/ ago$/, '')
@@ -3148,11 +3155,10 @@ export const register: Register = on => {
         ? `${label} again`
         : label
     const prPress = (p: PrPress) => (press: UiPressArgument) => runPress($, p, press.surface)
-    const checkRow = (pr: PrView, c: PrCheck): Row => ({
+    const checkRowBase = (pr: PrView, c: PrCheck): Row => ({
       id: prCheckId(pr, c),
       handle: '✗',
       handleTone: 'error',
-      head: { label: 'Failing check', tone: 'error', age: '' },
       title: c.name,
       line: { text: c.name },
       body: null,
@@ -3167,6 +3173,22 @@ export const register: Register = on => {
         },
       ],
     })
+    // On desktop the block's "Failing checks" label says the kind, so the row reads as GitHub lists it:
+    // "CI / lint", then how long it ran.
+    const checkRow = (pr: PrView, c: PrCheck): Row => {
+      if (look !== 'desktop')
+        return { ...checkRowBase(pr, c), head: { label: 'Failing check', tone: 'error', age: '' } }
+      const ran =
+        c.startedAt !== undefined && c.finishedAt !== undefined
+          ? `Failed after ${took(c.finishedAt - c.startedAt)}`
+          : 'Failed'
+      return {
+        ...checkRowBase(pr, c),
+        ...(c.finishedAt !== undefined ? { at: c.finishedAt } : {}),
+        line: { ...(c.workflow ? { before: `${c.workflow} / ` } : {}), text: c.name, after: ran },
+        subtitle: <Text color={pal.muted}>{c.workflow ? `${c.workflow}${DOT}${ran}` : ran}</Text>,
+      }
+    }
     const threadRow = (pr: PrView, t: PrThread): Row => {
       const id = prThreadId(pr, t)
       const latest = t.reply ?? { author: t.author, body: t.body, at: t.at }
@@ -3194,21 +3216,39 @@ export const register: Register = on => {
         ...(isSent || isChanged
           ? { fold: t.isLinesChanged ? { note: `Lines changed since this comment${DOT}still open on GitHub` } : {} }
           : {}),
-        head: {
-          label: 'Review thread',
-          tone: 'prs',
-          age: t.at === null ? '' : `${DOT}${ago(now - t.at)}`,
-          notes: [t.replies > 0 ? `${t.replies + 1} comments` : '', t.isOutdated ? 'outdated' : '']
-            .filter(Boolean)
-            .map(part => `${DOT}${part}`)
-            .join(''),
-        },
         title: threadWhere(t),
-        line: {
-          before: `${threadWhere(t, baseName(t.path))} `,
-          text: commentLine(latest.body),
-          ...(isChanged ? { after: `${DOT}lines changed` } : {}),
-        },
+        // On desktop the block's "Review threads" label says the kind. The first comment, which asks for the change,
+        // is the title, and the second line says who asked or the latest reply.
+        ...(look === 'desktop'
+          ? {
+              ...(t.at === null ? {} : { at: t.at }),
+              line: {
+                before: `${threadWhere(t, baseName(t.path))} `,
+                text: commentLine(t.body),
+                after: [
+                  isChanged ? 'Lines changed' : '',
+                  t.reply ? `@${t.reply.author}: ${commentLine(t.reply.body)}` : `@${t.author}`,
+                ]
+                  .filter(Boolean)
+                  .join(DOT),
+              },
+            }
+          : {
+              head: {
+                label: 'Review thread',
+                tone: 'prs' as const,
+                age: t.at === null ? '' : `${DOT}${ago(now - t.at)}`,
+                notes: [t.replies > 0 ? `${t.replies + 1} comments` : '', t.isOutdated ? 'outdated' : '']
+                  .filter(Boolean)
+                  .map(part => `${DOT}${part}`)
+                  .join(''),
+              },
+              line: {
+                before: `${threadWhere(t, baseName(t.path))} `,
+                text: commentLine(latest.body),
+                ...(isChanged ? { after: `${DOT}lines changed` } : {}),
+              },
+            }),
         body: comment,
         keys: () => [
           ...(retry
@@ -3269,13 +3309,14 @@ export const register: Register = on => {
     const needsYouGroups = NEEDS_YOU_GROUPS.map(g => ({ ...g, entries: lists[g.list], rows: rowsIn(lists[g.list]) }))
     const findingEntries = lists.findings
     // A PR dismissed moments ago draws settled, with no rows.
-    const prGroups = shownPrs.map(({ pr, isSettled }) => ({
-      pr,
-      isSettled,
-      rows: isSettled
-        ? []
-        : [...failingChecks(pr).map(c => checkRow(pr, c)), ...waitingThreads(pr).map(t => threadRow(pr, t))],
-    }))
+    const prGroups = shownPrs
+      .map(({ pr, isSettled }) => ({
+        pr,
+        isSettled,
+        checks: isSettled ? [] : failingChecks(pr).map(c => checkRow(pr, c)),
+        threads: isSettled ? [] : waitingThreads(pr).map(t => threadRow(pr, t)),
+      }))
+      .map(g => ({ ...g, rows: [...g.checks, ...g.threads] }))
     const rows: Record<Tab, Row[]> = {
       needsYou: lists.byTab.needsYou,
       findings: lists.byTab.findings,
@@ -3646,7 +3687,7 @@ export const register: Register = on => {
         sideCells: DESKTOP_SIDE_CELLS,
         before: row.line?.before ?? '',
         title: text.trim(),
-        after: f?.age ? f.text : (row.line?.after ?? '').replace(DOT, '').trim(),
+        after: f?.age ? f.text : (row.line?.after ?? '').replace(LEADING_DOT, '').trim(),
         side: sideAge(row),
         head: row.head ? { label: row.head.label, color: pal.tone[row.head.tone] ?? pal.mark[row.head.tone] } : null,
         padY: DESKTOP_ROW_PAD,
@@ -4685,7 +4726,38 @@ export const register: Register = on => {
           `settled-pr:${pr.ref}`,
         ),
       ])
-    const prBlock = ({ pr, isSettled, rows: prRows }: { pr: PrView; isSettled: boolean; rows: Row[] }) => {
+    // A desktop PR block's checks or threads, under a muted label that says their kind once, a line below the
+    // lines above it.
+    const prRowGroup = (title: string, group: Row[], key: string) =>
+      group.length === 0
+        ? []
+        : [
+            <Box key={`group-${key}`} marginTop={blankLine}>
+              {desktopFrame({
+                padY: 0,
+                children: <Text color={pal.muted}>{`${title}${DOT}${group.length}`}</Text>,
+              })}
+            </Box>,
+            ...titleGap(),
+            ...divided(
+              group.map((r, n) => listRow(r, childPos(n, group.length))),
+              key,
+              true,
+            ),
+          ]
+    const prBlock = ({
+      pr,
+      isSettled,
+      rows: prRows,
+      checks,
+      threads,
+    }: {
+      pr: PrView
+      isSettled: boolean
+      rows: Row[]
+      checks: Row[]
+      threads: Row[]
+    }) => {
       if (isSettled) return settledPrBlock(pr)
       const { status, text: statusText, head: statusHead, reasons: statusReasons } = readiness(pr, isThreadSent)
       const { mark, tone } = PR_STATUSES[status]
@@ -4832,12 +4904,19 @@ export const register: Register = on => {
           // Desktop has no tree lines to show the status is not one of the rows, so it starts at the title's column.
           look === 'desktop' ? 1 : undefined,
         ),
-        ...(hasRows ? titleGap() : []),
-        ...divided(
-          prRows.map((r, n) => listRow(r, childPos(n, prRows.length))),
-          pr.ref,
-          true,
-        ),
+        ...(look === 'desktop'
+          ? [
+              ...prRowGroup('Failing checks', checks, `${pr.ref}-checks`),
+              ...prRowGroup('Review threads', threads, `${pr.ref}-threads`),
+            ]
+          : [
+              ...(hasRows ? titleGap() : []),
+              ...divided(
+                prRows.map((r, n) => listRow(r, childPos(n, prRows.length))),
+                pr.ref,
+                true,
+              ),
+            ]),
       ])
     }
     const prsView = () =>

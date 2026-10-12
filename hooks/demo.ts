@@ -252,10 +252,31 @@ export function demoView(now: number): DemoCopy {
           mergeable: 'CONFLICTING',
           reviewDecision: 'CHANGES_REQUESTED',
           checks: [
-            { name: 'prettier', bucket: 'pass', url: `${REPO}/actions/runs/1` },
-            { name: 'plugin tests', bucket: 'fail', url: `${REPO}/actions/runs/2` },
-            { name: 'lint', bucket: 'fail', url: `${REPO}/actions/runs/3` },
-            { name: 'plugin validate', bucket: 'pending', url: null },
+            {
+              name: 'prettier',
+              bucket: 'pass',
+              url: `${REPO}/actions/runs/1`,
+              workflow: 'CI',
+              startedAt: now - 16 * MIN,
+              finishedAt: now - 16 * MIN + 19_000,
+            },
+            {
+              name: 'plugin tests',
+              bucket: 'fail',
+              url: `${REPO}/actions/runs/2`,
+              workflow: 'CI',
+              startedAt: now - 16 * MIN,
+              finishedAt: now - 12 * MIN - 8_000,
+            },
+            {
+              name: 'lint',
+              bucket: 'fail',
+              url: `${REPO}/actions/runs/3`,
+              workflow: 'CI',
+              startedAt: now - 16 * MIN,
+              finishedAt: now - 15 * MIN - 19_000,
+            },
+            { name: 'plugin validate', bucket: 'pending', url: null, workflow: 'CI', startedAt: now - 2 * MIN },
           ],
           threads: [
             {
