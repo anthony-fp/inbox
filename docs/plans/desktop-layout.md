@@ -54,6 +54,14 @@ The check's workflow, start and end come from the same `gh pr view` call, in `st
 
 What failed inside a check, such as the failing test or the first error line, would need one more call per failing check: `gh run view --log-failed`, or the check run's annotations. Not built. It waits on Pete's decision.
 
+## Colors
+
+The status colors live in `hooks/tones.ts`. The terminal palettes import them, and `codex/build.mjs` writes them into the Codex tab's CSS.
+
+Text in the desktop pane draws one color in both appearances, since the mod cannot read which one the app uses. So a row's colored mark, and a finding's kind label beside it, draw as one Svg, which follows the system's light or dark setting. The marks are shapes. The label is text in the system font, since an Svg cannot load the app's font.
+
+The tab counts are still theme keys, since the tabs are a Client, which cannot draw an Svg.
+
 ## Head of the pane
 
 - The demo notice is muted and shares one line with Hide demo. Desktop words it shorter, "Sample entries. Presses send nothing.", so it fits.
@@ -69,3 +77,4 @@ What failed inside a check, such as the failing test or the first error line, wo
 
 - The light appearance, and a row's hover in a frame.
 - The fold's hover color. It needs the pointer over the pane.
+- The Svg kind labels on the Findings tab, and every Svg color in the light appearance.
