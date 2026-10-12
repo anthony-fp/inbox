@@ -53,6 +53,7 @@ import {
   failingChecks,
   readableComment,
   readiness,
+  THREAD_TITLE_CHARS,
   threadsOnYou,
   threadWhere,
   took,
@@ -686,7 +687,7 @@ function prThreadRow(v: View, pr: PrView, t: PrThread): Row {
       : {}),
     // The first comment, which asks for the change, is the title open or closed; the line under it says where it
     // sits and who asked, or the latest reply.
-    title: commentLine(t.body),
+    title: clipLabel(commentLine(t.body), THREAD_TITLE_CHARS),
     meta: [
       threadWhere(t, baseName(t.path)),
       isChanged ? 'Lines changed' : '',
@@ -697,6 +698,9 @@ function prThreadRow(v: View, pr: PrView, t: PrThread): Row {
     age: t.at === null ? undefined : shortAgo(v.at - t.at),
     body: (
       <div>
+        {commentLine(t.body).length > THREAD_TITLE_CHARS ? (
+          <p class="quote">{inlineHtml(clipLabel(readableComment(t.body), 1200))}</p>
+        ) : null}
         <p class="muted">{`${where}${DOT}@${t.author}`}</p>
         {t.reply ? (
           <p class="quote">

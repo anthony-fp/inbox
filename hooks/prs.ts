@@ -332,6 +332,9 @@ export function commentLine(body: string): string {
     .replace(/\s+/g, ' ')
 }
 
+/** How much of a thread's first comment its row's title shows. An open row shows the rest under it. */
+export const THREAD_TITLE_CHARS = 120
+
 /** Where a thread sits in the diff: "path:line", or the path alone. */
 export function threadWhere(t: PrThread, path = t.path): string {
   return `${path}${t.line ? `:${t.line}` : ''}`
