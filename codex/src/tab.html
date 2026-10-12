@@ -502,9 +502,10 @@
         padding: var(--row-pad) 14px var(--row-pad) var(--text-x);
         color: var(--muted);
       }
+      /* The chevron centers in the mark column and the label starts at the rows' text, as a group's rows do. */
       .fold {
         display: block;
-        margin: 8px 0 0 calc(var(--mark-x) - 2px);
+        margin: 8px 0 0 calc(var(--mark-x) - 1px);
         padding: 1px 4px;
         border-radius: 5px;
         color: var(--muted);
@@ -515,13 +516,13 @@
       .fold .icon {
         width: 12px;
         height: 12px;
-        margin-right: 4px;
+        margin-right: calc(var(--text-x) - var(--mark-x) - 15px);
         vertical-align: -1px;
       }
-      /* The closed items sit under the fold's label. */
+      /* The closed items' marks sit under the fold's label. */
       .closed-list {
-        --mark-x: 34px;
-        --text-x: 60px;
+        --mark-x: 41px;
+        --text-x: 67px;
         padding-top: 4px;
       }
       .closed-list .row {
