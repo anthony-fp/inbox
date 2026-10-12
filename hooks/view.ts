@@ -16,7 +16,7 @@ import type {
   Tab,
   Turns,
 } from '../types'
-import { isLapsed, questionNumbers, reopenFinding, reopenItem } from './ledger'
+import { ago, isLapsed, questionNumbers, reopenFinding, reopenItem } from './ledger'
 import type { ClosedState } from './ledger'
 import { actionId, capitalized, clipLabel, isHandedOff, isUndoable, noteText, retryOf, stepsOf } from './presses'
 import type { HelpStep, RowPress } from './presses'
@@ -180,6 +180,13 @@ export function foldLabel(total: number): string {
 /** The line under a Closed fold's list for the closes it leaves out, or null when it lists them all. */
 export function earlierLabel(total: number, shown: number): string | null {
   return total > shown ? `${total - shown} earlier` : null
+}
+
+/** An age for a side column: "12m", "3h", or "now". */
+export function shortAgo(ms: number): string {
+  const age = ago(ms)
+
+  return age === 'just now' ? 'now' : age.replace(/ ago$/, '')
 }
 
 /** The line above a demo's rows. */

@@ -36,6 +36,7 @@ import {
   rowKeyPlan,
   SETTLED_MS,
   settledIn,
+  shortAgo,
 } from '../../hooks/view'
 import { ROW_PAD_PT } from '../../hooks/layout'
 import type { DrawnEntry, DrawnLists, Feedback, PlannedKey, RowView } from '../../hooks/view'
@@ -104,12 +105,8 @@ type Row = {
   /** A finding's kind, which sets its handle's color and size. */
   kind?: Finding['kind']
   title: string
-  /** Muted text after the title, such as an age. */
-  titleAfter?: string
-  /** The unselected line, when it differs from the title and its age. */
-  line?: { text: string; after?: string; afterTone?: Tone }
-  /** Unselected, the title may take a second line. */
-  hasSecondLine?: boolean
+  /** How long ago the row appeared, in the side column. */
+  age?: string
   body?: JSX.Element | null
   keys: Key[]
   /** Actions that talk about the row or drop it, after `keys` and a muted dot. */
@@ -524,8 +521,7 @@ function itemRow(v: View, r: RowView, item: Item): Row {
     handleTone: isHandedOff ? 'done' : undefined,
     ...(isHandedOff ? { fold: {} } : {}),
     title: item.ask,
-    titleAfter: item.at === null ? undefined : `${DOT}${ago(v.at - item.at)}`,
-    hasSecondLine: isQuestion,
+    age: item.at === null ? undefined : shortAgo(v.at - item.at),
     ...rowKeys(r),
     typing: {
       hint: isQuestion ? 'Your answer' : 'Your reply to Codex',
@@ -547,8 +543,7 @@ function findingRow(v: View, r: RowView, f: Finding): Row {
     kind: f.kind,
     ...(isHandedOff ? { fold: {} } : {}),
     title: f.title,
-    titleAfter: `${DOT}${ago(v.at - f.at)}`,
-    line: { text: f.title },
+    age: shortAgo(v.at - f.at),
     body: (
       <div>
         <p>{inlineHtml(f.detail)}</p>
@@ -819,18 +814,11 @@ function ListRow({
   const bar = isNew(row.id) ? ` new tone-bar-${tone}` : ''
   const handle = <span class={`mark ${row.handleTone ?? row.kind ?? ''}`}>{row.handle}</span>
 
-  const plain = row.line ?? { text: row.title, after: row.titleAfter }
-  // A row's last action takes the place of its age, as "✓ Discuss 1m ago". It is muted unless it failed: a done row's ✓ is already green.
+  // A row's last action reads after its title, as "✓ Discuss · 1m ago", and takes the place of its side age. It is muted unless it failed: a done row's ✓ is already green.
   // A press still out reads there too, as "Sending…", so nothing under the line moves while it runs.
   const pending = sending.get(row.id)
   const last = pending ?? (isFeedbackShown(row) ? lastText(row, now) : null)
-  const line = last
-    ? {
-        ...plain,
-        after: `${DOT}${last}`,
-        afterTone: !pending && isFailure(row.feedback) ? ('error' as const) : undefined,
-      }
-    : plain
+  const afterTone = !pending && isFailure(row.feedback) ? 'error' : undefined
 
   // The same elements draw the row open and closed, so its line stays put and only the panel under it comes and goes.
   // Closed, the whole row takes the click; the button keeps it in the focus order, and its click reaches the row.
@@ -847,13 +835,12 @@ function ListRow({
           class="line"
           {...(isSelected ? { tabIndex: -1, 'aria-disabled': true } : { 'aria-expanded': false })}
         >
-          <span class={row.hasSecondLine ? 'text two' : 'text'}>{line.text}</span>
-          {line.after ? (
-            <span class={`after ${line.afterTone ? `tone-${line.afterTone}` : ''}`}>{line.after}</span>
-          ) : null}
+          <span class="text">{row.title}</span>
+          {last ? <span class={`after ${afterTone ? `tone-${afterTone}` : ''}`}>{`${DOT}${last}`}</span> : null}
         </button>
         {isSelected || isClosing ? <Panel row={row} isClosing={isClosing} /> : null}
       </div>
+      <span class="side">{last ? null : row.age}</span>
     </div>
   )
 }
@@ -1003,8 +990,13 @@ function Entries({ entries, group, all, now }: { entries: Entry[]; group: Group;
 function GroupTitle({ title, count }: { title: string; count: number }) {
   return (
     <div class="group-title">
-      {title}
-      {count > 0 ? <span class="count">{count}</span> : null}
+      <b>{title}</b>
+      {count > 0 ? (
+        <span class="count">
+          {DOT}
+          {count}
+        </span>
+      ) : null}
     </div>
   )
 }
@@ -1101,14 +1093,9 @@ function ClosedFold({ group, closed, now }: { group: Group; closed: ClosedLine[]
                 <span class="mark">{CLOSED_MARKS[d.state]}</span>
                 <div class="content tight">
                   <div class="muted">{d.ask}</div>
-                  <div>
-                    <span class={d.isLapsed ? 'outcome lapsed' : 'outcome'}>{capitalized(d.outcome)}</span>
-                    <span class="muted age">
-                      {DOT}
-                      {ago(now - d.at)}
-                    </span>
-                  </div>
+                  <div class={d.isLapsed ? 'outcome lapsed' : 'outcome'}>{capitalized(d.outcome)}</div>
                 </div>
+                <span class="side">{shortAgo(now - d.at)}</span>
               </div>
             </div>
           ))}
