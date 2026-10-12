@@ -3640,6 +3640,7 @@ export const register: Register = on => {
       fill,
       outline,
       padY = space.rowPad,
+      isCentered = false,
       children,
     }: {
       key?: string
@@ -3648,12 +3649,14 @@ export const register: Register = on => {
       fill?: string | undefined
       outline?: string | null
       padY?: number
+      /** Centers the parts on each other, for a one-line row whose side is taller than its text, as Undo is. */
+      isCentered?: boolean
       children: JSX.Element | (JSX.Element | null)[]
     }) => (
       <Box
         key={key}
         flexDirection="row"
-        alignItems="flex-start"
+        alignItems={isCentered ? 'center' : 'flex-start'}
         borderStyle="single"
         borderColor={outline ?? '#0000'}
         paddingY={padY}
@@ -4392,6 +4395,7 @@ export const register: Register = on => {
           mark: state.isQueued ? null : <Text color={pal.muted}>✓</Text>,
           side: undo ? undoButton(undo, state.at) : null,
           padY: space.settledPad,
+          isCentered: true,
           children: [
             <Text wrap="truncate-end">
               {clipLine(r.title, reserved + Math.ceil(after.length / DESKTOP_CHARS_PER_CELL))}
