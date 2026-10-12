@@ -194,6 +194,7 @@ const NOTES = atom({ plugin: 'inbox', key: 'notes' } as const, {} as Record<stri
 const ARRIVAL = atom({ plugin: 'inbox', key: 'arrival' } as const, null as Arrival | null)
 const LAST_ACTIONS = atom({ plugin: 'inbox', key: 'lastActions' } as const, {} as Record<string, LastAction>)
 const UNFOLDED = atom({ plugin: 'inbox', key: 'unfolded' } as const, [] as (Item['kind'] | 'finding')[])
+const FOLD_HOVER = atom({ plugin: 'inbox', key: 'foldHover' } as const, null as Item['kind'] | 'finding' | null)
 const OPTIONS_SHOWN = atom({ plugin: 'inbox', key: 'optionsShown' } as const, [] as string[])
 const IS_KEY_LIST_SHOWN = atom({ plugin: 'inbox', key: 'isKeyListShown' } as const, false)
 const UNREADABLE = atom({ plugin: 'inbox', key: 'unreadable' } as const, null as string | null)
@@ -266,7 +267,7 @@ function undoSvg(fraction: number, leftMs: number): string {
  * The chevron in a desktop fold line's mark column: right while folded, down while unfolded. It is an Svg, the
  * only icon the pane can draw, sized to the fold line, so it sits in the mark column at the line's middle.
  */
-function chevronSvg(isUnfolded: boolean): string {
+function chevronSvg(isUnfolded: boolean, isHover: boolean): string {
   const w = FRAME_INSET_PT + DESKTOP_MARK_CELLS * DESKTOP_CELL_PT
   const h = 2 * ROW_PAD_PT + DESKTOP_LINE_PT
   // At the column left of the mark column, where the rows' marks hang.
@@ -277,7 +278,10 @@ function chevronSvg(isUnfolded: boolean): string {
     : `${x + 1.5},${y - 3.5} ${x + 5},${y} ${x + 1.5},${y + 3.5}`
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
-    `<style>polyline{stroke:#6f6e6a}@media (prefers-color-scheme: dark){polyline{stroke:#c3c2b8}}</style>` +
+    // At rest, the fold label's muted text; under the pointer, the app's text color, as the label turns.
+    (isHover
+      ? `<style>polyline{stroke:#0b0b0b}@media (prefers-color-scheme: dark){polyline{stroke:#f0efec}}</style>`
+      : `<style>polyline{stroke:#6f6e6a}@media (prefers-color-scheme: dark){polyline{stroke:#c3c2b8}}</style>`) +
     `<polyline points="${points}" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`
   )
 }
@@ -533,9 +537,8 @@ const DESKTOP_PALETTE: Palette = {
   line: 'subtle',
   divider: 'rgba(128, 128, 128, 0.25)',
   tone: {},
-  // Counts and kind marks keep their status colors, so a count or a finding's kind reads at a glance. A closed
-  // item's ✓ stays muted.
-  mark: { needsYou: NEEDS_YOU, issue: NEEDS_YOU, findings: FINDINGS, prs: PRS, done: 'inactive', error: 'error' },
+  // Counts and kind marks keep their status colors, so a count or a finding's kind reads at a glance.
+  mark: { needsYou: NEEDS_YOU, issue: NEEDS_YOU, findings: FINDINGS, prs: PRS, done: DONE, error: 'error' },
 }
 /**
  * The look the mod draws for an engine surface. Mobile and VS Code get the terminal look, which nobody has checked
@@ -1357,6 +1360,13 @@ async function setFold($: EngineInterface, kind: string, isUnfolded: unknown) {
   await update($, UNFOLDED, u =>
     u.includes(fold) === isUnfolded ? u : isUnfolded ? [...u, fold] : u.filter(k => k !== fold),
   )
+}
+
+/** Records which Closed fold is under the pointer, so its chevron draws in the label's hover color. */
+async function setFoldHover($: EngineInterface, kind: string, isHover: boolean) {
+  const fold = FOLD_KINDS.find(k => k === kind)
+  if (fold === undefined) return
+  await update($, FOLD_HOVER, h => (isHover ? fold : h === fold ? null : h))
 }
 
 /**
@@ -2845,7 +2855,7 @@ export const register: Register = on => {
   on('ui.message', async ($, e, next) => {
     const r = await next(e)
     if (e.requestId !== PANE) return r
-    const data = e.data as { tab?: unknown; isUnfolded?: unknown; key?: unknown } | null
+    const data = e.data as { tab?: unknown; isUnfolded?: unknown; hover?: unknown; key?: unknown } | null
     const shown = TABS.find(t => t.id === data?.tab)
     const followUp = typeof data?.key === 'string' ? followUpPresses.get(data.key) : undefined
     if (e.element === 'tabs' && shown) await showTab($, shown.id)
@@ -2869,6 +2879,8 @@ export const register: Register = on => {
         surface: e.surface,
       })
     } else if (e.element.startsWith('select-')) await selectClicked($, e.element.slice('select-'.length))
+    else if (e.element.startsWith('fold-') && typeof data?.hover === 'boolean')
+      await setFoldHover($, e.element.slice('fold-'.length), data.hover)
     else if (e.element.startsWith('fold-')) await setFold($, e.element.slice('fold-'.length), data?.isUnfolded)
 
     return r
@@ -2878,6 +2890,7 @@ export const register: Register = on => {
   on('ui.close', { id: PANE }, async ($, e, next) => {
     const r = await next(e)
     await update($, TYPING, () => null)
+    await update($, FOLD_HOVER, () => null)
 
     return r
   })
@@ -2993,6 +3006,7 @@ export const register: Register = on => {
       theme,
       typing,
       unfolded,
+      foldHover,
       isKeyListShown,
       arrival,
       optionsShown,
@@ -3003,6 +3017,7 @@ export const register: Register = on => {
       read($, THEME),
       read($, TYPING),
       read($, UNFOLDED),
+      read($, FOLD_HOVER),
       read($, IS_KEY_LIST_SHOWN),
       read($, ARRIVAL),
       read($, OPTIONS_SHOWN),
@@ -3663,6 +3678,7 @@ export const register: Register = on => {
       padY = space.rowPad,
       isCentered = false,
       indent = 0,
+      isMarkHung = true,
       gapY = 0,
       children,
     }: {
@@ -3676,6 +3692,8 @@ export const register: Register = on => {
       isCentered?: boolean
       /** Columns before the mark, for a line nested under another. */
       indent?: number
+      /** Hangs the mark a column left, into the frame's inset. Unhung, the mark starts at `indent` and a column parts it from the text. */
+      isMarkHung?: boolean
       /** Space above and below the frame, in the hooks tree's half lines. */
       gapY?: number
       children: JSX.Element | (JSX.Element | null)[]
@@ -3690,10 +3708,10 @@ export const register: Register = on => {
         paddingY={padY}
         {...(fill ? { backgroundColor: fill } : {})}
       >
-        {/* The mark hangs a column left, into the frame's inset, so a full column parts it from the text. */}
-        <Box width={indent + DESKTOP_MARK_CELLS} flexShrink={0} paddingLeft={indent}>
+        {/* A hung mark sits a column left, in the frame's inset, so a full column parts it from the text. */}
+        <Box width={indent + DESKTOP_MARK_CELLS + (isMarkHung ? 0 : 1)} flexShrink={0} paddingLeft={indent}>
           {mark ? (
-            <Box position="absolute" top={0} left={indent - 1}>
+            <Box position="absolute" top={0} left={isMarkHung ? indent - 1 : indent}>
               {mark}
             </Box>
           ) : null}
@@ -4258,11 +4276,12 @@ export const register: Register = on => {
     // A closed item or finding under the open ones: what was asked, then how it closed and when.
     const closedRow = (d: ClosedLine, pos: TreePos) =>
       look === 'desktop'
-        ? // Nested under its fold line, with its mark at the fold's text and half a row's padding, so the
+        ? // Nested under its fold line, with its mark under the fold's label and half a row's padding, so the
           // closed items read as the fold's group.
           desktopFrame({
             key: `closed-${d.id}`,
             indent: DESKTOP_MARK_CELLS,
+            isMarkHung: false,
             padY: space.rowPad / 2,
             mark: <Text color={pal.age}>{CLOSED_MARKS[closedState(d)]}</Text>,
             side: <Text color={pal.age}>{shortAgo(now - d.at)}</Text>,
@@ -4301,7 +4320,7 @@ export const register: Register = on => {
         <Box key={`fold-row-${kind}`} flexDirection="row" overflow="hidden">
           {'Svg' in elements ? (
             <elements.Svg
-              source={chevronSvg(isUnfolded)}
+              source={chevronSvg(isUnfolded, foldHover === kind)}
               alt={isUnfolded ? 'Unfolded' : 'Folded'}
               width={FRAME_INSET_PT + DESKTOP_MARK_CELLS * DESKTOP_CELL_PT}
               height={2 * ROW_PAD_PT + DESKTOP_LINE_PT}
@@ -4321,8 +4340,7 @@ export const register: Register = on => {
                   colors: {
                     rest: isInline ? null : (pal.card ?? null),
                     text: pal.muted,
-                    hover: pal.raised,
-                    hoverText: pal.raisedText ?? null,
+                    hoverText: 'text',
                   },
                 } satisfies FoldProps
               }

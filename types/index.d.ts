@@ -278,6 +278,8 @@ declare module 'claude-code' {
       lastActions: Record<string, LastAction>
       /** The Needs you groups, and Findings, whose closed items show. Each starts folded. */
       unfolded: (Item['kind'] | 'finding')[]
+      /** The desktop Closed fold under the pointer, whose chevron draws in the hover color. */
+      foldHover: Item['kind'] | 'finding' | null
       /** The questions whose every option shows, by the row's id. Until then, one with more than 5 options shows 4. */
       optionsShown: string[]
       /** The pane's list of the keys no row shows is unfolded. */
