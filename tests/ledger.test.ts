@@ -634,6 +634,8 @@ describe('questionNumbers', () => {
     expect([...questionNumbers(labeled, 2)]).toEqual([])
     const both = { ...batch, items: batch.items.map(i => (i.id === 'i3' ? { ...i, label: 'D4' } : i)) }
     expect([...questionNumbers(both, 2)]).toEqual([['i3', 4]])
+    const anId = { ...batch, items: batch.items.map(i => (i.id === 'i3' ? { ...i, label: 'f235 report' } : i)) }
+    expect([...questionNumbers(anId, 2)].map(([, n]) => n)).not.toContain(235)
   })
 
   test('numbers nothing once the batch is a turn old', () => {

@@ -997,8 +997,10 @@ function describe(item: Item): string {
   return parts.join('; ')
 }
 
+// The numbers LINE_ANSWER reads, so a label's number is one a typed answer can reach. Digits inside an id,
+// as in a label naming finding f235, are not one.
 function numberOf(label: string | null): number | null {
-  const m = label?.match(/(\d+)/)
+  const m = label?.match(/(?:^|[^A-Za-z\d])(?:[QqDd#]\s?)?(\d{1,2})(?!\d)/)
 
   return m ? Number(m[1]) : null
 }

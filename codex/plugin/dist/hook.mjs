@@ -118,7 +118,7 @@ function describe(item) {
   return parts.join("; ");
 }
 function numberOf(label) {
-  const m = label?.match(/(\d+)/);
+  const m = label?.match(/(?:^|[^A-Za-z\d])(?:[QqDd#]\s?)?(\d{1,2})(?!\d)/);
   return m ? Number(m[1]) : null;
 }
 function answerableBatch(ledger, promptTurn) {
