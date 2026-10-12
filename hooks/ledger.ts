@@ -167,6 +167,8 @@ HELP: <item> | <kind> | <value> | <name>
     link | an https URL the person needs to visit
   name: what a copy, command or link is, at most 3 words ("settings snippet", "removal command", "token page"), or "-".
   Use only paths, commands, text and URLs that appear in <reply> or <activity>. Never invent one.
+TODO: <work>
+  One line for each todo in <person> that the reply neither takes up nor asks about. A todo is work the person sets aside for later, as in "todo: X" or "later, let's X". Nothing else is a todo, and work already in <open> or <findings> is not one, even when the person puts it off. work: what to start, at most 12 words, worded to follow "Ready to start on".
 
 Write plainly. No jargon, no filler, no markdown.`
 }
@@ -325,6 +327,8 @@ export type Update = {
   updated: { id: string; options: string[] | null; rec: string | null }[]
   /** Findings an item now asks about: an open item's id, or the place of a NEW item in `added`. */
   asked: { id: string; item: string | number }[]
+  /** Work the person set aside for later, from TODO lines. Each becomes a question about starting it. */
+  todos: string[]
 }
 
 const FENCE = /```[^\n]*\n([\s\S]*?)```/g
@@ -579,7 +583,7 @@ function dash(value: string | undefined): string | null {
   return v === '' || v === '-' ? null : v
 }
 
-const KEY_LINE = /^\s*[-*]?\s*(GOAL|DONE|NOW|RUNNING|CLOSED|FIXED|ASKED|NEW|UPDATE|HELP)\s*:\s*(.*)$/
+const KEY_LINE = /^\s*[-*]?\s*(GOAL|DONE|NOW|RUNNING|CLOSED|FIXED|ASKED|NEW|UPDATE|HELP|TODO)\s*:\s*(.*)$/
 
 /**
  * Reads the model's line format; null when no known key appears. `source` is
@@ -595,6 +599,7 @@ export function parseReply(text: string, source: string | null = null): Update |
   const updated: Update['updated'] = []
   const helps: { target: string; help: Help }[] = []
   const asks: { id: string; target: string }[] = []
+  const todos: string[] = []
   let seen = 0
   const lines = text.split(NL)
   // The model sometimes writes an answer, then a correction and a whole second answer. Each answer starts with
@@ -644,6 +649,8 @@ export function parseReply(text: string, source: string | null = null): Update |
       }
       added.push(item)
       newLines.push(item)
+    } else if (key === 'TODO' && value) {
+      todos.push(value)
     } else if (key === 'UPDATE') {
       const [target, options, rec] = value.split('|').map(dash)
       const id = target?.match(/\b(i\d+)\b/)?.[1]
@@ -672,7 +679,14 @@ export function parseReply(text: string, source: string | null = null): Update |
     if (item !== undefined && item !== -1) asked.push({ id, item })
   }
 
-  return seen === 0 ? null : { card: { ...card, done: card.done.slice(-4) }, closed, added, helped, updated, asked }
+  return seen === 0
+    ? null
+    : { card: { ...card, done: card.done.slice(-4) }, closed, added, helped, updated, asked, todos }
+}
+
+/** The question a todo the person set aside becomes. */
+export function todoAsk(work: string): string {
+  return `Ready to start on ${work.replace(/[.?!\s]+$/, '')}?`
 }
 
 const FILLER = new Set([
@@ -891,6 +905,25 @@ export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number
     items.push({ ...a, id: `i${nextId}`, turn, at: now })
     addedIds.push(`i${nextId}`)
     created.add(`i${nextId}`)
+    nextId += 1
+    added += 1
+  }
+  // Every todo asks the same question, built here. The model sometimes reads work the person puts off as a todo,
+  // so a todo that rewords an open item or finding, or one closed while the model ran, adds nothing.
+  for (const work of u.todos) {
+    const todo = {
+      kind: 'question' as const,
+      label: null,
+      ask: todoAsk(work),
+      options: ['Proceed', 'Not yet'],
+      rec: null,
+    }
+    const isKnown =
+      items.some(i => restates(i.ask, work)) ||
+      ledger.findings.some(f => restates(f.title, work)) ||
+      repeatsRecentlyClosed(ledger.closed, { ...todo, helps: [] }, promptAt)
+    if (isKnown) continue
+    items.push({ ...todo, helps: [], id: `i${nextId}`, turn, at: now })
     nextId += 1
     added += 1
   }

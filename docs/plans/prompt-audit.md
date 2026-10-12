@@ -230,6 +230,25 @@ Theme 4 was measured with its own fixtures. A case counts when the outcome takes
 
 The first version asked the dismissed question again in up to 4 of 8 Sonnet runs. The kept version did not.
 
+**A todo the person mentions is a question, not a finding.** Two changes:
+
+- **The `record_finding` description** now leaves out "todos or ideas the user mentioned". The agent was measured with a stand-in server, 6 runs per case.
+- **The inbox model has a `TODO:` line.** It names the work. Code turns that into the question "Ready to start on <work>?" with the options Proceed / Not yet. Sonnet sometimes writes a `TODO:` line for a finding the person puts off, so code drops a todo that rewords an open item or finding.
+
+| Case | Sonnet before | Sonnet after | Codex before | Codex after |
+| --- | --- | --- | --- | --- |
+| The agent records the person's todo as a finding | 6 of 6 | 0 of 6 | 1 of 6 | 1 of 6 |
+| The agent still records its own finding | 6 of 6 | 6 of 6 | 6 of 6 | 5 of 6 |
+| A todo becomes a question (inbox model) | 1 of 10 | 10 of 10 | 0 of 10 | 10 of 10 |
+| A todo the reply took up adds nothing | 5 of 5 | 5 of 5 | 5 of 5 | 5 of 5 |
+
+Two other wordings were dropped:
+
+- **Telling the agent to ask "Ready to start on <todo>. Proceed?"** It made Sonnet ask about its own findings too, in 5 or 6 of 6 runs against 0 of 6 before.
+- **A `NEW`-line rule for todos.** It made Sonnet close or ask about findings in other cases. The separate `TODO:` line, with the code check, did not.
+
+`dismissed-question-stays-closed` is flaky on Sonnet with or without this change: 7 of 10 before, 5 of 10 after. Its failures come from `NEW` lines for the reply's own question, not from `TODO:` lines.
+
 ## Proposed order
 
 1. Theme 4 is done.

@@ -69,6 +69,33 @@ describe('parseReply', () => {
     expect(lettered?.rec).toBe('A: Cancel button')
   })
 
+  test('a TODO line becomes a question about starting it, unless it rewords an open finding', () => {
+    const u = parseReply(
+      [
+        'TODO: caching the product API responses.',
+        'TODO: add install steps to the README',
+        'NEW: decide | - | Which port? | 3000 / 3001 | -',
+        'HELP: new 1 | link | https://example.com/ports | ports page',
+        'TODO: -',
+      ].join('\n'),
+      'See https://example.com/ports',
+    )!
+    const finding = {
+      id: 'f4',
+      kind: 'issue' as const,
+      title: 'README lacks install steps',
+      detail: 'd',
+      path: null,
+      at: 1,
+    }
+    const after = applyUpdate({ ...EMPTY, turn: 2, nextId: 5, findings: [finding] }, u, 10, 2)
+    expect(after.items.map(i => [i.ask, i.options.join(' / '), i.helps.length])).toEqual([
+      ['Which port?', '3000 / 3001', 1],
+      ['Ready to start on caching the product API responses?', 'Proceed / Not yet', 0],
+    ])
+    expect(after.findings.map(f => f.id)).toEqual(['f4'])
+  })
+
   test('a key written as "-" adds nothing and keeps the card', () => {
     const u = parseReply('GOAL: -\nNOW: -\nDONE: -\nRUNNING: -\nNEW: do | - | - | - | -')!
     expect(u.added).toEqual([])

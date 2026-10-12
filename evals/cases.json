@@ -1253,5 +1253,103 @@
         "added": 0
       }
     ]
+  },
+  {
+    "name": "person-todo-becomes-question",
+    "about": "A todo the person mentions, which the reply does not take up, becomes a question about starting it.",
+    "ledger": {
+      "turn": 4,
+      "nextId": 5,
+      "card": {
+        "goal": "Fix the flaky checkout test",
+        "done": [],
+        "now": "Fixing the checkout test",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [],
+      "findings": [],
+      "closed": [],
+      "batchTurn": 3
+    },
+    "exchange": {
+      "person": "nice. todo: look into caching the product API responses",
+      "turn": 4,
+      "activity": ["edited tests/checkout.test.ts"],
+      "reply": "The checkout test is fixed. It waited on a fixed 200 ms timer; it now waits for the order-saved event, and it passed 50 runs in a row."
+    },
+    "checks": [
+      {
+        "new": "cach",
+        "kind": "question"
+      },
+      {
+        "added": 1
+      }
+    ]
+  },
+  {
+    "name": "person-todo-mid-task-becomes-question",
+    "about": "A todo the person sends while the agent works on something else becomes a question about starting it.",
+    "ledger": {
+      "turn": 4,
+      "nextId": 5,
+      "card": {
+        "goal": "Rename BASE to API_URL across the app",
+        "done": [],
+        "now": "Renaming the env var",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [],
+      "findings": [],
+      "closed": [],
+      "batchTurn": 3
+    },
+    "exchange": {
+      "person": "todo: investigate why the build takes 4 minutes",
+      "turn": 4,
+      "activity": ["edited src/config.ts", "edited deploy/env.yaml", "edited README.md"],
+      "reply": "The rename is done: all 9 files now use API_URL, and the tests pass."
+    },
+    "checks": [
+      {
+        "new": "build",
+        "kind": "question"
+      },
+      {
+        "added": 1
+      }
+    ]
+  },
+  {
+    "name": "person-todo-taken-up-not-new",
+    "about": "A todo the reply already took up adds nothing.",
+    "ledger": {
+      "turn": 4,
+      "nextId": 5,
+      "card": {
+        "goal": "Add flags to the greet CLI",
+        "done": [],
+        "now": "Adding flags",
+        "running": [],
+        "updatedAt": 0
+      },
+      "items": [],
+      "findings": [],
+      "closed": [],
+      "batchTurn": 3
+    },
+    "exchange": {
+      "person": "todo: add a --verbose flag",
+      "turn": 4,
+      "activity": ["edited src/cli.ts", "ran: npm test"],
+      "reply": "Added --verbose: it prints each step as it runs. Tests pass."
+    },
+    "checks": [
+      {
+        "added": 0
+      }
+    ]
   }
 ]
