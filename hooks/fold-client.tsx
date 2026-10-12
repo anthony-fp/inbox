@@ -1,15 +1,15 @@
 import type { ClientModule } from 'claude-code'
 
 /**
- * A list's "▸ N Closed" line in the desktop pane. A Button takes a click only
+ * A list's "N closed ›" line in the desktop pane. A Button takes a click only
  * on its label, so the line is drawn here instead: this region gets the
  * pointer over every cell of the line, draws the hover, and posts the fold
  * state the click asks for to the hooks module, which sets it.
  */
 
 export type FoldProps = {
-  /** The column the arrow starts at. */
-  inset: number
+  /** The mark column's width, in columns: the label starts where the rows' text does. */
+  markCells: number
   count: number
   isUnfolded: boolean
   /** Lines of padding above and below the text. The hover covers it. */
@@ -55,13 +55,16 @@ const Fold: ClientModule<FoldProps, State> = (props, surface) => {
   const background = hover ? props.colors.hover : props.colors.rest
   const color = hover && props.colors.hoverText ? props.colors.hoverText : props.colors.text
 
+  // The pane's row frame: a rounded Box with a transparent border, as the hooks module's own lines draw.
   return Box({
     flexDirection: 'row',
+    borderStyle: 'single',
+    borderColor: '#0000',
     paddingY: props.padY,
     ...(background ? { backgroundColor: background } : {}),
     children: [
-      Box({ width: props.inset, flexShrink: 0 }),
-      Text({ ...(color ? { color } : {}), children: `${isUnfolded ? '▾' : '▸'} ${props.count} Closed` }),
+      Box({ width: props.markCells, flexShrink: 0 }),
+      Text({ ...(color ? { color } : {}), children: `${props.count} closed ${isUnfolded ? '⌄' : '›'}` }),
     ],
   })
 }

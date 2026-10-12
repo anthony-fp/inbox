@@ -6,30 +6,35 @@ import type { ClientModule } from 'claude-code'
  * cell of the row, draws the hover and the press, and posts to the hooks
  * module, which opens the row. The hooks module reads the row from this
  * Client's key, so a post carries nothing.
+ *
+ * It draws the pane's row frame: a rounded Box with a transparent border, then
+ * the mark, the text and the side columns, as the hooks module's own frames do.
  */
 
 export type RowProps = {
-  /** The column the handle starts at; the cells before it hold the new-row bar and the tree indent. */
-  handleAt: number
-  /** The column the text starts at. */
-  textAt: number
+  /** The mark column's width, in columns. */
+  markCells: number
+  /** The side column's width, in columns. */
+  sideCells: number
   handle: string
   /** Muted, before the title, such as a review thread's path. */
   before: string
   title: string
-  /** The age, or the row's last action in its place. */
+  /** The row's last action, muted after the title. */
   after: string
-  /** A line above the title, as a finding's kind and age: `label` in its color, then `age` as `after` is drawn. */
-  head: { label: string; color: string | null; age: string } | null
+  /** The age, at the side. */
+  side: string
+  /** A line above the title, as a finding's kind, in its color. */
+  head: { label: string; color: string | null } | null
   /** Lines of padding above and below the text. The hover covers it. */
   padY: number
-  /** 2 for a question, which can take two lines; 1 otherwise. */
+  /** How many lines the title and `after` may take before they are cut. */
   maxLines: number
   /** How many characters fit in a cell, counted low, so a clipped line does not wrap. */
   charsPerCell: number
   /** The region's width before its first layout, when `surface.columns` is still 0. */
   fallbackColumns: number
-  /** The new-row bar's color while the row is new, else null. */
+  /** The frame's outline while the row is new, else null. */
   newBar: string | null
   /** A null color is the theme's own. */
   colors: {
@@ -48,6 +53,8 @@ type State = { hover: boolean; pressed: boolean }
 
 /** A title clipped shorter than this reads as nothing, so `after` is cut instead. */
 const MIN_TITLE = 12
+/** The columns a frame's border takes from its content, both sides together. */
+const FRAME_CELLS = 4
 
 /** `text` cut to `max` characters at a space, ending "…". */
 function clipAtSpace(text: string, max: number): string {
@@ -89,13 +96,13 @@ const Row: ClientModule<RowProps, State> = (props, surface) => {
   })
 
   const columns = surface.columns || props.fallbackColumns
-  const budget = Math.floor((columns - props.textAt) * props.charsPerCell * props.maxLines)
+  const textCells = columns - FRAME_CELLS - props.markCells - props.sideCells
+  const budget = Math.floor(textCells * props.charsPerCell * props.maxLines)
   const line = fitLine(budget, props.before, props.title, props.after)
   const background = pressed ? props.colors.pressed : hover ? props.colors.hover : null
   // A raised background can share its color with muted text, so on it all text takes the palette's text for it.
   const isRaised = background !== null && background === props.colors.hover
   const color = (own: string | null) => (isRaised && props.colors.hoverText ? props.colors.hoverText : own)
-  // `after` and a head's age dim at rest and take `afterHover` under the pointer or pressed.
   const ageColor = background ? props.colors.afterHover : props.colors.after
   const colored = (own: string | null) => {
     const c = color(own)
@@ -104,37 +111,24 @@ const Row: ClientModule<RowProps, State> = (props, surface) => {
 
   return Box({
     flexDirection: 'row',
+    alignItems: 'flex-start',
+    borderStyle: 'single',
+    borderColor: props.newBar ?? '#0000',
+    paddingY: props.padY,
     ...(background ? { backgroundColor: background } : {}),
     children: [
       Box({
-        width: 1,
+        width: props.markCells,
         flexShrink: 0,
-        ...(props.newBar ? { backgroundColor: props.newBar } : {}),
-      }),
-      Box({ width: props.handleAt - 1, flexShrink: 0 }),
-      Box({
-        width: props.textAt - props.handleAt,
-        flexShrink: 0,
-        // The padding is on the handle and text, so the new-row bar spans the row's full height.
-        paddingY: props.padY,
         children: Text({ ...colored(props.colors.handle), children: props.handle }),
       }),
       Box({
         flexDirection: 'column',
         flexShrink: 1,
         flexGrow: 1,
-        paddingY: props.padY,
         children: [
           ...(props.head
-            ? [
-                Text({
-                  wrap: 'truncate-end',
-                  children: [
-                    Text({ ...colored(props.head.color), children: props.head.label }),
-                    Text({ ...colored(ageColor), children: props.head.age }),
-                  ],
-                }),
-              ]
+            ? [Text({ wrap: 'truncate-end', ...colored(props.head.color), children: props.head.label })]
             : []),
           Text({
             wrap: 'wrap',
@@ -146,6 +140,13 @@ const Row: ClientModule<RowProps, State> = (props, surface) => {
             ],
           }),
         ],
+      }),
+      Box({
+        width: props.sideCells,
+        flexShrink: 0,
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        children: Text({ ...colored(ageColor), children: props.side }),
       }),
     ],
   })

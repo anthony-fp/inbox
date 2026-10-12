@@ -4,6 +4,7 @@ import type { On, PromptOrigin, RenderSurface } from 'claude-code'
 
 import type { FoldProps } from '../hooks/fold-client'
 import type { LinksProps } from '../hooks/links-client'
+import type { RowProps } from '../hooks/row-client'
 import type { TabsProps } from '../hooks/tabs-client'
 import { demoView } from '../hooks/demo'
 import { NEW_ROW_MS, PRESS_GUARD_MS, SETTLED_MS, inboxView, perTurnStatus, rowKeyPlan } from '../hooks/view'
@@ -2072,14 +2073,10 @@ test('the desktop pane draws each action as one button and the tabs as one click
   // The recommended option is the desktop's primary button, and its label says so, as in the terminal.
   const recommended = await pane.find({ key: 'answer-i1-0' })
   expect([recommended?.props.label, recommended?.props.variant]).toEqual(['Node (recommended)', 'primary'])
-  // A closed row is one click region with no buttons of its own; below 50 columns it drops its age, and the open row keeps its.
   expect((await pane.find({ key: 'select-i2' }))?.type).toBe('Client')
   expect(await pane.find({ key: 'title-i2' })).toBeUndefined()
-  const closedAge = { type: 'Text', text: /^\u2002·\s3m\sago$/, in: 'select-i2' } as const
-  expect(await pane.find(closedAge)).toBeUndefined()
-  expect(await pane.findAll({ type: 'Text', text: /^\u2002·\s3m\sago$/ })).toHaveLength(1)
+  expect(((await pane.find({ key: 'select-i2' }))?.props.props as RowProps).side).toBe('3m')
   await pane.redraw({ ...PANE.props, bodyColumns: 69 })
-  expect(await pane.find(closedAge)).toBeDefined()
 
   // A click anywhere on a closed row opens it, and its actions work once the guard ends.
   await pane.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: 'select-i2' })

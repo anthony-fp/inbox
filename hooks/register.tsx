@@ -276,6 +276,14 @@ const ROW_COLUMNS = {
   flat: { lead: 1, handleAt: 3, textAt: 5 },
   desktop: { lead: 1, handleAt: 1, textAt: 3 },
 } as const
+// A desktop list line's mark column and its side column, for the age, in columns. See docs/plans/desktop-layout.md.
+const DESKTOP_MARK_CELLS = 2
+const DESKTOP_SIDE_CELLS = 5
+/** An age for the desktop side column: "12m", or "now". */
+function shortAgo(ms: number): string {
+  const age = ago(ms)
+  return age === 'just now' ? 'now' : age.replace(/ ago$/, '')
+}
 // Theme keys, so the colors follow the person's Claude Code theme.
 const NEEDS_YOU = 'warning'
 // A child's place under its section: a middle child, the last, or a block the tree passes.
@@ -3022,6 +3030,8 @@ export const register: Register = on => {
       title: string
       /** Muted text on the selected title's line, such as an age. */
       titleAfter?: string
+      /** When the row was asked or found, for the desktop side column. */
+      at?: number
       /** A line under the selected title. */
       subtitle?: JSX.Element
       /**
@@ -3056,6 +3066,7 @@ export const register: Register = on => {
         ...(isHandedOff ? { fold: {} } : {}),
         title: item.ask,
         titleAfter: asked,
+        ...(item.at === null ? {} : { at: item.at }),
         hasSecondLine: item.kind === 'question',
         body: null,
         keys: () => rowKeyActions($, r, optionsShown.includes(r.id)).keys,
@@ -3067,6 +3078,7 @@ export const register: Register = on => {
     // reply leaves it open.
     const findingRow = (r: RowView, finding: Finding): Row => ({
       id: finding.id,
+      at: finding.at,
       ...(r.state.is === 'handedOff'
         ? { handle: '✓', handleTone: 'done' as const, fold: {} }
         : { handle: FINDING_BADGES[finding.kind].mark, handleTone: FINDING_BADGES[finding.kind].tone }),
@@ -3579,26 +3591,28 @@ export const register: Register = on => {
       )
     }
     // A closed desktop row drawn by its Client, at the columns listRow draws an open row's handle and text.
-    const rowClientProps = (row: Row, tree?: TreePos): RowProps => {
-      const line = closedLine(row)
-      const columns = columnsFor(tree)
+    // The desktop side column's age: the row's last action's, or when it was asked or found.
+    const sideAge = (row: Row) => {
+      const f = feedbackOf(row.id, lastActions[row.id], notes[row.id], now)
+      const at = f && hasAge(f) ? f.at : row.at
+      return at === undefined ? '' : shortAgo(now - at)
+    }
+    // A closed desktop row drawn by its Client, in the same frame as the pane's other lines.
+    const rowClientProps = (row: Row): RowProps => {
+      const f = feedbackLabel(row.id, row)
+      const text = row.line?.text ?? row.title
 
       return {
-        handleAt: columns.handleAt,
-        textAt: columns.textAt,
+        markCells: DESKTOP_MARK_CELLS,
+        sideCells: DESKTOP_SIDE_CELLS,
         handle: row.handle,
-        before: line.before ?? '',
-        title: line.text.trim(),
-        after: line.after ? unbroken(line.after) : '',
-        head: row.head
-          ? {
-              label: row.head.label,
-              color: pal.tone[row.head.tone] ?? pal.mark[row.head.tone],
-              age: headOf(row, row.head).age,
-            }
-          : null,
+        before: row.line?.before ?? '',
+        title: text.trim(),
+        after: f?.age ? unbroken(`${DOT}${f.text}`) : row.line?.after ? unbroken(row.line.after) : '',
+        side: sideAge(row),
+        head: row.head ? { label: row.head.label, color: pal.tone[row.head.tone] ?? pal.mark[row.head.tone] } : null,
         padY: DESKTOP_ROW_PAD,
-        maxLines: row.hasSecondLine ? 2 : 1,
+        maxLines: row.hasSecondLine ? 4 : 2,
         charsPerCell: DESKTOP_CLIP_CHARS_PER_CELL,
         // The list pads the pane by a column on each side.
         fallbackColumns: e.props.bodyColumns - 2,
@@ -3606,14 +3620,54 @@ export const register: Register = on => {
         colors: {
           handle: row.handleTone ? pal.mark[row.handleTone] : null,
           muted: pal.muted,
-          after: line.afterTone ? (pal.tone[line.afterTone] ?? null) : pal.age,
-          afterHover: line.afterTone ? (pal.tone[line.afterTone] ?? null) : pal.muted,
+          after: f?.isFailure ? (pal.tone.error ?? null) : pal.age,
+          afterHover: f?.isFailure ? (pal.tone.error ?? null) : pal.muted,
           hover: pal.raised,
           hoverText: pal.raisedText ?? null,
           pressed: pal.selection ?? pal.raised,
         },
       }
     }
+    // A desktop list line: the mark column, the text, and the side column for the age or Undo. Each line is a
+    // rounded frame with a transparent border, as the row Client draws its own, so every line's text starts at the
+    // same column and a fill rounds without moving it.
+    const desktopFrame = ({
+      key,
+      mark = null,
+      side = null,
+      fill,
+      outline,
+      padY = space.rowPad,
+      children,
+    }: {
+      key?: string
+      mark?: JSX.Element | null
+      side?: JSX.Element | null
+      fill?: string | undefined
+      outline?: string | null
+      padY?: number
+      children: JSX.Element | (JSX.Element | null)[]
+    }) => (
+      <Box
+        key={key}
+        flexDirection="row"
+        alignItems="flex-start"
+        borderStyle="single"
+        borderColor={outline ?? '#0000'}
+        paddingY={padY}
+        {...(fill ? { backgroundColor: fill } : {})}
+      >
+        <Box width={DESKTOP_MARK_CELLS} flexShrink={0}>
+          {mark}
+        </Box>
+        <Box flexDirection="column" flexShrink={1} flexGrow={1}>
+          {children}
+        </Box>
+        <Box minWidth={DESKTOP_SIDE_CELLS} flexShrink={0} flexDirection="row" justifyContent="flex-end" paddingLeft={1}>
+          {side}
+        </Box>
+      </Box>
+    )
     // `tree` places the row as a section's child; without it, as in Findings, the
     // handle sits in the 4 columns after the bar.
     const listRow = (row: Row, tree?: TreePos) => {
@@ -3629,7 +3683,7 @@ export const register: Register = on => {
               key={`select-${row.id}`}
               module="./row-client.tsx"
               width="100%"
-              props={rowClientProps(row, tree)}
+              props={rowClientProps(row)}
             />
           </Box>
         )
@@ -3653,6 +3707,63 @@ export const register: Register = on => {
         ...(row.fold?.note ? [{ text: row.fold.note, color: pal.muted }] : []),
         ...(f && !f.age ? [{ text: f.text, color: f.isFailure ? pal.tone.error : pal.muted }] : []),
       ]
+
+      const keysBlock = (
+        <Box flexDirection="column" marginTop={blankLine}>
+          {isTyping ? (
+            look === 'desktop' ? (
+              <Box flexDirection="row" alignItems="center" columnGap={space.buttonGap}>
+                <Box flexShrink={1}>{field}</Box>
+                {/* The desktop Input supplies its own Send button. */}
+                {keyRow(
+                  row.id,
+                  fieldActions(row).filter(a => !a.key.startsWith('send-')),
+                )}
+              </Box>
+            ) : (
+              [field, keyRow(row.id, fieldActions(row))]
+            )
+          ) : look === 'desktop' || keysWidth(keys, more) <= e.props.bodyColumns - 3 - columns.textAt ? (
+            keyRow(row.id, keys, more)
+          ) : (
+            [keyRow(row.id, keys), keyRow(row.id, more)]
+          )}
+        </Box>
+      )
+      // The `view-` Box is what select() scrolls into view. Drawn on the selected row alone, so the key exists only
+      // once that row has redrawn expanded.
+      if (look === 'desktop' && isSelected)
+        return desktopFrame({
+          key: `row-${row.id}`,
+          mark: row.handleTone ? <Text color={pal.mark[row.handleTone]}>{row.handle}</Text> : <Text>{row.handle}</Text>,
+          side: <Text color={pal.muted}>{sideAge(row)}</Text>,
+          fill: pal.selection,
+          outline: isNew(row.id) ? pal.mark[tab] : null,
+          children: [
+            <Box key={`view-${row.id}`} position="absolute" top={0} bottom={0} left={0} width={1} />,
+            row.head ? (
+              <Text wrap="truncate-end" color={pal.tone[row.head.tone] ?? pal.mark[row.head.tone]}>
+                {row.head.label}
+              </Text>
+            ) : null,
+            <Text wrap="wrap">
+              <Text bold>{row.title}</Text>
+              {f?.age ? <Text color={pal.muted}>{unbroken(`${DOT}${f.text}`)}</Text> : null}
+            </Text>,
+            row.subtitle ?? null,
+            row.body ? <Box marginTop={blankLine}>{row.body}</Box> : null,
+            status.length > 0 ? (
+              <Box flexDirection="column" marginTop={blankLine}>
+                {status.map(st => (
+                  <Text color={st.color} wrap="wrap">
+                    {st.text}
+                  </Text>
+                ))}
+              </Box>
+            ) : null,
+            keysBlock,
+          ],
+        })
 
       return (
         <Box
@@ -3701,26 +3812,7 @@ export const register: Register = on => {
                   ))}
                 </Box>
               ) : null}
-              <Box flexDirection="column" marginTop={blankLine}>
-                {isTyping ? (
-                  look === 'desktop' ? (
-                    <Box flexDirection="row" alignItems="center" columnGap={space.buttonGap}>
-                      <Box flexShrink={1}>{field}</Box>
-                      {/* The desktop Input supplies its own Send button. */}
-                      {keyRow(
-                        row.id,
-                        fieldActions(row).filter(a => !a.key.startsWith('send-')),
-                      )}
-                    </Box>
-                  ) : (
-                    [field, keyRow(row.id, fieldActions(row))]
-                  )
-                ) : look === 'desktop' || keysWidth(keys, more) <= e.props.bodyColumns - 3 - columns.textAt ? (
-                  keyRow(row.id, keys, more)
-                ) : (
-                  [keyRow(row.id, keys), keyRow(row.id, more)]
-                )}
-              </Box>
+              {keysBlock}
             </Box>
           ) : (
             <Box flexShrink={1} flexGrow={1} paddingRight={1}>
@@ -4062,14 +4154,26 @@ export const register: Register = on => {
 
     // A group's title: its name, and how many of its items are open. An empty
     // group's own line says it has none, so its title has no count.
-    const groupTitle = (title: string, count: number) => (
-      <Box paddingLeft={look === 'desktop' ? ROW_COLUMNS.desktop.handleAt : 2}>
-        <Text>
-          <Text bold>{title}</Text>
-          {count > 0 ? <Text color={pal.muted}> {count}</Text> : null}
-        </Text>
-      </Box>
-    )
+    // Desktop labels a group as the app labels its sidebar's groups: muted, at the rows' text column.
+    const groupTitle = (title: string, count: number) =>
+      look === 'desktop' ? (
+        desktopFrame({
+          padY: 0,
+          children: (
+            <Text color={pal.muted}>
+              {title}
+              {count > 0 ? `${DOT}${count}` : ''}
+            </Text>
+          ),
+        })
+      ) : (
+        <Box paddingLeft={2}>
+          <Text>
+            <Text bold>{title}</Text>
+            {count > 0 ? <Text color={pal.muted}> {count}</Text> : null}
+          </Text>
+        </Box>
+      )
     const section = (children: JSX.Element | JSX.Element[]) => (
       <Box flexDirection="column" paddingY={blankLine} backgroundColor={isInline ? undefined : pal.card}>
         {children}
@@ -4091,23 +4195,37 @@ export const register: Register = on => {
             ]
     // A closed item or finding under the open ones: what was asked, then how it closed and when.
     const closedRow = (d: ClosedLine, pos: TreePos) =>
-      treeRow(
-        pos,
-        <Text color={pal.muted}>{CLOSED_MARKS[closedState(d)]}</Text>,
-        <Box flexDirection="column">
-          <Text wrap="wrap" color={pal.muted}>
-            {d.ask}
-          </Text>
-          <Text wrap="wrap">
-            <Text bold={!isLapsed(d)} color={isLapsed(d) ? pal.muted : undefined}>
-              {outcomeText(d)}
-            </Text>
-            <Text color={pal.age}>{unbroken(`${DOT}${ago(now - d.at)}`)}</Text>
-          </Text>
-        </Box>,
-        `closed-${d.id}`,
-        1,
-      )
+      look === 'desktop'
+        ? desktopFrame({
+            key: `closed-${d.id}`,
+            mark: <Text color={pal.muted}>{CLOSED_MARKS[closedState(d)]}</Text>,
+            side: <Text color={pal.age}>{shortAgo(now - d.at)}</Text>,
+            children: [
+              <Text wrap="wrap" color={pal.muted}>
+                {d.ask}
+              </Text>,
+              <Text wrap="wrap" color={pal.muted}>
+                {outcomeText(d)}
+              </Text>,
+            ],
+          })
+        : treeRow(
+            pos,
+            <Text color={pal.muted}>{CLOSED_MARKS[closedState(d)]}</Text>,
+            <Box flexDirection="column">
+              <Text wrap="wrap" color={pal.muted}>
+                {d.ask}
+              </Text>
+              <Text wrap="wrap">
+                <Text bold={!isLapsed(d)} color={isLapsed(d) ? pal.muted : undefined}>
+                  {outcomeText(d)}
+                </Text>
+                <Text color={pal.age}>{unbroken(`${DOT}${ago(now - d.at)}`)}</Text>
+              </Text>
+            </Box>,
+            `closed-${d.id}`,
+            1,
+          )
     // The row that folds or unfolds a list's closed items, with how many there are.
     // It sits apart from the list's tree, and the closed items hang from its arrow.
     // On desktop a Client takes a click on every cell of the line, where a Button takes one only on its label.
@@ -4120,7 +4238,7 @@ export const register: Register = on => {
             width="100%"
             props={
               {
-                inset: ROW_COLUMNS.desktop.handleAt,
+                markCells: DESKTOP_MARK_CELLS,
                 count,
                 isUnfolded,
                 padY: DESKTOP_ROW_PAD,
@@ -4153,8 +4271,6 @@ export const register: Register = on => {
           `fold-row-${kind}`,
         )
       )
-    // On desktop a row's padding sets each two-line closed item apart. The terminal has no gap smaller than a line.
-    const closedGap = () => (look === 'desktop' && !isInline ? [<Box paddingTop={DESKTOP_ROW_PAD} />] : [])
     // The fold row and, unfolded, the closed items under it; nothing when none closed.
     const closedFold = (kind: Item['kind'] | 'finding', closed: ClosedLine[], isUnfolded: boolean) =>
       closed.length === 0
@@ -4162,7 +4278,7 @@ export const register: Register = on => {
         : [
             ...(space.isFoldGapped ? titleGap(false) : []),
             foldRow(kind, closed.length, isUnfolded),
-            ...(isUnfolded ? closed.flatMap((d, n) => [...closedGap(), closedRow(d, childPos(n, closed.length))]) : []),
+            ...(isUnfolded ? closed.map((d, n) => closedRow(d, childPos(n, closed.length))) : []),
           ]
     // A row that just closed stays where it was, with a ✓ and its outcome, and
     // [Undo] after the person's own Done or Dismiss, until it joins its list's
@@ -4260,6 +4376,24 @@ export const register: Register = on => {
     }
     const settledRow = ({ settled: r, state }: Extract<Entry, { settled: RowView }>, pos?: TreePos) => {
       const undo = r.actions.find(a => a.press.action === 'undo')?.press ?? null
+      if (look === 'desktop') {
+        const after = `${DOT}${state.isQueued ? `Queued: ${state.label}` : state.label}`
+        const reserved = DESKTOP_MARK_CELLS + 4 + (undo ? UNDO_CELLS + 1 : DESKTOP_SIDE_CELLS)
+        return desktopFrame({
+          key: `settled-${r.id}`,
+          // The ✓ waits for the answer to reach Claude.
+          mark: state.isQueued ? null : <Text color={pal.muted}>✓</Text>,
+          side: undo ? undoButton(undo, state.at) : null,
+          padY: space.settledPad,
+          children: [
+            <Text wrap="truncate-end">
+              {clipLine(r.title, reserved + Math.ceil(after.length / DESKTOP_CHARS_PER_CELL))}
+              <Text color={pal.muted}>{after}</Text>
+            </Text>,
+            undo ? null : leaveBar(state.at, state.isLapsed),
+          ],
+        })
+      }
       const columns = columnsFor(pos)
       const content = settledContent(
         r.title,
