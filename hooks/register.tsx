@@ -4306,6 +4306,14 @@ export const register: Register = on => {
         : [
             ...(space.isFoldGapped ? titleGap(false) : []),
             foldRow(kind, total, isUnfolded),
+            // A line of the closed items' tree parts them from the fold line, as a group's title is parted from its rows.
+            ...(isUnfolded && look !== 'desktop' && !isInline
+              ? [
+                  <Box key={`fold-gap-${kind}`} paddingLeft={1 + markWidth}>
+                    <Text color={pal.line}>│</Text>
+                  </Box>,
+                ]
+              : []),
             ...(isUnfolded ? closed.map((d, n) => closedRow(d, childPos(n, closed.length + (earlier ? 1 : 0)))) : []),
             ...(isUnfolded && earlier
               ? [
@@ -4317,11 +4325,13 @@ export const register: Register = on => {
                         padY: space.rowPad / 2,
                         children: <Text color={pal.age}>{earlier}</Text>,
                       })
-                    : treeRow(
+                    : // On the closed items' tree, with its text where their titles start.
+                      treeRow(
                         childPos(closed.length, closed.length + 1),
-                        null,
+                        <Text> </Text>,
                         <Text color={pal.age}>{earlier}</Text>,
                         `earlier-${kind}`,
+                        1,
                       ),
                 ]
               : []),
