@@ -1,6 +1,4 @@
-// Reading GitHub PR data into a `PrView`, and the PR status and wording rules. A shared module that only the
-// mod uses today, since Codex has no PRs. The one exception is `namedPrs` and `parseRef`, which presses.ts
-// imports, so the Codex bundle includes them.
+// Reading GitHub PR data into a `PrView`, and the PR status and wording rules. A shared module.
 
 import type { PrCheck, PrThread, PrView } from '../types'
 import { clip } from './ledger'

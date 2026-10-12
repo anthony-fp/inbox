@@ -14,7 +14,8 @@ Shared modules are in `hooks/`. Both hosts import them. They import nothing from
 | `hooks/presses.ts` | Shared module. The press reducer, its effects, and the saved last-action shape. |
 | `hooks/arrivals.ts` | Shared module. Which rows are new, and where a look moves for them. |
 | `hooks/ledger.ts` | Shared module. Saved ledger, ledger writes, and the texts the model reads. It also holds Claude-only code and two UI helpers, `ago` and `isLapsed`. |
-| `hooks/prs.ts` | Shared module. PR parsing, readiness and prompts. Only the mod uses most of it. The Codex bundle includes `namedPrs` and `parseRef` through `hooks/presses.ts`. |
+| `hooks/prs.ts` | Shared module. PR parsing, readiness and prompts. |
+| `hooks/pr-tab.ts` | Shared module. The PRs tab's rules: fetching each tracked PR through a host's gh runner, which PRs the tab draws, its row ids, and what each PR press does. |
 | `hooks/tools.ts` | Shared module. The record_finding and close tools. |
 | `hooks/demo.ts` | Shared module. Sample data for `/inbox demo` and the Codex demo. |
 | `hooks/layout.ts` | Shared module. Sizes the desktop look and the Codex tab share. |
