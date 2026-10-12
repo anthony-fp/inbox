@@ -340,10 +340,10 @@ function chevronSvg(isUnfolded: boolean, isHover: boolean): string {
     : `${x + 1.5},${y - 3.5} ${x + 5},${y} ${x + 1.5},${y + 3.5}`
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
-    // At rest, the fold label's muted text; under the pointer, the app's text color, as the label turns.
+    // At rest, the fold label's dim gray; under the pointer, the app's text color, as the label turns.
     (isHover
       ? `<style>polyline{stroke:#0b0b0b}@media (prefers-color-scheme: dark){polyline{stroke:#f0efec}}</style>`
-      : `<style>polyline{stroke:#6f6e6a}@media (prefers-color-scheme: dark){polyline{stroke:#c3c2b8}}</style>`) +
+      : `<style>polyline{stroke:${DESKTOP_AGE}}</style>`) +
     `<polyline points="${points}" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`
   )
 }
@@ -555,20 +555,22 @@ const THEME_KEY_PALETTE: Palette = {
 // its sections on its own background and marks a selected row with a warm gray, #ecebe8 on its light page. No theme
 // key draws that gray, so a translucent warm gray does: about #edece9 over the light pane and #2d2b29 over the dark
 // one. The app refuses an hsl() alpha or color-mix() color.
+// A third, dimmer text level for ages, as the app sets its timestamps apart: one gray that keeps about
+// 4.5:1 on the dark pane and 3.9:1 on the light one, since no theme key draws a dimmer text.
+const DESKTOP_AGE = '#85837e'
 const DESKTOP_PALETTE: Palette = {
   raised: 'rgba(128, 120, 105, 0.14)',
   raisedText: 'text',
   selection: 'rgba(128, 120, 105, 0.14)',
   muted: 'inactive',
-  // A third, dimmer text level for ages, as the app sets its timestamps apart: one gray that keeps about
-  // 4.5:1 on the dark pane and 3.9:1 on the light one, since no theme key draws a dimmer text.
-  age: '#85837e',
+  age: DESKTOP_AGE,
   key: 'remember',
   line: 'subtle',
   divider: 'rgba(128, 128, 128, 0.25)',
   tone: {},
   // Counts and kind marks keep their status colors, so a count or a finding's kind reads at a glance.
-  mark: { needsYou: NEEDS_YOU, issue: NEEDS_YOU, findings: FINDINGS, prs: PRS, done: DONE, error: 'error' },
+  // PRs take the app's blue, `suggestion`, so the PR count and each PR's number match.
+  mark: { needsYou: NEEDS_YOU, issue: NEEDS_YOU, findings: FINDINGS, prs: 'suggestion', done: DONE, error: 'error' },
 }
 /**
  * The look the mod draws for an engine surface. Mobile and VS Code get the terminal look, which nobody has checked
@@ -4370,6 +4372,8 @@ export const register: Register = on => {
                       key={`rule-${n}`}
                       marginTop={space}
                       marginBottom={space - blankLine}
+                      // Starts at the text column, past the marks, as the section titles do.
+                      marginLeft={FRAME_INSET_PT / DESKTOP_CELL_PT + DESKTOP_MARK_CELLS}
                       height={1 / DESKTOP_LINE_PT}
                       backgroundColor={pal.divider}
                     />,
@@ -4459,7 +4463,7 @@ export const register: Register = on => {
                   padY: DESKTOP_ROW_PAD,
                   colors: {
                     rest: isInline ? null : (pal.card ?? null),
-                    text: pal.muted,
+                    text: pal.age,
                     hoverText: 'text',
                   },
                 } satisfies FoldProps
@@ -4901,7 +4905,7 @@ export const register: Register = on => {
         <Box paddingLeft={1}>
           <Text wrap="wrap">
             {look === 'desktop' ? (
-              <Text color={pal.muted}>#{pr.number} </Text>
+              <Text color={pal.mark.prs}>{`#${pr.number}\u2002`}</Text>
             ) : (
               <Text bold color={pal.tone.prs}>
                 #{pr.number}{' '}
