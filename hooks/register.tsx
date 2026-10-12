@@ -498,25 +498,22 @@ const THEME_KEY_PALETTE: Palette = {
 // not follow it. Theme keys resolve to the app's colors, so the desktop pane draws text in theme keys. The app keeps
 // its sections on its own background and marks a selected row with a warm gray, #ecebe8 on its light page. No theme
 // key draws that gray, so a translucent warm gray does: about #edece9 over the light pane and #2d2b29 over the dark
-// one. Counts and marks are muted, with color left for errors. The app refuses an hsl() alpha or color-mix() color.
+// one. The app refuses an hsl() alpha or color-mix() color.
 const DESKTOP_PALETTE: Palette = {
   raised: 'rgba(128, 120, 105, 0.14)',
   raisedText: 'text',
   selection: 'rgba(128, 120, 105, 0.14)',
   muted: 'inactive',
-  age: 'inactive',
+  // A third, dimmer text level for ages, as the app sets its timestamps apart: one gray that keeps about
+  // 4.5:1 on the dark pane and 3.9:1 on the light one, since no theme key draws a dimmer text.
+  age: '#85837e',
   key: 'remember',
   line: 'subtle',
   divider: 'rgba(128, 128, 128, 0.25)',
   tone: {},
-  mark: {
-    needsYou: 'inactive',
-    issue: 'inactive',
-    findings: 'inactive',
-    prs: 'inactive',
-    done: 'inactive',
-    error: 'error',
-  },
+  // Counts and kind marks keep their status colors, so a count or a finding's kind reads at a glance. A closed
+  // item's ✓ stays muted.
+  mark: { needsYou: NEEDS_YOU, issue: NEEDS_YOU, findings: FINDINGS, prs: PRS, done: 'inactive', error: 'error' },
 }
 /**
  * The look the mod draws for an engine surface. Mobile and VS Code get the terminal look, which nobody has checked
@@ -3622,8 +3619,9 @@ export const register: Register = on => {
         colors: {
           handle: row.handleTone ? pal.mark[row.handleTone] : null,
           muted: pal.muted,
-          after: f?.isFailure ? (pal.tone.error ?? null) : pal.age,
+          after: f?.isFailure ? (pal.tone.error ?? null) : pal.muted,
           afterHover: f?.isFailure ? (pal.tone.error ?? null) : pal.muted,
+          side: pal.age,
           hover: pal.raised,
           hoverText: pal.raisedText ?? null,
           pressed: pal.selection ?? pal.raised,
@@ -3741,7 +3739,7 @@ export const register: Register = on => {
         return desktopFrame({
           key: `row-${row.id}`,
           mark: row.handleTone ? <Text color={pal.mark[row.handleTone]}>{row.handle}</Text> : <Text>{row.handle}</Text>,
-          side: <Text color={pal.muted}>{sideAge(row)}</Text>,
+          side: <Text color={pal.age}>{sideAge(row)}</Text>,
           fill: pal.selection,
           outline: isNew(row.id) ? pal.mark[tab] : null,
           children: [

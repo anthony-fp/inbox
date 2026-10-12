@@ -43,6 +43,8 @@ export type RowProps = {
     after: string | null
     /** `after` on a row under the pointer or pressed. */
     afterHover: string | null
+    /** The age at the side. */
+    side: string | null
     hover: string | null
     hoverText: string | null
     pressed: string | null
@@ -147,7 +149,7 @@ const Row: ClientModule<RowProps, State> = (props, surface) => {
         flexShrink: 0,
         flexDirection: 'row',
         justifyContent: 'flex-end',
-        children: Text({ ...colored(ageColor), children: props.side }),
+        children: Text({ ...colored(props.colors.side), children: props.side }),
       }),
     ],
   })
