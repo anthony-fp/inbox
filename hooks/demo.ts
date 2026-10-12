@@ -186,7 +186,7 @@ export function demoView(now: number): DemoCopy {
           kind: 'opportunity',
           title: 'One contrast check could cover all six themes',
           detail:
-            'A capture of the pane in each theme holds every cell’s colors. A script could flag any text under 4.5:1 and run in check.sh.',
+            'A capture of the pane in **each theme** holds every cell’s colors. A script could flag any text under *4.5:1* and run in `check.sh`.',
           path: 'scripts/check.sh',
           at: now - 3 * 60 * MIN,
         },

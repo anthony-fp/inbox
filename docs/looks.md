@@ -23,7 +23,7 @@ Shared modules are in `hooks/`. Both hosts import them. They import nothing from
 | `hooks/row-client.tsx` | Mod only. A Client region for a closed row in the desktop pane. |
 | `hooks/fold-client.tsx` | Mod only. A Client region for the desktop "N Closed" line. |
 | `hooks/links-client.tsx` | Mod only. A Client region for an open row's follow-ups on desktop. |
-| `hooks/countdown-client.tsx` | Mod only. A Client region for the bar that drains while Undo lasts on desktop. |
+| `hooks/undo-client.tsx` | Mod only. A Client region for Undo on desktop, whose fill drains while Undo lasts. |
 | `codex/src/tab.tsx` | Codex adapter. Draws the Codex tab and runs its page code: polling, keys, clipboard. |
 | `codex/src/tab.html` | Codex adapter. The tab's styles and page shell. |
 | `codex/src/rows.ts` | Codex adapter. The motion state machine for rows. |
@@ -88,7 +88,7 @@ A difference is on purpose when a look cannot do something or the product decide
 | --- | --- | --- | --- | --- | --- |
 | Keys | Button hotkeys work. The key letter is drawn before the label. | Clicks only. Button hotkeys do nothing, and no letter is drawn. | A page `keydown` handler takes the letters. No key text is drawn. | The desktop pane takes no key input. A browser page can, but keys are an extra there. | `hooks/register.tsx:keyedButton`, `codex/src/tab.tsx:KeyButton` |
 | Hit areas | Character cells. | A Button takes a click only over its label. A Client region takes clicks over a whole shape. | Normal page hit areas. | The engine draws desktop Buttons label-sized. | `hooks/row-client.tsx:RowProps`, `hooks/tabs-client.tsx:TabsProps` |
-| Motion and bars | A bar under a just-closed row shrinks by half cells until the row leaves. A bar marks a new row. No animation. | A bar marks a new row. A bar under a just-closed row drains while Undo lasts. No leave bar and no animation. | Rows enter, move and exit. A bar marks a new row. | The pane has no opacity, transform or CSS. | `hooks/register.tsx:leaveBar`, `hooks/countdown-client.tsx`, `codex/src/rows.ts:stepRow` |
+| Motion and bars | Undo's fill drains by cells until the row leaves. A just-closed row without Undo shows a bar that shrinks by half cells. A bar marks a new row. No animation. | Undo's fill drains while it lasts. A bar marks a new row. No leave bar and no animation. | Rows enter, move and exit. A bar marks a new row. | The pane has no opacity, transform or CSS. | `hooks/register.tsx:leaveBar`, `hooks/undo-client.tsx`, `codex/src/rows.ts:stepRow` |
 | Redraw and polling | Redraws in steps while a row leaves. | Redraws once when a row leaves. A timer redraw loop made clicks fail. | The tab polls the server every 3 seconds. | Only the mod gets pushed events. | `hooks/register.tsx:redrawWhileLeaving`, `codex/src/settle.ts:POLL_MS` |
 | Hot reload | Mod handlers reload. | Same as terminal. | The handler reloads, and an open tab replaces its page with the new build's. The loader needs Codex restarted. | Codex starts the loader once per app launch and keeps it. | `codex/src/server-main.ts:load`, `codex/src/server-handler.ts:createHandler` |
 | Storage | Engine atoms hold the live session. The engine store keeps a saved ledger per session. | Same as terminal. | One JSON file per session, under a lock. | Codex has no engine store. Its hooks run as separate short-lived processes beside the server. | `hooks/register.tsx:save`, `codex/src/state.ts:withLock` |

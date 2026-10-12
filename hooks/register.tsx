@@ -153,7 +153,7 @@ import {
   recordClose,
   recordFinding,
 } from './tools'
-import type { CountdownProps } from './countdown-client'
+import type { UndoProps } from './undo-client'
 import { followTo, recordRows } from './arrivals'
 import { parseInline } from './inline'
 import type { RowRecord } from './arrivals'
@@ -2784,6 +2784,14 @@ export const register: Register = on => {
     const shown = TABS.find(t => t.id === data?.tab)
     const followUp = typeof data?.key === 'string' ? followUpPresses.get(data.key) : undefined
     if (e.element === 'tabs' && shown) await showTab($, shown.id)
+    else if (e.element.startsWith('undo-') && followUp && typeof data?.key === 'string')
+      followUp({
+        plugin: 'inbox',
+        element: data.key,
+        component: e.component,
+        requestId: e.requestId,
+        surface: e.surface,
+      })
     else if (e.element.startsWith('links-') && followUp && typeof data?.key === 'string') {
       // The Client is not a focusable key, so the next drawing moves the focus, to the hint first.
       focusedKey = e.element
@@ -4128,13 +4136,34 @@ export const register: Register = on => {
     // closed items. It cannot be selected. `undo` is that press. An answer
     // whose message has not reached Claude reads "Queued: <answer>" instead. A
     // lapsed close, such as Dismissed, Expired or one by Claude, reads muted.
-    // Undo on a row that just closed. In the terminal its fill drains as its time runs out, as the Codex tab's does,
-    // on the redraws the leave bar already takes. Desktop's native button draws no fill, so its time drains below.
+    // Undo on a row that just closed, with a fill that drains as its time runs out, as the Codex tab's does. The
+    // terminal redraws it on the steps the leave bar already takes. Desktop's native button draws no fill, so there
+    // a Client draws it and ticks on its own, and its click presses the same handler.
     const undoButton = (undo: RowPress | PrPress, at: number) => {
       const key = `undo-${pressRowId(undo)}`
+      const label = ' ↺ Undo '
       const onPress = (press: { surface: UiPressArgument['surface'] }) => runPress($, undo, press.surface)
+      if (hasClient) {
+        followUpPresses.set(key, onPress)
+        return (
+          <elements.Client
+            key={`${key}-${at}`}
+            module="./undo-client.tsx"
+            width={Math.ceil(label.length / DESKTOP_CHARS_PER_CELL) + 1}
+            props={
+              {
+                pressKey: key,
+                label,
+                startedAt: at,
+                totalMs: SETTLED_MS,
+                colors: { rest: null, fill: pal.divider, hover: pal.divider, text: null },
+              } satisfies UndoProps
+            }
+          />
+        )
+      }
       if (look !== 'terminal') return <Button key={key} label="↺ Undo" onPress={onPress} />
-      const cells = [...' ↺ Undo ']
+      const cells = [...label]
       const filled = Math.ceil((Math.max(0, SETTLED_MS - (now - at)) / SETTLED_MS) * cells.length)
 
       return (
@@ -4164,23 +4193,6 @@ export const register: Register = on => {
           {undo ? undoButton(undo, at) : null}
         </Box>
         {undo ? null : leaveBar(at, isLapsed)}
-        {/* On desktop the time Undo has left drains in a Client of its own, which ticks without redrawing the pane. */}
-        {undo && hasClient ? (
-          <Box marginTop={0.5}>
-            <elements.Client
-              key={`countdown-${pressRowId(undo)}-${at}`}
-              module="./countdown-client.tsx"
-              width="100%"
-              props={
-                {
-                  startedAt: at,
-                  totalMs: SETTLED_MS,
-                  colors: { bar: pal.muted, track: pal.divider },
-                } satisfies CountdownProps
-              }
-            />
-          </Box>
-        ) : null}
       </Box>
     )
     const settledRow = ({ settled: r, state }: Extract<Entry, { settled: RowView }>, pos?: TreePos) => {
