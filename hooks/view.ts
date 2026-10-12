@@ -167,6 +167,24 @@ export function closedShown<T extends { id: string }>(closed: T[], drawnSettled:
   return closed.filter(d => !drawnSettled.has(d.id)).slice(0, CLOSED_SHOWN)
 }
 
+/** How many closes a Closed fold counts: all it keeps, without the rows drawn as settled right now. */
+export function closedTotal(closed: { id: string }[], drawnSettled: ReadonlySet<string>): number {
+  return closed.filter(d => !drawnSettled.has(d.id)).length
+}
+
+/** A Closed fold's label, which counts every close, not only the ones it lists. */
+export function foldLabel(total: number): string {
+  return `${total} closed`
+}
+
+/** The line under a Closed fold's list for the closes it leaves out, or null when it lists them all. */
+export function earlierLabel(total: number, shown: number): string | null {
+  return total > shown ? `${total - shown} earlier` : null
+}
+
+/** The line above a demo's rows. */
+export const DEMO_NOTICE = 'Sample entries. Presses send nothing.'
+
 const UPDATE_FAILED = 'Last update failed. Items from that reply may be missing.'
 const UPDATE_RETRIES = ' It retries after your next message.'
 
