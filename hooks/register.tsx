@@ -274,7 +274,7 @@ const DESKTOP_ROW_PAD = ROW_PAD_PT / DESKTOP_LINE_PT
 const ROW_COLUMNS = {
   tree: { lead: 4, handleAt: 4, textAt: 7 },
   flat: { lead: 1, handleAt: 3, textAt: 5 },
-  desktop: { lead: 1, handleAt: 2, textAt: 5 },
+  desktop: { lead: 1, handleAt: 1, textAt: 3 },
 } as const
 // Theme keys, so the colors follow the person's Claude Code theme.
 const NEEDS_YOU = 'warning'
@@ -485,15 +485,28 @@ const THEME_KEY_PALETTE: Palette = {
   mark: { needsYou: NEEDS_YOU, issue: NEEDS_YOU, findings: FINDINGS, prs: PRS, done: DONE, error: 'error' },
 }
 // The desktop app picks its own light or dark appearance, which the mod cannot read, and Claude Code's theme does
-// not follow it. Theme keys resolve to the app's colors, so the desktop pane draws text in theme keys and fills in
-// translucent grays, which stand about as far above the app's background in either appearance: #262626 over the
-// dark #1a1a19, #efefef over white. The app refuses a tree with an hsl() alpha or color-mix() color; rgba() draws.
+// not follow it. Theme keys resolve to the app's colors, so the desktop pane draws only in theme keys. The app keeps
+// its sections on its own background and marks a selected row with a warm gray, as its sidebar does, and
+// `userMessageBackground` draws that gray, its message bubble's, in either appearance. Its counts and marks are
+// muted, with color left for errors.
 const DESKTOP_PALETTE: Palette = {
-  ...THEME_KEY_PALETTE,
-  tab: 'rgba(128, 128, 128, 0.12)',
-  card: 'rgba(128, 128, 128, 0.12)',
-  raised: 'rgba(128, 128, 128, 0.24)',
-  selection: 'rgba(76, 154, 255, 0.2)',
+  raised: 'userMessageBackground',
+  raisedText: 'text',
+  selection: 'userMessageBackground',
+  muted: 'inactive',
+  age: 'inactive',
+  key: 'remember',
+  line: 'subtle',
+  divider: 'subtle',
+  tone: {},
+  mark: {
+    needsYou: 'inactive',
+    issue: 'inactive',
+    findings: 'inactive',
+    prs: 'inactive',
+    done: 'inactive',
+    error: 'error',
+  },
 }
 /**
  * The look the mod draws for an engine surface. Mobile and VS Code get the terminal look, which nobody has checked
@@ -4057,7 +4070,6 @@ export const register: Register = on => {
         </Text>
       </Box>
     )
-    // Square on desktop: a rounded fill needs a border, which would inset the rows from the card's edges.
     const section = (children: JSX.Element | JSX.Element[]) => (
       <Box flexDirection="column" paddingY={blankLine} backgroundColor={isInline ? undefined : pal.card}>
         {children}
