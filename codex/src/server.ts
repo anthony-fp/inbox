@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
 
-import { applyPrPress, fetchTracked, isDismissing, isTracked, prRowId } from '../../hooks/pr-tab'
+import { applyPrPress, fetchTracked, isDismissing, isTracked, prRowId, splitLinked } from '../../hooks/pr-tab'
 import type { PrPress } from '../../hooks/pr-tab'
 import {
   applyPress,
@@ -254,7 +254,7 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     await updateState(dir, id, cur => {
       const at = now()
       const views = Object.fromEntries(
-        Object.entries(fetched).filter(([ref]) => ref === branchRef || cur.ledger.prs.includes(ref)),
+        Object.entries(fetched).filter(([ref]) => isTracked({ ...cur.prViews, branchRef }, cur.ledger.prs, ref)),
       )
       const dismissing = Object.fromEntries(
         Object.entries(cur.prViews.views).filter(([ref]) => isDismissing(cur.lastActions, ref, at)),
@@ -268,7 +268,7 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
   function fetchPrsWhenDue(id: string, s: SessionState) {
     if (fetchingPrs.has(id)) return
     const last = prsFetchedAt.get(id)
-    const hasNewPr = s.ledger.prs.some(ref => !(ref in s.prViews.views))
+    const hasNewPr = splitLinked(s.ledger.prs).tracked.some(ref => !(ref in s.prViews.views))
     const isDue = last === undefined || now() - last >= PRS_REFRESH_MS || (hasNewPr && now() - last >= NEW_PR_FETCH_MS)
     if (!isDue) return
     fetchingPrs.add(id)

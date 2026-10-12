@@ -1728,6 +1728,11 @@ function Prs({ v, now }: { v: View; now: number }) {
           <PrBlock {...b} v={v} openId={openId} all={rows} now={now} />
         ),
       )}
+      {v.prs.olderText ? (
+        <section>
+          <div class="group-title muted">{v.prs.olderText}</div>
+        </section>
+      ) : null}
     </main>
   )
 }

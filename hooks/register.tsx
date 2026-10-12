@@ -52,8 +52,8 @@ import {
   isDismissing,
   isTracked,
   linkedPrs,
+  olderPrsText,
   PR_TONES,
-  MAX_PRS,
   prCheckId,
   prMarkId,
   prRetryOf,
@@ -1692,7 +1692,7 @@ async function fetchPrsNow($: EngineInterface, findsBranchPr: boolean) {
       $.clock.now(),
     ])
     const views = Object.fromEntries(
-      Object.entries(fetched).filter(([ref]) => ref === branchRef || stillLinked.includes(ref)),
+      Object.entries(fetched).filter(([ref]) => isTracked({ ...state, branchRef }, stillLinked, ref)),
     )
     // A fetch queued behind this one keeps the tab checking, so it does not show "No PRs" in between.
     // A PR dismissed moments ago keeps its last view while its block shows settled.
@@ -4874,6 +4874,26 @@ export const register: Register = on => {
         ...prRowGroup('Failing checks', checks, `${pr.ref}-checks`),
       ])
     }
+    // Linked PRs past MAX_PRS are not fetched, so the tab names them instead of dropping them unsaid.
+    const olderPrs = () => {
+      const text = olderPrsText(ledger.prs)
+      if (!text) return []
+      const line = (
+        <Text color={pal.muted} wrap="wrap">
+          {text}
+        </Text>
+      )
+
+      return [
+        section(
+          look === 'desktop' ? (
+            desktopFrame({ key: 'older-prs', padY: 0, children: line })
+          ) : (
+            <Box paddingLeft={1}>{line}</Box>
+          ),
+        ),
+      ]
+    }
     const prsView = () =>
       prGroups.length === 0 ? (
         <Box flexDirection="column" flexGrow={1}>
@@ -4885,7 +4905,7 @@ export const register: Register = on => {
         </Box>
       ) : (
         // A PR block is denser than a list, with its buttons last, so its rules take a full line on each side.
-        sections(prGroups.map(prBlock), 2)
+        sections([...prGroups.map(prBlock), ...olderPrs()], 2)
       )
 
     const move = (step: number) => {

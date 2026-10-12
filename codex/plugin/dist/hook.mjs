@@ -301,9 +301,8 @@ var TABS = [
 var ROW_TABS = TABS.filter((t) => t.id !== "prs");
 
 // ../hooks/pr-tab.ts
-var MAX_PRS = 6;
 function linkedPrs(prs, refs) {
-  return [...prs.filter((r) => !refs.includes(r)), ...refs].slice(-MAX_PRS);
+  return [...prs.filter((r) => !refs.includes(r)), ...refs];
 }
 
 // src/settle.ts

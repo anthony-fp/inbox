@@ -6,7 +6,7 @@ import { carryText, EMPTY, guidanceText, promptNotes, screenText, START_TITLE, t
 import type { Exchange, Press } from '../../hooks/ledger'
 import { inboxView, perTurnStatus } from '../../hooks/view'
 import type { InboxView } from '../../hooks/view'
-import { drawnPrs, linkedPrs, threadSentIn } from '../../hooks/pr-tab'
+import { drawnPrs, linkedPrs, olderPrsText, threadSentIn } from '../../hooks/pr-tab'
 import { prNeedsYou, prRefs } from '../../hooks/prs'
 import type { LastAction, PrView } from '../../types'
 import { PRESS_TIMEOUT_MS, SETTLE_WINDOW_MS } from './settle'
@@ -186,6 +186,8 @@ export type PrTab = {
   branchRef: string | null
   /** How many open PRs wait on the person. */
   count: number
+  /** Names the linked PRs too old for the tab to show, or null. */
+  olderText: string | null
 }
 
 /** What the tab draws: the shared inbox view, and what only the tab reads. */
@@ -280,5 +282,6 @@ function prTabOf(s: SessionState, lastActions: Record<string, LastAction>, now: 
     drawn,
     branchRef: s.prViews.branchRef,
     count: drawn.filter(d => !d.isSettled && prNeedsYou(d.pr, isSent)).length,
+    olderText: olderPrsText(s.ledger.prs),
   }
 }

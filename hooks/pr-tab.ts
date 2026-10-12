@@ -20,15 +20,29 @@ import {
 import type { IsThreadSent, PrStatus } from './prs'
 import { SETTLED_MS } from './view'
 
-/** How many linked PRs a conversation keeps, newest last. */
-export const MAX_PRS = 6
+/** How many of a conversation's linked PRs the tab fetches and shows: the newest ones. */
+export const MAX_PRS = 12
 
 /** Runs gh with these arguments in the session's folder. */
 export type GhRun = (args: string[]) => Promise<{ exitCode: number; stdout: string; stderr: string }>
 
-/** The linked PRs after a reply or command links `refs`: each moves to the end, and the oldest past MAX_PRS leave. */
+/** The linked PRs after a reply or command links `refs`: each moves to the end. */
 export function linkedPrs(prs: string[], refs: string[]): string[] {
-  return [...prs.filter(r => !refs.includes(r)), ...refs].slice(-MAX_PRS)
+  return [...prs.filter(r => !refs.includes(r)), ...refs]
+}
+
+/** The linked PRs the tab tracks, the newest MAX_PRS, and the older ones it leaves out, each newest last. */
+export function splitLinked(linked: string[]): { tracked: string[]; older: string[] } {
+  return { tracked: linked.slice(-MAX_PRS), older: linked.slice(0, Math.max(0, linked.length - MAX_PRS)) }
+}
+
+/** The line under the PR blocks that names the linked PRs the tab leaves out, newest first, or null for none. */
+export function olderPrsText(linked: string[]): string | null {
+  const { older } = splitLinked(linked)
+  if (older.length === 0) return null
+  const numbers = older.map(ref => `#${parseRef(ref).number}`).reverse()
+
+  return `${older.length} older ${older.length === 1 ? 'PR' : 'PRs'} not shown: ${numbers.join(', ')}`
 }
 
 /**
@@ -42,14 +56,15 @@ export async function fetchTracked(
   linked: string[],
   findsBranchPr: boolean,
 ): Promise<{ views: Record<string, PrView>; branchRef: string | null }> {
+  const { tracked } = splitLinked(linked)
   const branchTarget = findsBranchPr ? null : state.branchRef
   // The branch's PR, when it is also linked, is fetched once, with the linked ones.
-  const isBranchLinked = branchTarget !== null && linked.includes(branchTarget)
+  const isBranchLinked = branchTarget !== null && tracked.includes(branchTarget)
   const [branch, ...rest] = await Promise.all([
     findsBranchPr || (branchTarget && !isBranchLinked)
       ? fetchPr(gh, now, branchTarget, state.views, state.branchRef)
       : null,
-    ...linked.map(ref => fetchPr(gh, now, ref, state.views, null)),
+    ...tracked.map(ref => fetchPr(gh, now, ref, state.views, null)),
   ])
   const views: Record<string, PrView> = {}
   for (const v of [...rest, branch]) if (v) views[v.ref] = v
@@ -152,9 +167,9 @@ export function threadSentIn(lastActions: Record<string, LastAction>): IsThreadS
   }
 }
 
-/** A PR the session still tracks: one it linked, or the current branch's. */
+/** A PR the session still tracks: one of the newest it linked, or the current branch's. */
 export function isTracked(prState: PrViews, linked: string[], ref: string): boolean {
-  return linked.includes(ref) || prState.branchRef === ref
+  return splitLinked(linked).tracked.includes(ref) || prState.branchRef === ref
 }
 
 /** A PR the person dismissed less than SETTLED_MS ago, whose block stays in place, settled, with Undo. */
@@ -259,7 +274,7 @@ export function applyPrPress(
   if (p.action === 'pr-undo') {
     // Like an item's Undo, it does not check the settle window, so a press just after it ends still lands.
     if (!pr || isTracked(prState, ledger.prs, p.ref) || lastActions[markId]?.action !== 'pr-dismiss') return stale
-    return applied({ ledger: { ...ledger, prs: [...ledger.prs, p.ref].slice(-MAX_PRS) }, drop: [markId] })
+    return applied({ ledger: { ...ledger, prs: [...ledger.prs, p.ref] }, drop: [markId] })
   }
   if (!pr || !isTracked(prState, ledger.prs, p.ref)) return stale
   const record = (kind: 'talk' | 'handoff' | 'mark', action: PrActionId, text: string) =>
