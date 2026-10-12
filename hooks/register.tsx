@@ -153,6 +153,7 @@ import {
   groupEmptyText,
   closedTotal,
   earlierLabel,
+  entryId,
   foldLabel,
   feedbackOf,
   feedbackText,
@@ -3276,8 +3277,16 @@ export const register: Register = on => {
     // A row with no marker, such as a group's empty line, starts its text right after the tree.
     // A row at depth 1 hangs from a tree under the marker column, as a group's closed items do.
     // The columns a row draws at: one set on desktop, the tree's or the flat ones in the terminal.
-    const columnsFor = (tree?: TreePos | null) =>
-      look === 'desktop' ? ROW_COLUMNS.desktop : tree ? ROW_COLUMNS.tree : ROW_COLUMNS.flat
+    const columnsFor = (tree?: TreePos | null, extra = 0) => {
+      const base = look === 'desktop' ? ROW_COLUMNS.desktop : tree ? ROW_COLUMNS.tree : ROW_COLUMNS.flat
+      return { ...base, textAt: base.textAt + extra }
+    }
+    // A number from 10 up, as "10)", is a column wider than the mark column, so every question then starts its text
+    // a column later and the list stays in line.
+    const wideQuestions = view.needsYou.questions.some(r => r.handle.length > 2)
+      ? new Set(view.needsYou.questions.map(r => r.id))
+      : new Set<string>()
+    const markExtra = (id: string) => (wideQuestions.has(id) ? 1 : 0)
     // A tree row's mark column, which a nested row's lead also steps by.
     const markColumns = look === 'desktop' ? ROW_COLUMNS.desktop : ROW_COLUMNS.tree
     const markWidth = markColumns.textAt - markColumns.handleAt
@@ -3288,11 +3297,12 @@ export const register: Register = on => {
       key?: string,
       depth = 0,
       lead = markColumns.handleAt + markWidth * depth,
+      extra = 0,
     ) => (
       <Box key={key} flexDirection="row" alignItems="flex-start" overflow="hidden">
         <Box width={lead} flexShrink={0} />
         {marker ? (
-          <Box width={markWidth} flexShrink={0}>
+          <Box width={markWidth + extra} flexShrink={0}>
             {marker}
           </Box>
         ) : null}
@@ -3313,7 +3323,14 @@ export const register: Register = on => {
     // row and wraps into a second line, so there the rows sit flush and each pads itself.
     // `isBarred(n)` says element n draws a just-closed row's draining bar, which stands in for the rule after it:
     // a rule under the bar would draw two dashed lines in a row.
-    const divided = (rowEls: JSX.Element[], group: string, isTree: boolean, isBarred = (_n: number) => false) =>
+    // `extra` moves the rules with a list whose text starts later, as numbers from 10 up make the questions' do.
+    const divided = (
+      rowEls: JSX.Element[],
+      group: string,
+      isTree: boolean,
+      isBarred = (_n: number) => false,
+      extra = 0,
+    ) =>
       rowEls.flatMap((el, n) =>
         n === 0 || isInline || look === 'desktop' || isBarred(n - 1)
           ? [el]
@@ -3321,10 +3338,10 @@ export const register: Register = on => {
               isTree ? (
                 <Box key={`divider-${group}-${n}`} flexDirection="row">
                   <Box width={1} flexShrink={0} />
-                  <Box width={6} flexShrink={0}>
+                  <Box width={6 + extra} flexShrink={0}>
                     <Text color={pal.line}>│</Text>
                   </Box>
-                  {rule(9)}
+                  {rule(9 + extra)}
                 </Box>
               ) : (
                 <Box key={`divider-${group}-${n}`} paddingLeft={5}>
@@ -3476,7 +3493,7 @@ export const register: Register = on => {
       const text = row.line?.text ?? row.title
 
       return {
-        markCells: DESKTOP_MARK_CELLS,
+        markCells: DESKTOP_MARK_CELLS + markExtra(row.id),
         sideCells: DESKTOP_SIDE_CELLS,
         before: row.line?.before ?? '',
         title: text.trim(),
@@ -3518,6 +3535,7 @@ export const register: Register = on => {
       isCentered = false,
       indent = 0,
       isMarkHung = true,
+      markCells = DESKTOP_MARK_CELLS,
       gapY = 0,
       children,
     }: {
@@ -3533,6 +3551,7 @@ export const register: Register = on => {
       indent?: number
       /** Hangs the mark a column left, into the frame's inset. Unhung, the mark starts at `indent` and a column parts it from the text. */
       isMarkHung?: boolean
+      markCells?: number
       /** Space above and below the frame, in the hooks tree's half lines. */
       gapY?: number
       children: JSX.Element | (JSX.Element | null)[]
@@ -3551,7 +3570,7 @@ export const register: Register = on => {
             the column is one line tall, so it centers on the text's line: with no height it would center at the
             row's middle and the mark would hang below the text. */}
         <Box
-          width={indent + DESKTOP_MARK_CELLS + (isMarkHung ? 0 : 1)}
+          width={indent + markCells + (isMarkHung ? 0 : 1)}
           {...(isCentered ? { height: 1 } : {})}
           flexShrink={0}
           paddingLeft={indent}
@@ -3587,7 +3606,7 @@ export const register: Register = on => {
         line
       )
     const listRow = (row: Row, tree?: TreePos) => {
-      const columns = columnsFor(tree)
+      const columns = columnsFor(tree, markExtra(row.id))
       const index = indexOf.get(row.id) ?? -1
       const isSelected = index === at
       // On desktop a Client takes a click on every cell of the row, where a Button takes one only on its label.
@@ -3666,6 +3685,7 @@ export const register: Register = on => {
       if (look === 'desktop' && isSelected)
         return desktopFrame({
           key: `row-${row.id}`,
+          markCells: DESKTOP_MARK_CELLS + markExtra(row.id),
           mark:
             toned(row) ??
             (row.handleTone ? <Text color={pal.mark[row.handleTone]}>{row.handle}</Text> : <Text>{row.handle}</Text>),
@@ -4408,9 +4428,10 @@ export const register: Register = on => {
       const undo = r.actions.find(a => a.press.action === 'undo')?.press ?? null
       if (look === 'desktop') {
         const after = `${DOT}${state.isQueued ? `Queued: ${state.label}` : state.label}`
-        const reserved = DESKTOP_MARK_CELLS + 4 + (undo ? UNDO_CELLS + 1 : DESKTOP_SIDE_CELLS)
+        const reserved = DESKTOP_MARK_CELLS + markExtra(r.id) + 4 + (undo ? UNDO_CELLS + 1 : DESKTOP_SIDE_CELLS)
         return desktopFrame({
           key: `settled-${r.id}`,
+          markCells: DESKTOP_MARK_CELLS + markExtra(r.id),
           // The ✓ waits for the answer to reach Claude.
           mark: state.isQueued ? null : <Text color={pal.muted}>✓</Text>,
           side: undo ? undoButton(undo, state.at) : null,
@@ -4425,7 +4446,7 @@ export const register: Register = on => {
           ],
         })
       }
-      const columns = columnsFor(pos)
+      const columns = columnsFor(pos, markExtra(r.id))
       const content = settledContent(
         r.title,
         state.label,
@@ -4440,7 +4461,7 @@ export const register: Register = on => {
       // In a group's tree, or flat as Findings lists its rows. On desktop it pads itself as a closed row does.
       return pos ? (
         <Box key={`settled-${r.id}`} flexDirection="column" paddingY={space.settledPad}>
-          {treeRow(pos, mark, content)}
+          {treeRow(pos, mark, content, undefined, 0, undefined, markExtra(r.id))}
         </Box>
       ) : (
         <Box
@@ -4475,6 +4496,7 @@ export const register: Register = on => {
           g.kind,
           true,
           n => isBarred(entries[n]),
+          Math.max(0, ...entries.map(x => markExtra(entryId(x)))),
         )
         const tail = closedFold(
           g.kind,
