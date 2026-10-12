@@ -6,7 +6,7 @@ The Codex Inbox tab gets the PRs tab the Claude panes have. It lists the PRs the
 
 ## What is shared
 
-The PR rules move out of `hooks/register.tsx` into `hooks/prs.ts`, which both hosts already import. One copy of each rule means a fix in one host reaches the other.
+The PR rules move out of `hooks/register.tsx` into a new shared module, `hooks/pr-tab.ts`, which both hosts import. One copy of each rule means a fix in one host reaches the other.
 
 - **Fetching:** `fetchPr` and the fetch of every tracked PR take a `gh` runner and a clock instead of the Claude engine. Each host passes its own runner.
 - **Tracking:** `isTracked`, `isDismissing`, `drawnPrs` and `threadSentIn` decide which PRs show and which threads were handed off.
