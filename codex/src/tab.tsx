@@ -62,7 +62,7 @@ import type { Finding, Item, PrCheck, PrThread, PrView, RowNote } from '../../ty
 import { followTo } from '../../hooks/arrivals'
 import { parseInline } from '../../hooks/inline'
 import { isShownEmpty, newRows, TAB_IDS, TAB_OF } from './arrivals'
-import type { Group, SeenRows, Tab } from './arrivals'
+import type { FoldGroup, Group, SeenRows, Tab } from './arrivals'
 import type { TabView as View } from './core'
 import type { PressReply } from './server'
 import { ENTER_MS, EXIT_MS, isMoving, MOVE_MS, ROW_STATE_MS, stepRow } from './rows'
@@ -190,7 +190,7 @@ let focusTyping = false
 const drafts = new Map<string, string>()
 // Questions whose every option shows. Until then, one with more than 5 options shows 4.
 const optionsShown = new Set<string>()
-const unfolded = new Set<Group>()
+const unfolded = new Set<FoldGroup>()
 // What a row shows while its press runs: "Sending…", or a Local press's pending note.
 const sending = new Map<string, string>()
 const errors = new Map<string, string>()
@@ -209,7 +209,7 @@ const entering = new Set<string>()
 // Settled rows whose Undo press is out. They stay drawn, and their Undo fill stops, until it answers.
 const undoing = new Set<string>()
 // Closed folds still drawn while their list collapses.
-const closingFolds = new Set<Group>()
+const closingFolds = new Set<FoldGroup>()
 /**
  * A row the shown tab draws: its state in the machine in rows.ts, and the row as it last drew open, whose panel it
  * keeps while it closes, settles or leaves.
@@ -238,7 +238,8 @@ type Kept = {
   typing: string | null
   drafts: [string, string][]
   optionsShown: string[]
-  unfolded: Group[]
+  /** An earlier page kept 'finding' for the one fold Findings had. */
+  unfolded: (FoldGroup | 'finding')[]
 }
 const KEPT_KEY = 'inbox-tab-kept'
 
@@ -282,7 +283,8 @@ function restoreState() {
   focusTyping = typing !== null
   for (const [id, text] of kept.drafts) drafts.set(id, text)
   for (const id of kept.optionsShown) optionsShown.add(id)
-  for (const g of kept.unfolded) unfolded.add(g)
+  for (const g of kept.unfolded)
+    for (const fold of g === 'finding' ? (['issue', 'opportunity'] as const) : [g]) unfolded.add(fold)
 }
 
 // ── The host ────────────────────────────────────────────────────────────────
@@ -1335,7 +1337,7 @@ function ClosedFold({
   total,
   now,
 }: {
-  group: Group
+  group: FoldGroup
   closed: ClosedLine[]
   /** Every close the fold keeps, which its label counts. `closed` lists the newest few. */
   total: number
@@ -1426,15 +1428,18 @@ function NeedsYou({ v, lists, now }: { v: View; lists: Lists; now: number }) {
 
 function Findings({ v, lists, now }: { v: View; lists: Lists; now: number }) {
   // A finding stays listed until Codex closes it or the person dismisses it. Then it settles and moves to Closed.
-  const closed = closedShown(v.findings.closed, settledIn(lists.findings)).map(f => ({
-    id: f.id,
-    ask: f.title,
-    outcome: f.outcome,
-    state: closedState(f),
-    at: f.closedAt,
-  }))
+  const settled = settledIn(lists.findings)
+  const closedOf = (kind: Finding['kind']) => v.findings.closed.filter(f => f.kind === kind)
+  const shown = (kind: Finding['kind']) =>
+    closedShown(closedOf(kind), settled).map(f => ({
+      id: f.id,
+      ask: f.title,
+      outcome: f.outcome,
+      state: closedState(f),
+      at: f.closedAt,
+    }))
   const isNothing = lists.findings.length === 0
-  if (isNothing && closed.length === 0)
+  if (isNothing && closedTotal(v.findings.closed, settled) === 0)
     return (
       <div class="empty">
         <div class="title">{emptyText('findings', 'Codex').title}</div>
@@ -1442,7 +1447,7 @@ function Findings({ v, lists, now }: { v: View; lists: Lists; now: number }) {
       </div>
     )
 
-  // Closed findings are one fold under both groups.
+  // Each kind keeps its own Closed fold, as each Needs you group does.
   return (
     <main>
       {lists.findingGroups.map(g => {
@@ -1455,19 +1460,15 @@ function Findings({ v, lists, now }: { v: View; lists: Lists; now: number }) {
             <GroupTitle title={g.title} count={rows.filter(r => !r.fold).length} />
             {g.entries.length === 0 ? <div class="group-empty">{groupEmptyText(g.title)}</div> : null}
             <Entries entries={g.entries} group="finding" all={lists.byTab.findings} now={now} />
+            <ClosedFold
+              group={g.kind}
+              closed={shown(g.kind)}
+              total={closedTotal(closedOf(g.kind), settled)}
+              now={now}
+            />
           </section>
         )
       })}
-      {closed.length > 0 ? (
-        <section>
-          <ClosedFold
-            group="finding"
-            closed={closed}
-            total={closedTotal(v.findings.closed, settledIn(lists.findings))}
-            now={now}
-          />
-        </section>
-      ) : null}
     </main>
   )
 }
@@ -2029,7 +2030,7 @@ function collapse(el: HTMLElement, from: Frame) {
  * Opens or closes a list's Closed fold. Closing takes the group out of `unfolded` at once, so the arrow turns
  * and a second click reopens it, and keeps the list drawn in `closingFolds` while it collapses.
  */
-function toggleFold(group: Group) {
+function toggleFold(group: FoldGroup) {
   const el = document.querySelector<HTMLElement>(`[data-motion="closed-${group}"]`)
   if (!unfolded.has(group)) {
     unfolded.add(group)

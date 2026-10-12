@@ -28,6 +28,7 @@ import type {
   Closed,
   DemoCopy,
   Dialog,
+  FoldKind,
   Item,
   Ledger,
   Finding,
@@ -222,8 +223,8 @@ const DRAFTS = atom({ plugin: 'inbox', key: 'drafts' } as const, {} as Record<st
 const NOTES = atom({ plugin: 'inbox', key: 'notes' } as const, {} as Record<string, RowNote>)
 const ARRIVAL = atom({ plugin: 'inbox', key: 'arrival' } as const, null as Arrival | null)
 const LAST_ACTIONS = atom({ plugin: 'inbox', key: 'lastActions' } as const, {} as Record<string, LastAction>)
-const UNFOLDED = atom({ plugin: 'inbox', key: 'unfolded' } as const, [] as (Item['kind'] | 'finding')[])
-const FOLD_HOVER = atom({ plugin: 'inbox', key: 'foldHover' } as const, null as Item['kind'] | 'finding' | null)
+const UNFOLDED = atom({ plugin: 'inbox', key: 'unfolded' } as const, [] as FoldKind[])
+const FOLD_HOVER = atom({ plugin: 'inbox', key: 'foldHover' } as const, null as FoldKind | null)
 const OPTIONS_SHOWN = atom({ plugin: 'inbox', key: 'optionsShown' } as const, [] as string[])
 const IS_KEY_LIST_SHOWN = atom({ plugin: 'inbox', key: 'isKeyListShown' } as const, false)
 const UNREADABLE = atom({ plugin: 'inbox', key: 'unreadable' } as const, null as string | null)
@@ -608,7 +609,7 @@ const NEEDS_YOU_GROUPS: { kind: Item['kind']; title: string; list: 'questions' |
   { kind: 'task', title: 'Tasks', list: 'tasks' },
 ]
 // The lists with a Closed fold.
-const FOLD_KINDS: (Item['kind'] | 'finding')[] = [...NEEDS_YOU_GROUPS.map(g => g.kind), 'finding']
+const FOLD_KINDS: FoldKind[] = [...NEEDS_YOU_GROUPS.map(g => g.kind), 'issue', 'opportunity']
 const MODEL = 'sonnet'
 const AWAY_MS = 15 * 60_000
 const KEPT_SESSIONS = 40
@@ -1215,8 +1216,12 @@ async function upgradeState($: EngineInterface): Promise<Ledger> {
     }),
     // An earlier build saved only the row the pane jumped to; its bar ended long ago.
     update($, ARRIVAL, a => (a && Array.isArray(a.ids) ? a : null)),
-    // Old builds saved the group kinds as `decide` and `do`; Findings' fold keeps its own name.
-    update($, UNFOLDED, u => u.map(k => (k === 'finding' ? k : readKind(k)))),
+    // Old builds saved the group kinds as `decide` and `do`, and Findings' one fold as `finding`, now one per kind.
+    update($, UNFOLDED, u =>
+      u.flatMap((k: string): FoldKind[] =>
+        k === 'finding' ? ['issue', 'opportunity'] : k === 'issue' || k === 'opportunity' ? [k] : [readKind(k)],
+      ),
+    ),
     // A demo an earlier build seeded may lack a field this one draws, so it ends; /inbox demo seeds a new one.
     update($, DEMO, d => (d === null || isDemoCopy(d) ? d : null)),
     // Last actions an earlier build saved by button key, without a kind. Those for Open, Open log,
@@ -1552,7 +1557,8 @@ async function followNewRows($: EngineInterface, isOpening = false) {
       !stop &&
       !isUnread &&
       !unfolded.some(kind => ledger.closed.some(d => d.kind === kind)),
-    findings: view.findings.rows.length === 0 && !(unfolded.includes('finding') && ledger.closedFindings.length > 0),
+    findings:
+      view.findings.rows.length === 0 && !unfolded.some(kind => ledger.closedFindings.some(f => f.kind === kind)),
     prs: prs.length === 0 && !prState.isFetching,
   }[tab]
   const to = followTo(
@@ -4245,7 +4251,7 @@ export const register: Register = on => {
     // The row that folds or unfolds a list's closed items, with how many there are.
     // It sits apart from the list's tree, and the closed items hang from its arrow.
     // On desktop a Client takes a click on every cell of the line, where a Button takes one only on its label.
-    const foldRow = (kind: Item['kind'] | 'finding', count: number, isUnfolded: boolean) =>
+    const foldRow = (kind: FoldKind, count: number, isUnfolded: boolean) =>
       hasClient ? (
         // The chevron Svg sits under the Client, which takes the clicks, as Undo's does.
         <Box key={`fold-row-${kind}`} flexDirection="row" overflow="hidden">
@@ -4299,7 +4305,7 @@ export const register: Register = on => {
       )
     // The fold row, which counts every close, and, unfolded, the closed items it lists, then how many it leaves
     // out; nothing when none closed.
-    const closedFold = (kind: Item['kind'] | 'finding', closed: ClosedLine[], total: number, isUnfolded: boolean) => {
+    const closedFold = (kind: FoldKind, closed: ClosedLine[], total: number, isUnfolded: boolean) => {
       const earlier = earlierLabel(total, closed.length)
       return closed.length === 0
         ? []
@@ -4591,17 +4597,21 @@ export const register: Register = on => {
 
     // A finding stays listed until Claude closes it or the person dismisses it. Then it settles and moves to Closed.
     const findingsView = () => {
-      const closed = closedShown(view.findings.closed, settledIn(findingEntries)).map(f => ({
-        id: f.id,
-        ask: f.title,
-        at: f.closedAt,
-        how: f.how,
-        outcome: f.outcome,
-      }))
-      if (findingEntries.length === 0 && closed.length === 0) return emptyState(emptyText('findings', 'Claude'))
-      // A row handed to Claude stays listed but leaves the count.
-      const groups = lists.findingGroups.map(g =>
-        section([
+      const settled = settledIn(findingEntries)
+      if (findingEntries.length === 0 && closedTotal(view.findings.closed, settled) === 0)
+        return emptyState(emptyText('findings', 'Claude'))
+      // Each kind keeps its own Closed fold, as each Needs you group does. A row handed to Claude stays listed but
+      // leaves the count.
+      const groups = lists.findingGroups.map(g => {
+        const closedOf = view.findings.closed.filter(f => f.kind === g.kind)
+        const closed = closedShown(closedOf, settled).map(f => ({
+          id: f.id,
+          ask: f.title,
+          at: f.closedAt,
+          how: f.how,
+          outcome: f.outcome,
+        }))
+        return section([
           groupTitle(g.title, rowsIn(g.entries).filter(r => !r.fold).length),
           ...titleGap(),
           ...(g.entries.length === 0 ? [groupEmpty(g.title)] : []),
@@ -4613,24 +4623,11 @@ export const register: Register = on => {
             true,
             n => isBarred(g.entries[n]),
           ),
-        ]),
-      )
-      // Closed findings are one fold under both groups.
-      const tail =
-        closed.length > 0
-          ? [
-              section([
-                ...closedFold(
-                  'finding',
-                  closed,
-                  closedTotal(view.findings.closed, settledIn(findingEntries)),
-                  unfolded.includes('finding'),
-                ),
-              ]),
-            ]
-          : []
+          ...closedFold(g.kind, closed, closedTotal(closedOf, settled), unfolded.includes(g.kind)),
+        ])
+      })
 
-      return sections([...groups, ...tail])
+      return sections(groups)
     }
 
     // A PR the person just dismissed keeps its title, settled, with [Undo], until it leaves.

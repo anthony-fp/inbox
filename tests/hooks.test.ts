@@ -674,14 +674,14 @@ test('last actions an earlier build saved convert once by the table, and a task 
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   await clock.settle()
   expect(saved).toEqual(converted)
-  expect(savedUnfolded).toEqual(['finding', 'task'])
+  expect(savedUnfolded).toEqual(['issue', 'opportunity', 'task'])
   expect(savedOpen).toEqual(openConverted)
   saved = null
   savedUnfolded = null
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   await clock.settle()
   expect(saved).toEqual(converted)
-  expect(savedUnfolded).toEqual(['finding', 'task'])
+  expect(savedUnfolded).toEqual(['issue', 'opportunity', 'task'])
   expect(savedOpen).toEqual(openConverted)
 
   // The task handed off by the old Run still folds, and waits on no one.
@@ -692,7 +692,7 @@ test('last actions an earlier build saved convert once by the table, and a task 
   // Findings' Closed fold stays open across the reloads. The closed finding shows there once it has settled.
   await clock.advance(SETTLED_MS)
   await pane.press({ key: 'tab-findings' })
-  expect((await pane.find({ key: 'fold-finding' }))?.props.label).toBe('▾ 1 closed')
+  expect((await pane.find({ key: 'fold-issue' }))?.props.label).toBe('▾ 1 closed')
 })
 
 test('the band is [Open inbox] and the counts, the same while working and after 15 idle minutes', async ($, on) => {
@@ -1185,13 +1185,13 @@ test('Claude closes an item or finding that no longer applies, by the id it read
   expect(await pane.find({ text: /^Deno$/ })).toBeDefined()
   expect(await pane.find({ text: /^Closed by Claude: no longer applies$/ })).toBeDefined()
 
-  // The closed finding leaves its list for the Findings tab's own Closed fold.
+  // The closed finding leaves its list for its group's own Closed fold.
   await pane.press({ key: 'tab-findings' })
   expect(await pane.find({ key: 'row-f3' })).toBeUndefined()
   expect(await pane.find({ text: 'No open issues' })).toBeDefined()
   expect(await pane.find({ text: 'No open opportunities' })).toBeDefined()
-  expect((await pane.find({ key: 'fold-finding' }))?.props.label).toBe('▸ 1 closed')
-  await pane.press({ key: 'fold-finding' })
+  expect((await pane.find({ key: 'fold-issue' }))?.props.label).toBe('▸ 1 closed')
+  await pane.press({ key: 'fold-issue' })
   expect(await pane.find({ text: /^README is stale$/ })).toBeDefined()
   expect(await pane.find({ text: /^Closed by Claude: fixed$/ })).toBeDefined()
 })
@@ -2118,15 +2118,15 @@ test('the desktop pane draws each action as one button and the tabs as one click
   await $.tool.call({ tool: 'mcp__inbox__record_finding', kind: 'issue', title: 'README is stale', detail: 'Old.' })
   await $.tool.call({ tool: 'mcp__inbox__close', id: 'f3', reason: 'fixed' } as never)
   await clock.advance(9000)
-  const fold = async () => (await pane.find({ key: 'fold-finding' }))?.props.props as FoldProps
+  const fold = async () => (await pane.find({ key: 'fold-issue' }))?.props.props as FoldProps
   const closedItem = { text: /^Closed by Claude: fixed$/ } as const
-  expect((await pane.find({ key: 'fold-finding' }))?.type).toBe('Client')
+  expect((await pane.find({ key: 'fold-issue' }))?.type).toBe('Client')
   expect(await pane.find(closedItem)).toBeUndefined()
-  await pane.pointer({ type: 'down', x: 30, y: 0, button: 'left', in: 'fold-finding' })
+  await pane.pointer({ type: 'down', x: 30, y: 0, button: 'left', in: 'fold-issue' })
   await clock.settle()
   expect((await fold()).isUnfolded).toBe(true)
   expect(await pane.find(closedItem)).toBeDefined()
-  await pane.post({ isUnfolded: true }, { in: 'fold-finding' })
+  await pane.post({ isUnfolded: true }, { in: 'fold-issue' })
   await clock.settle()
   expect((await fold()).isUnfolded).toBe(true)
   expect(await pane.find(closedItem)).toBeDefined()

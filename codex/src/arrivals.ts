@@ -12,6 +12,8 @@ export type Tab = 'needsYou' | 'findings'
 
 /** A Closed fold, which the person unfolds by its group. */
 export type Group = 'question' | 'task' | 'finding'
+/** A list with its own Closed fold: each Needs you group and each kind of finding. */
+export type FoldGroup = 'question' | 'task' | 'issue' | 'opportunity'
 
 /** The tab that lists each group. */
 export const TAB_OF: Record<Group, Tab> = { question: 'needsYou', task: 'needsYou', finding: 'findings' }
@@ -43,11 +45,23 @@ export function isShownEmpty(
   v: InboxView & { heard: HeardState },
   t: Tab,
   drawn: ReadonlySet<string>,
-  unfolded: ReadonlySet<Group>,
+  unfolded: ReadonlySet<FoldGroup>,
 ): boolean {
   const isListed = (rows: RowView[]) => rows.some(r => r.state.is !== 'settled' || drawn.has(r.id))
-  const isClosedShown = (g: Group, closed: { id: string }[]) => unfolded.has(g) && closedShown(closed, drawn).length > 0
-  if (t === 'findings') return !isListed(v.findings.rows) && !isClosedShown('finding', v.findings.closed)
+  const isClosedShown = (g: FoldGroup, closed: { id: string }[]) =>
+    unfolded.has(g) && closedShown(closed, drawn).length > 0
+  if (t === 'findings')
+    return (
+      !isListed(v.findings.rows) &&
+      !isClosedShown(
+        'issue',
+        v.findings.closed.filter(f => f.kind === 'issue'),
+      ) &&
+      !isClosedShown(
+        'opportunity',
+        v.findings.closed.filter(f => f.kind === 'opportunity'),
+      )
+    )
 
   return (
     v.heard === 'heard' &&
