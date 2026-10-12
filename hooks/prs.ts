@@ -335,6 +335,19 @@ export function commentLine(body: string): string {
 /** How much of a thread's first comment its row's title shows. An open row shows the rest under it. */
 export const THREAD_TITLE_CHARS = 120
 
+/**
+ * A thread's first comment split for its row: `head`, its first line as plain text, which the title shows, and
+ * `rest`, what the open row shows under the title. `rest` is the whole comment when the title cannot show all of
+ * `head`, so no words go missing.
+ */
+export function commentParts(body: string): { head: string; rest: string } {
+  const text = readableComment(body)
+  const [first = '', ...more] = text.split('\n')
+  const head = commentLine(first).trim()
+
+  return { head, rest: head.length > THREAD_TITLE_CHARS ? text : more.join('\n').trim() }
+}
+
 /** Where a thread sits in the diff: "path:line", or the path alone. */
 export function threadWhere(t: PrThread, path = t.path): string {
   return `${path}${t.line ? `:${t.line}` : ''}`

@@ -68,6 +68,7 @@ import {
   VIEW_FIELDS,
   inPrOrder,
   commentLine,
+  commentParts,
   failingChecks,
   parseRef,
   prRefs,
@@ -3014,11 +3015,10 @@ export const register: Register = on => {
     const threadRow = (pr: PrView, t: PrThread): Row => {
       const id = prThreadId(pr, t)
       // Open, the row adds where the thread sits and the latest reply under the comment its title already shows.
+      const { head, rest } = commentParts(t.body)
       const comment = (
         <Box flexDirection="column">
-          {commentLine(t.body).length > THREAD_TITLE_CHARS ? (
-            <Markdown text={clipLabel(readableComment(t.body), 1200)} />
-          ) : null}
+          {rest ? <Markdown text={clipLabel(rest, 1200)} /> : null}
           <Text color={pal.muted} wrap="wrap">
             {threadWhere(t)}
             {DOT}@{t.author}
@@ -3044,7 +3044,7 @@ export const register: Register = on => {
           : {}),
         // The block's "Review threads" title says the kind. The first comment, which asks for the change, is the
         // title open or closed, and the line under it says where it sits and who asked, or the latest reply.
-        title: clipLabel(commentLine(t.body), THREAD_TITLE_CHARS),
+        title: clipLabel(head, THREAD_TITLE_CHARS),
         ...(t.at === null ? {} : { at: t.at }),
         line: {
           before: '',

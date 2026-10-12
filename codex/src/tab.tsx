@@ -50,6 +50,7 @@ import { PR_TONES, prCheckId, prMarkId, prRetryOf, prThreadId, threadSentIn } fr
 import type { PrPress } from '../../hooks/pr-tab'
 import {
   commentLine,
+  commentParts,
   failingChecks,
   readableComment,
   readiness,
@@ -678,6 +679,7 @@ function prThreadRow(v: View, pr: PrView, t: PrThread): Row {
     (action: 'thread-address' | 'thread-draft' | 'thread-discuss' | 'thread-open', pending?: string) => () =>
       void act(id, { action, ref: pr.ref, thread: t.id }, undefined, pending)
   const where = threadWhere(t)
+  const { head, rest } = commentParts(t.body)
 
   return {
     id,
@@ -688,7 +690,7 @@ function prThreadRow(v: View, pr: PrView, t: PrThread): Row {
       : {}),
     // The first comment, which asks for the change, is the title open or closed; the line under it says where it
     // sits and who asked, or the latest reply.
-    title: clipLabel(commentLine(t.body), THREAD_TITLE_CHARS),
+    title: clipLabel(head, THREAD_TITLE_CHARS),
     meta: [
       threadWhere(t, baseName(t.path)),
       isChanged ? 'Lines changed' : '',
@@ -699,9 +701,7 @@ function prThreadRow(v: View, pr: PrView, t: PrThread): Row {
     age: t.at === null ? undefined : shortAgo(v.at - t.at),
     body: (
       <div>
-        {commentLine(t.body).length > THREAD_TITLE_CHARS ? (
-          <p class="quote">{inlineHtml(clipLabel(readableComment(t.body), 1200))}</p>
-        ) : null}
+        {rest ? <p class="quote">{inlineHtml(clipLabel(rest, 1200))}</p> : null}
         <p class="muted">{`${where}${DOT}@${t.author}`}</p>
         {t.reply ? (
           <p class="quote">
