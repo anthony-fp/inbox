@@ -281,6 +281,7 @@ const ROW_COLUMNS = {
 // A desktop list line's mark column and its side column, for the age, in columns. See docs/plans/desktop-layout.md.
 const DESKTOP_MARK_CELLS = 2
 const DESKTOP_SIDE_CELLS = 5
+const SELECTED_GAP_PT = 3
 /** An age for the desktop side column: "12m", or "now". */
 function shortAgo(ms: number): string {
   const age = ago(ms)
@@ -3640,6 +3641,7 @@ export const register: Register = on => {
       padY = space.rowPad,
       isCentered = false,
       indent = 0,
+      gapY = 0,
       children,
     }: {
       key?: string
@@ -3652,12 +3654,15 @@ export const register: Register = on => {
       isCentered?: boolean
       /** Columns before the mark, for a line nested under another. */
       indent?: number
+      /** Space above and below the frame, in the hooks tree's half lines. */
+      gapY?: number
       children: JSX.Element | (JSX.Element | null)[]
     }) => (
       <Box
         key={key}
         flexDirection="row"
         alignItems={isCentered ? 'center' : 'flex-start'}
+        marginY={gapY}
         borderStyle="single"
         borderColor={outline ?? '#0000'}
         paddingY={padY}
@@ -3745,6 +3750,9 @@ export const register: Register = on => {
           side: <Text color={pal.age}>{sideAge(row)}</Text>,
           fill: pal.selection,
           outline: isNew(row.id) ? pal.mark[tab] : null,
+          // A rounded fill cannot square one edge, so the selected row keeps 3 pt from its neighbors, whose hover
+          // fill would otherwise meet its own.
+          gapY: (2 * SELECTED_GAP_PT) / DESKTOP_LINE_PT,
           children: [
             <Box key={`view-${row.id}`} position="absolute" top={0} bottom={0} left={0} width={1} />,
             row.head ? (
