@@ -92,6 +92,9 @@
       .tone-findings {
         color: var(--findings);
       }
+      .tone-prs {
+        color: var(--prs);
+      }
       .tone-done {
         color: var(--done);
       }
@@ -192,6 +195,59 @@
       .group-title .count {
         color: var(--muted);
         white-space: pre;
+      }
+
+      /* A PR's block: its number and title, its verdict, its actions, then its threads and checks. */
+      .pr-head,
+      .pr-status,
+      .pr-actions,
+      .pr-last,
+      .quiet-line {
+        padding: 0 14px 0 var(--text-x);
+        overflow-wrap: anywhere;
+      }
+      .pr-head {
+        font-weight: 600;
+      }
+      .pr-head .num {
+        font-weight: 400;
+      }
+      .pr-actions {
+        margin-top: 8px;
+      }
+      .pr-last {
+        margin-top: 6px;
+      }
+      .pr-groups {
+        margin-top: 12px;
+      }
+      .pr-groups .group-title + .list {
+        margin-bottom: 6px;
+      }
+      .quiet-line {
+        display: flex;
+        align-items: baseline;
+        gap: 0 5px;
+      }
+      .quiet-line > * {
+        flex: none;
+      }
+      .quiet-line .link {
+        flex: 0 1 auto;
+        min-width: 0;
+      }
+      .quiet-line .status {
+        white-space: nowrap;
+      }
+      .link {
+        padding: 0;
+        text-align: left;
+        text-decoration: underline;
+        text-decoration-color: color-mix(in oklab, var(--text) 30%, transparent);
+        text-underline-offset: 2px;
+      }
+      .link:hover {
+        text-decoration-color: currentColor;
       }
 
       /* Rows. */
@@ -305,6 +361,27 @@
       .row.closing .line .after {
         white-space: normal;
         font-weight: 400;
+      }
+      /* A PR thread or check: where it is or which workflow ran it leads the title, muted. */
+      .line .lead {
+        color: var(--muted);
+        font-weight: 400;
+      }
+      .line .meta {
+        display: block;
+        color: var(--muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .row.collapsed:not(:hover) .line .meta {
+        color: var(--age);
+      }
+      .row.selected .line .meta {
+        display: none;
+      }
+      .quote {
+        white-space: pre-line;
       }
       .row.collapsed:hover {
         background-color: var(--row-hover);

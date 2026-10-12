@@ -529,6 +529,7 @@ var NOTHING_HEARD = {
   stops: 0,
   promptMissedAt: null
 };
+var NO_PRS = { views: {}, branchRef: null, isFetching: false };
 function emptyState(sessionId) {
   return {
     version: 1,
@@ -543,6 +544,7 @@ function emptyState(sessionId) {
     pending: [],
     sent: [],
     lastActions: {},
+    prViews: NO_PRS,
     tabSeenAt: 0,
     heard: NOTHING_HEARD
   };
@@ -578,6 +580,7 @@ function upgraded(saved, sessionId) {
     // A message sent before the server kept its row changes no row when it arrives.
     sent: (saved.sent ?? []).map((x) => ({ ...x, row: x.row ?? null, queuedId: x.queuedId ?? null })),
     lastActions: upgradeLastActions(saved.lastActions ?? {}),
+    prViews: { ...NO_PRS, ...saved.prViews, isFetching: false },
     // A file saved before the hooks kept this record came from hooks that ran, so it reads as heard.
     // Its turns were not recorded, so `promptAt` is set too: a tool call then falls back to the time rule.
     heard: saved.heard ? { ...NOTHING_HEARD, ...saved.heard } : {

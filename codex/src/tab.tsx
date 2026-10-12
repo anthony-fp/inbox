@@ -28,8 +28,9 @@ import {
   drawnLists,
   emptyText,
   entryId,
-  ROW_TABS,
+  TABS,
   FINDING_GROUPS,
+  feedbackOf,
   feedbackText,
   foldLabel,
   hasAge,
@@ -44,7 +45,19 @@ import {
 } from '../../hooks/view'
 import { ROW_PAD_PT } from '../../hooks/layout'
 import type { DrawnEntry, DrawnLists, Feedback, PlannedKey, RowView } from '../../hooks/view'
-import type { Finding, Item, RowNote } from '../../types'
+import { isQuietPr, PR_TONES, prCheckId, prMarkId, prRetryOf, prThreadId, threadSentIn } from '../../hooks/pr-tab'
+import type { PrPress } from '../../hooks/pr-tab'
+import {
+  commentLine,
+  failingChecks,
+  readableComment,
+  readiness,
+  threadsOnYou,
+  threadWhere,
+  took,
+  waitingThreads,
+} from '../../hooks/prs'
+import type { Finding, Item, PrCheck, PrThread, PrView, RowNote } from '../../types'
 import { followTo } from '../../hooks/arrivals'
 import { parseInline } from '../../hooks/inline'
 import { isShownEmpty, newRows, TAB_IDS, TAB_OF } from './arrivals'
@@ -56,6 +69,9 @@ import type { RowState, RowTarget, RowTrack } from './rows'
 import { drawnSettled, POLL_MS, PRESS_TIMEOUT_MS, settledIds, settledSeen } from './settle'
 
 type Tone = 'needsYou' | 'issue' | 'findings' | 'done' | 'error'
+
+/** The tabs: Needs you and Findings list the ledger's rows, PRs lists what the server fetched from GitHub. */
+type ShownTab = Tab | 'prs'
 
 /**
  * How loudly an action draws: `primary` is a filled button, at most one per row; `normal` an outlined button; `quiet`
@@ -122,7 +138,11 @@ type Row = {
   handleTone?: Tone
   /** A finding's kind, which sets its handle's color and size. */
   kind?: Finding['kind']
+  /** Muted text before the title: a PR thread's file and line, or a check's workflow. */
+  lead?: string
   title: string
+  /** A second muted line under a closed row's title: who wrote a PR thread, or how long a check ran. */
+  meta?: string
   /** How long ago the row appeared, in the side column. */
   age?: string
   body?: JSX.Element | null
@@ -155,10 +175,14 @@ let isLoadingShown = false
 // Polls that failed in a row while a view shows, and when the shown view was read.
 let pollFailures = 0
 let readAt = 0
-let tab: Tab = 'needsYou'
+let tab: ShownTab = 'needsYou'
 // Each tab's open row, and when a click or key opened it; 0 when it was open by default when pressed.
 // Null until a row opens there: the tab then draws its top row open.
-const selection: Record<Tab, { id: string; openedAt: number } | null> = { needsYou: null, findings: null }
+const selection: Record<ShownTab, { id: string; openedAt: number } | null> = {
+  needsYou: null,
+  findings: null,
+  prs: null,
+}
 let typing: string | null = null
 let focusTyping = false
 // Typed text by row, kept until it is sent, so a redraw, a new selection or a closed field keeps it.
@@ -208,8 +232,8 @@ let isPressing = false
 type Kept = {
   version: 1
   isDemo: boolean
-  tab: Tab
-  selection: Record<Tab, string | null>
+  tab: ShownTab
+  selection: Record<ShownTab, string | null>
   typing: string | null
   drafts: [string, string][]
   optionsShown: string[]
@@ -223,7 +247,11 @@ function keepState() {
     version: 1,
     isDemo,
     tab,
-    selection: { needsYou: selection.needsYou?.id ?? null, findings: selection.findings?.id ?? null },
+    selection: {
+      needsYou: selection.needsYou?.id ?? null,
+      findings: selection.findings?.id ?? null,
+      prs: selection.prs?.id ?? null,
+    },
     typing,
     drafts: [...drafts],
     optionsShown: [...optionsShown],
@@ -244,7 +272,7 @@ function restoreState() {
   if (kept?.version !== 1) return
   isDemo = kept.isDemo
   tab = kept.tab
-  for (const t of TAB_IDS) {
+  for (const t of [...TAB_IDS, 'prs'] as const) {
     const id = kept.selection[t]
     // An openedAt of 0 reads as open by default, so the restored row's actions take a press at once.
     selection[t] = id ? { id, openedAt: 0 } : null
@@ -319,6 +347,9 @@ function applyView(next: View, seq: number) {
   // A row seen settled for the first time starts to leave once SETTLED_MS passes. Its exit schedules its own end.
   if ([...seen.keys()].some(id => !before.has(id))) drawIn(SETTLED_MS)
   view = next
+  // A dismissed PR's block draws settled until its time is up.
+  for (const { pr, isSettled } of next.prs.drawn)
+    if (isSettled) drawIn(Math.max(0, SETTLED_MS - (next.at - (next.lastActions[prMarkId(pr.ref)]?.at ?? next.at))))
   const rows = newRows(rowsSeen, next)
   rowsSeen = rows.seen
   const added = [...rows.added.needsYou, ...rows.added.findings]
@@ -333,6 +364,8 @@ function applyView(next: View, seq: number) {
 
 /** Moves to the other tab for its new rows while the tab on screen shows only its empty text, as the mod's pane does. */
 function follow(v: View, added: Record<Tab, string[]>) {
+  // PR rows come from a fetch, all at once, so they never move the person off the tab they are on.
+  if (tab === 'prs') return
   const drawn = shownSettled()
   const to = followTo(TAB_IDS, tab, isShownEmpty(v, tab, drawn, unfolded), added)
   if (!to) return
@@ -421,20 +454,28 @@ async function poll() {
 
 /** Whether the view lists an open row with this id, which can show a note. */
 function isListed(v: View, id: string): boolean {
-  return allRows(v).some(r => r.id === id && r.state.is !== 'settled')
+  return (
+    allRows(v).some(r => r.id === id && r.state.is !== 'settled') ||
+    prRows(v).some(r => r.id === id) ||
+    v.prs.drawn.some(d => prMarkId(d.pr.ref) === id)
+  )
 }
 
 /** Whether the view lists this row as reading "Not sent". */
 function isNotSent(v: View, id: string): boolean {
-  return allRows(v).some(r => r.id === id && r.feedback?.is === 'notSent')
+  return (
+    allRows(v).some(r => r.id === id && r.feedback?.is === 'notSent') ||
+    feedbackOf(id, v.lastActions[id], undefined, v.at)?.is === 'notSent'
+  )
 }
 
 /**
  * Sends a press, drawn for the view's session, to the server. `onSent` runs
  * only once the press went through, so a stale or failed press keeps a typed draft.
  */
-async function act(rowId: string, press: RowPress, onSent?: () => void, pending = 'Sending…') {
-  if (press.action !== 'undo') keepPressedOpen(rowId)
+async function act(rowId: string, press: RowPress | PrPress, onSent?: () => void, pending = 'Sending…') {
+  // Undo is pressed on a row that just closed, and a PR block's actions on no row.
+  if (press.action !== 'undo' && !rowId.startsWith('pr:')) keepPressedOpen(rowId)
   sending.set(rowId, pending)
   errors.delete(rowId)
   notes.delete(rowId)
@@ -607,6 +648,175 @@ function findingRow(v: View, r: RowView, f: Finding): Row {
   }
 }
 
+// ── PRs ─────────────────────────────────────────────────────────────────────
+
+/** A PR action's label, "Address again" once it was its row's last action and its message went. */
+function again(v: View, rowId: string, action: string, label: string): string {
+  const last = v.lastActions[rowId]
+
+  return last?.action === action && last.delivery?.state !== 'failed' ? `${label} again` : label
+}
+
+/** What a row reads while an open of `name` is out. */
+function opening(name: string): string {
+  const result = pendingResult([{ kind: 'open', target: '', name }], Date.now())
+
+  return feedbackText({ is: 'local', result }, 'codex')
+}
+
+function prThreadRow(v: View, pr: PrView, t: PrThread): Row {
+  const id = prThreadId(pr, t)
+  const isSent = threadSentIn(v.lastActions)(pr, t)
+  const isChanged = !isSent && t.isLinesChanged
+  const retry = prRetryOf(v.lastActions[id], pr.ref, t.id)
+  const press =
+    (action: 'thread-address' | 'thread-draft' | 'thread-discuss' | 'thread-open', pending?: string) => () =>
+      void act(id, { action, ref: pr.ref, thread: t.id }, undefined, pending)
+  const latest = t.reply ?? t
+  const where = threadWhere(t)
+  const lead = threadWhere(t, baseName(t.path))
+
+  return {
+    id,
+    handle: isSent ? '✓' : '◦',
+    handleTone: isSent ? 'done' : undefined,
+    ...(isSent || isChanged
+      ? { fold: t.isLinesChanged ? { note: `Lines changed since this comment${DOT}still open on GitHub` } : {} }
+      : {}),
+    lead,
+    title: commentLine(t.body),
+    meta: [
+      isChanged ? 'Lines changed' : '',
+      t.reply ? `@${t.reply.author}: ${commentLine(t.reply.body)}` : `@${t.author}`,
+    ]
+      .filter(Boolean)
+      .join(DOT),
+    age: t.at === null ? undefined : shortAgo(v.at - t.at),
+    body: (
+      <div>
+        {where === lead ? null : <p class="muted">{where}</p>}
+        {t.reply ? <p class="muted">{`@${t.author}: ${clipLabel(commentLine(t.body), 200)}`}</p> : null}
+        <p class="quote">
+          <b>@{latest.author}:</b> {inlineHtml(clipLabel(readableComment(latest.body), 1200))}
+        </p>
+      </div>
+    ),
+    keys: [
+      ...(retry
+        ? [
+            {
+              label: 'Try again',
+              emphasis: 'normal' as const,
+              icon: 'retry' as const,
+              run: () => void act(id, retry.press),
+            },
+          ]
+        : []),
+      {
+        hotkey: 'a',
+        label: again(v, id, 'thread-address', 'Address'),
+        emphasis: 'primary',
+        run: press('thread-address'),
+      },
+      {
+        hotkey: 'r',
+        label: again(v, id, 'thread-draft', 'Draft reply'),
+        emphasis: 'normal',
+        run: press('thread-draft'),
+      },
+      {
+        hotkey: 'o',
+        label: 'Open',
+        emphasis: 'normal',
+        icon: 'open',
+        run: press('thread-open', opening('the comment')),
+      },
+    ],
+    more: [
+      {
+        hotkey: 'e',
+        label: again(v, id, 'thread-discuss', 'Discuss'),
+        emphasis: 'quiet',
+        run: press('thread-discuss'),
+      },
+    ],
+    hidden: [],
+    feedback: feedbackOf(id, v.lastActions[id], undefined, v.at),
+  }
+}
+
+function prCheckRow(v: View, pr: PrView, c: PrCheck): Row {
+  const id = prCheckId(pr, c)
+  const ran =
+    c.startedAt !== undefined && c.finishedAt !== undefined
+      ? `Failed after ${took(c.finishedAt - c.startedAt)}`
+      : 'Failed'
+  const target = c.url ? 'the log' : `PR #${pr.number}`
+
+  return {
+    id,
+    handle: '✗',
+    handleTone: 'error',
+    ...(c.workflow ? { lead: `${c.workflow} /` } : {}),
+    title: c.name,
+    meta: ran,
+    age: c.finishedAt === undefined ? undefined : shortAgo(v.at - c.finishedAt),
+    body: <div class="muted">{ran}</div>,
+    keys: [
+      {
+        hotkey: 'o',
+        label: 'Open log',
+        emphasis: 'normal',
+        icon: 'open',
+        run: () => void act(id, { action: 'log', ref: pr.ref, check: c.name }, undefined, opening(target)),
+      },
+    ],
+    more: [],
+    hidden: [],
+    feedback: feedbackOf(id, v.lastActions[id], undefined, v.at),
+  }
+}
+
+/** When the tab drew a dismissed PR's block first, from its Dismiss's age in the view. */
+function prSettledStart(v: View, pr: PrView): number {
+  return readAt - (v.at - (v.lastActions[prMarkId(pr.ref)]?.at ?? v.at))
+}
+
+type PrBlockPlan = { pr: PrView; isSettled: boolean; threads: Row[]; checks: Row[] }
+
+/** The PRs as the tab draws them: each block in order, then the PRs that wait on nobody. */
+function prPlan(v: View): { blocks: PrBlockPlan[]; quiet: PrView[]; rows: Row[] } {
+  const isSent = threadSentIn(v.lastActions)
+  const blocks: PrBlockPlan[] = []
+  const quiet: PrView[] = []
+  for (const { pr, isSettled } of v.prs.drawn) {
+    if (isSettled) {
+      const id = prMarkId(pr.ref)
+      if (undoing.has(id) || Date.now() - prSettledStart(v, pr) < SETTLED_MS)
+        blocks.push({ pr, isSettled, threads: [], checks: [] })
+    } else if (isQuietPr(pr, isSent)) quiet.push(pr)
+    else
+      blocks.push({
+        pr,
+        isSettled,
+        threads: waitingThreads(pr).map(t => prThreadRow(v, pr, t)),
+        checks: failingChecks(pr).map(c => prCheckRow(v, pr, c)),
+      })
+  }
+
+  return { blocks, quiet, rows: blocks.flatMap(b => [...b.threads, ...b.checks]) }
+}
+
+/** The PR rows the keys and clicks move through: each block's threads, then its checks. */
+function prRows(v: View): Row[] {
+  return prPlan(v).rows
+}
+
+/** The rows of a tab, in the order the keys move through them. */
+function tabRows(v: View, t: ShownTab): Row[] {
+  return t === 'prs' ? prRows(v) : listsOf(v, shownSettled()).byTab[t]
+}
+
 type Lists = DrawnLists<Row>
 
 /** The view's lists as the tab draws them. A settled row shows while `drawn` has it, and is left out after. */
@@ -633,7 +843,7 @@ const LIST_OF = { question: 'questions', task: 'tasks', finding: 'findings' } as
 function stepLists(v: View): { lists: Lists; changed: Set<string> } {
   const now = Date.now()
   const lists = listsOf(v, shownSettled())
-  const rows = lists.byTab[tab]
+  const rows = tab === 'prs' ? [] : lists.byTab[tab]
   const openId = rows[selectedIndex(rows, tab, v)]?.id
   const changed = new Set<string>()
   const kept = new Set<string>()
@@ -702,7 +912,7 @@ async function undo(r: RowView) {
  * draws its top row open. Once the open row leaves, none is open: a row
  * opening under the pointer would catch a second click.
  */
-function selectedIndex(rows: Row[], t: Tab, v: View): number {
+function selectedIndex(rows: Row[], t: ShownTab, v: View): number {
   const s = selection[t]
   // In Needs you the top row that counts, else the first, as when every task is handed off.
   const id = s ? s.id : ((t === 'needsYou' ? v.needsYou.topId : null) ?? rows[0]?.id)
@@ -711,12 +921,12 @@ function selectedIndex(rows: Row[], t: Tab, v: View): number {
 }
 
 /** Opens a row. Its buttons ignore clicks for PRESS_GUARD_MS, and draw again once that ends. */
-function open(t: Tab, id: string) {
+function open(t: ShownTab, id: string) {
   selection[t] = { id, openedAt: Date.now() }
   drawIn(PRESS_GUARD_MS)
 }
 
-function select(t: Tab, rows: Row[], index: number) {
+function select(t: ShownTab, rows: Row[], index: number) {
   const row = rows[index]
   if (!row) return
   open(t, row.id)
@@ -750,14 +960,16 @@ function rowActions(row: Row): { keys: Key[]; more: Key[]; hidden: Key[] } {
  * One of the open row's actions. A click right after the row opened does
  * nothing; its key works at once. Keys are an extra, so no key text shows.
  */
-function KeyButton({ k }: { k: Key }) {
+function KeyButton({ k, isGuarded = true }: { k: Key; isGuarded?: boolean }) {
+  const isBlocked = () => isGuarded && isOpenGuarded()
+
   return (
     <button
       type="button"
       class={`${k.emphasis === 'primary' ? 'key primary' : k.emphasis === 'quiet' ? 'key ghost' : 'key'}${k.isDismiss ? ' dismiss' : ''}`}
-      disabled={isOpenGuarded()}
+      disabled={isBlocked()}
       onClick={() => {
-        if (!isOpenGuarded()) k.run()
+        if (!isBlocked()) k.run()
       }}
     >
       {k.icon ? <Icon name={k.icon} /> : null}
@@ -878,7 +1090,15 @@ function ListRow({
           class="line"
           {...(isSelected ? { tabIndex: -1, 'aria-disabled': true } : { 'aria-expanded': false })}
         >
-          <span class="text">{row.title}</span>
+          <span class="text">
+            {row.lead ? (
+              <>
+                <span class="lead">{row.lead}</span>{' '}
+              </>
+            ) : null}
+            {row.title}
+          </span>
+          {row.meta ? <span class="meta">{row.meta}</span> : null}
           {last ? (
             <span class={`after ${afterTone ? `tone-${afterTone}` : ''}`}>
               {isSelected || isClosing ? `${DOT}${last}` : last}
@@ -1265,6 +1485,270 @@ function Findings({ v, lists, now }: { v: View; lists: Lists; now: number }) {
   )
 }
 
+/** A dismissed PR's block: its title and Undo, in the place of its block until its time is up. */
+function SettledPr({ v, pr }: { v: View; pr: PrView }) {
+  const id = prMarkId(pr.ref)
+  const start = prSettledStart(v, pr)
+  const isUndoing = undoing.has(id)
+  const error = errors.get(id)
+
+  return (
+    <div class="row settled">
+      <span class="mark">✓</span>
+      <div class="content">
+        <div class="settled-head">
+          <div class="settled-line">
+            <span class="what">
+              <span class="tone-prs">#{pr.number}</span> {pr.title}
+            </span>
+            <span class="outcome-label">{`${DOT}Dismissed`}</span>
+            {error ? <span class="tone-error">{`${DOT}${error}`}</span> : null}
+          </div>
+          <button type="button" class="key undo" disabled={isUndoing} onClick={() => void undoPr(id, pr.ref)}>
+            <span
+              key={start}
+              class={isUndoing ? 'time-left paused' : 'time-left'}
+              style={{ animationDuration: `${SETTLED_MS}ms` }}
+              ref={el => {
+                if (el && !el.style.animationDelay) el.style.animationDelay = `-${Math.max(0, Date.now() - start)}ms`
+              }}
+            />
+            {isUndoing ? null : <Icon name="undo" />}
+            {isUndoing ? 'Undoing…' : 'Undo'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** Undo on a dismissed PR's block: the PR is tracked again and its block comes back. */
+async function undoPr(id: string, ref: string) {
+  if (undoing.has(id)) return
+  undoing.add(id)
+  try {
+    await act(id, { action: 'pr-undo', ref })
+  } finally {
+    undoing.delete(id)
+    draw()
+  }
+}
+
+/** The line under a PR block's buttons: a press still out, its error or note, or its last action. */
+function prLastLine(v: View, id: string): { text: string; isError: boolean } | null {
+  const pending = sending.get(id)
+  if (pending) return { text: pending, isError: false }
+  const error = errors.get(id)
+  if (error) return { text: error, isError: true }
+  const note = noteOf(id)
+  if (note) return { text: note, isError: false }
+  // A Dismiss left on a PR that is tracked again, as one a later reply links, is over.
+  const f = v.lastActions[id]?.action === 'pr-dismiss' ? null : feedbackOf(id, v.lastActions[id], undefined, v.at)
+  if (!f) return null
+  const text = feedbackText(f, 'codex')
+
+  return { text: hasAge(f) ? `${text}${DOT}${ago(v.at - f.at)}` : text, isError: isFailure(f) }
+}
+
+function PrBlock({
+  v,
+  pr,
+  threads,
+  checks,
+  openId,
+  all,
+  now,
+}: PrBlockPlan & { v: View; openId: string | undefined; all: Row[]; now: number }) {
+  const isSent = threadSentIn(v.lastActions)
+  const { status, head, reasonList } = readiness(pr, isSent)
+  const tone = PR_TONES[status]
+  const id = prMarkId(pr.ref)
+  const waitingOn = threadsOnYou(pr, isSent)
+  const press = (p: PrPress, pending?: string) => () => void act(id, p, undefined, pending)
+  const retry = prRetryOf(v.lastActions[id], pr.ref, null)
+  // The first action that moves the PR on leads, as the filled button.
+  const moves: Key[] = [
+    ...(status === 'ready'
+      ? [{ label: again(v, id, 'pr-merge', 'Merge'), run: press({ action: 'pr-merge', ref: pr.ref }) }]
+      : []),
+    ...(pr.state === 'OPEN' && pr.mergeable === 'CONFLICTING'
+      ? [
+          {
+            label: again(v, id, 'pr-conflicts', 'Resolve conflicts'),
+            run: press({ action: 'pr-conflicts', ref: pr.ref }),
+          },
+        ]
+      : []),
+    ...(waitingOn.length > 1
+      ? [
+          {
+            label: again(v, id, 'pr-address-all', `Address all ${waitingOn.length} threads`),
+            run: press({ action: 'pr-address-all', ref: pr.ref }),
+          },
+        ]
+      : []),
+  ].map((k, n) => ({ ...k, emphasis: n === 0 ? ('primary' as const) : ('normal' as const) }))
+  const keys: Key[] = [
+    ...(retry
+      ? [{ label: 'Try again', emphasis: 'normal' as const, icon: 'retry' as const, run: press(retry.press) }]
+      : []),
+    ...moves,
+    {
+      label: 'Open PR',
+      emphasis: 'normal',
+      icon: 'open',
+      run: press({ action: 'pr-open', ref: pr.ref }, opening(`PR #${pr.number}`)),
+    },
+    // The branch's PR has no Dismiss: the tab shows it while the branch has it.
+    ...(pr.ref === v.prs.branchRef
+      ? []
+      : [
+          {
+            label: 'Dismiss',
+            emphasis: 'quiet' as const,
+            isDismiss: true,
+            run: press({ action: 'pr-dismiss', ref: pr.ref }),
+          },
+        ]),
+  ]
+  const last = prLastLine(v, id)
+
+  return (
+    <section>
+      <div class="pr-head">
+        <span class="tone-prs num">#{pr.number}</span> {pr.title}
+      </div>
+      <div class="pr-status">
+        <div class={tone ? `tone-${tone}` : 'muted'}>{head}</div>
+        {reasonList.map(r => (
+          <div class="muted">{r}</div>
+        ))}
+        {pr.error ? <div class="tone-error">Last refresh failed: {pr.error}</div> : null}
+      </div>
+      <div class="pr-actions keys">
+        {keys.map(k => (
+          <KeyButton k={k} isGuarded={false} />
+        ))}
+      </div>
+      {last ? <div class={last.isError ? 'pr-last tone-error' : 'pr-last muted'}>{last.text}</div> : null}
+      <div class="pr-groups">
+        <PrRows title="Review threads" rows={threads} all={all} openId={openId} now={now} />
+        <PrRows title="Failing checks" rows={checks} all={all} openId={openId} now={now} />
+      </div>
+    </section>
+  )
+}
+
+/** A group of a PR's threads or checks, under a title that says their kind once. */
+function PrRows({
+  title,
+  rows,
+  all,
+  openId,
+  now,
+}: {
+  title: string
+  rows: Row[]
+  all: Row[]
+  openId: string | undefined
+  now: number
+}) {
+  if (rows.length === 0) return null
+
+  return (
+    <>
+      <GroupTitle title={title} count={rows.length} />
+      <div class="list">
+        {rows.map(row => {
+          const isOpen = row.id === openId
+          const track: RowTrack = { state: isOpen ? 'open' : 'closed', since: 0, hasPanel: isOpen }
+
+          return (
+            <div class="entry" key={row.id}>
+              <ListRow
+                row={row}
+                tone="needsYou"
+                track={track}
+                now={now}
+                onSelect={() => select('prs', all, all.indexOf(row))}
+              />
+            </div>
+          )
+        })}
+      </div>
+    </>
+  )
+}
+
+const PRS_HINT = 'Your PRs show here when this conversation opens or links one, or when your branch has one.'
+
+function Prs({ v, now }: { v: View; now: number }) {
+  const { blocks, quiet, rows } = prPlan(v)
+  if (blocks.length === 0 && quiet.length === 0)
+    return (
+      <div class="empty">
+        <div class="title">{v.isFetchingPrs ? 'Checking for PRs…' : 'No PRs'}</div>
+        <div class="muted">{v.isGhMissing ? GH_MISSING : PRS_HINT}</div>
+      </div>
+    )
+  const openId = rows[selectedIndex(rows, 'prs', v)]?.id
+  const isSent = threadSentIn(v.lastActions)
+
+  return (
+    <main>
+      {v.isGhMissing ? (
+        <section>
+          <div class="group-title muted">{GH_MISSING}</div>
+        </section>
+      ) : null}
+      {blocks.map(b =>
+        b.isSettled ? (
+          <section>
+            <SettledPr v={v} pr={b.pr} />
+          </section>
+        ) : (
+          <PrBlock {...b} v={v} openId={openId} all={rows} now={now} />
+        ),
+      )}
+      {quiet.length > 0 ? (
+        <section>
+          <GroupTitle title="Nothing to do" count={quiet.length} />
+          {quiet.map(pr => {
+            const { status, head } = readiness(pr, isSent)
+            const tone = PR_TONES[status]
+
+            return (
+              <div class="quiet-line">
+                <span class="tone-prs">#{pr.number}</span>
+                <button
+                  type="button"
+                  class="link"
+                  onClick={() =>
+                    void act(
+                      prMarkId(pr.ref),
+                      { action: 'pr-open', ref: pr.ref },
+                      undefined,
+                      opening(`PR #${pr.number}`),
+                    )
+                  }
+                >
+                  {pr.title}
+                </button>
+                <span class="status">
+                  <span class="muted">{DOT}</span>
+                  <span class={tone ? `tone-${tone}` : 'muted'}>{head}</span>
+                </span>
+              </div>
+            )
+          })}
+        </section>
+      ) : null}
+    </main>
+  )
+}
+
+const GH_MISSING = 'The inbox could not find gh, so it cannot read your PRs.'
+
 /** How long polls may fail before "retrying" turns red. */
 const LATE_READ_MS = 60_000
 
@@ -1273,7 +1757,7 @@ const LATE_READ_MS = 60_000
  * A read error or a note takes its own line under the row, so the status never moves.
  */
 function TabBar({ v, now }: { v: View; now: number }) {
-  const counts: Record<Tab, number> = { needsYou: v.needsYou.count, findings: v.findings.count }
+  const counts: Record<ShownTab, number> = { needsYou: v.needsYou.count, findings: v.findings.count, prs: v.prs.count }
   const { changedAt, isUpdating, error } = v.status
   const sinceRead = Date.now() - readAt
   const status =
@@ -1293,7 +1777,7 @@ function TabBar({ v, now }: { v: View; now: number }) {
   return (
     <nav>
       <div class="tabs">
-        {ROW_TABS.map(t => (
+        {TABS.map(t => (
           <button
             type="button"
             class={`tab ${tab === t.id ? 'shown' : ''}`}
@@ -1335,6 +1819,7 @@ async function toggleDemo() {
   lastLists = null
   selection.needsYou = null
   selection.findings = null
+  selection.prs = null
   typing = null
   draw()
   await read()
@@ -1373,7 +1858,13 @@ function App({ lists }: { lists: Lists | null }): ComponentChildren {
         </div>
       ) : null}
       <TabBar v={v} now={now} />
-      {tab === 'needsYou' ? <NeedsYou v={v} lists={lists} now={now} /> : <Findings v={v} lists={lists} now={now} />}
+      {tab === 'needsYou' ? (
+        <NeedsYou v={v} lists={lists} now={now} />
+      ) : tab === 'findings' ? (
+        <Findings v={v} lists={lists} now={now} />
+      ) : (
+        <Prs v={v} now={now} />
+      )}
       <footer>
         {isDemo ? null : (
           <button type="button" class="demo-toggle" onClick={() => void toggleDemo()}>
@@ -1663,13 +2154,13 @@ document.addEventListener('keydown', e => {
     }
     return
   }
-  const switched = ROW_TABS.find(t => t.hotkey === e.key)
+  const switched = TABS.find(t => t.hotkey === e.key)
   if (switched) {
     tab = switched.id
     draw()
     return
   }
-  const rows = listsOf(view, shownSettled()).byTab[tab]
+  const rows = tabRows(view, tab)
   const at = selectedIndex(rows, tab, view)
   const move = e.key === 'j' || e.key === 'ArrowDown' ? 1 : e.key === 'k' || e.key === 'ArrowUp' ? -1 : 0
   if (move !== 0) {

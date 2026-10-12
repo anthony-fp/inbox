@@ -252,3 +252,14 @@ test('a session file this build cannot read is kept aside, and the session start
   assert.equal(kept.length, 1)
   assert.equal(readFileSync(join(dir, 'sessions', kept[0]!), 'utf8'), '{"ledger": ')
 })
+
+test('a PR link in the agent’s reply is linked to the session', async () => {
+  const dir = tempDir()
+  const deps = hookDeps(dir)
+  await handleHook(input('UserPromptSubmit', { prompt: 'Open a PR', turn_id: 't1' }), deps)
+  await handleHook(
+    input('Stop', { turn_id: 't1', last_assistant_message: 'Opened https://github.com/acme/app/pull/12 for review.' }),
+    deps,
+  )
+  assert.deepEqual((await readState(dir, 's1')).ledger.prs, ['acme/app#12'])
+})

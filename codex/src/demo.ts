@@ -14,6 +14,7 @@ export function demoState(now: number): SessionState {
     root: '/demo',
     ledger: d.ledger,
     lastActions: d.lastActions,
+    prViews: d.prViews,
     presence: { ...s.presence, ...d.turns },
     // The samples show no not-heard text: their hooks count as run.
     heard: { ...s.heard, startAt: now },

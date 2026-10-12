@@ -562,6 +562,15 @@ export function retryOf(id: string, last: LastAction): RowPress | null {
   }
 }
 
+/** Last actions with a press's entries merged in and the ones it removes gone. */
+export function withLasts(
+  lastActions: Record<string, LastAction>,
+  lasts: Record<string, LastAction>,
+  drop: string[],
+): Record<string, LastAction> {
+  return Object.fromEntries(Object.entries({ ...lastActions, ...lasts }).filter(([id]) => !drop.includes(id)))
+}
+
 /** The last action a press records on its row. */
 export function recordPress(
   kind: LastAction['kind'],

@@ -235,6 +235,12 @@ function promptNotes(host, ledger, prompt, told) {
   return { notes, told: { inbox, closed: ledger.closed.map((d) => d.id) } };
 }
 
+// ../hooks/prs.ts
+var PR_URL = /https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)/g;
+function prRefs(text) {
+  return [...new Set([...text.matchAll(PR_URL)].map((m) => `${m[1]}#${m[2]}`))];
+}
+
 // ../hooks/presses.ts
 var HANDOFF_IDS = /^(address|type|step-\d+|thread-address|pr-conflicts|pr-address-all)$/;
 var PR_RENAMES = [
@@ -293,6 +299,12 @@ var TABS = [
   { id: "prs", label: "PRs", hotkey: "3" }
 ];
 var ROW_TABS = TABS.filter((t) => t.id !== "prs");
+
+// ../hooks/pr-tab.ts
+var MAX_PRS = 6;
+function linkedPrs(prs, refs) {
+  return [...prs.filter((r) => !refs.includes(r)), ...refs].slice(-MAX_PRS);
+}
 
 // src/settle.ts
 var POLL_MS = 3e3;
@@ -364,7 +376,12 @@ function patchFiles(patch) {
   return [...patch.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)].map((m) => (m[1] ?? "").trim()).filter(Boolean);
 }
 function endTurn(s, reply, now) {
-  const base = { ...s, turn: { person: null, activity: [], press: null } };
+  const refs = prRefs(reply);
+  const base = {
+    ...s,
+    ledger: refs.length > 0 ? { ...s.ledger, prs: linkedPrs(s.ledger.prs, refs) } : s.ledger,
+    turn: { person: null, activity: [], press: null }
+  };
   if (reply.trim() === "") return base;
   const ex = {
     person: s.turn.person,
@@ -402,6 +419,7 @@ var NOTHING_HEARD = {
   stops: 0,
   promptMissedAt: null
 };
+var NO_PRS = { views: {}, branchRef: null, isFetching: false };
 function emptyState(sessionId) {
   return {
     version: 1,
@@ -416,6 +434,7 @@ function emptyState(sessionId) {
     pending: [],
     sent: [],
     lastActions: {},
+    prViews: NO_PRS,
     tabSeenAt: 0,
     heard: NOTHING_HEARD
   };
@@ -451,6 +470,7 @@ function upgraded(saved, sessionId) {
     // A message sent before the server kept its row changes no row when it arrives.
     sent: (saved.sent ?? []).map((x) => ({ ...x, row: x.row ?? null, queuedId: x.queuedId ?? null })),
     lastActions: upgradeLastActions(saved.lastActions ?? {}),
+    prViews: { ...NO_PRS, ...saved.prViews, isFetching: false },
     // A file saved before the hooks kept this record came from hooks that ran, so it reads as heard.
     // Its turns were not recorded, so `promptAt` is set too: a tool call then falls back to the time rule.
     heard: saved.heard ? { ...NOTHING_HEARD, ...saved.heard } : {

@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path'
 import { EMPTY, TOLD_NOTHING, upgradeLedger } from '../../hooks/ledger'
 import type { Exchange, Press, Told } from '../../hooks/ledger'
 import { upgradeLastActions } from '../../hooks/presses'
-import type { LastAction, Ledger } from '../../types'
+import type { LastAction, Ledger, PrViews } from '../../types'
 
 export type SessionState = {
   version: 1
@@ -47,6 +47,8 @@ export type SessionState = {
    */
   sent: { text: string; press: Press | null; at: number; row: string | null; queuedId: string | null }[]
   lastActions: Record<string, LastAction>
+  /** The PRs tab's data: each PR's latest view and the current branch's PR. `isFetching` is always false here; the server knows what runs. */
+  prViews: PrViews
   /** When the tab last asked for its view, so the inbox texts can say whether it is open. */
   tabSeenAt: number
   heard: Heard
@@ -79,6 +81,8 @@ export const NOTHING_HEARD: Heard = {
   promptMissedAt: null,
 }
 
+export const NO_PRS: PrViews = { views: {}, branchRef: null, isFetching: false }
+
 export function emptyState(sessionId: string): SessionState {
   return {
     version: 1,
@@ -93,6 +97,7 @@ export function emptyState(sessionId: string): SessionState {
     pending: [],
     sent: [],
     lastActions: {},
+    prViews: NO_PRS,
     tabSeenAt: 0,
     heard: NOTHING_HEARD,
   }
@@ -178,6 +183,7 @@ function upgraded(saved: Saved, sessionId: string): SessionState {
     // A message sent before the server kept its row changes no row when it arrives.
     sent: (saved.sent ?? []).map(x => ({ ...x, row: x.row ?? null, queuedId: x.queuedId ?? null })),
     lastActions: upgradeLastActions(saved.lastActions ?? {}),
+    prViews: { ...NO_PRS, ...saved.prViews, isFetching: false },
     // A file saved before the hooks kept this record came from hooks that ran, so it reads as heard.
     // Its turns were not recorded, so `promptAt` is set too: a tool call then falls back to the time rule.
     heard: saved.heard

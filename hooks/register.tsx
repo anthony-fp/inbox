@@ -50,8 +50,10 @@ import {
   drawnPrs,
   fetchTracked,
   isDismissing,
+  isQuietPr,
   isTracked,
   linkedPrs,
+  PR_TONES,
   MAX_PRS,
   prCheckId,
   prMarkId,
@@ -77,6 +79,7 @@ import {
   readableComment,
   readiness,
   threadWhere,
+  took,
   waitingThreads,
 } from './prs'
 import {
@@ -132,6 +135,7 @@ import {
   stepIconKind,
   upgradeLastActions,
   withArrival,
+  withLasts,
   withQueued,
   withRewrite,
 } from './presses'
@@ -390,11 +394,6 @@ const TERMINAL_SIDE_CELLS = 5
 const SELECTED_GAP_PT = 3
 // The terminal's `after` follows a row's title on its line, after a dot; desktop draws it on its own line.
 const LEADING_DOT = new RegExp(`^${DOT}`)
-/** How long something ran: "41s", "3m 52s". */
-function took(ms: number): string {
-  const secs = Math.max(0, Math.round(ms / 1000))
-  return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`
-}
 // Theme keys, so the colors follow the person's Claude Code theme.
 const NEEDS_YOU = 'warning'
 // A child's place under its section: a middle child, the last, or a block the tree passes.
@@ -1902,15 +1901,6 @@ function applyAnyPress(
   return { ledger: r.ledger, lasts: r.last ? { [p.id]: r.last } : {}, drop: [], effects: r.effects }
 }
 
-/** Last actions with a press's entries merged in and the ones it removes gone. */
-function withLasts(
-  lastActions: Record<string, LastAction>,
-  lasts: Record<string, LastAction>,
-  drop: string[],
-): Record<string, LastAction> {
-  return Object.fromEntries(Object.entries({ ...lastActions, ...lasts }).filter(([id]) => !drop.includes(id)))
-}
-
 /** Selects a row Undo brought back, in its own tab. */
 async function selectRestored($: EngineInterface, id: string) {
   const ids = tabRowIds((await drawnState($)).view, [])
@@ -2097,12 +2087,12 @@ function outcomeText(d: Pick<Closed, 'outcome'>): string {
  * and Waiting gray, since it waits on others.
  */
 const PR_STATUSES: Record<PrStatus, { mark: string; tone: Tone | null }> = {
-  ready: { mark: '✓', tone: 'done' },
-  blocked: { mark: '◇', tone: 'needsYou' },
-  waiting: { mark: '◇', tone: null },
-  draft: { mark: '◇', tone: null },
-  merged: { mark: '◇', tone: 'findings' },
-  closed: { mark: '◇', tone: 'error' },
+  ready: { mark: '✓', tone: PR_TONES.ready },
+  blocked: { mark: '◇', tone: PR_TONES.blocked },
+  waiting: { mark: '◇', tone: PR_TONES.waiting },
+  draft: { mark: '◇', tone: PR_TONES.draft },
+  merged: { mark: '◇', tone: PR_TONES.merged },
+  closed: { mark: '◇', tone: PR_TONES.closed },
 }
 
 /**
@@ -4806,8 +4796,7 @@ export const register: Register = on => {
         ...prRowGroup('Failing checks', checks, `${pr.ref}-checks`),
       ])
     }
-    const isQuietPr = (g: { pr: PrView; isSettled: boolean }) =>
-      !g.isSettled && !prNeedsYou(g.pr, isThreadSent) && readiness(g.pr, isThreadSent).status !== 'ready'
+    const isQuiet = (g: { pr: PrView; isSettled: boolean }) => !g.isSettled && isQuietPr(g.pr, isThreadSent)
     // "#33 Title · Waiting": the title opens the PR.
     const quietPrs = (prs: PrView[]) =>
       section([
@@ -4853,8 +4842,8 @@ export const register: Register = on => {
         // PRs that wait on nobody, neither blocked nor ready, are one line each at the end.
         sections(
           [
-            ...prGroups.filter(g => !isQuietPr(g)).map(prBlock),
-            ...(prGroups.some(isQuietPr) ? [quietPrs(prGroups.filter(isQuietPr).map(g => g.pr))] : []),
+            ...prGroups.filter(g => !isQuiet(g)).map(prBlock),
+            ...(prGroups.some(isQuiet) ? [quietPrs(prGroups.filter(isQuiet).map(g => g.pr))] : []),
           ],
           2,
         )

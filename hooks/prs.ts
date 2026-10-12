@@ -332,6 +332,12 @@ export function threadWhere(t: PrThread, path = t.path): string {
   return `${path}${t.line ? `:${t.line}` : ''}`
 }
 
+/** How long something ran: "41s", "3m 52s". */
+export function took(ms: number): string {
+  const secs = Math.max(0, Math.round(ms / 1000))
+  return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`
+}
+
 export function failingChecks(pr: PrView): PrCheck[] {
   return pr.checks.filter(c => c.bucket === 'fail')
 }

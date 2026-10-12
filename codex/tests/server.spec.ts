@@ -3,6 +3,7 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
+import { demoView } from '../../hooks/demo'
 import type { Feedback } from '../../hooks/view'
 import { noteHook, notePrompt, viewOf } from '../src/core'
 import type { View } from '../src/core'
@@ -481,12 +482,13 @@ test('Done on a task Codex just left queues one message once Undo ends, unless a
   await updateState(dir, 's1', s => ({ ...s, turn: { ...s.turn, person: 'keep going' } }))
   t += SETTLE_WINDOW_MS
   await poll()
-  assert.deepEqual(runner.calls, [])
+  const queued = () => runner.calls.filter(c => c[0] === '/apps/codex')
+  assert.deepEqual(queued(), [])
 
   await updateState(dir, 's1', s => ({ ...s, turn: { ...s.turn, person: null } }))
   await poll()
   await poll()
-  assert.deepEqual(runner.calls, [['/apps/codex', 'queue', '--thread', 's1', '--message', 'Done: Sign in to npm']])
+  assert.deepEqual(queued(), [['/apps/codex', 'queue', '--thread', 's1', '--message', 'Done: Sign in to npm']])
   const undo = await call('inbox_press', { press: { action: 'undo', id: 'i2' }, thread: 's1' })
   assert.equal(undo.result.structuredContent.note, 'stale')
   const s = await readState(dir, 's1')
@@ -498,4 +500,176 @@ test('Done on a task Codex just left queues one message once Undo ends, unless a
     ],
   )
   assert.deepEqual(notePrompt(s, s.sent[0]!.text, t).state.turn.press, { id: 'i2', action: 'done' })
+})
+
+const GH_VIEW = JSON.stringify({
+  number: 7,
+  title: 'Add the PRs tab',
+  url: 'https://github.com/acme/app/pull/7',
+  state: 'OPEN',
+  baseRefName: 'main',
+  mergeable: 'MERGEABLE',
+  reviewDecision: '',
+  statusCheckRollup: [{ name: 'lint', conclusion: 'FAILURE', workflowName: 'CI' }],
+})
+const GH_THREADS = JSON.stringify({
+  data: {
+    viewer: { login: 'me' },
+    repository: {
+      pullRequest: {
+        reviewThreads: {
+          nodes: [
+            {
+              id: 'T1',
+              isResolved: false,
+              isOutdated: false,
+              path: 'src/a.ts',
+              line: 4,
+              originalLine: 4,
+              comments: { totalCount: 1, nodes: [{ author: { login: 'rev' }, body: 'Rename this', url: 'u' }] },
+              last: { nodes: [] },
+            },
+          ],
+        },
+      },
+    },
+  },
+})
+
+type PrView = {
+  prs: { drawn: { pr: { ref: string; threads: unknown[] } }[]; count: number }
+  isFetchingPrs: boolean
+  isGhMissing: boolean
+  lastActions: Record<string, { action: string }>
+}
+type PrReply = { result: { structuredContent: PrView & { error: string | null; view: PrView } } }
+
+async function prServer(answer: (args: string[]) => { code: number; stdout: string; stderr: string }) {
+  const dir = tempDir()
+  await updateState(dir, 's1', s => ({ ...s, root: '/repo', cliPath: '/apps/codex' }))
+  const runner = fakeRunner(answer)
+  const handle = makeServer({
+    dir,
+    now: () => 100,
+    exec: runner.exec,
+    tabHtml: '<html></html>',
+    fallbackCli: async () => 'codex',
+  })
+  const call = (name: string, args: Record<string, unknown>) =>
+    handle({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name, arguments: args, _meta: { thread_id: 's1' } },
+    }) as Promise<PrReply>
+
+  return { dir, calls: runner.calls, call }
+}
+
+const ghAnswer = (args: string[]) => {
+  if (args[0] === 'gh' && args[1] === 'pr') return { code: 0, stdout: GH_VIEW, stderr: '' }
+  if (args[0] === 'gh') return { code: 0, stdout: args.includes('api') ? GH_THREADS : 'gh 2.0', stderr: '' }
+  return { code: 0, stdout: 'Queued message q1\n', stderr: '' }
+}
+
+test('a view starts a fetch of the session’s PRs through gh in its folder, and the next view shows them', async () => {
+  const { dir, calls, call } = await prServer(ghAnswer)
+  const first = await call('inbox_view', {})
+  assert.equal(first.result.structuredContent.isFetchingPrs, true)
+  assert.deepEqual(first.result.structuredContent.prs.drawn, [])
+  await new Promise(resolve => setTimeout(resolve, 50))
+  const next = await call('inbox_view', {})
+  const { prs, isFetchingPrs } = next.result.structuredContent
+  assert.equal(isFetchingPrs, false)
+  assert.deepEqual(
+    prs.drawn.map(d => [d.pr.ref, d.pr.threads.length]),
+    [['acme/app#7', 1]],
+  )
+  assert.equal(prs.count, 1)
+  assert.ok(calls.some(c => c[0] === 'gh' && c[1] === 'pr'))
+  assert.equal((await readState(dir, 's1')).prViews.branchRef, 'acme/app#7')
+})
+
+test('a view says gh was not found when no gh can start', async () => {
+  const { call } = await prServer(() => ({ code: -1, stdout: '', stderr: '' }))
+  await call('inbox_view', {})
+  await new Promise(resolve => setTimeout(resolve, 50))
+  const next = await call('inbox_view', {})
+  assert.equal(next.result.structuredContent.isGhMissing, true)
+  assert.deepEqual(next.result.structuredContent.prs.drawn, [])
+})
+
+test('gh is found in the Homebrew folder when it is not on the PATH', async () => {
+  const { calls, call } = await prServer(args =>
+    args[0] === 'gh' ? { code: -1, stdout: '', stderr: '' } : ghAnswer(['gh', ...args.slice(1)]),
+  )
+  await call('inbox_view', {})
+  await new Promise(resolve => setTimeout(resolve, 50))
+  const next = await call('inbox_view', {})
+  assert.equal(next.result.structuredContent.isGhMissing, false)
+  assert.equal(next.result.structuredContent.prs.drawn.length, 1)
+  assert.ok(calls.some(c => c[0] === '/opt/homebrew/bin/gh' && c[1] === 'pr'))
+})
+
+test('a PR press sends its prompt through codex queue and records the press on its row', async () => {
+  const { dir, calls, call } = await prServer(ghAnswer)
+  const d = demoView(100)
+  await updateState(dir, 's1', s => ({ ...s, ledger: { ...s.ledger, prs: d.ledger.prs }, prViews: d.prViews }))
+  const pr = d.prViews.views['petekp/inbox#31']!
+  const thread = pr.threads.find(t => t.isWaiting)!
+  const r = await call('inbox_press', {
+    press: { action: 'thread-address', ref: pr.ref, thread: thread.id },
+    thread: 's1',
+  })
+  assert.equal(r.result.structuredContent.error, null)
+  assert.equal(calls.length, 1)
+  assert.deepEqual(calls[0]?.slice(0, 4), ['/apps/codex', 'queue', '--thread', 's1'])
+  assert.match(calls[0]?.[5] ?? '', new RegExp(thread.path))
+  const id = `${pr.ref} thread ${thread.id}`
+  assert.equal(r.result.structuredContent.view.lastActions[id]?.action, 'thread-address')
+  assert.equal((await readState(dir, 's1')).sent[0]?.row, id)
+})
+
+test('a PR press with a failing queue says it was not sent and keeps the failure on its row', async () => {
+  const { dir, call } = await prServer(args =>
+    args[1] === 'queue' ? { code: 1, stdout: '', stderr: 'no such thread' } : ghAnswer(args),
+  )
+  const d = demoView(100)
+  await updateState(dir, 's1', s => ({ ...s, ledger: { ...s.ledger, prs: d.ledger.prs }, prViews: d.prViews }))
+  const r = await call('inbox_press', { press: { action: 'pr-conflicts', ref: 'petekp/inbox#31' }, thread: 's1' })
+  assert.match(r.result.structuredContent.error ?? '', /no such thread/)
+  const last = (await readState(dir, 's1')).lastActions['pr:petekp/inbox#31']
+  assert.equal(last?.delivery?.state, 'failed')
+})
+
+test('dismissing a linked PR unlinks it, and its view leaves once its settled block has', async () => {
+  let t = 100
+  const dir = tempDir()
+  await updateState(dir, 's1', s => ({ ...s, root: '/repo', cliPath: '/apps/codex' }))
+  const runner = fakeRunner(() => ({ code: -1, stdout: '', stderr: '' }))
+  const handle = makeServer({ dir, now: () => t, exec: runner.exec, tabHtml: '', fallbackCli: async () => 'codex' })
+  const call = (name: string, args: Record<string, unknown>) =>
+    handle({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name, arguments: args, _meta: { thread_id: 's1' } },
+    }) as Promise<PrReply>
+  const d = demoView(100)
+  await updateState(dir, 's1', s => ({
+    ...s,
+    ledger: { ...s.ledger, prs: d.ledger.prs },
+    prViews: { ...d.prViews, branchRef: null },
+  }))
+  const dismissed = await call('inbox_press', {
+    press: { action: 'pr-dismiss', ref: 'petekp/inbox#29' },
+    thread: 's1',
+  })
+  const drawn = (v: PrView) => v.prs.drawn.map(x => x.pr.ref)
+  assert.ok(drawn(dismissed.result.structuredContent.view).includes('petekp/inbox#29'))
+  assert.equal((await readState(dir, 's1')).ledger.prs.includes('petekp/inbox#29'), false)
+  t += SETTLE_WINDOW_MS
+  const later = await call('inbox_view', {})
+  assert.equal(drawn(later.result.structuredContent).includes('petekp/inbox#29'), false)
+  assert.equal('petekp/inbox#29' in (await readState(dir, 's1')).prViews.views, false)
 })

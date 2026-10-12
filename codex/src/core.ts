@@ -6,7 +6,9 @@ import { carryText, EMPTY, guidanceText, promptNotes, screenText, START_TITLE, t
 import type { Exchange, Press } from '../../hooks/ledger'
 import { inboxView, perTurnStatus } from '../../hooks/view'
 import type { InboxView } from '../../hooks/view'
-import type { LastAction } from '../../types'
+import { drawnPrs, linkedPrs, threadSentIn } from '../../hooks/pr-tab'
+import { prNeedsYou, prRefs } from '../../hooks/prs'
+import type { LastAction, PrView } from '../../types'
 import { PRESS_TIMEOUT_MS, SETTLE_WINDOW_MS } from './settle'
 import type { Heard, SessionState } from './state'
 import { CODEX } from './texts'
@@ -97,7 +99,12 @@ export function patchFiles(patch: string): string[] {
 
 /** Ends the turn: the exchange waits for the inbox model. */
 export function endTurn(s: SessionState, reply: string, now: number): SessionState {
-  const base = { ...s, turn: { person: null, activity: [], press: null } }
+  const refs = prRefs(reply)
+  const base = {
+    ...s,
+    ledger: refs.length > 0 ? { ...s.ledger, prs: linkedPrs(s.ledger.prs, refs) } : s.ledger,
+    turn: { person: null, activity: [], press: null },
+  }
   if (reply.trim() === '') return base
   const ex: Exchange = {
     person: s.turn.person,
@@ -173,6 +180,14 @@ export function heardState(h: Heard): HeardState {
   return h.startAt === null || isMissed || (turns >= 2 && h.stops === 0) ? 'partial' : 'heard'
 }
 
+/** The PRs the tab draws, each with whether it is the settled block of a PR just dismissed. */
+export type PrTab = {
+  drawn: { pr: PrView; isSettled: boolean }[]
+  branchRef: string | null
+  /** How many open PRs wait on the person. */
+  count: number
+}
+
 /** What the tab draws: the shared inbox view, and what only the tab reads. */
 export type View = InboxView & {
   heard: HeardState
@@ -180,6 +195,7 @@ export type View = InboxView & {
   running: string[]
   /** Each row's last press, by row id. The tab draws from each row's feedback; a tab loaded before that still reads this. */
   lastActions: Record<string, LastAction>
+  prs: PrTab
   /** When the view was drawn, for the rows' ages. */
   at: number
 }
@@ -194,7 +210,16 @@ export type View = InboxView & {
  * `serverBuild` is the fingerprint build.mjs stamped into the running server. `serverLoadError` says why a newer
  * build of the server did not load.
  */
-export type TabView = View & { thread: string; devPage: string; serverBuild?: string; serverLoadError?: string }
+export type TabView = View & {
+  thread: string
+  devPage: string
+  serverBuild?: string
+  serverLoadError?: string
+  /** A fetch of the session's PRs runs now. */
+  isFetchingPrs: boolean
+  /** Neither `gh` nor the usual install folders hold a gh the server can start. */
+  isGhMissing: boolean
+}
 
 /**
  * Each row's last press, without a Local result still pending after PRESS_TIMEOUT_MS. The server
@@ -242,6 +267,18 @@ export function viewOf(s: SessionState, now: number): View {
     done: l.card?.done ?? [],
     running: l.card?.running ?? [],
     lastActions,
+    prs: prTabOf(s, lastActions, now),
     at: now,
+  }
+}
+
+function prTabOf(s: SessionState, lastActions: Record<string, LastAction>, now: number): PrTab {
+  const drawn = drawnPrs(s.prViews, s.ledger.prs, lastActions, now)
+  const isSent = threadSentIn(lastActions)
+
+  return {
+    drawn,
+    branchRef: s.prViews.branchRef,
+    count: drawn.filter(d => !d.isSettled && prNeedsYou(d.pr, isSent)).length,
   }
 }

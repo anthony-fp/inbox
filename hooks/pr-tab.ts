@@ -7,6 +7,7 @@ import type { Effect, PrActionId } from './presses'
 import {
   inPrOrder,
   parseRef,
+  prNeedsYou,
   prompts,
   prRefs,
   readiness,
@@ -16,7 +17,7 @@ import {
   THREADS_QUERY,
   VIEW_FIELDS,
 } from './prs'
-import type { IsThreadSent } from './prs'
+import type { IsThreadSent, PrStatus } from './prs'
 import { SETTLED_MS } from './view'
 
 /** How many linked PRs a conversation keeps, newest last. */
@@ -177,6 +178,21 @@ export function drawnPrs(
         ? [{ pr, isSettled: true }]
         : [],
   )
+}
+
+/** A PR that waits on nobody and is not ready: the tab lists it as one line under "Nothing to do". */
+export function isQuietPr(pr: PrView, isSent: IsThreadSent): boolean {
+  return !prNeedsYou(pr, isSent) && readiness(pr, isSent).status !== 'ready'
+}
+
+/** The tone each status word draws in: Blocked waits on the person, Ready is done, and Waiting has none. */
+export const PR_TONES: Record<PrStatus, 'needsYou' | 'done' | 'findings' | 'error' | null> = {
+  ready: 'done',
+  blocked: 'needsYou',
+  waiting: null,
+  draft: null,
+  merged: 'findings',
+  closed: 'error',
 }
 
 /** A press on a PR block, one of its review threads, or a failing check's row. Only the mod has PRs. */

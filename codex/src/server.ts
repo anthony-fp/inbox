@@ -6,6 +6,8 @@ import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
 
+import { applyPrPress, fetchTracked, isDismissing, isTracked, prRowId } from '../../hooks/pr-tab'
+import type { PrPress } from '../../hooks/pr-tab'
 import {
   applyPress,
   demoRecord,
@@ -16,8 +18,9 @@ import {
   openCommands,
   runLocalEffects,
   runSends,
+  withLasts,
 } from '../../hooks/presses'
-import type { EffectHost, PressResult, RowPress } from '../../hooks/presses'
+import type { Effect, EffectHost, RowPress } from '../../hooks/presses'
 import {
   CLOSE_DESCRIPTION,
   CLOSE_SCHEMA,
@@ -29,12 +32,13 @@ import {
 import { noteToolCall, viewOf } from './core'
 import type { TabView } from './core'
 import { demoState } from './demo'
+import { ghFinder, ghIn } from './gh'
 import { SETTLE_WINDOW_MS } from './settle'
 import { readState, updateState } from './state'
 import type { SessionState } from './state'
 import { CODEX, INBOX_DESCRIPTION, inboxToolText, VIEW_DESCRIPTION } from './texts'
 import type { Run } from './run'
-import type { RowNote } from '../../types'
+import type { LastAction, Ledger, PrViews, RowNote } from '../../types'
 
 /**
  * The tab's address for one build of its page. Codex keeps a tab's page by its address, even across server
@@ -47,6 +51,25 @@ const TAB_MIME = 'text/html;profile=mcp-app'
 
 const APP_ONLY = { ui: { visibility: ['app'] } }
 const MAX_SENT = 20
+/** How old a session's PRs may be before a view asks gh again. */
+const PRS_REFRESH_MS = 120_000
+/** How soon a PR linked since the last fetch, which has no view yet, is fetched. */
+const NEW_PR_FETCH_MS = 15_000
+
+/** A press as the server applies it: the ledger after it, the last actions it records and removes, and its effects. */
+type Pressed = { ledger: Ledger; lasts: Record<string, LastAction>; drop: string[]; effects: Effect[] }
+
+/** The PR views a session still shows: those it tracks, and a PR dismissed moments ago, which draws settled. */
+function viewsStillShown(
+  prs: PrViews,
+  linked: string[],
+  lastActions: Record<string, LastAction>,
+  at: number,
+): PrViews['views'] {
+  return Object.fromEntries(
+    Object.entries(prs.views).filter(([ref]) => isTracked(prs, linked, ref) || isDismissing(lastActions, ref, at)),
+  )
+}
 
 const toolsFor = (uri: string) => [
   { name: 'record_finding', description: findingDescription(CODEX), inputSchema: FINDING_SCHEMA },
@@ -151,6 +174,11 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
   const { dir, now } = deps
   const uri = tabUri(deps.tabHtml)
   const tools = toolsFor(uri)
+  const findGh = ghFinder(deps.exec)
+  // Per session, in memory only: a server that restarts fetches again on its first view.
+  const fetchingPrs = new Set<string>()
+  const prsFetchedAt = new Map<string, number>()
+  let isGhMissing = false
 
   /**
    * Sends a message into the session as the person's own: it runs after any
@@ -196,16 +224,70 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
   /** The tab page to show: the dev build's while it runs, else this handler's own, which a reinstall replaces. */
   const currentPage = async () => (await deps.devPage?.()) ?? deps.tabHtml
 
-  const pressOn = (s: SessionState, p: RowPress, at = now()) =>
-    applyPress(s.ledger, s.lastActions[p.id], p, { now: at, turnsStarted: s.presence.turnsStarted, extraSteps: [] })
+  /** Applies a row press or a PR press to the session's state. Pure. */
+  const pressOn = (s: SessionState, p: RowPress | PrPress, at = now()): Pressed | { stale: true } => {
+    const ctx = { now: at, turnsStarted: s.presence.turnsStarted }
+    if ('ref' in p) return applyPrPress(s.ledger, s.prViews, s.lastActions, p, ctx)
+    const r = applyPress(s.ledger, s.lastActions[p.id], p, { ...ctx, extraSteps: [] })
+    if ('stale' in r) return r
+
+    return { ledger: r.ledger, lasts: r.last ? { [p.id]: r.last } : {}, drop: [], effects: r.effects }
+  }
+
+  /**
+   * Fetches the session's PRs through gh in the background. The result is saved for the tab's next poll. A PR
+   * dismissed while the fetch ran stays dismissed, and one dismissed moments ago keeps its last view.
+   */
+  async function fetchPrs(id: string) {
+    const s = await readState(dir, id)
+    const bin = await findGh()
+    isGhMissing = bin === null
+    if (bin === null) return
+    const { views: fetched, branchRef } = await fetchTracked(
+      ghIn(deps.exec, bin, s.root),
+      now,
+      s.prViews,
+      s.ledger.prs,
+      true,
+    )
+    await updateState(dir, id, cur => {
+      const at = now()
+      const views = Object.fromEntries(
+        Object.entries(fetched).filter(([ref]) => ref === branchRef || cur.ledger.prs.includes(ref)),
+      )
+      const dismissing = Object.fromEntries(
+        Object.entries(cur.prViews.views).filter(([ref]) => isDismissing(cur.lastActions, ref, at)),
+      )
+
+      return { ...cur, prViews: { views: { ...dismissing, ...views }, branchRef, isFetching: false } }
+    })
+  }
+
+  /** Starts a fetch when the session's PRs were never fetched, are old, or a linked PR has no view yet. */
+  function fetchPrsWhenDue(id: string, s: SessionState) {
+    if (fetchingPrs.has(id)) return
+    const last = prsFetchedAt.get(id)
+    const hasNewPr = s.ledger.prs.some(ref => !(ref in s.prViews.views))
+    const isDue = last === undefined || now() - last >= PRS_REFRESH_MS || (hasNewPr && now() - last >= NEW_PR_FETCH_MS)
+    if (!isDue) return
+    fetchingPrs.add(id)
+    void fetchPrs(id)
+      .catch(() => undefined)
+      .finally(() => {
+        prsFetchedAt.set(id, now())
+        fetchingPrs.delete(id)
+      })
+  }
 
   /** The view for the tab, with the session it was read for and the page the server serves now. */
-  const served = async (s: SessionState, id: string): Promise<TabView> => {
+  const served = async (s: SessionState, id: string, isDemo = false): Promise<TabView> => {
     const loadError = deps.loadError?.()
 
     return {
       ...viewOf(s, now()),
       thread: id,
+      isFetchingPrs: !isDemo && fetchingPrs.has(id),
+      isGhMissing: !isDemo && isGhMissing,
       devPage: tabUri(await currentPage()),
       ...(deps.build ? { serverBuild: deps.build } : {}),
       ...(loadError ? { serverLoadError: loadError } : {}),
@@ -218,12 +300,13 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
    * message went, and a failed send's undo lands in the same write. Its opens run after, outside the lock. A press
    * drawn for another session, or for a row that changed, sends nothing and returns a stale note.
    */
-  async function onPress(id: string, p: RowPress, thread: unknown): Promise<PressReply> {
+  async function onPress(id: string, p: RowPress | PrPress, thread: unknown): Promise<PressReply> {
+    const rowId = 'ref' in p ? prRowId(p) : p.id
     let copy: PressReply['copy'] = null
     let error: string | null = null
     let note: PressReply['note'] = thread === id ? null : 'stale'
     // The press as applied under the lock, read once the lock is released.
-    const pressed: { r?: Exclude<PressResult, { stale: true }> } = {}
+    const pressed: { r?: Pressed } = {}
     /** The press's effects, saving through `change`: the state a held lock writes, or a fresh lock each time. */
     const hostFor = (
       change: (f: (s: SessionState) => SessionState | Promise<SessionState>) => Promise<SessionState>,
@@ -240,7 +323,7 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
       send: e =>
         change(async s => {
           const queuedId = await queue(s, e.text)
-          const sent = { text: e.text, press: e.by, at: now(), row: p.id, queuedId }
+          const sent = { text: e.text, press: e.by, at: now(), row: rowId, queuedId }
           return { ...s, sent: [...s.sent, sent].slice(-MAX_SENT) }
         }).then(
           () => null,
@@ -264,12 +347,15 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
       let next: SessionState = {
         ...s,
         ledger: r.ledger,
-        lastActions: r.last ? { ...s.lastActions, [p.id]: r.last } : s.lastActions,
+        lastActions: withLasts(s.lastActions, r.lasts, r.drop),
         // Codex was told of the close; with the id out of `told`, a second close of the row is reported too.
-        told: p.action === 'undo' ? { ...s.told, closed: s.told.closed.filter(id => id !== p.id) } : s.told,
+        told:
+          !('ref' in p) && p.action === 'undo'
+            ? { ...s.told, closed: s.told.closed.filter(id => id !== p.id) }
+            : s.told,
       }
       const held = hostFor(async f => (next = await f(next)))
-      const failed = await runSends(held, r.effects, p.id, r.last ? [p.id] : [], at)
+      const failed = await runSends(held, r.effects, rowId, Object.keys(r.lasts), at)
       if (failed) error = `Not sent: ${failed.reason}`
 
       return next
@@ -277,14 +363,14 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
       error = `Not sent: ${err instanceof Error ? err.message : String(err)}`
     })
     // A server restart loses the timer; the tab's next poll checks again.
-    if (pressed.r && p.action === 'done')
+    if (pressed.r && !('ref' in p) && p.action === 'done')
       setTimeout(() => void wakeForDone(id).catch(() => undefined), SETTLE_WINDOW_MS).unref()
     if (pressed.r)
       await runLocalEffects(
         hostFor(f => updateState(dir, id, f)),
         pressed.r.effects,
-        p.id,
-        pressed.r.last?.result,
+        rowId,
+        pressed.r.lasts[rowId]?.result,
       )
 
     return { view: await served(await readState(dir, id), id), copy, error, note }
@@ -323,15 +409,15 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
   }
 
   /** A press in the demo changes only its copy and performs nothing: each send, open or copy gives its row the sample note. */
-  async function onDemoPress(id: string, p: RowPress, thread: unknown): Promise<PressReply> {
+  async function onDemoPress(id: string, p: RowPress | PrPress, thread: unknown): Promise<PressReply> {
     const s = demoOf(id)
     const r = thread === id ? pressOn(s, p) : ({ stale: true } as const)
-    if ('stale' in r) return { view: await served(s, id), copy: null, error: null, note: 'stale' }
-    const { lasts, isSample } = demoRecord(r.last ? { [p.id]: r.last } : {}, r.effects)
-    const next: SessionState = { ...s, ledger: r.ledger, lastActions: { ...s.lastActions, ...lasts } }
+    if ('stale' in r) return { view: await served(s, id, true), copy: null, error: null, note: 'stale' }
+    const { lasts, isSample } = demoRecord(r.lasts, r.effects)
+    const next: SessionState = { ...s, ledger: r.ledger, lastActions: withLasts(s.lastActions, lasts, r.drop) }
     demos.set(id, next)
 
-    return { view: await served(next, id), copy: null, error: null, note: isSample ? 'sample' : null }
+    return { view: await served(next, id, true), copy: null, error: null, note: isSample ? 'sample' : null }
   }
 
   async function callTool(
@@ -359,15 +445,21 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
         return text(inboxToolText(viewOf(s, now())))
       }
       case 'inbox_view': {
-        if (args.demo === true) return { ...text('Inbox demo'), structuredContent: await served(demoOf(id), id) }
+        if (args.demo === true) return { ...text('Inbox demo'), structuredContent: await served(demoOf(id), id, true) }
         await wakeForDone(id).catch(() => undefined)
-        const s = await updateState(dir, id, s => ({ ...s, tabSeenAt: now() }))
+        // A dismissed PR's view leaves once its settled block has.
+        const s = await updateState(dir, id, s => ({
+          ...s,
+          tabSeenAt: now(),
+          prViews: { ...s.prViews, views: viewsStillShown(s.prViews, s.ledger.prs, s.lastActions, now()) },
+        }))
+        fetchPrsWhenDue(id, s)
         return { ...text('Inbox view'), structuredContent: await served(s, id) }
       }
       case 'inbox_tab_page':
         return { ...text('Tab page'), structuredContent: { html: stamped(await currentPage()) } }
       case 'inbox_press': {
-        const p = args.press as RowPress
+        const p = args.press as RowPress | PrPress
         const r = await (args.demo === true ? onDemoPress(id, p, args.thread) : onPress(id, p, args.thread))
         return { ...text(r.error ?? (r.note ? noteText(r.note) : 'Done')), structuredContent: r }
       }
