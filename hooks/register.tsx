@@ -233,8 +233,8 @@ const DESKTOP_LINE_PT = 19
 const DESKTOP_CELL_PT = 7.9
 // The desktop Undo button's width, in columns.
 const UNDO_CELLS = 9
-// The app's own buttons, measured in the pane (2026-10-11): 23 pt tall, corners of 6 pt, a 14 px label, and in
-// the dark appearance a 10% white fill and #f0efec text.
+// The app's own buttons, measured in the pane (2026-10-11): 23 pt tall, corners of 6 pt and a 14 px label. Dark:
+// a 10% white fill and #f0efec text. Light: a near-white fill, a 1 pt outline about 10% black, and #0b0b0b text.
 const UNDO_HEIGHT_PT = 23
 /**
  * The desktop Undo button, drawn to look like the app's own buttons. The part of its fill that is time left is
@@ -248,13 +248,14 @@ function undoSvg(fraction: number, leftMs: number): string {
   const left = (w * fraction).toFixed(1)
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
-    `<style>.used{fill:rgba(0,0,0,0.035)}.left{fill:rgba(0,0,0,0.07)}text{fill:#1f1f1e}` +
-    `@media (prefers-color-scheme: dark){.used{fill:rgba(255,255,255,0.05)}.left{fill:rgba(255,255,255,0.1)}` +
-    `text{fill:#f0efec}}</style>` +
+    `<style>.used{fill:rgba(255,255,255,0.6)}.left{fill:rgba(0,0,0,0.06)}.edge{fill:none;stroke:rgba(0,0,0,0.1)}` +
+    `text{fill:#0b0b0b}@media (prefers-color-scheme: dark){.used{fill:rgba(255,255,255,0.05)}` +
+    `.left{fill:rgba(255,255,255,0.1)}.edge{stroke:none}text{fill:#f0efec}}</style>` +
     `<clipPath id="shape"><rect width="${w}" height="${h}" rx="6"/></clipPath>` +
     `<g clip-path="url(#shape)"><rect class="used" width="${w}" height="${h}"/>` +
     `<rect class="left" width="${left}" height="${h}">` +
     `<animate attributeName="width" from="${left}" to="0" dur="${leftMs}ms" fill="freeze"/></rect></g>` +
+    `<rect class="edge" x="0.5" y="0.5" width="${w - 1}" height="${h - 1}" rx="5.5"/>` +
     `<text x="${w / 2}" y="${h / 2}" dominant-baseline="central" text-anchor="middle" ` +
     `font-family="-apple-system, system-ui, sans-serif" font-size="14">↺ Undo</text></svg>`
   )
@@ -483,21 +484,17 @@ const THEME_KEY_PALETTE: Palette = {
   tone: {},
   mark: { needsYou: NEEDS_YOU, issue: NEEDS_YOU, findings: FINDINGS, prs: PRS, done: DONE, error: 'error' },
 }
-// The desktop app resolves theme keys to its own colors, where Auto's tab and raised keys fail contrast and the
-// ANSI palettes' premise does not hold. So on desktop every theme without hex colors above takes translucent
-// gray fills, which land near the dark and light palettes' grays over either app appearance. The app refuses
-// a tree with an hsl() alpha or color-mix() color; rgba() draws.
-const DESKTOP_KEY_PALETTE: Palette = {
+// The desktop app picks its own light or dark appearance, which the mod cannot read, and Claude Code's theme does
+// not follow it. Theme keys resolve to the app's colors, so the desktop pane draws text in theme keys and fills in
+// translucent grays, which stand about as far above the app's background in either appearance: #262626 over the
+// dark #1a1a19, #efefef over white. The app refuses a tree with an hsl() alpha or color-mix() color; rgba() draws.
+const DESKTOP_PALETTE: Palette = {
   ...THEME_KEY_PALETTE,
-  tab: 'rgba(128, 128, 128, 0.2)',
-  card: 'rgba(128, 128, 128, 0.2)',
-  raised: 'rgba(128, 128, 128, 0.36)',
+  tab: 'rgba(128, 128, 128, 0.12)',
+  card: 'rgba(128, 128, 128, 0.12)',
+  raised: 'rgba(128, 128, 128, 0.24)',
   selection: 'rgba(76, 154, 255, 0.2)',
 }
-const HEX_THEMES = new Set(['dark', 'dark-daltonized', 'light', 'light-daltonized'])
-// On the desktop app's dark background, #1a1a19, the cards and the selected tab stand half as far above it as the
-// terminal's fills do, which read too strong in the pane.
-const DESKTOP_DARK_FILLS = { card: '#292929', raised: '#333333' }
 /**
  * The look the mod draws for an engine surface. Mobile and VS Code get the terminal look, which nobody has checked
  * there: docs/reference/claude-desktop-app.md records what is known about those surfaces.
@@ -505,13 +502,9 @@ const DESKTOP_DARK_FILLS = { card: '#292929', raised: '#333333' }
 function lookOf(surface: RenderSurface): ModLook {
   return surface === 'desktop' ? 'desktop' : 'terminal'
 }
-/** The palette for a Claude Code theme, drawn in the terminal or the desktop app. */
+/** The palette for a Claude Code theme in the terminal. The desktop app's palette follows the app instead. */
 function paletteFor(theme: string, look: ModLook): Palette {
-  if (look === 'terminal') return PALETTES[theme] ?? THEME_KEY_PALETTE
-  if (!HEX_THEMES.has(theme)) return DESKTOP_KEY_PALETTE
-  const palette = PALETTES[theme]!
-
-  return theme.startsWith('dark') ? { ...palette, ...DESKTOP_DARK_FILLS } : palette
+  return look === 'desktop' ? DESKTOP_PALETTE : (PALETTES[theme] ?? THEME_KEY_PALETTE)
 }
 // The blank columns on each side of a docked tab's name, which a click there also selects. A pane too narrow
 // for the three tabs at this padding draws them with one column each side instead.
