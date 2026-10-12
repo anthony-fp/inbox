@@ -1,6 +1,6 @@
 # A PRs tab in Codex
 
-Status: built. Not yet checked in the Codex app: whether `gh` runs from the server and finds the branch's PR.
+Status: built. `gh` runs from the server: the shared fetch, run with the PATH the Codex app gives the server, found `gh` and its sign-in, a linked PR and the branch's PR. Not yet seen in the Codex app: the PRs tab drawing those views, and a PR press sending its message.
 
 The Codex Inbox tab gets the PRs tab the Claude panes have. It lists the PRs the conversation links and the current branch's PR, each with its verdict, its review threads and its failing checks, and the same buttons. A press sends Codex the same message it sends Claude.
 
@@ -33,4 +33,4 @@ The ledger already keeps the PRs a conversation links, in `ledger.prs`, for both
 
 - `./scripts/check.sh`, with tests for the shared fetch and press rules moved alongside them.
 - The tab in a headless browser with the demo state.
-- In the Codex app: whether `gh` runs from the server and finds the branch's PR. This is the one part a harness cannot show.
+- In the Codex app: the PRs tab in a chat on a branch with an open PR, and one PR press. This is the one part a harness cannot show.
