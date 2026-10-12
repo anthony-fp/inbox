@@ -1633,15 +1633,11 @@ function PrBlock({
   return (
     <section>
       <div class="pr-head">
-        <span class="tone-prs num">#{pr.number}</span> {pr.title}
+        <span class="tone-prs num">#{pr.number}</span> {pr.title}{' '}
+        <span class={tone ? `pr-verdict tone-${tone}` : 'pr-verdict muted'}>{head}</span>
+        <span class="pr-verdict muted">{unlisted.map(r => `${DOT}${r}`).join('')}</span>
       </div>
-      <div class="pr-status">
-        <div>
-          <span class={tone ? `tone-${tone}` : 'muted'}>{head}</span>
-          <span class="muted">{unlisted.map(r => `${DOT}${r}`).join('')}</span>
-        </div>
-        {pr.error ? <div class="tone-error">Last refresh failed: {pr.error}</div> : null}
-      </div>
+      {pr.error ? <div class="pr-status tone-error">Last refresh failed: {pr.error}</div> : null}
       <div class="pr-actions keys">
         {keys.map(k => (
           <KeyButton k={k} isGuarded={false} />

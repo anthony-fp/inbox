@@ -203,7 +203,7 @@ Three rows have no Dismiss:
 
 "Address it" on a finding becomes "Address", the same word as on a thread.
 
-**PR readiness.** The block's status line is one of: `Ready to merge: approved, checks pass, no threads waiting on you`, `Blocked: <reasons>`, a draft (`Blocked: draft, …`, gray), `Waiting: <reasons>` (gray), `Merged` or `Closed`. `Blocked` names only what waits on the person: a draft, conflicts, failing checks, requested changes and threads waiting on them. The rows under the block list each check and thread. `Waiting` shows once none of those is left, and names what waits on others: threads sent to Claude or on changed lines, a needed approval, running checks.
+**PR readiness.** The block's status follows its title on the same line, in its color, with no mark. It is one of: `Ready to merge: approved, checks pass, no threads waiting on you`, `Blocked: <reasons>`, a draft (`Blocked: draft, …`, gray), `Waiting: <reasons>` (gray), `Merged` or `Closed`. `Blocked` names only what waits on the person: a draft, conflicts, failing checks, requested changes and threads waiting on them. The rows under the block list each check and thread. `Waiting` shows once none of those is left, and names what waits on others: threads sent to Claude or on changed lines, a needed approval, running checks.
 
 **Every option draws.** Today `CHOICE_KEYS` in `hooks/register.tsx:1549` cuts a question at 9 lettered options and steps. Under this plan every option has a button. In the terminal only the first 9 get letters.
 

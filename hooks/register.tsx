@@ -45,7 +45,6 @@ import type {
 } from '../types'
 import { demoView, isDemoCopy } from './demo'
 import type { Exchange, Press, Update } from './ledger'
-import type { IsThreadSent, PrStatus } from './prs'
 import {
   applyPrPress,
   drawnPrs,
@@ -2130,20 +2129,6 @@ type ClosedLine = Pick<Closed, 'id' | 'ask' | 'at' | 'how' | 'outcome'>
 /** The outcome as the pane shows it: "Dismissed", "Yes, renamed". */
 function outcomeText(d: Pick<Closed, 'outcome'>): string {
   return capitalized(d.outcome)
-}
-
-/**
- * A PR's status line: a mark, and GitHub's colors, green ready, purple merged,
- * red closed and a gray draft. Blocked is amber, the color of what waits on the person,
- * and Waiting gray, since it waits on others.
- */
-const PR_STATUSES: Record<PrStatus, { mark: string; tone: Tone | null }> = {
-  ready: { mark: '✓', tone: PR_TONES.ready },
-  blocked: { mark: '◇', tone: PR_TONES.blocked },
-  waiting: { mark: '◇', tone: PR_TONES.waiting },
-  draft: { mark: '◇', tone: PR_TONES.draft },
-  merged: { mark: '◇', tone: PR_TONES.merged },
-  closed: { mark: '◇', tone: PR_TONES.closed },
 }
 
 /**
@@ -4748,7 +4733,7 @@ export const register: Register = on => {
     }) => {
       if (isSettled) return settledPrBlock(pr)
       const { status, head: statusHead, unlisted } = readiness(pr, isThreadSent)
-      const { mark, tone } = PR_STATUSES[status]
+      const tone = PR_TONES[status]
       const waitingOn = threadsOnYou(pr, isThreadSent)
       // A Dismiss left on a PR that is tracked again, as one a later reply links, is over.
       const prLast = lastActions[prMarkId(pr.ref)]?.action === 'pr-dismiss' ? null : lastActionText(prMarkId(pr.ref))
@@ -4814,22 +4799,19 @@ export const register: Register = on => {
           : []),
       ]
 
-      // The status word carries its color, then the reasons no row below lists, muted, so the title stays the loudest
-      // line. On desktop the word says the status, so it needs no mark.
-
+      // The status word follows the title in its color, then the reasons no row below lists, muted, so the title stays
+      // the loudest text.
       const titleLine = (
         <Text wrap="wrap">
           <Text color={look === 'desktop' ? pal.mark.prs : pal.tone.prs}>{`#${pr.number}\u2002`}</Text>
           <Text bold>{pr.title}</Text>
+          {/* Desktop's palette names few tones, so a status falls back to its mark's color there. */}
+          <Text color={tone ? (pal.tone[tone] ?? pal.mark[tone]) : pal.muted}>{`\u2002${statusHead}`}</Text>
+          <Text color={pal.muted}>{unlisted.map(r => `${DOT}${r}`).join('')}</Text>
         </Text>
       )
       const statusBlock = (
         <Box flexDirection="column">
-          {/* Desktop's palette names few tones, so a status falls back to its mark's color there. */}
-          <Text wrap="wrap">
-            <Text color={tone ? (pal.tone[tone] ?? pal.mark[tone]) : pal.muted}>{statusHead}</Text>
-            <Text color={pal.muted}>{unlisted.map(r => `${DOT}${r}`).join('')}</Text>
-          </Text>
           {/* The next poll is minutes away, and desktop has no key to refresh with. */}
           {pr.error ? (
             <Box flexDirection="column">
@@ -4875,20 +4857,15 @@ export const register: Register = on => {
         </Box>
       )
 
-      // On desktop the title, status and actions start at the rows' text column, as group titles do there, so the
-      // block and its rows share one edge.
+      // On desktop the title and actions start at the rows' text column, as group titles do there, so the block and
+      // its rows share one edge.
       return section([
         ...(look === 'desktop'
           ? [
               desktopFrame({ key: `pr-title-${pr.ref}`, padY: 0, children: titleLine }),
-              ...titleGap(false),
               desktopFrame({ key: `pr-status-${pr.ref}`, padY: 0, children: statusBlock }),
             ]
-          : [
-              <Box paddingLeft={1}>{titleLine}</Box>,
-              ...titleGap(false),
-              treeRow(null, <Text color={tone ? pal.mark[tone] : pal.muted}>{mark}</Text>, statusBlock),
-            ]),
+          : [<Box paddingLeft={1}>{titleLine}</Box>, <Box paddingLeft={1}>{statusBlock}</Box>]),
         // Threads come first: a thread waits on the person, and a failing check usually on Claude.
         ...prRowGroup('Review threads', threads, `${pr.ref}-threads`),
         ...prRowGroup('Failing checks', checks, `${pr.ref}-checks`),

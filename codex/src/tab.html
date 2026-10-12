@@ -197,7 +197,7 @@
         white-space: pre;
       }
 
-      /* A PR's block: its number and title, its verdict, its actions, then its threads and checks. */
+      /* A PR's block: its number, title and verdict, its actions, then its threads and checks. */
       .pr-head,
       .pr-status,
       .pr-actions,
@@ -208,7 +208,8 @@
       .pr-head {
         font-weight: 600;
       }
-      .pr-head .num {
+      .pr-head .num,
+      .pr-head .pr-verdict {
         font-weight: 400;
       }
       .pr-actions {
