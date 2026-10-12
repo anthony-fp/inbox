@@ -20,7 +20,7 @@ export type RowProps = {
   /** Muted, before the title, such as a review thread's path. */
   before: string
   title: string
-  /** The row's last action, muted after the title. */
+  /** The row's last action, muted on its own line under the title. */
   after: string
   /** The age, at the side. */
   side: string
@@ -97,8 +97,9 @@ const Row: ClientModule<RowProps, State> = (props, surface) => {
 
   const columns = surface.columns || props.fallbackColumns
   const textCells = columns - FRAME_CELLS - props.markCells - props.sideCells
-  const budget = Math.floor(textCells * props.charsPerCell * props.maxLines)
-  const line = fitLine(budget, props.before, props.title, props.after)
+  const perLine = Math.floor(textCells * props.charsPerCell)
+  const line = fitLine(perLine * props.maxLines, props.before, props.title, '')
+  const after = clipAtSpace(props.after, perLine)
   const background = pressed ? props.colors.pressed : hover ? props.colors.hover : null
   // A raised background can share its color with muted text, so on it all text takes the palette's text for it.
   const isRaised = background !== null && background === props.colors.hover
@@ -136,9 +137,9 @@ const Row: ClientModule<RowProps, State> = (props, surface) => {
             children: [
               ...(props.before ? [Text({ ...colored(props.colors.muted), children: props.before })] : []),
               line.title,
-              ...(line.after ? [Text({ ...colored(ageColor), children: line.after })] : []),
             ],
           }),
+          ...(after ? [Text({ wrap: 'truncate-end', ...colored(ageColor), children: after })] : []),
         ],
       }),
       Box({

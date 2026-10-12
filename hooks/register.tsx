@@ -507,7 +507,7 @@ const DESKTOP_PALETTE: Palette = {
   age: 'inactive',
   key: 'remember',
   line: 'subtle',
-  divider: 'subtle',
+  divider: 'rgba(128, 128, 128, 0.25)',
   tone: {},
   mark: {
     needsYou: 'inactive',
@@ -3610,7 +3610,7 @@ export const register: Register = on => {
         handle: row.handle,
         before: row.line?.before ?? '',
         title: text.trim(),
-        after: f?.age ? unbroken(`${DOT}${f.text}`) : row.line?.after ? unbroken(row.line.after) : '',
+        after: f?.age ? f.text : (row.line?.after ?? '').replace(DOT, '').trim(),
         side: sideAge(row),
         head: row.head ? { label: row.head.label, color: pal.tone[row.head.tone] ?? pal.mark[row.head.tone] } : null,
         padY: DESKTOP_ROW_PAD,
@@ -4159,15 +4159,15 @@ export const register: Register = on => {
 
     // A group's title: its name, and how many of its items are open. An empty
     // group's own line says it has none, so its title has no count.
-    // Desktop labels a group as the app labels its sidebar's groups: muted, at the rows' text column.
+    // Desktop draws a group's title at the rows' text column.
     const groupTitle = (title: string, count: number) =>
       look === 'desktop' ? (
         desktopFrame({
           padY: 0,
           children: (
-            <Text color={pal.muted}>
-              {title}
-              {count > 0 ? `${DOT}${count}` : ''}
+            <Text>
+              <Text bold>{title}</Text>
+              {count > 0 ? <Text color={pal.muted}>{`${DOT}${count}`}</Text> : null}
             </Text>
           ),
         })
@@ -4179,16 +4179,20 @@ export const register: Register = on => {
           </Text>
         </Box>
       )
-    const section = (children: JSX.Element | JSX.Element[]) => (
-      <Box
-        flexDirection="column"
-        // Desktop rows pad themselves, so a section adds only the space above its label.
-        {...(look === 'desktop' ? { paddingTop: blankLine } : { paddingY: blankLine })}
-        backgroundColor={isInline ? undefined : pal.card}
-      >
-        {children}
-      </Box>
-    )
+    // On desktop a hairline rule tops each section, so the sections read apart without cards.
+    const section = (children: JSX.Element | JSX.Element[]) =>
+      look === 'desktop' ? (
+        <Box flexDirection="column">
+          <Box height={1 / DESKTOP_LINE_PT} backgroundColor={pal.divider} />
+          <Box flexDirection="column" paddingTop={blankLine}>
+            {children}
+          </Box>
+        </Box>
+      ) : (
+        <Box flexDirection="column" paddingY={blankLine} backgroundColor={isInline ? undefined : pal.card}>
+          {children}
+        </Box>
+      )
     // A blank line in the tree, but for its │: under a title, so the children
     // do not crowd it, and between two-line entries, so they read apart. Inline
     // it is left out, so callers spread what this returns.
