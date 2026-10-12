@@ -16,7 +16,7 @@ A difference in material is allowed. A difference in structure is drift, unless 
 - **Region:** a horizontal band of the pane. There are four: notice, tab bar, error line, body.
 - **Section:** a label line, its rows, and an optional fold of closed rows.
 - **Row grid:** the three columns every row uses. A mark column (2 columns wide), a text column, and a side column (5 columns wide) for the age or Undo.
-- **Column:** the abstract width unit. One terminal cell, about 7.9 pt on desktop, and an unmeasured px value in Codex.
+- **Column:** the abstract width unit. One terminal cell, 7.9 pt on desktop (`DESKTOP_CELL_PT`, measured), and 13 px in Codex, where the 2-column mark column is `--text-x` less `--mark-x`, 26 px.
 - **Emphasis:** an action's rank, `ActionView.emphasis` from `three-looks.md` step 6: `primary`, `normal` or `quiet`.
 - **Role:** a named color use, such as `muted` or `surface.selected`. Each look maps a role to a value.
 
@@ -175,11 +175,11 @@ The goal: a change to the structure is made once, and a look that does not follo
 ```ts
 export const COLUMNS = { mark: 2, side: 5 } as const
 export type Space = 's0' | 's1' | 's2' | 's3' | 's4'
-export const BREAKPOINTS = { statusWraps: 54, ageMoves: 50, tabsShrink: 40 } as const
+export const BREAKPOINTS = { narrow: 50 } as const
 export const REGIONS = ['notice', 'tabs', 'error', 'body'] as const
 ```
 
-Each look's traits give `column` and `space: Record<Space, number>` in its own unit. Layout code asks for `space.s3`, never a number. The breakpoints are estimates from reading the code, not measurements. Measure them against `DESKTOP_WIDE_AT` and the tab-shrink constants before they replace those constants. The desktop row padding of 8 pt also needs measuring as a fraction of a line.
+Each look's traits give `column` and `space: Record<Space, number>` in its own unit. Layout code asks for `space.s3`, never a number. The code has one breakpoint: `DESKTOP_WIDE_AT`, 50 columns. Below it, the desktop pane puts its status under the tabs and drops closed rows' ages. `narrow` takes its value. Add another breakpoint only when a layout change needs one, measured in the app it applies to. The row padding is `ROW_PAD_PT`, 8 pt, already in `hooks/layout.ts`. Desktop draws it as 8 / 19 of a line, from the measured `DESKTOP_LINE_PT`, and Codex as 8 px.
 
 ### Keyed tables
 
