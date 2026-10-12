@@ -206,6 +206,8 @@ const DRAW_IN_MS = 200
 const DRAW_IN_STEPS = 4
 const DEMO = atom({ plugin: 'inbox', key: 'demo' } as const, null as DemoCopy | null)
 const DEMO_BANNER = 'Showing sample entries. Presses here send nothing.'
+// The desktop pane's shorter notice, which fits one line beside Hide demo.
+const DESKTOP_DEMO_NOTE = 'Sample entries. Presses send nothing.'
 const TOOLS_REFUSED_TEXT =
   "Claude cannot record or close items here: your organization's settings block the inbox's tools."
 const PR_POLL_MS = 2 * 60_000
@@ -3942,18 +3944,13 @@ export const register: Register = on => {
     // half a line below them, so it does not read as the first tab's caption.
     // Desktop draws the tabs in a Client, whose region takes the pointer over each whole tab.
     // The tabs Box pads the bar by 1 column on each side, and puts 3 between the tabs and the status.
-    // The tabs narrow before the status leaves their row, and take their full width again once it has.
-    const statusCells = 3 + Math.ceil(status.length / DESKTOP_CHARS_PER_CELL)
-    const sizesIn = (columns: number) => {
-      const sizes = desktopTabSizes(
-        TABS.map(({ id, label }) => ({ label, count: tabCounts[id] })),
-        columns,
-      )
-      return { sizes, width: sizes.widths.reduce((sum, w) => sum + w, 0) + sizes.gap * (sizes.widths.length - 1) }
-    }
-    const beside = sizesIn(e.props.bodyColumns - 2 - statusCells)
-    const isStatusBelow = look === 'desktop' && beside.width > e.props.bodyColumns - 2 - statusCells
-    const tabSizes = isStatusBelow ? sizesIn(e.props.bodyColumns - 2).sizes : beside.sizes
+    const tabSizes = desktopTabSizes(
+      TABS.map(({ id, label }) => ({ label, count: tabCounts[id] })),
+      e.props.bodyColumns - 2,
+    )
+    const tabsWidth = tabSizes.widths.reduce((sum, w) => sum + w, 0) + tabSizes.gap * (tabSizes.widths.length - 1)
+    const isStatusBelow =
+      look === 'desktop' && tabsWidth + 3 + Math.ceil(status.length / DESKTOP_CHARS_PER_CELL) + 2 > e.props.bodyColumns
     const tabProps: TabsProps | null = hasClient
       ? {
           tabs: TABS.map(({ id, label }, n) => ({
@@ -4797,7 +4794,7 @@ export const register: Register = on => {
           <Box flexDirection="row" alignItems="center" columnGap={2} paddingX={1} marginBottom={blankLine}>
             <Box flexGrow={1} flexShrink={1}>
               <Text wrap="wrap" color={pal.muted}>
-                {DEMO_BANNER}
+                {DESKTOP_DEMO_NOTE}
               </Text>
             </Box>
             <Button key="hide-demo" label="Hide demo" onPress={() => void setDemo($, false)} />
