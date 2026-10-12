@@ -33,7 +33,8 @@ Shared modules are in `hooks/`. Both hosts import them. They import nothing from
 | `codex/src/texts.ts` | Codex adapter. Texts only Codex reads, and the `CODEX` host. |
 | `codex/src/core.ts` | Codex host. Session logic as pure functions on the session state. |
 | `codex/src/state.ts` | Codex host. One JSON state file per session, under a lock. |
-| `codex/src/server.ts` | Codex host. The MCP server: tools, presses, open, queue. |
+| `codex/src/server.ts` | Codex host. The MCP server: tools, presses, open, queue, and the background fetch of the session's PRs. |
+| `codex/src/gh.ts` | Codex host. Finds a gh the server can start, and runs it for the shared PR fetch. |
 | `codex/src/server-main.ts` | Codex host. The loader that Codex starts once per app launch. |
 | `codex/src/server-handler.ts` | Codex host. The request handler the loader reloads. |
 | `codex/src/update.ts` | Codex host. The per-reply update through `codex exec`. |
@@ -68,8 +69,8 @@ Change a rule in its owner. Do not change it in a reader.
 | Demo data | `hooks/demo.ts:demoView` | The mod's `/inbox demo` and `codex/src/demo.ts:demoState` |
 | Model-read texts | `hooks/ledger.ts:guidanceText`, `hooks/ledger.ts:systemText`, `hooks/ledger.ts:inboxText`, `hooks/ledger.ts:promptNotes`, `hooks/tools.ts:findingDescription` | The mod and Codex, each through its `Host` |
 | Saved state shapes and upgrades | `types/index.d.ts:PluginState`, `hooks/ledger.ts:upgradeLedger`, `hooks/presses.ts:upgradeLastActions` | The mod also uses `hooks/register.tsx:upgradeState`. Codex uses `codex/src/state.ts:upgraded`. |
-| PR readiness and prompts | `hooks/prs.ts:readiness`, `hooks/prs.ts:prompts` | The mod only |
-| PR presses | `hooks/register.tsx:applyPrPress` | The mod only. Moves to its own module in step 10 of `docs/plans/three-looks.md`. |
+| PR readiness and prompts | `hooks/prs.ts:readiness`, `hooks/prs.ts:prompts` | The mod and the Codex tab |
+| PR presses, which PRs the tab draws, and how a PR is fetched | `hooks/pr-tab.ts:applyPrPress`, `hooks/pr-tab.ts:drawnPrs`, `hooks/pr-tab.ts:fetchTracked` | The mod and the Codex server |
 
 Some rules are still written once per adapter. Each is a place where the looks can drift.
 
@@ -94,7 +95,8 @@ A difference is on purpose when a look cannot do something or the product decide
 | Hot reload | Mod handlers reload. | Same as terminal. | The handler reloads, and an open tab replaces its page with the new build's. The loader needs Codex restarted. | Codex starts the loader once per app launch and keeps it. | `codex/src/server-main.ts:load`, `codex/src/server-handler.ts:createHandler` |
 | Storage | Engine atoms hold the live session. The engine store keeps a saved ledger per session. | Same as terminal. | One JSON file per session, under a lock. | Codex has no engine store. Its hooks run as separate short-lived processes beside the server. | `hooks/register.tsx:save`, `codex/src/state.ts:withLock` |
 | How a press sends, opens and copies | Sends with the engine's prompt submit. Opens and copies in process. | Same as terminal. | Sends with `codex queue` from the server. Opens in the server. The tab copies. | Codex's server cannot reach the page's clipboard. | `hooks/presses.ts:EffectHost`, `codex/src/server.ts:makeServer` |
-| Band, stop and dialog rows, PRs tab | Yes. | Yes. | No. | Codex has no line above its prompt, and no PR data. | `hooks/view.ts:TABS`, `hooks/view.ts:ROW_TABS` |
+| Band, stop and dialog rows | Yes. | Yes. | No. | Codex has no line above its prompt. | `hooks/view.ts:TABS`, `hooks/view.ts:ROW_TABS` |
+| PR data | The mod runs gh through the engine, on a timer while the person is around. | Same as terminal. | The server runs gh through `deps.exec` in the session's folder, and refetches on a view when the last fetch is over 2 minutes old. It tries `gh`, then the Homebrew folders. | The desktop app may start the server without Homebrew on its PATH. | `hooks/register.tsx:fetchPrsNow`, `codex/src/server.ts:fetchPrs`, `codex/src/gh.ts:ghFinder` |
 | Settle window | A row stays in place for `SETTLED_MS` from the close. | Same as terminal. | The server lists a row as settled for `SETTLED_MS` plus two polls from the close. The tab draws it in place for `SETTLED_MS` from the first poll that lists it. | The tab only learns of a close at its next poll. | `codex/src/settle.ts:SETTLE_WINDOW_MS`, `codex/src/settle.ts:drawnSettled` |
 | Failed per-reply update | Keeps `turnsApplied`. | Same as terminal. | Advances `turnsApplied`. | The mod has a catch-up that retries. Codex has none, so a handed-off row would stay folded. | `hooks/register.tsx:queueUpdate`, `codex/src/update.ts:applied` |
 | Primary buttons | None. A plain terminal Button ignores `variant`. The recommended option ends "(recommended)". | The recommended option, Done and Address. | Only the recommended option, with no "(recommended)" text. Drift, fixed in step 6. | `docs/plans/inbox-ui.md` says the desktop pane makes the recommended option, or else Done or Address, the primary button. | `hooks/register.tsx:keyedButton`, `codex/src/tab.tsx:KeyButton` |
@@ -117,7 +119,7 @@ State in your change, for each look, whether it applies and what you checked.
 | A saved field | `types/index.d.ts:PluginState`, then `hooks/ledger.ts:upgradeLedger` or `hooks/register.tsx:upgradeState`, and `codex/src/state.ts:upgraded` | Load a state saved by the old build in the mod and in Codex. |
 | A size or timing | `hooks/view.ts` constants or `hooks/layout.ts:ROW_PAD_PT` when both looks share it, else the adapter's own constant | Measure in the terminal, desktop and Codex tab. Add a row to Differences on purpose when the values differ. |
 | A tab | `hooks/view.ts:TABS` and `hooks/view.ts:ROW_TABS` | The mod pane, the Codex tab, `codex/src/arrivals.ts:TAB_IDS` and the empty text in `hooks/view.ts:emptyText`. |
-| A PR feature | `hooks/prs.ts` and `hooks/register.tsx:applyPrPress` | The mod's terminal and desktop looks only. Codex has no PRs. |
+| A PR feature | `hooks/prs.ts` and `hooks/pr-tab.ts:applyPrPress` | All three looks. Check the PRs tab in each, and add the case to `codex/tests/server.spec.ts` when the repo's coverage expects it. |
 | Anything in `hooks/` that Codex imports | The shared module | Run `npm --prefix codex run build` to rebuild the Codex bundles. `./scripts/check.sh` fails until you do. |
 | `codex/src/server-main.ts` | The loader | Quit and reopen Codex. A change to `codex/src/server-handler.ts` or anything it imports reloads without a restart. |
 

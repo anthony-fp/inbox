@@ -1,6 +1,6 @@
 # A PRs tab in Codex
 
-Status: building.
+Status: built. Not yet checked in the Codex app: whether `gh` runs from the server and finds the branch's PR.
 
 The Codex Inbox tab gets the PRs tab the Claude panes have. It lists the PRs the conversation links and the current branch's PR, each with its verdict, its review threads and its failing checks, and the same buttons. A press sends Codex the same message it sends Claude.
 
