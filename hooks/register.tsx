@@ -4245,20 +4245,32 @@ export const register: Register = on => {
           </Text>
         </Box>
       )
-    // On desktop a hairline rule tops each section, so the sections read apart without cards.
     const section = (children: JSX.Element | JSX.Element[]) =>
       look === 'desktop' ? (
-        <Box flexDirection="column">
-          <Box height={1 / DESKTOP_LINE_PT} backgroundColor={pal.divider} />
-          <Box flexDirection="column" paddingTop={blankLine}>
-            {children}
-          </Box>
+        <Box flexDirection="column" paddingTop={blankLine}>
+          {children}
         </Box>
       ) : (
         <Box flexDirection="column" paddingY={blankLine} backgroundColor={isInline ? undefined : pal.card}>
           {children}
         </Box>
       )
+    // A tab's sections, a line apart. On desktop a hairline rule parts each from the one above, so the sections read
+    // apart without cards; the tabs' own line already parts the first from the tabs.
+    const sections = (list: JSX.Element[]) => (
+      <Box flexDirection="column" flexGrow={1} gap={look === 'desktop' ? 0 : 1}>
+        {look === 'desktop'
+          ? list.flatMap((el, n) =>
+              n === 0
+                ? [el]
+                : [
+                    <Box key={`rule-${n}`} marginTop={1} height={1 / DESKTOP_LINE_PT} backgroundColor={pal.divider} />,
+                    el,
+                  ],
+            )
+          : list}
+      </Box>
+    )
     // A blank line in the tree, but for its │: under a title, so the children
     // do not crowd it, and between two-line entries, so they read apart. Inline
     // it is left out, so callers spread what this returns.
@@ -4622,14 +4634,7 @@ export const register: Register = on => {
             ]
           : []
 
-      return (
-        <Box flexDirection="column" gap={1}>
-          {outside}
-          {unread}
-          {nothing}
-          {groups}
-        </Box>
-      )
+      return sections([...outside, ...unread, ...nothing, ...groups])
     }
 
     // A finding stays listed until Claude closes it or the person dismisses it. Then it settles and moves to Closed.
@@ -4835,17 +4840,18 @@ export const register: Register = on => {
         ),
       ])
     }
-    const prsView = () => (
-      <Box flexDirection="column" flexGrow={1} gap={1}>
-        {prGroups.length === 0
-          ? // Loading keeps the empty state's text, so only the title changes when the fetch ends.
-            emptyState({
-              title: prState.isFetching ? 'Checking for PRs…' : 'No PRs',
-              hint: 'Your PRs show here when this session opens or links one, or when your branch has one.',
-            })
-          : prGroups.map(prBlock)}
-      </Box>
-    )
+    const prsView = () =>
+      prGroups.length === 0 ? (
+        <Box flexDirection="column" flexGrow={1}>
+          {/* Loading keeps the empty state's text, so only the title changes when the fetch ends. */}
+          {emptyState({
+            title: prState.isFetching ? 'Checking for PRs…' : 'No PRs',
+            hint: 'Your PRs show here when this session opens or links one, or when your branch has one.',
+          })}
+        </Box>
+      ) : (
+        sections(prGroups.map(prBlock))
+      )
 
     const move = (step: number) => {
       const to = Math.min(Math.max(at + step, 0), ids.length - 1)
