@@ -249,13 +249,11 @@ function plural(count: number, one: string, many: string): string {
 export function readiness(
   pr: PrView,
   isSent: IsThreadSent = () => false,
-): { status: PrStatus; text: string; head: string; reasons: string } {
-  const result = (status: PrStatus, head: string, reasons = '', joint = ': ') => ({
-    status,
-    text: reasons ? `${head}${joint}${reasons}` : head,
-    head,
-    reasons,
-  })
+): { status: PrStatus; text: string; head: string; reasons: string; reasonList: string[] } {
+  const result = (status: PrStatus, head: string, reasonList: string[] = [], joint = ': ') => {
+    const reasons = reasonList.join(', ')
+    return { status, text: reasons ? `${head}${joint}${reasons}` : head, head, reasons, reasonList }
+  }
   if (pr.state === 'MERGED') return result('merged', 'Merged')
   if (pr.state !== 'OPEN') return result('closed', 'Closed')
   const { fail: failing, pending } = checkCounts(pr)
@@ -278,14 +276,14 @@ export function readiness(
     pending > 0 ? `${pending} ${pending === 1 ? 'check' : 'checks'} running` : null,
   ].filter(isPresent)
 
-  if (onYou.length > 0) return result(pr.isDraft ? 'draft' : 'blocked', 'Blocked', onYou.join(', '))
-  if (onOthers.length > 0) return result('waiting', 'Waiting', onOthers.join(', '))
+  if (onYou.length > 0) return result(pr.isDraft ? 'draft' : 'blocked', 'Blocked', onYou)
+  if (onOthers.length > 0) return result('waiting', 'Waiting', onOthers)
   const isApproved = pr.reviewDecision === 'APPROVED'
 
   return result(
     'ready',
     'Ready to merge',
-    `${isApproved ? 'approved, ' : ''}checks pass, no threads waiting on you`,
+    [...(isApproved ? ['approved'] : []), 'checks pass', 'no threads waiting on you'],
     isApproved ? ': ' : ', ',
   )
 }

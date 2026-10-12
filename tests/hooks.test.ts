@@ -1376,9 +1376,8 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   await pane.press({ key: 'tab-prs' })
   await clock.settle()
   expect(await pane.find({ text: /Add a greeting CLI/ })).toBeDefined()
-  expect(
-    await pane.find({ text: /Blocked: conflicts with main, 1 failing check, 1 thread waiting on you$/ }),
-  ).toBeDefined()
+  for (const line of ['Blocked', 'conflicts with main', '1 failing check', '1 thread waiting on you'])
+    expect(await pane.find({ text: line })).toBeDefined()
   // A blocked PR offers no Merge.
   expect(await pane.find({ key: 'merge-acme/greet#12' })).toBeUndefined()
 
@@ -1389,9 +1388,8 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   expect(await pane.find({ text: /✓ Asked to resolve conflicts\u2002·/ })).toBeDefined()
   expect((await pane.find({ key: 'resolve-acme/greet#12' }))?.props.label).toBe('Resolve conflicts again')
 
-  // Open PR reports on the block, and a failed open reads in the failing check's red.
-  const red = (await pane.findAll({ type: 'Text', text: /^Failing check$/ })).find(n => n.props.color)?.props.color
-  expect(red).toBeDefined()
+  // Open PR reports on the block, and a failed open reads in a color, not muted as its reasons are.
+  const muted = (await pane.find({ type: 'Text', text: 'conflicts with main' }))?.props.color
   expect(await pane.find({ text: '✓ Opened PR #12' })).toBeUndefined()
   await pane.press({ key: 'open-acme/greet#12' })
   await clock.settle()
@@ -1399,10 +1397,14 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   ghAnswers.push({ match: argv => argv[0] === 'open', stdout: '', fails: 'no browser' })
   await pane.press({ key: 'open-acme/greet#12' })
   await clock.settle()
-  expect((await pane.find({ type: 'Text', text: 'Could not open PR #12: no browser' }))?.props.color).toBe(red)
+  const failed = (await pane.find({ type: 'Text', text: 'Could not open PR #12: no browser' }))?.props.color
+  expect(failed).toBeDefined()
+  expect(failed).not.toBe(muted)
   ghAnswers.pop()
 
-  // The failing check comes first. It offers its log and no Fix, so it waits on the person until it passes.
+  // The failing check follows the thread. It offers its log and no Fix, so it waits on the person until it passes.
+  await pane.press({ key: 'next' })
+  await clock.settle()
   expect(await pane.find({ key: 'fix-acme/greet#12-test-key' })).toBeUndefined()
   await pane.press({ key: 'log-acme/greet#12-test-key' })
   await clock.settle()
@@ -1410,7 +1412,7 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   expect(await pane.find({ text: '✓ Opened the log' })).toBeDefined()
 
   // A thread's keys say so too, pressed by hotkey or by click.
-  await pane.press({ key: 'next' })
+  await pane.press({ key: 'previous' })
   await pane.press({ key: 'discuss-T1-key' })
   expect(sent.at(-1)).toContain("Let's talk through this review comment on PR #12")
   await clock.settle()

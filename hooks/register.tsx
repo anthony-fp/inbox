@@ -3213,11 +3213,9 @@ export const register: Register = on => {
         },
       ],
     })
-    // On desktop the block's "Failing checks" label says the kind, so the row reads as GitHub lists it:
-    // "CI / lint", then how long it ran.
+    // The block's "Failing checks" title says the kind, so the row reads as GitHub lists it: "CI / lint", then how
+    // long it ran.
     const checkRow = (pr: PrView, c: PrCheck): Row => {
-      if (look !== 'desktop')
-        return { ...checkRowBase(pr, c), head: { label: 'Failing check', tone: 'error', age: '' } }
       const ran =
         c.startedAt !== undefined && c.finishedAt !== undefined
           ? `Failed after ${took(c.finishedAt - c.startedAt)}`
@@ -3257,38 +3255,19 @@ export const register: Register = on => {
           ? { fold: t.isLinesChanged ? { note: `Lines changed since this comment${DOT}still open on GitHub` } : {} }
           : {}),
         title: threadWhere(t),
-        // On desktop the block's "Review threads" label says the kind. The first comment, which asks for the change,
-        // is the title, and the second line says who asked or the latest reply.
-        ...(look === 'desktop'
-          ? {
-              ...(t.at === null ? {} : { at: t.at }),
-              line: {
-                before: `${threadWhere(t, baseName(t.path))} `,
-                text: commentLine(t.body),
-                after: [
-                  isChanged ? 'Lines changed' : '',
-                  t.reply ? `@${t.reply.author}: ${commentLine(t.reply.body)}` : `@${t.author}`,
-                ]
-                  .filter(Boolean)
-                  .join(DOT),
-              },
-            }
-          : {
-              head: {
-                label: 'Review thread',
-                tone: 'prs' as const,
-                age: t.at === null ? '' : `${DOT}${ago(now - t.at)}`,
-                notes: [t.replies > 0 ? `${t.replies + 1} comments` : '', t.isOutdated ? 'outdated' : '']
-                  .filter(Boolean)
-                  .map(part => `${DOT}${part}`)
-                  .join(''),
-              },
-              line: {
-                before: `${threadWhere(t, baseName(t.path))} `,
-                text: commentLine(latest.body),
-                ...(isChanged ? { after: `${DOT}lines changed` } : {}),
-              },
-            }),
+        // The block's "Review threads" title says the kind. The first comment, which asks for the change, is the
+        // title, and the second line says who asked or the latest reply.
+        ...(t.at === null ? {} : { at: t.at }),
+        line: {
+          before: `${threadWhere(t, baseName(t.path))} `,
+          text: commentLine(t.body),
+          after: [
+            isChanged ? 'Lines changed' : '',
+            t.reply ? `@${t.reply.author}: ${commentLine(t.reply.body)}` : `@${t.author}`,
+          ]
+            .filter(Boolean)
+            .join(DOT),
+        },
         body: comment,
         keys: () => [
           ...(retry
@@ -3356,7 +3335,7 @@ export const register: Register = on => {
         checks: isSettled ? [] : failingChecks(pr).map(c => checkRow(pr, c)),
         threads: isSettled ? [] : waitingThreads(pr).map(t => threadRow(pr, t)),
       }))
-      .map(g => ({ ...g, rows: [...g.checks, ...g.threads] }))
+      .map(g => ({ ...g, rows: [...g.threads, ...g.checks] }))
     const rows: Record<Tab, Row[]> = {
       needsYou: lists.byTab.needsYou,
       findings: lists.byTab.findings,
@@ -3667,7 +3646,10 @@ export const register: Register = on => {
       const perCell = look === 'desktop' ? DESKTOP_CHARS_PER_CELL : 1
       // `before` is text, so it counts in characters, as the title does.
       const budget = Math.floor((e.props.bodyColumns - 3 - inset - side - buttonFrame) * perCell) - before
-      const room = Math.max(12, budget - (line.after?.length ?? 0))
+      // In the terminal a row's own `after`, such as who asked, is its muted meta line. A press's, which starts with
+      // the dot, stays on the title's line.
+      const meta = look === 'terminal' && line.after && !LEADING_DOT.test(line.after) ? line.after : null
+      const room = Math.max(12, budget - (meta ? 0 : (line.after?.length ?? 0)))
       const text = line.text.trim()
       const space = text.lastIndexOf(' ', room)
       // Desktop cuts the title to one native button, rather than draw two.
@@ -3676,8 +3658,9 @@ export const register: Register = on => {
       const second = isWrapped ? clipLabel(text.slice(space + 1), Math.max(12, width)) : null
       // Desktop wraps a long `after` under the title, so it is cut to the room the title leaves.
       const afterRoom = budget - first.length
-      const after =
-        look === 'desktop' && line.after && line.after.length > afterRoom
+      const after = meta
+        ? undefined
+        : look === 'desktop' && line.after && line.after.length > afterRoom
           ? afterRoom >= 2
             ? clipLabel(line.after, afterRoom)
             : undefined
@@ -3708,6 +3691,11 @@ export const register: Register = on => {
             <Box paddingLeft={line.before?.length ?? 0}>
               <Button plain key={`title-${row.id}-2`} label={second} {...hover} onPress={onPress} />
             </Box>
+          ) : null}
+          {meta ? (
+            <Text wrap="truncate-end" color={line.afterTone ? pal.tone[line.afterTone] : pal.muted}>
+              {meta}
+            </Text>
           ) : null}
         </Box>
       )
@@ -4906,7 +4894,6 @@ export const register: Register = on => {
     const prBlock = ({
       pr,
       isSettled,
-      rows: prRows,
       checks,
       threads,
     }: {
@@ -4917,9 +4904,8 @@ export const register: Register = on => {
       threads: Row[]
     }) => {
       if (isSettled) return settledPrBlock(pr)
-      const { status, text: statusText, head: statusHead, reasons: statusReasons } = readiness(pr, isThreadSent)
+      const { status, head: statusHead, reasonList } = readiness(pr, isThreadSent)
       const { mark, tone } = PR_STATUSES[status]
-      const hasRows = prRows.length > 0
       const waitingOn = threadsOnYou(pr, isThreadSent)
       // A Dismiss left on a PR that is tracked again, as one a later reply links, is over.
       const prLast = lastActions[prMarkId(pr.ref)]?.action === 'pr-dismiss' ? null : lastActionText(prMarkId(pr.ref))
@@ -4985,37 +4971,27 @@ export const register: Register = on => {
           : []),
       ]
 
-      // On desktop the status words carry its color and its reasons are muted, so the
-      // title stays the loudest line; the words say the status, so it needs no mark.
+      // The status word carries its color and its reasons are muted, one per line, so the title stays the loudest
+      // line. On desktop the word says the status, so it needs no mark.
 
       return section([
         <Box paddingLeft={1}>
           <Text wrap="wrap">
-            {look === 'desktop' ? (
-              <Text color={pal.mark.prs}>{`#${pr.number}\u2002`}</Text>
-            ) : (
-              <Text bold color={pal.tone.prs}>
-                #{pr.number}{' '}
-              </Text>
-            )}
+            <Text color={look === 'desktop' ? pal.mark.prs : pal.tone.prs}>{`#${pr.number}\u2002`}</Text>
             <Text bold>{pr.title}</Text>
           </Text>
         </Box>,
-        ...titleGap(hasRows),
+        ...titleGap(false),
         treeRow(
-          hasRows ? 'pass' : null,
+          null,
           look === 'desktop' ? null : <Text color={tone ? pal.mark[tone] : pal.muted}>{mark}</Text>,
           <Box flexDirection="column">
-            {look === 'desktop' ? (
-              <Text wrap="wrap">
-                <Text color={tone ? pal.tone[tone] : pal.muted}>{statusReasons ? `${statusHead}:` : statusHead}</Text>
-                {statusReasons ? <Text color={pal.muted}> {statusReasons}</Text> : null}
+            <Text color={tone ? pal.tone[tone] : pal.muted}>{statusHead}</Text>
+            {reasonList.map(r => (
+              <Text color={pal.muted} wrap="wrap">
+                {r}
               </Text>
-            ) : (
-              <Text wrap="wrap" color={tone ? pal.tone[tone] : pal.muted}>
-                {statusText}
-              </Text>
-            )}
+            ))}
             {/* The next poll is minutes away, and desktop has no key to refresh with. */}
             {pr.error ? (
               <Box flexDirection="column">
@@ -5035,13 +5011,15 @@ export const register: Register = on => {
               rowGap={look === 'desktop' ? 1 : 0}
               marginTop={blankLine}
             >
-              {/* On desktop the first action, the one that moves the PR on, is the primary button. */}
+              {/* On desktop the first action, the one that moves the PR on, is the primary button. Dismiss is quiet. */}
               {prActions.map((a, n) =>
-                look === 'desktop' ? (
+                a.key.startsWith('dismiss-') ? (
+                  <Button key={a.key} plain dimColor label={a.label} onPress={a.onPress} />
+                ) : look === 'desktop' ? (
                   <Button
                     key={a.key}
                     label={desktopLabel(a)}
-                    {...(n === 0 && !a.key.startsWith('dismiss-') ? { variant: 'primary' as const } : {})}
+                    {...(n === 0 ? { variant: 'primary' as const } : {})}
                     onPress={a.onPress}
                   />
                 ) : (
@@ -5062,21 +5040,44 @@ export const register: Register = on => {
           // Desktop has no tree lines to show the status is not one of the rows, so it starts at the title's column.
           look === 'desktop' ? 1 : undefined,
         ),
-        ...(look === 'desktop'
-          ? [
-              ...prRowGroup('Failing checks', checks, `${pr.ref}-checks`),
-              ...prRowGroup('Review threads', threads, `${pr.ref}-threads`),
-            ]
-          : [
-              ...(hasRows ? titleGap() : []),
-              ...divided(
-                prRows.map((r, n) => listRow(r, childPos(n, prRows.length))),
-                pr.ref,
-                true,
-              ),
-            ]),
+        // Threads come first: a thread waits on the person, and a failing check usually on Claude.
+        ...prRowGroup('Review threads', threads, `${pr.ref}-threads`),
+        ...prRowGroup('Failing checks', checks, `${pr.ref}-checks`),
       ])
     }
+    const isQuietPr = (g: { pr: PrView; isSettled: boolean }) =>
+      !g.isSettled && !prNeedsYou(g.pr, isThreadSent) && readiness(g.pr, isThreadSent).status !== 'ready'
+    // "#33 Title · Waiting": the title opens the PR.
+    const quietPrs = (prs: PrView[]) =>
+      section([
+        groupTitle('Nothing to do', prs.length),
+        ...titleGap(false),
+        ...prs.map(pr => {
+          const { status, head } = readiness(pr, isThreadSent)
+          const tone = PR_STATUSES[status].tone
+          const number = `#${pr.number}\u2002`
+          const room = Math.max(
+            12,
+            e.props.bodyColumns - 6 - number.length - DOT.length - head.length - columnsFor(null).textAt,
+          )
+          const line = (
+            <Box flexDirection="row" key={`quiet-${pr.ref}`}>
+              <Text color={look === 'desktop' ? pal.mark.prs : pal.tone.prs}>{number}</Text>
+              <Button
+                plain
+                key={`quiet-open-${pr.ref}`}
+                label={clipLabel(pr.title, room)}
+                onPress={prPress({ action: 'pr-open', ref: pr.ref })}
+              />
+              <Text color={pal.muted}>{DOT}</Text>
+              <Text color={tone ? pal.tone[tone] : pal.muted}>{head}</Text>
+            </Box>
+          )
+          return look === 'desktop'
+            ? desktopFrame({ key: `quiet-${pr.ref}`, padY: 0, children: line })
+            : treeRow(null, null, line, `quiet-${pr.ref}`)
+        }),
+      ])
     const prsView = () =>
       prGroups.length === 0 ? (
         <Box flexDirection="column" flexGrow={1}>
@@ -5088,7 +5089,14 @@ export const register: Register = on => {
         </Box>
       ) : (
         // A PR block is denser than a list, with its buttons last, so its rules take a full line on each side.
-        sections(prGroups.map(prBlock), 2)
+        // PRs that wait on nobody, neither blocked nor ready, are one line each at the end.
+        sections(
+          [
+            ...prGroups.filter(g => !isQuietPr(g)).map(prBlock),
+            ...(prGroups.some(isQuietPr) ? [quietPrs(prGroups.filter(isQuietPr).map(g => g.pr))] : []),
+          ],
+          2,
+        )
       )
 
     const move = (step: number) => {
