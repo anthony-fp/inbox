@@ -1,6 +1,6 @@
 # Desktop pane layout
 
-Status: building.
+Status: built. Checked in the dark appearance with the demo's Needs you tab.
 
 The desktop pane's rows start at five different columns, so its hierarchy reads as haphazard. This plan gives every line in a list one shape, so the pane reads like the Claude app's own lists. The terminal pane does not change.
 
@@ -27,10 +27,15 @@ Each frame is a Box with `borderStyle="single"` and a transparent border. That r
 
 ## Head of the pane
 
-- The demo notice and Hide demo share one muted line.
-- The update time sits at the right of the tab row whenever it fits.
+- The demo notice is muted and shares one line with Hide demo. Desktop words it shorter, "Sample entries. Presses send nothing.", so it fits.
+- The update time stays under the tabs when it does not fit beside them. Narrowing the tabs to make room wrapped the first tab's count.
 
-## Unknowns to check in the pane
+## Checked in the pane
 
-- Whether a frame drawn inside a Client insets its content as much as one in the hooks tree.
-- How wide the app draws the longest short age, such as "40m", against the 5-column side.
+- A frame drawn inside a Client insets its text exactly as one in the hooks tree: the row Client's text and the selected row's start at the same pixel.
+- Ages such as "48m" and "1h" fit the 5-column side.
+- The selected row's fill draws with rounded corners.
+
+## Not checked yet
+
+- The light appearance, the Findings and PRs tabs, and a row's hover in a frame.
