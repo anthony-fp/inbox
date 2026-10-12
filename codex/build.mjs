@@ -125,7 +125,9 @@ if (mode === '--dev') {
     try {
       const build = await serverBuild()
       const script = await buildTabScript(build)
-      writeFileSync(page, tabPage(readFileSync(join(here, 'src', 'tab.html'), 'utf8'), script))
+      // The server reads the page when its time changes and keeps it, so it must never see it half written either.
+      writeFileSync(`${page}.tmp`, tabPage(readFileSync(join(here, 'src', 'tab.html'), 'utf8'), script))
+      renameSync(`${page}.tmp`, page)
       // A tab opened while this runs starts from the handler's own page, so that page carries the script too.
       const server = await esbuild.build({
         ...common,

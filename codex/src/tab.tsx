@@ -375,6 +375,9 @@ async function swapPage() {
   isSwapping = true
   try {
     const { html } = await callTool<{ html: string }>('inbox_tab_page', {}, READ_TIMEOUT_MS)
+    // A page cut off mid-write would blank the tab for good, since it could never connect again. The next poll
+    // tries again.
+    if (!/<\/html>\s*$/i.test(html)) throw new Error('The new page is incomplete.')
     // document.open keeps this window's timers, so the old page's polls and redraws would run beside the new
     // page's. Timer ids count up from 1, so clearing every id up to a new one stops them all.
     const last = window.setTimeout(() => undefined, 0)
