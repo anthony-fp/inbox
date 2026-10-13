@@ -134,11 +134,11 @@ export function isHandedOff(
 }
 
 /**
- * Whether a press handed its question, task or finding row to the agent, so the row closes to its one line and stays
- * closed. Fix settles its row instead, and a review thread waits on GitHub.
+ * Whether a press handed its row to the agent, so the row closes to its one line and stays closed: a question, task,
+ * finding, review thread or check. Fix settles its finding's row instead, and a PR block is always open.
  */
 export function isFoldingPress(id: string, last: Pick<LastAction, 'kind' | 'action'> | undefined): boolean {
-  return /^[if]\d+$/.test(id) && last?.kind === 'handoff' && last.action !== 'address'
+  return !id.startsWith('pr:') && last?.kind === 'handoff' && last.action !== 'address'
 }
 
 /**

@@ -1117,7 +1117,7 @@ function ListRow({
   const ageAt = !pending && f && hasAge(f) ? f.at : null
   const isInSide = ageAt !== null && !isSelected && !isClosing
   const last = isInSide ? null : label
-  const side = ageAt !== null ? `${isInSide ? `${label} ` : ''}${shortAgo(now - ageAt)}` : last ? null : row.age
+  const side = ageAt !== null ? shortAgo(now - ageAt) : last ? null : row.age
   const afterTone = !pending && isFailure(row.feedback) ? 'error' : undefined
 
   // The same elements draw the row open and closed, so its line stays put and only the panel under it comes and goes.
@@ -1152,7 +1152,10 @@ function ListRow({
         </button>
         {isSelected || isClosing ? <Panel row={row} isClosing={isClosing} /> : null}
       </div>
-      <span class="side">{side}</span>
+      <span class="side">
+        {isInSide ? <span class="side-label">{label}</span> : null}
+        {side}
+      </span>
     </div>
   )
 }

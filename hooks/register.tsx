@@ -1918,7 +1918,7 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
   if (failed.isRowFailed && !('ref' in p) && p.action === 'type')
     await update($, DRAFTS, d => (d[p.id] ? d : { ...d, [p.id]: p.text }))
   // A hand-off that did not send gave nothing away, so its row opens again to show why, with [Try again].
-  if (failed.isRowFailed && isFolding) await selectRestored($, rowId)
+  if (failed.isRowFailed && isFolding) await reopenPressed($, rowId)
   void publishStatus($)
 }
 
@@ -1967,6 +1967,15 @@ function applyAnyPress(
 async function closePressed($: EngineInterface) {
   const [tab, openedAt] = await Promise.all([read($, TAB), $.clock.now()])
   await update($, SELECTION, s => ({ ...s, [tab]: { id: null, index: s[tab].index, openedAt } }))
+}
+
+/**
+ * Opens again the row `closePressed` closed, where it was. Unguarded, as `keepPressedOpen` leaves a row: the person
+ * was pressing on it, so [Try again] takes a click at once.
+ */
+async function reopenPressed($: EngineInterface, id: string) {
+  const tab = await read($, TAB)
+  await update($, SELECTION, s => ({ ...s, [tab]: { id, index: s[tab].index, openedAt: 0 } }))
 }
 
 /** Selects a row Undo brought back, in its own tab. */

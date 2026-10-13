@@ -255,7 +255,9 @@ export function feedbackOf(
   const isAwaiting = isAwaitingReply(last, turns)
   const working = WORKING_LABELS[last.action]
   if (last.kind === 'talk' && working && isAwaiting) return { is: 'working', label: working, at: last.at }
-  if (!isAwaiting && isFoldingPress(id, last)) return { is: 'stillOpen', label: last.text, at: last.at }
+  // A review thread or check waits on GitHub instead, so only a question, task or finding row reads it.
+  if (!isAwaiting && /^[if]\d+$/.test(id) && isFoldingPress(id, last))
+    return { is: 'stillOpen', label: last.text, at: last.at }
 
   // A step's own label is an instruction, as "Run load script", so a step handed to the agent says it was.
   const isHandedStep = last.kind === 'handoff' && last.action.startsWith('step-')

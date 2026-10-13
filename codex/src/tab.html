@@ -287,6 +287,15 @@
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
       }
+      /* A closed row's last press reads before its age, cut short so a long step label cannot squeeze the title. */
+      .side-label {
+        display: inline-block;
+        max-width: 14em;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        vertical-align: bottom;
+        margin-right: 4px;
+      }
       .row.collapsed:hover .side {
         color: var(--muted);
       }

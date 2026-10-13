@@ -1097,7 +1097,6 @@ test('a press during a turn reads Queued until its prompt enters, and one that w
   expect(await pane.find({ key: 'row-i1' })).toBeDefined()
   expect(drafts).toEqual({ i1: 'Deno, actually' })
   // A refused answer: the question opens again and counts, says why, and offers [Try again].
-  await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'answer-i1-0' })
   await clock.settle()
   expect(sent.at(-1)).toBe('Re "Use Node or Python?": Node')
@@ -1413,6 +1412,9 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   await pane.press({ key: 'fix-acme/greet#12-test-key' })
   expect(sent.at(-1)).toContain('The test check failed on PR #12')
   await clock.settle()
+  expect(await pane.find({ key: 'fix-acme/greet#12-test-key' })).toBeUndefined()
+  await pane.press({ key: 'title-acme/greet#12 check test' })
+  await clock.advance(PRESS_GUARD_MS)
   expect((await pane.find({ key: 'fix-acme/greet#12-test-key' }))?.props.label).toMatch(/Fix again$/)
   await pane.press({ key: 'log-acme/greet#12-test-key' })
   await clock.settle()
@@ -1444,7 +1446,10 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   await clock.settle()
   expect(await pane.find({ text: /^\u2007·\sAddressed$/ })).toBeDefined()
 
-  // Sent to Claude, the thread folds out of the count, and keeps its keys, until the reviewer answers.
+  // Sent to Claude, the thread closes to its line and folds out of the count until the reviewer answers.
+  expect(await pane.find({ key: 'address-T1-key' })).toBeUndefined()
+  await pane.press({ key: 'title-acme/greet#12 thread T1' })
+  await clock.advance(PRESS_GUARD_MS)
   expect((await pane.find({ key: 'address-T1-key' }))?.props.label).toBe('Address again')
   // Opening it on GitHub keeps it folded and out of the count.
   await pane.press({ key: 'open-T1' })
