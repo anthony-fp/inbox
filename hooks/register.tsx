@@ -1351,6 +1351,45 @@ async function findPrs($: EngineInterface) {
   void fetchPrs($, true)
 }
 
+/** How many lines `text` takes when wrapped at word breaks to `width` cells. */
+function lineCount(text: string, width: number): number {
+  return wrapped(text, width).length
+}
+
+/** `text` cut to its first `lines` lines at `width` cells, ending in "…" when cut. */
+function clipToLines(text: string, width: number, lines: number): string {
+  const all = wrapped(text, width)
+  if (all.length <= lines) return text
+  const last = all[lines - 1]!
+  const kept = [...all.slice(0, lines - 1), last.length < width ? last : last.slice(0, width - 1)]
+
+  return `${kept.join(' ').replace(/[\s.,;:]+$/, '')}…`
+}
+
+/** `text` wrapped at word breaks to `width` cells, as the terminal wraps a Text; a longer word breaks anywhere. */
+function wrapped(text: string, width: number): string[] {
+  const size = Math.max(1, width)
+  const lines: string[] = []
+  let line = ''
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    const next = line ? `${line} ${word}` : word
+    if (next.length <= size) {
+      line = next
+      continue
+    }
+    if (line) lines.push(line)
+    let rest = word
+    while (rest.length > size) {
+      lines.push(rest.slice(0, size))
+      rest = rest.slice(size)
+    }
+    line = rest
+  }
+  if (line) lines.push(line)
+
+  return lines
+}
+
 /**
  * Selects a row and scrolls the pane the least that shows it whole. The row's
  * scroll target is drawn only once the row redraws expanded, and the engine
@@ -2914,6 +2953,8 @@ export const register: Register = on => {
       /** Unselected, text that does not fit beside `after` goes on a second line instead of being cut. */
       hasSecondLine?: boolean
       body?: JSX.Element | null
+      /** The body cut to `lines` lines of `width` cells, or left out, for an inline pane too short to show the open row whole. */
+      clippedBody?: (lines: number, width: number) => JSX.Element | null
       keys: () => KeyAction[]
       /** Actions that talk about the row or drop it, after `keys`: past a muted dot in the terminal, on their own line on desktop. */
       moreKeys?: () => KeyAction[]
@@ -2951,6 +2992,18 @@ export const register: Register = on => {
     }
     // A finding's handle is its kind's mark, ▲ or ✦, and its group's title says the kind. Handed to Claude, it
     // folds, as a task does, until Claude's reply leaves it open.
+    const findingBody = (detail: string, path: string | null) => (
+      <Box flexDirection="column" rowGap={blankLine}>
+        <Text wrap="wrap">{inlineText(detail)}</Text>
+        {path ? (
+          <Text wrap="wrap">
+            <Text color={pal.muted}>Relevant file: </Text>
+            {/* Claude Code's own color for inline code. */}
+            <Text color="permission">{baseName(path)}</Text>
+          </Text>
+        ) : null}
+      </Box>
+    )
     const findingRow = (r: RowView, finding: Finding): Row => ({
       id: finding.id,
       at: finding.at,
@@ -2960,18 +3013,15 @@ export const register: Register = on => {
       title: finding.title,
       titleAfter: `${DOT}${ago(now - finding.at)}`,
       line: { text: finding.title },
-      body: (
-        <Box flexDirection="column" rowGap={blankLine}>
-          <Text wrap="wrap">{inlineText(finding.detail)}</Text>
-          {finding.path ? (
-            <Text wrap="wrap">
-              <Text color={pal.muted}>Relevant file: </Text>
-              {/* Claude Code's own color for inline code. */}
-              <Text color="permission">{baseName(finding.path)}</Text>
-            </Text>
-          ) : null}
-        </Box>
-      ),
+      body: findingBody(finding.detail, finding.path),
+      // The file's line goes first, then the detail, which keeps at least one line while it shows.
+      clippedBody: (lines, width) =>
+        lines < 1
+          ? null
+          : findingBody(
+              clipToLines(finding.detail, width, Math.max(1, lines - (finding.path && lines > 1 ? 1 : 0))),
+              lines > 1 ? finding.path : null,
+            ),
       typeHint: 'Your reply to Claude',
       keys: () => rowKeyActions($, look, r, true).keys,
       moreKeys: () => rowKeyActions($, look, r, true).more,
@@ -3727,6 +3777,21 @@ export const register: Register = on => {
         ...(f && !f.age ? [{ text: f.text, color: f.isFailure ? pal.tone.error : pal.muted }] : []),
       ]
 
+      // Inline, the pane's window can be shorter than the open row, and a key scrolled out of view does not
+      // take its letter. So the body gives up lines until the row fits. A tab's first row opens with the window at
+      // the top, under the demo notice, the tab row and its group's title; select() scrolls any other row to its top.
+      const textWidth = e.props.bodyColumns - columns.textAt - 1
+      const bodyLines =
+        isSelected && isInline && look === 'terminal' && row.clippedBody
+          ? e.props.scroll.bodyRows -
+            (index === 0 ? (isDemo ? 3 : 2) : 0) -
+            2 * space.rowPad -
+            lineCount(`${row.title}${titleAfter ?? ''}`, textWidth - TERMINAL_SIDE_CELLS) -
+            status.length -
+            (keysWidth(keys, more) <= e.props.bodyColumns - 3 - columns.textAt ? 1 : 2)
+          : null
+      const body =
+        bodyLines !== null && row.clippedBody && row.body ? row.clippedBody(bodyLines, textWidth) : (row.body ?? null)
       const keysBlock = (
         <Box flexDirection="column" marginTop={blankLine}>
           {isTyping ? (
@@ -3832,7 +3897,7 @@ export const register: Register = on => {
                 </Text>,
               )}
               {row.subtitle}
-              {row.body ? <Box marginTop={blankLine}>{row.body}</Box> : null}
+              {body ? <Box marginTop={blankLine}>{body}</Box> : null}
               {status.length > 0 ? (
                 <Box flexDirection="column" marginTop={blankLine}>
                   {status.map(s => (
