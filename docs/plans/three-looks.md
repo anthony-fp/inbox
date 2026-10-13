@@ -48,7 +48,7 @@ What drifts, with the evidence the review found:
    - No file says "to change X, touch these files in every look".
    - About ten finished plans read as current instructions. `target-architecture.md` is 857 lines, has no status line, and lists deleted files.
    - Thirty-five references point to `docs/plans/clients.md`, which does not exist.
-   - `codex/README.md` says the desktop tab is untried, and `codex-tab.md` contradicts the shipped keys.
+   - `codex/README.md` says the desktop tab is untried, and the Codex tab plan contradicts the shipped keys.
 10. **No check catches drift.**
     - Nothing checks import boundaries.
     - No test runs one scenario on both hosts. Each runner re-writes the same cases by hand.
@@ -69,8 +69,6 @@ Each rule has one owner. Adapters only map a shared description to their own wid
 Each step is one commit on `revamp-build`. Each passes `./scripts/check.sh` and is checked on the looks it touches before the next starts. A step that changes `hooks/` or `codex/src` also rebuilds the Codex bundles with the clean-worktree flow, because the main working copy holds another session's uncommitted bundle changes.
 
 The checks come first, so they guard the code moves that follow. Steps 1 to 4 change no behavior. Each behavior change is listed under the step that makes it.
-
-Another session has uncommitted edits in `docs/plans/row-actions.md`, `docs/plans/codex-tab.md` and `codex/src/tab.html`. This plan leaves those files alone until that work lands. Their cleanup is listed in step 3 as waiting.
 
 ### 1. Names
 
@@ -106,12 +104,11 @@ Another session has uncommitted edits in `docs/plans/row-actions.md`, `docs/plan
   - It adds one rule: a change to a shared module or an adapter states, for each look, whether it applies and what was checked.
 - Add header comments where a file does not say what it owns: `register.tsx`, `ledger.ts`, `prs.ts`, `server-main.ts` and `server-handler.ts`. The `register.tsx` header includes a section index.
 - Clean up the docs:
-  - Archive finished plans to `docs/archive/` with a dated banner.
+  - Retire finished plans.
   - Give every remaining plan a status line.
   - Remove the `clients.md` references.
   - Fix `codex/README.md`.
   - Move the misplaced `actionsOf` comment in `view.ts`.
-- Waiting on the other session's work: archive `row-actions.md`, and fix the key text in `codex-tab.md`. Its line 57 says keys show before labels; the tab draws no key text.
 - When this step lands, the docs checks switch from report-only to failing.
 
 ### 4. A drawing test for the mod's looks

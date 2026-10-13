@@ -533,7 +533,7 @@ These change the terminal or shared code.
 - **F3.** The billing fix says "then resume", but billing stops have no button. Proposed wording: "then send a message to resume."
 - **F4.** `inbox-ui.md:291` says the whole stop line is red. Only the prefix is.
 - **F5.** Check that `/login` exists in a desktop session, and that running it clears a sign-in stop.
-- **F6.** `docs/plans/inbox-ui.md:600` and `:691`, and `docs/archive/action-feedback.md:86` and `:95`, cite `withLastAction`, which does not exist in the revamp worktree. The revamp `AGENTS.md` already names `runPress` and `applyPress`.
+- **F6.** `docs/plans/inbox-ui.md:600` and `:691` cite `withLastAction`, which does not exist in the revamp worktree. The revamp `AGENTS.md` already names `runPress` and `applyPress`.
 - **F7.** Screen readers likely cannot reach the Client tabs, or the rows once they are Clients.
 
 ## Probes before building

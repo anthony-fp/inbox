@@ -377,7 +377,7 @@ const ROW_COLUMNS = {
   flat: { lead: 1, handleAt: 3, textAt: 5 },
   desktop: { lead: 1, handleAt: 1, textAt: 3 },
 } as const
-// A desktop list line's mark column and its side column, for the age, in columns. See docs/plans/desktop-layout.md.
+// A desktop list line's mark column and its side column, for the age, in columns.
 const DESKTOP_MARK_CELLS = 1
 // How far a row frame's transparent border insets its content, in points.
 const FRAME_INSET_PT = 13.2
@@ -1590,7 +1590,7 @@ function tabRowIds(view: InboxView, prViews: PrView[]): Record<Tab, string[]> {
  * the pane to a new row on another tab while the tab on screen shows only its
  * empty text. `isOpening` records the tabs afresh, so nothing in them counts as
  * new. The render cannot write state, so each write that can add a row calls
- * this. See docs/archive/jump-to-new-rows.md.
+ * this.
  */
 async function followNewRows($: EngineInterface, isOpening = false) {
   const [drawn, tab, unfolded, isShown] = await Promise.all([

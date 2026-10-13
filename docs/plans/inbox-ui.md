@@ -126,7 +126,7 @@ Every press is one of five kinds. The kind decides what the screen shows at once
 
 The View kind covers [Open inbox], the tab buttons, [All 7 options], the Closed fold, Show demo and Hide demo, Reply in chat, Undo and Retry. [Try again] repeats a failed press, so it takes that press's kind.
 
-**Done on a task** can tell the agent after its Undo ends. When the agent is idle and waits on the task, one message goes out once the row leaves: `Done: <ask>`. Done presses on several tasks in a row go as one message. [Done on a task](done-wake.md) has the rule.
+**Done on a task** can tell the agent after its Undo ends. When the agent is idle and waits on the task, one message goes out once the row leaves: `Done: <ask>`. Done presses on several tasks in a row go as one message.
 
 **Answering a question** is a Mark and a send together. The row settles as `✓ Yes, rename`, and `Re "<ask>": <answer>` goes to Claude. It has no Undo, because the message is already on its way.
 

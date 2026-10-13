@@ -63,13 +63,12 @@ function checkCodex() {
     }
 }
 
-/** The markdown files whose links and paths must resolve. docs/archive/ describes old code and is skipped. */
+/** The markdown files whose links and paths must resolve. */
 function docFiles() {
   const files = ['README.md', 'AGENTS.md', 'GLOSSARY.md', 'ROADMAP.md', 'codex/README.md'].filter(exists)
   const walk = dir => {
     for (const entry of readdirSync(join(ROOT, dir))) {
       const path = `${dir}/${entry}`
-      if (path === 'docs/archive') continue
       if (statSync(join(ROOT, path)).isDirectory()) walk(path)
       else if (path.endsWith('.md')) files.push(path)
     }

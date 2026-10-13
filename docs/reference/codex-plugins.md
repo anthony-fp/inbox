@@ -1973,7 +1973,7 @@ developers.openai.com/plugins (packaging, submission, UI):
 
 ### This repo
 
-`docs/plans/codex-plugin.md`, `docs/plans/codex-tab.md`,
+`docs/plans/codex-plugin.md`,
 `codex/README.md`, `codex/plugin/.codex-plugin/plugin.json`,
 `codex/plugin/.mcp.json`, `codex/plugin/hooks/hooks.json`,
 `.agents/plugins/marketplace.json`, `.claude-plugin/plugin.json`,

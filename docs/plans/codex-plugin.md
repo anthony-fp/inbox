@@ -413,8 +413,7 @@ press from the tab in the desktop app.
 3. Session state, the hooks and the MCP tools, with tests. Done.
 4. The per-reply update through `codex exec`, and the model measurement.
    Done.
-5. The Inbox tab. Done. Rebuilt with Preact to follow the mod's pane:
-   [codex-tab.md](codex-tab.md).
+5. The Inbox tab. Done. Rebuilt with Preact to follow the mod's pane.
 6. A full session through `codex exec`. Done. A real session in the desktop
    app, which needs the person to install the plugin, trust the hooks and
    open the tab. Not yet.
