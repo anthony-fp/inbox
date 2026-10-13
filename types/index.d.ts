@@ -58,9 +58,6 @@ export type Closed = {
   isSentToAgent?: true
 }
 
-/** The rows that just appeared in the pane, and when, so each draws a bar for a moment. */
-export type Arrival = { ids: string[]; at: number }
-
 /**
  * What a press does, which decides what its row shows at once. Talk asks Claude
  * to talk or draft; Hand-off gives Claude the row's work, so the row folds;
@@ -284,8 +281,6 @@ declare module 'claude-code' {
       drafts: Record<string, string>
       /** Each row's latest note, by the row's id. */
       notes: Record<string, RowNote>
-      /** The rows that last appeared in the pane, which draw a bar for NEW_ROW_MS. */
-      arrival: Arrival | null
       /** Each row's last action, by the row's id. */
       lastActions: Record<string, LastAction>
       /** The Needs you groups and the kinds of finding whose closed items show. Each starts folded. */

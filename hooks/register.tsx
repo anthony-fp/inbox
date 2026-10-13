@@ -23,7 +23,6 @@ import type {
 } from 'claude-code'
 
 import type {
-  Arrival,
   Cursor,
   Closed,
   DemoCopy,
@@ -152,7 +151,6 @@ import {
   inboxView,
   isFailure,
   isGuarded,
-  NEW_ROW_MS,
   perTurnStatus,
   PRESS_GUARD_MS,
   rowKeyPlan,
@@ -216,7 +214,6 @@ const DIALOGS = atom({ plugin: 'inbox', key: 'dialogs' } as const, [] as Dialog[
 const TYPING = atom({ plugin: 'inbox', key: 'typing' } as const, null as string | null)
 const DRAFTS = atom({ plugin: 'inbox', key: 'drafts' } as const, {} as Record<string, string>)
 const NOTES = atom({ plugin: 'inbox', key: 'notes' } as const, {} as Record<string, RowNote>)
-const ARRIVAL = atom({ plugin: 'inbox', key: 'arrival' } as const, null as Arrival | null)
 const LAST_ACTIONS = atom({ plugin: 'inbox', key: 'lastActions' } as const, {} as Record<string, LastAction>)
 const UNFOLDED = atom({ plugin: 'inbox', key: 'unfolded' } as const, [] as FoldKind[])
 const FOLD_HOVER = atom({ plugin: 'inbox', key: 'foldHover' } as const, null as FoldKind | null)
@@ -976,7 +973,7 @@ function redrawWhileLeaving($: EngineInterface, waitMs: number) {
  * A reload cancels the redraws that were running, so this sets them again
  * until the latest of these ends, each SETTLED_MS after its time: a close, a
  * PR's Dismiss, a finding's Fix, a Local result and a row's note. Drawn on the demo's copy
- * while the demo shows. It also redraws once a new-row bar still showing ends.
+ * while the demo shows.
  */
 async function redrawAfterReload($: EngineInterface) {
   const { ledger, lastActions, notes, now } = await drawnState($)
@@ -991,8 +988,6 @@ async function redrawAfterReload($: EngineInterface) {
   ]
   const waitMs = Math.max(0, ...times.map(t => t + SETTLED_MS - now))
   if (waitMs > 0) redrawWhileLeaving($, waitMs)
-  const arrival = await read($, ARRIVAL)
-  if (arrival && arrival.at + NEW_ROW_MS > now) redrawAfterNewRows($, arrival.at, now)
 }
 
 type ModelResult = Awaited<ReturnType<EngineInterface['model']['fork']>>
@@ -1212,8 +1207,6 @@ async function upgradeState($: EngineInterface): Promise<Ledger> {
         Object.entries(cursors).map(([t, c]) => [t, { ...c, openedAt: c.openedAt ?? 0 }]),
       ) as Record<Tab, Cursor>
     }),
-    // An earlier build saved only the row the pane jumped to; its bar ended long ago.
-    update($, ARRIVAL, a => (a && Array.isArray(a.ids) ? a : null)),
     // Old builds saved the group kinds as `decide` and `do`, and Findings' one fold as `finding`, now one per kind.
     update($, UNFOLDED, u =>
       u.flatMap((k: string): FoldKind[] =>
@@ -1592,14 +1585,6 @@ async function jumpTo($: EngineInterface, tab: Tab) {
   })().catch(() => undefined)
 }
 
-/** Redraws the pane once the new-row bars that started at `at` end. */
-function redrawAfterNewRows($: EngineInterface, at: number, now: number) {
-  void $.clock
-    .sleep(Math.max(0, at + NEW_ROW_MS - now))
-    .then(() => update($, ARRIVAL, a => a && { ...a }))
-    .catch(() => undefined)
-}
-
 /** Each tab's selectable row ids, in the order the pane lists them: rows that just closed are left out. */
 function tabRowIds(view: InboxView, prViews: PrView[]): Record<Tab, string[]> {
   const listed = drawnLists(
@@ -1612,11 +1597,11 @@ function tabRowIds(view: InboxView, prViews: PrView[]): Record<Tab, string[]> {
 }
 
 /**
- * Marks the rows that just appeared, which draw a bar for NEW_ROW_MS, and moves
- * the pane to a new row on another tab while the tab on screen shows only its
- * empty text. `isOpening` records the tabs afresh, so nothing in them counts as
- * new. The render cannot write state, so each write that can add a row calls
- * this.
+ * Records the rows that just appeared, keeps open the row a tab drew open when
+ * they arrive above it, and moves the pane to a new row on another tab while the
+ * tab on screen shows only its empty text. `isOpening` records the tabs afresh,
+ * so nothing in them counts as new. The render cannot write state, so each write
+ * that can add a row calls this.
  */
 async function followNewRows($: EngineInterface, isOpening = false) {
   const [drawn, tab, unfolded, isShown] = await Promise.all([
@@ -1653,11 +1638,6 @@ async function followNewRows($: EngineInterface, isOpening = false) {
     })
     // Rows that arrive above push the kept row down, so an inline pane scrolls it back to the window's top.
     if (isInlinePane && keeps.some(k => k.t === tab)) void scrollToOpenRow($, tab)
-  }
-  const arrived = TABS.flatMap(t => added[t.id])
-  if (arrived.length > 0) {
-    await update($, ARRIVAL, () => ({ ids: arrived, at: now }))
-    redrawAfterNewRows($, now, now)
   }
   // A tab is empty while it shows only its empty text.
   const isEmpty = {
@@ -2943,7 +2923,6 @@ export const register: Register = on => {
       unfolded,
       foldHover,
       isKeyListShown,
-      arrival,
       optionsShown,
     ] = await Promise.all([
       drawnState($),
@@ -2954,7 +2933,6 @@ export const register: Register = on => {
       read($, UNFOLDED),
       read($, FOLD_HOVER),
       read($, IS_KEY_LIST_SHOWN),
-      read($, ARRIVAL),
       read($, OPTIONS_SHOWN),
     ])
     // A hot reload keeps TYPING but empties fieldSeeds, so an open field takes its seed again here.
@@ -3312,7 +3290,6 @@ export const register: Register = on => {
     const at = selectedIndex(ids, cursor, top, id => settledIds.has(id))
     // The open row's buttons ignore clicks for a moment after it opens, and draw dim meanwhile.
     const isOpenGuarded = isGuarded(cursor.openedAt, now)
-    const isNew = (id: string) => arrival !== null && arrival.ids.includes(id) && now - arrival.at < NEW_ROW_MS
 
     // A Button draws its hotkey in the theme's accent, which Claude Code's light
     // theme draws at 2.9:1 on the selected row. So a key's letter is Text in the
@@ -3739,7 +3716,6 @@ export const register: Register = on => {
         charsPerCell: DESKTOP_CLIP_CHARS_PER_CELL,
         // The list pads the pane by a column on each side.
         fallbackColumns: e.props.bodyColumns - 2,
-        newBar: isNew(row.id) ? pal.mark[tab] : null,
         colors: {
           muted: pal.muted,
           after: f?.isFailure ? (pal.tone.error ?? null) : pal.muted,
@@ -3759,7 +3735,6 @@ export const register: Register = on => {
       mark = null,
       side = null,
       fill,
-      outline,
       padY = space.rowPad,
       isCentered = false,
       indent = 0,
@@ -3772,7 +3747,6 @@ export const register: Register = on => {
       mark?: JSX.Element | null
       side?: JSX.Element | null
       fill?: string | undefined
-      outline?: string | null
       padY?: number
       /** Centers the parts on each other, for a one-line row whose side is taller than its text, as Undo is. */
       isCentered?: boolean
@@ -3791,7 +3765,7 @@ export const register: Register = on => {
         alignItems={isCentered ? 'center' : 'flex-start'}
         marginY={gapY}
         borderStyle="single"
-        borderColor={outline ?? '#0000'}
+        borderColor="#0000"
         paddingY={padY}
         {...(fill ? { backgroundColor: fill } : {})}
       >
@@ -3934,7 +3908,6 @@ export const register: Register = on => {
             (row.handleTone ? <Text color={pal.mark[row.handleTone]}>{row.handle}</Text> : <Text>{row.handle}</Text>),
           side: <Text color={pal.age}>{sideAge(row)}</Text>,
           fill: pal.selection,
-          outline: isNew(row.id) ? pal.mark[tab] : null,
           // A rounded fill cannot square one edge, so the selected row keeps 3 pt from its neighbors, whose hover
           // fill would otherwise meet its own.
           gapY: (2 * SELECTED_GAP_PT) / DESKTOP_LINE_PT,
@@ -4051,30 +4024,10 @@ export const register: Register = on => {
               left={0}
               width={1}
               // Desktop draws a column of ▌ as broken dashes, so there the bar is the Box's own fill.
-              {...(look === 'desktop' && !pal.selection && !isNew(row.id) ? { backgroundColor: pal.key } : {})}
+              {...(look === 'desktop' && !pal.selection ? { backgroundColor: pal.key } : {})}
             >
-              {pal.selection || isNew(row.id) || look === 'desktop' ? null : (
-                <Text color={pal.key}>{SELECTION_BAR}</Text>
-              )}
+              {pal.selection || look === 'desktop' ? null : <Text color={pal.key}>{SELECTION_BAR}</Text>}
             </Box>
-          ) : null}
-          {/* A row that just appeared takes a bar in its tab's color, in every theme, for NEW_ROW_MS. */}
-          {isNew(row.id) ? (
-            look === 'desktop' ? (
-              <Box
-                key={`new-${row.id}`}
-                position="absolute"
-                top={0}
-                bottom={0}
-                left={0}
-                width={1}
-                backgroundColor={pal.mark[tab]}
-              />
-            ) : (
-              <Box key={`new-${row.id}`} position="absolute" top={0} bottom={0} left={0} width={1}>
-                <Text color={pal.mark[tab]}>{SELECTION_BAR}</Text>
-              </Box>
-            )
           ) : null}
         </Box>
       )

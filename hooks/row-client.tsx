@@ -33,8 +33,6 @@ export type RowProps = {
   charsPerCell: number
   /** The region's width before its first layout, when `surface.columns` is still 0. */
   fallbackColumns: number
-  /** The frame's outline while the row is new, else null. */
-  newBar: string | null
   /** A null color is the theme's own. */
   colors: {
     muted: string | null
@@ -114,7 +112,7 @@ const Row: ClientModule<RowProps, State> = (props, surface) => {
     flexDirection: 'row',
     alignItems: 'flex-start',
     borderStyle: 'single',
-    borderColor: props.newBar ?? '#0000',
+    borderColor: '#0000',
     paddingY: props.padY,
     ...(background ? { backgroundColor: background } : {}),
     children: [

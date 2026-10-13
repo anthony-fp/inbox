@@ -66,7 +66,7 @@ Change a rule in its owner. Do not change it in a reader.
 | Closed fold size | `hooks/view.ts:CLOSED_SHOWN`, `hooks/view.ts:closedShown` | All three looks |
 | Options fold size | `hooks/view.ts:OPTIONS_FOLD_AT` | All three looks through `actionsOf` |
 | New rows and where a look moves | `hooks/arrivals.ts:recordRows`, `hooks/arrivals.ts:followTo` | The pane and the Codex tab |
-| New-row bar length and press guard | `hooks/view.ts:NEW_ROW_MS`, `hooks/view.ts:PRESS_GUARD_MS` | All three looks |
+| Press guard | `hooks/view.ts:PRESS_GUARD_MS` | All three looks |
 | Row padding | `hooks/layout.ts:ROW_PAD_PT` | Desktop and Codex |
 | Demo data | `hooks/demo.ts:demoView` | The mod's `/inbox demo` and `codex/src/demo.ts:demoState` |
 | Model-read texts | `hooks/ledger.ts:guidanceText`, `hooks/ledger.ts:systemText`, `hooks/ledger.ts:inboxText`, `hooks/ledger.ts:promptNotes`, `hooks/tools.ts:findingDescription` | The mod and Codex, each through its `Host` |

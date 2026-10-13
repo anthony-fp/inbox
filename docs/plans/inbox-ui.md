@@ -249,7 +249,7 @@ An expired item closes as `Expired`. The rule behind it, 12 prompts or more than
 ### 2.8 New rows
 
 - The counts change at once.
-- A new row gets a colored bar for 1.5 s.
+- A new row arrives with no mark of its own. In the Codex tab it grows in. A row arriving above the open one arrives closed.
 - The view jumps to another tab only when the tab on screen shows nothing but its empty text.
 - The 200 ms tab draw-in stays in the terminal only. At desktop's 10 redraws a second it drops most of its frames.
 
@@ -362,7 +362,7 @@ Below 50 columns, a closed row drops its age; the open form still shows it. At 5
 | Tabs | Raised panel; 5 plain Buttons per unselected tab | One Client draws the three tabs. A click anywhere on a tab shows it. Only the shown tab has a fill: raised, rounded and bold. A hovered tab takes the tab gray. Other labels and every count are muted. | A Button takes a click only on its label. A Client takes one over its whole region. The selection color means the open row, so the shown tab does not use it. |
 | Closed row | Handle Button and title Button, two when the title wraps | One Client per row. A click anywhere on it opens the row. The title is cut to one line with "…". | A Button takes a click only on its label. |
 | Keys drawer, "1 2 3", "j k", "ctrl+x tab" | Shown | Not drawn | Nothing to press. |
-| Tab draw-in | Kept | Not drawn | It drops most frames at 10 redraws a second. The 1.5 s new-row bar stays. |
+| Tab draw-in | Kept | Not drawn | It drops most frames at 10 redraws a second. |
 | Closing the pane | Esc | The app's own ✕ on the pane's title bar | The app draws it, so a [Close] in the pane would be a second close. |
 | Tree lines and dividers | `│ ├─ └─` and a `─` rule between rows | None. Closed rows sit flush, each padded a quarter line above and below. A PR's status block starts at the title's column, so only its check and thread rows are indented. | Desktop text is proportional and its lines differ in height, so stacked glyphs break into bars and a rule sized in columns wraps. A rail drawn as a Box is a full cell wide and would read as the new-row bar. |
 | Title cut | By columns | By about 1.25 characters per column | A column of `bodyColumns` holds more than one character of desktop text. |

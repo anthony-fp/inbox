@@ -28,7 +28,7 @@ When the system asks for reduced motion, every duration is 0, and Undo's fill st
 
 ### What moves
 
-1. **A row arrives.** Its height grows from 0 and it fades in, 300 ms. The rows below slide down with it. The new-row bar fades out instead of vanishing.
+1. **A row arrives.** Its height grows from 0 and it fades in, 300 ms. The rows below slide down with it.
 2. **A row opens or closes, as an accordion.** The row's line, its mark, title and age, stays where it is in both states. Opening reveals a panel under it, and closing hides that panel again. The row being closed and the row being opened move together, 200 ms on the move curve, so the rows below slide once.
    - **Opening:** the row's height grows to fit the panel, which stays opaque and is revealed as the row grows. The title unclamps to its full length in place.
    - **Closing:** the panel stays drawn, and takes no clicks, while the row's height shrinks over it to the line. It does not fade, so no empty space shows while the row shrinks. Then it is removed.

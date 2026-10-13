@@ -7,7 +7,7 @@ import type { LinksProps } from '../hooks/links-client'
 import type { RowProps } from '../hooks/row-client'
 import type { TabsProps } from '../hooks/tabs-client'
 import { demoView } from '../hooks/demo'
-import { NEW_ROW_MS, PRESS_GUARD_MS, SETTLED_MS, inboxView, perTurnStatus, rowKeyPlan } from '../hooks/view'
+import { PRESS_GUARD_MS, SETTLED_MS, inboxView, perTurnStatus, rowKeyPlan } from '../hooks/view'
 
 const LEDGER_REPLY = `GOAL: Add a greeting CLI
 DONE: Plan written
@@ -629,18 +629,13 @@ test('last actions an earlier build saved convert once by the table, and a task 
     savedUnfolded = write.value
     return next(write)
   })
-  // Its open rows, with no time each opened, and its last jump, which named one row and its tab.
+  // Its open rows, with no time each opened.
   const oldCursor = { id: 'i1', index: 0 }
-  let savingOpen: { selection: unknown; arrival: unknown } | null = null
-  const savedOpen: { selection?: unknown; arrival?: unknown } = {}
+  let savingOpen: { selection: unknown } | null = null
+  const savedOpen: { selection?: unknown } = {}
   on('state.set', { plugin: 'inbox', key: 'selection' } as const, ($, e, next) => {
     const write = savingOpen ? { ...e, value: savingOpen.selection as never } : e
     savedOpen.selection = write.value
-    return next(write)
-  })
-  on('state.set', { plugin: 'inbox', key: 'arrival' } as const, ($, e, next) => {
-    const write = savingOpen ? { ...e, value: savingOpen.arrival as never } : e
-    savedOpen.arrival = write.value
     return next(write)
   })
 
@@ -661,7 +656,6 @@ test('last actions an earlier build saved convert once by the table, and a task 
   savingUnfolded = ['finding', 'do']
   savingOpen = {
     selection: { needsYou: oldCursor, findings: { id: null, index: 0 }, prs: { id: null, index: 0 } },
-    arrival: { tab: 'findings', id: 'f2', at },
   }
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   saving = null
@@ -673,7 +667,6 @@ test('last actions an earlier build saved convert once by the table, and a task 
       findings: { id: null, index: 0, openedAt: 0 },
       prs: { id: null, index: 0, openedAt: 0 },
     },
-    arrival: null,
   }
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   await clock.settle()
@@ -881,10 +874,6 @@ test('a finding Claude records while the pane shows an empty tab brings the pane
   expect(r.result).toBe('Recorded as f1. The user sees it in the Findings tab of the /inbox pane.')
   await clock.settle()
   expect(await pane.find({ text: /Retry loop never backs off/ })).toBeDefined()
-  // The new row draws a bar for a moment.
-  expect(await pane.find({ key: 'new-f1' })).toBeDefined()
-  await clock.advance(NEW_ROW_MS)
-  expect(await pane.find({ key: 'new-f1' })).toBeUndefined()
 
   const band = await $.ui.mount({ plugin: 'inbox', surface: 'terminal', ...BAND })
   expect(await band.find({ text: /Findings 1/ })).toBeDefined()
@@ -909,7 +898,6 @@ test('a finding Claude records while the pane shows an empty tab brings the pane
   expect(await pane.find({ key: 'address-f1-key' })).toBeUndefined()
   expect(await pane.find({ text: /1 closed/ })).toBeDefined()
 
-  // A finding recorded while Findings shows draws its bar in place, without a jump.
   await $.tool.call({
     tool: 'mcp__inbox__record_finding',
     kind: 'opportunity',
@@ -917,9 +905,7 @@ test('a finding Claude records while the pane shows an empty tab brings the pane
     detail: 'Each call fetches a new token.',
   })
   await clock.settle()
-  expect(await pane.find({ key: 'new-f4' })).toBeDefined()
-  await clock.advance(NEW_ROW_MS)
-  expect(await pane.find({ key: 'new-f4' })).toBeUndefined()
+  expect(await pane.find({ text: /Cache the API token/ })).toBeDefined()
 })
 
 test('findings that arrive one by one after the pane moves to them keep the first one open', async ($, on) => {
@@ -934,7 +920,6 @@ test('findings that arrive one by one after the pane moves to them keep the firs
     await $.tool.call({ tool: 'mcp__inbox__record_finding', kind: 'issue', title, detail: 'Found while reading.' })
     await clock.settle()
   }
-  await clock.advance(NEW_ROW_MS)
   expect(await pane.find({ key: 'address-f1' })).toBeDefined()
   expect(await pane.find({ key: 'address-f3' })).toBeUndefined()
 })

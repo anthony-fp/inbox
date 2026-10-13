@@ -40,7 +40,6 @@ import {
   firstWaiting,
   keptOpen,
   listWaits,
-  NEW_ROW_MS,
   PRESS_GUARD_MS,
   rowAfterClose,
   rowKeyPlan,
@@ -209,9 +208,8 @@ const copies = new Map<string, { name: string; text: string }>()
 let lineNote: { text: string; at: number; isError?: boolean } | null = null
 // When the tab first saw each row the view lists as settled. It draws one in place for SETTLED_MS from then.
 let seen = new Map<string, number>()
-// The row ids the tab has seen, and when each row new to it appeared. A new row draws a bar for NEW_ROW_MS.
+// The row ids the tab has seen in each tab.
 let rowsSeen: SeenRows = {}
-const arrived = new Map<string, number>()
 // Rows and Closed lists that arrived since the last draw, which grow in when they are first drawn.
 const entering = new Set<string>()
 // Settled rows whose Undo press is out. They stay drawn, and their Undo fill stops, until it answers.
@@ -365,11 +363,7 @@ function applyView(next: View, seq: number) {
   const rows = newRows(rowsSeen, next)
   rowsSeen = rows.seen
   const added = [...rows.added.needsYou, ...rows.added.findings]
-  for (const id of added) {
-    arrived.set(id, Date.now())
-    entering.add(id)
-  }
-  if (added.length > 0) drawIn(NEW_ROW_MS)
+  for (const id of added) entering.add(id)
   // A tab that drew its first waiting row open keeps that row open when rows arrive above it, as the mod's pane does.
   for (const t of TAB_IDS) {
     const id = !selection[t] && rows.added[t].length > 0 ? keptOpen(tabWaits(next, t), rows.added[t]) : null
@@ -1114,31 +1108,10 @@ function isFeedbackShown(row: Row): boolean {
   return !errors.has(row.id) && noteOf(row.id) === null && !copies.has(row.id)
 }
 
-/** Whether a row appeared less than NEW_ROW_MS ago, so it draws a bar. */
-function isNew(id: string): boolean {
-  const at = arrived.get(id)
-
-  return at !== undefined && Date.now() - at < NEW_ROW_MS
-}
-
-function ListRow({
-  row,
-  tone,
-  track,
-  onSelect,
-  now,
-}: {
-  row: Row
-  /** The tab's color, for the bar of a row that just appeared. */
-  tone: Tone
-  track: RowTrack
-  onSelect: () => void
-  now: number
-}) {
+function ListRow({ row, track, onSelect, now }: { row: Row; track: RowTrack; onSelect: () => void; now: number }) {
   // A closing or leaving row keeps its panel, inert, while its height shrinks over it.
   const isClosing = track.hasPanel && (track.state === 'closing' || track.state === 'leaving')
   const isSelected = track.hasPanel && !isClosing
-  const bar = isNew(row.id) ? ` new tone-bar-${tone}` : ''
   const handle = <span class={`mark ${row.handleTone ?? row.kind ?? ''}`}>{row.handle}</span>
 
   // A row's last press that reads with an age, as "✓ Explained", takes the age's place: in the side column while the
@@ -1158,7 +1131,7 @@ function ListRow({
   // Closed, the whole row takes the click; the button keeps it in the focus order, and its click reaches the row.
   return (
     <div
-      class={`row ${isSelected ? 'selected' : 'collapsed'}${isClosing ? ' closing' : ''}${bar}`}
+      class={`row ${isSelected ? 'selected' : 'collapsed'}${isClosing ? ' closing' : ''}`}
       onClick={isSelected ? undefined : onSelect}
     >
       {handle}
@@ -1309,13 +1282,7 @@ function Entries({ entries, group, all, now }: { entries: Entry[]; group: Group;
         return (
           <div class="entry" key={id} data-motion={id}>
             {'row' in x ? (
-              <ListRow
-                row={x.row}
-                tone={t}
-                track={drawn.track}
-                now={now}
-                onSelect={() => select(t, all, all.indexOf(x.row))}
-              />
+              <ListRow row={x.row} track={drawn.track} now={now} onSelect={() => select(t, all, all.indexOf(x.row))} />
             ) : (
               // A row that settled while open keeps the panel it last drew while its height shrinks over it.
               <SettledView settled={x.settled} panel={drawn.openRow} />
@@ -1733,13 +1700,7 @@ function PrRows({
 
           return (
             <div class="entry" key={row.id}>
-              <ListRow
-                row={row}
-                tone="needsYou"
-                track={track}
-                now={now}
-                onSelect={() => select('prs', all, all.indexOf(row))}
-              />
+              <ListRow row={row} track={track} now={now} onSelect={() => select('prs', all, all.indexOf(row))} />
             </div>
           )
         })}
@@ -1850,7 +1811,6 @@ async function toggleDemo() {
   view = null
   seen = new Map()
   rowsSeen = {}
-  arrived.clear()
   // The other view's rows are not this one's: none of them leaves or settles in it.
   drawnRows.clear()
   lastLists = null

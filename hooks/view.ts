@@ -59,8 +59,6 @@ export const CLOSED_MARKS: Record<ClosedState, string> = { handled: '✓', dismi
 export const CLOSED_SHOWN = 3
 /** How long a row that just closed stays in its place, and a row's note shows. */
 export const SETTLED_MS = 5120
-/** How long a new row's bar shows. */
-export const NEW_ROW_MS = 1500
 /** How long a row's buttons ignore clicks after it opens, so a double-click cannot land on one that just drew. */
 export const PRESS_GUARD_MS = 400
 

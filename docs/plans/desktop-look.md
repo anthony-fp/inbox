@@ -4,7 +4,7 @@ Status: built.
 
 ## Status
 
-Every build step below is done, in `f29471e` and earlier. The probes ran on 2026-10-09 against the Claude app on engine 2.1.295, in the dark theme. "Probe results" below records each one.
+Every build step below is done, in `f29471e` and earlier. The new-row bar it describes was removed later: a new row now arrives with no mark in every look. The probes ran on 2026-10-09 against the Claude app on engine 2.1.295, in the dark theme. "Probe results" below records each one.
 
 - **Built from the probes:**
   - The shown tab is raised and bold, with a line in its tone along its top.
