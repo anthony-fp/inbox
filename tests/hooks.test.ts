@@ -2188,7 +2188,7 @@ test('every row and action in the demo is drawn in the terminal and desktop look
     turns,
     extraSteps: {},
     settleWindowMs: SETTLED_MS,
-    status: perTurnStatus(ledger, { isUpdating: false, isFailed: false, retries: true }),
+    status: perTurnStatus({ isUpdating: false, isFailed: false, retries: true }),
     now: 1_000_000,
   })
   const TITLE_START = 20

@@ -1759,9 +1759,8 @@ const GH_MISSING = 'The inbox could not find gh, so it cannot read your PRs.'
 /** How long polls may fail before "retrying" turns red. */
 const LATE_READ_MS = 60_000
 
-/** When the inbox last updated, at the footer's right. While polls fail, it says when the view shown was read. */
-function Status({ v, now }: { v: View; now: number }) {
-  const { changedAt, isUpdating } = v.status
+/** At the footer's right: Updating… while the per-turn update runs, or, while polls fail, when the view shown was read. */
+function Status({ v }: { v: View }) {
   const sinceRead = Date.now() - readAt
   const status =
     pollFailures >= 2 ? (
@@ -1769,13 +1768,9 @@ function Status({ v, now }: { v: View; now: number }) {
         Last read {ago(sinceRead)}
         {DOT}retrying
       </span>
-    ) : isUpdating ? (
+    ) : v.status.isUpdating ? (
       'Updating…'
-    ) : changedAt !== null ? (
-      `Updated ${ago(now - changedAt)}`
-    ) : (
-      'Not updated yet'
-    )
+    ) : null
 
   return <div class="status">{status}</div>
 }
@@ -1881,7 +1876,7 @@ function App({ lists }: { lists: Lists | null }): ComponentChildren {
             Show demo
           </button>
         )}
-        <Status v={v} now={now} />
+        <Status v={v} />
       </footer>
     </>
   )

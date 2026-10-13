@@ -952,7 +952,7 @@ function viewOf(
     extraSteps: prViews ? Object.fromEntries(ledger.items.map(i => [i.id, itemPrSteps(i, prViews, ledger.prs)])) : {},
     settleWindowMs: SETTLED_MS,
     // catchUp reruns a failed update after the next message.
-    status: perTurnStatus(ledger, {
+    status: perTurnStatus({
       isUpdating: presence.isUpdating,
       isFailed: presence.ledgerState === 'failed',
       retries: true,
@@ -3956,19 +3956,10 @@ export const register: Register = on => {
       )
     }
 
-    // The PRs tab shows when its PRs were checked; the other tabs, the item status.
-    const newest = prViews.reduce((t, v) => Math.max(t, v.fetchedAt), 0)
+    // Work under way that may change the rows: the PRs tab's refresh, or the other tabs' per-turn update.
     const isPrStatus = tab === 'prs' && prViews.length > 0
-    const { changedAt, isUpdating, error } = view.status
-    const status = isPrStatus
-      ? prState.isFetching
-        ? 'Refreshing PRs'
-        : `PRs checked ${ago(now - newest)}`
-      : isUpdating
-        ? 'Updating…'
-        : changedAt !== null
-          ? `Updated ${ago(now - changedAt)}`
-          : 'Not updated yet'
+    const { isUpdating, error } = view.status
+    const status = isPrStatus ? (prState.isFetching ? 'Refreshing PRs' : '') : isUpdating ? 'Updating…' : ''
 
     // A note on a row the pane no longer draws, as after a press on a row that left, shows on the status line.
     const drawnIds = new Set([
@@ -4146,7 +4137,7 @@ export const register: Register = on => {
         {statusLines}
       </Box>
     ) : null
-    // The footer's one line says when the inbox last updated, at its right end, and, where keys work, opens the list
+    // The footer's one line shows the status at its right end, and, where keys work, opens the list
     // of keys as a drawer above it. The drawer is absolute, so it covers the rows above instead of moving the line.
     const footer = (
       <Box flexDirection="column" paddingX={1} paddingTop={blankLine}>

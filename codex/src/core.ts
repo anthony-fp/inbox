@@ -264,7 +264,7 @@ export function viewOf(s: SessionState, now: number): View {
       extraSteps: {},
       // The tab times each settled row from its first poll, so the server lists a close for longer.
       settleWindowMs: SETTLE_WINDOW_MS,
-      status: perTurnStatus(l, update),
+      status: perTurnStatus(update),
       now,
     }),
     heard: heardState(s.heard),

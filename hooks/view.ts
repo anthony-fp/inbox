@@ -70,7 +70,7 @@ export function isGuarded(openedAt: number, now: number): boolean {
 }
 
 /** When the item list last changed, whether its source is working, and its error, if any. */
-export type ItemStatus = { changedAt: number | null; isUpdating: boolean; error: string | null }
+export type ItemStatus = { isUpdating: boolean; error: string | null }
 
 export type ViewInput = {
   ledger: Ledger
@@ -721,26 +721,11 @@ export function inboxView({
 }
 
 /**
- * The per-turn update's status. The list changed last when the card or any
- * item or finding did, so tool calls that write the list count too. A failure
- * shows only once no update runs, since a running one may repair it. Its text
- * promises a retry only when the source retries a failed update.
+ * The per-turn update's status. A failure shows only once no update runs, since a running one may repair it. Its
+ * text promises a retry only when the source retries a failed update.
  */
-export function perTurnStatus(
-  ledger: Ledger,
-  update: { isUpdating: boolean; isFailed: boolean; retries: boolean },
-): ItemStatus {
-  let changedAt: number | null = ledger.card?.updatedAt ?? null
-  for (const t of [
-    ...ledger.items.map(i => i.at),
-    ...ledger.closed.map(d => d.at),
-    ...ledger.findings.map(f => f.at),
-    ...ledger.closedFindings.map(f => f.closedAt),
-  ])
-    if (typeof t === 'number' && (changedAt === null || t > changedAt)) changedAt = t
-
+export function perTurnStatus(update: { isUpdating: boolean; isFailed: boolean; retries: boolean }): ItemStatus {
   return {
-    changedAt,
     isUpdating: update.isUpdating,
     error: update.isFailed && !update.isUpdating ? UPDATE_FAILED + (update.retries ? UPDATE_RETRIES : '') : null,
   }

@@ -349,7 +349,6 @@ test('the tab reads Updating… while exchanges wait for the inbox model, and sh
   )
   // Codex does not rerun a failed update, so the error promises no retry.
   assert.equal(viewOf(s, 60).status.error, 'Last update failed. Items from that reply may be missing.')
-  assert.equal(viewOf(s, 60).status.changedAt, 1)
 })
 
 test('Fix hands a finding off: it settles as the choice made, then lists in the Closed fold though an applied turn leaves it open; Discuss keeps it open; a close moves it to Closed', () => {

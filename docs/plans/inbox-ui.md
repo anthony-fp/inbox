@@ -222,15 +222,13 @@ Claude mode has no field. See 3.3.
 
 ### 2.6 Status, the same for either item source
 
-The UI reads one status record for items and one for PRs. Either item source fills the first.
+The UI reads one status record for items and one for PRs. Either item source fills the first. The status shows only work under way and errors, at the right end of the footer line. When the list last changed is not shown: it would not change what the person does.
 
 | Field | Shown as |
 |---|---|
-| `changedAt`, when the item list last changed | `Updated 3m ago`, or `Not updated yet` |
 | `isUpdating`, optional | `Updating…`. Only a source with pending work sets it. |
-| `error`, optional, with the source's own text | The text in red |
+| `error`, optional, with the source's own text | The text in red, under the tabs |
 | PR `isFetching` | `Refreshing PRs` |
-| PR `fetchedAt` | `PRs checked 3m ago` |
 
 The PRs tab shows the PR status. The other tabs show the item status. This is today's split (`hooks/register.tsx:3203-3212`).
 
@@ -307,7 +305,7 @@ The band falls back to the engine default when the mod is off, a survey shows, o
 **The pane.** It keeps today's layout and keys: raised tabs when docked, "a: Label" on each action, j and k, 1 2 3 for tabs, ctrl+x tab, Esc, and the Keys drawer. It gains the shared changes in section 2.
 
 ```
- Needs you 3 │ Findings 2 │ PRs 1             Updated 2m ago
+ Needs you 3 │ Findings 2 │ PRs 1
  ─────────────────────────────────────────────────────────
  ! Stopped 3m ago: sign-in expired. Run /login, then send
    a message.
@@ -340,7 +338,6 @@ The mod picks the desktop drawing on each draw from `e.surface === 'desktop'`, n
 
 ```
 Needs you 3  [Findings 2]  [PRs]
-Updated 3m ago
 Questions
 1) Rename the table to accou…
    Rename the users table to
@@ -454,7 +451,7 @@ Done and Dismiss are Marks, recorded by the server, with Undo as in 2.3. Claude 
 | Server gone, card already mounted | `The inbox server is not running. Restart Claude to bring it back.` Rows stay muted, with no buttons. |
 | Lost track of the chat | `New inbox for this chat` |
 | Superseded | `Moved to a newer card below` |
-| Status | `Updated 3m ago` from Claude's last recorded change. `Updating…` never shows. |
+| Status | None. `Updating…` never shows. |
 
 **If the view does not render.** The person sees only the tool's text content. It lists the count and each open row on one line.
 
@@ -488,7 +485,7 @@ The split is chosen over a compact inline layout because the tab is already wher
 **First thing seen.** The Needs you tab with its top row open.
 
 ```
- [Needs you 2] [Findings 1]                Updated 3m ago
+ [Needs you 2] [Findings 1]
  ──────────────────────────────────────────────────────
  Questions
  1) Use "inbox" or "attention" for the name?     2m ago
