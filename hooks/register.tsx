@@ -627,6 +627,8 @@ let nextFetchFindsBranchPr: boolean | null = null
 let recordedRows: { isDemo: boolean; ids: RowRecord<Tab> } | null = null
 // The pane's latest jump to another tab, whose top edge draws in for DRAW_IN_MS. A reload may lose it mid-draw.
 let jumped: { tab: Tab; at: number } | null = null
+/** Whether the pane last drew inline, where the open row scrolls to the window's top so its keys stay in view. */
+let isInlinePane = false
 let isSaved = false
 let queue: Promise<void> = Promise.resolve()
 // Counts the conversations this process has run, and the saved ledgers [Try again] put in place,
@@ -1337,7 +1339,7 @@ async function focusField($: EngineInterface, id: string) {
 async function showTab($: EngineInterface, tab: Tab) {
   if (tab === 'prs') await findPrs($)
   await update($, TAB, () => tab)
-  await $.ui.scroll({ in: PANE, to: 'start' }).catch(() => undefined)
+  await scrollToOpenRow($, tab)
 }
 
 /**
@@ -1405,13 +1407,39 @@ async function select($: EngineInterface, tab: Tab, id: string, index: number) {
     .sleep(PRESS_GUARD_MS)
     .then(() => update($, SELECTION, s => ({ ...s })))
     .catch(() => undefined)
+  await scrollToRow($, id)
+}
+
+/**
+ * Scrolls the pane to row `id`: inline to the window's top, else the least that shows it whole. The row's scroll
+ * target is drawn only once the row redraws expanded, and the engine refuses a key it has not drawn, so the scroll
+ * retries for a few frames.
+ */
+async function scrollToRow($: EngineInterface, id: string) {
   for (let tries = 0; tries < 10; tries++) {
     const result = await $.ui
-      .scroll({ in: PANE, to: { key: `view-${id}` }, block: 'nearest' })
+      .scroll({ in: PANE, to: { key: `view-${id}` }, block: isInlinePane ? 'start' : 'nearest' })
       .catch((): UiScrollResult => ({}))
     if (result.deny === undefined) return
     await $.clock.sleep(30)
   }
+}
+
+/** Scrolls the pane to the shown tab's open row when the pane is inline, else to its top. */
+async function scrollToOpenRow($: EngineInterface, tab: Tab) {
+  if (isInlinePane) {
+    const [selection, { view, ledger, prViews: prState, lastActions, now }] = await Promise.all([
+      read($, SELECTION),
+      drawnState($),
+    ])
+    const prViews = drawnPrs(prState, ledger.prs, lastActions, now)
+      .filter(x => !x.isSettled)
+      .map(x => x.pr)
+    const cursor = selection[tab]
+    const id = cursor.id ?? (cursor.openedAt === 0 ? topRow(tab, tabRowIds(view, prViews)[tab], view) : null)
+    if (id !== null) return scrollToRow($, id)
+  }
+  await $.ui.scroll({ in: PANE, to: 'start' }).catch(() => undefined)
 }
 
 /**
@@ -1556,7 +1584,7 @@ async function jumpTo($: EngineInterface, tab: Tab) {
   await update($, TAB, () => tab)
   // With no row chosen, the tab draws its top row open, so rows that arrive above later move the open row with them.
   await update($, SELECTION, s => ({ ...s, [tab]: NO_CURSOR }))
-  await $.ui.scroll({ in: PANE, to: 'start' }).catch(() => undefined)
+  await scrollToOpenRow($, tab)
   void (async () => {
     for (let n = 1; n <= DRAW_IN_STEPS; n++) {
       await $.clock.sleep(Math.max(0, at + (n * DRAW_IN_MS) / DRAW_IN_STEPS - (await $.clock.now())))
@@ -2877,6 +2905,7 @@ export const register: Register = on => {
     // Inline above the prompt, the pane takes its room from the conversation, so
     // it drops the section cards, the tab panels and the blank lines between parts.
     const isInline = e.props.placement === 'inline'
+    isInlinePane = isInline
     const blankLine = isInline ? 0 : 1
     // Row spacing by look. A desktop row pads the same open, closed or just closed, so its title stays put when it
     // opens, and its rows sit flush with the Closed fold under them. Desktop's buttons draw their own padding, so a
@@ -3102,21 +3131,43 @@ export const register: Register = on => {
       const id = prThreadId(pr, t)
       // Open, the row adds where the thread sits and the latest reply under the comment its title already shows.
       const { head, rest } = commentParts(t.body)
+      const where = (
+        <Text color={pal.muted} wrap="wrap">
+          {/* As Open comment does, it opens the latest reply, else the first comment. */}
+          <Link href={t.reply?.url || t.url}>
+            <Text underline>{threadWhere(t)}</Text>
+          </Link>
+          {DOT}@{t.author}
+        </Text>
+      )
       const comment = (
         <Box flexDirection="column">
           {rest ? <Markdown text={clipLabel(rest, 1200)} /> : null}
-          <Text color={pal.muted} wrap="wrap">
-            {/* As Open comment does, it opens the latest reply, else the first comment. */}
-            <Link href={t.reply?.url || t.url}>
-              <Text underline>{threadWhere(t)}</Text>
-            </Link>
-            {DOT}@{t.author}
-          </Text>
+          {where}
           {t.reply ? (
             <Markdown text={`**@${t.reply.author}:** ${clipLabel(readableComment(t.reply.body), 1200)}`} />
           ) : null}
         </Box>
       )
+      const replyText = t.reply ? `@${t.reply.author}: ${readableComment(t.reply.body)}` : ''
+      // The where line stays, the comment takes the lines it can, and the reply the lines left. Clipped, both draw as
+      // plain text, since a cut can split their Markdown.
+      const clippedComment = (lines: number, width: number) => {
+        if (lines < 1) return null
+        const restLines = rest ? lineCount(rest, width) : 0
+        const replyLines = replyText ? lineCount(replyText, width) : 0
+        if (restLines + 1 + replyLines <= lines) return comment
+        const restShown = Math.min(restLines, lines - 1)
+        const replyShown = Math.min(replyLines, lines - 1 - restShown)
+
+        return (
+          <Box flexDirection="column">
+            {rest && restShown > 0 ? <Text wrap="wrap">{inlineText(clipToLines(rest, width, restShown))}</Text> : null}
+            {where}
+            {replyShown > 0 ? <Text wrap="wrap">{inlineText(clipToLines(replyText, width, replyShown))}</Text> : null}
+          </Box>
+        )
+      }
       // Sent to Claude, the thread folds to the first line of its latest comment,
       // until a comment newer than the send arrives. So does one on lines a later
       // commit changed, but with no ✓: nothing says the change fixed it.
@@ -3147,6 +3198,7 @@ export const register: Register = on => {
             .join(DOT),
         },
         body: comment,
+        clippedBody: clippedComment,
         keys: () => [
           ...(retry
             ? [
@@ -3331,6 +3383,25 @@ export const register: Register = on => {
         2 * Math.max(0, all.length - 1) +
         dot
       )
+    }
+    // The lines a selected terminal row's keys take: one when they fit, else the main keys and the others each wrap.
+    const keyLines = (keys: KeyAction[], more: KeyAction[], width: number) => {
+      if (keysWidth(keys, more) <= width) return 1
+      const wrappedLines = (actions: KeyAction[]) => {
+        let lines = 0
+        let used = 0
+        for (const k of actions) {
+          const w = (k.hotkey ? k.hotkey.length + 2 : 0) + shownLabel(k).length
+          if (used > 0 && used + 2 + w <= width) used += 2 + w
+          else {
+            lines++
+            used = w
+          }
+        }
+        return lines
+      }
+
+      return wrappedLines(keys) + wrappedLines(more)
     }
     // A typed reply needs a text field, so it is left out where there is none.
     const pressable = (keys: KeyAction[]) => keys.filter(k => Input || !k.key.startsWith('typekey-'))
@@ -3788,18 +3859,17 @@ export const register: Register = on => {
         ...(f && !f.age ? [{ text: f.text, color: f.isFailure ? pal.tone.error : pal.muted }] : []),
       ]
 
-      // Inline, the pane's window can be shorter than the open row, which hides its keys and so their letters.
-      // So the body gives up lines until the row fits. A tab's first row opens with the window at
-      // the top, under the demo notice, the tab row and its group's title; select() scrolls any other row to its top.
-      const textWidth = e.props.bodyColumns - columns.textAt - 1
+      // Inline, the pane's window can be shorter than the open row, which would hide its keys. The open row scrolls to
+      // the window's top (scrollToRow), so the body gives up lines until the row's own lines fit the window.
+      // The list's side padding and the row's right padding take 3 columns.
+      const textWidth = e.props.bodyColumns - 3 - columns.textAt
       const bodyLines =
         isSelected && isInline && look === 'terminal' && row.clippedBody
           ? e.props.scroll.bodyRows -
-            (index === 0 ? (isDemo ? 3 : 2) : 0) -
             2 * space.rowPad -
             lineCount(`${row.title}${titleAfter ?? ''}`, textWidth - TERMINAL_SIDE_CELLS) -
             status.length -
-            (keysWidth(keys, more) <= e.props.bodyColumns - 3 - columns.textAt ? 1 : 2)
+            keyLines(keys, more, textWidth)
           : null
       const body =
         bodyLines !== null && row.clippedBody && row.body ? row.clippedBody(bodyLines, textWidth) : (row.body ?? null)
@@ -3818,7 +3888,7 @@ export const register: Register = on => {
             ) : (
               [field, keyRow(row.id, fieldActions(row))]
             )
-          ) : look === 'desktop' || keysWidth(keys, more) <= e.props.bodyColumns - 3 - columns.textAt ? (
+          ) : look === 'desktop' || keysWidth(keys, more) <= textWidth ? (
             keyRow(row.id, keys, more)
           ) : (
             [keyRow(row.id, keys), keyRow(row.id, more)]
