@@ -1759,13 +1759,9 @@ const GH_MISSING = 'The inbox could not find gh, so it cannot read your PRs.'
 /** How long polls may fail before "retrying" turns red. */
 const LATE_READ_MS = 60_000
 
-/**
- * The tabs, with the status at the row's right. While polls fail, the status says when the view shown was read.
- * A read error or a note takes its own line under the row, so the status never moves.
- */
-function TabBar({ v, now }: { v: View; now: number }) {
-  const counts: Record<ShownTab, number> = { needsYou: v.needsYou.count, findings: v.findings.count, prs: v.prs.count }
-  const { changedAt, isUpdating, error } = v.status
+/** When the inbox last updated, at the footer's right. While polls fail, it says when the view shown was read. */
+function Status({ v, now }: { v: View; now: number }) {
+  const { changedAt, isUpdating } = v.status
   const sinceRead = Date.now() - readAt
   const status =
     pollFailures >= 2 ? (
@@ -1780,6 +1776,14 @@ function TabBar({ v, now }: { v: View; now: number }) {
     ) : (
       'Not updated yet'
     )
+
+  return <div class="status">{status}</div>
+}
+
+/** The tabs. A read error or a note takes its own line under them. */
+function TabBar({ v }: { v: View }) {
+  const counts: Record<ShownTab, number> = { needsYou: v.needsYou.count, findings: v.findings.count, prs: v.prs.count }
+  const { error } = v.status
 
   return (
     <nav>
@@ -1798,7 +1802,6 @@ function TabBar({ v, now }: { v: View; now: number }) {
           </button>
         ))}
       </div>
-      <div class="status">{status}</div>
       {serverNote ? (
         serverNote.isReloadable ? (
           <ErrorStrip text={serverNote.text} reload={() => location.reload()} />
@@ -1864,7 +1867,7 @@ function App({ lists }: { lists: Lists | null }): ComponentChildren {
           </button>
         </div>
       ) : null}
-      <TabBar v={v} now={now} />
+      <TabBar v={v} />
       {tab === 'needsYou' ? (
         <NeedsYou v={v} lists={lists} now={now} />
       ) : tab === 'findings' ? (
@@ -1878,6 +1881,7 @@ function App({ lists }: { lists: Lists | null }): ComponentChildren {
             Show demo
           </button>
         )}
+        <Status v={v} now={now} />
       </footer>
     </>
   )
