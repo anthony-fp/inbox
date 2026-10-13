@@ -11,6 +11,9 @@
 //   node build.mjs --dev    rebuilds the tab's page and the server's handler into .dev on each save, and points
 //                          the installed plugin's server at them, so an open Inbox tab swaps to the page and the
 //                          server runs the handler, with no restart.
+//
+// The tab shows its Show demo button only in --dev builds, or when INBOX_DEMO_BUTTON=1 is set for a build to try in
+// another install. Don't commit plugin/dist from such a build: --check would fail it.
 
 import { createHash } from 'node:crypto'
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, watch, writeFileSync } from 'node:fs'
@@ -49,11 +52,13 @@ async function serverBuild() {
   return hash.digest('hex').slice(0, 12)
 }
 
+const isDemoButton = mode === '--dev' || process.env.INBOX_DEMO_BUTTON === '1'
+
 /** The tab's script, bundled for the browser, holding the fingerprint of the server sources it was built with. */
 async function buildTabScript(build) {
   const tab = await esbuild.build({
     absWorkingDir: here,
-    define: { SERVER_BUILD: JSON.stringify(build) },
+    define: { SERVER_BUILD: JSON.stringify(build), DEMO_BUTTON: JSON.stringify(isDemoButton) },
     entryPoints: ['src/tab.tsx'],
     bundle: true,
     platform: 'browser',

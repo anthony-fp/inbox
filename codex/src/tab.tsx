@@ -61,7 +61,7 @@ import {
   took,
   waitingThreads,
 } from '../../hooks/prs'
-import type { Finding, Item, PrCheck, PrThread, PrView, RowNote } from '../../types'
+import type { Finding, Item, PrCheck, PrThread, PrView } from '../../types'
 import { followTo } from '../../hooks/arrivals'
 import { parseInline } from '../../hooks/inline'
 import { isShownEmpty, newRows, TAB_IDS, TAB_OF } from './arrivals'
@@ -1727,7 +1727,6 @@ function Prs({ v, now }: { v: View; now: number }) {
       </div>
     )
   const openId = rows[selectedIndex(rows, 'prs', v)]?.id
-  const isSent = threadSentIn(v.lastActions)
 
   return (
     <main>
@@ -1871,7 +1870,7 @@ function App({ lists }: { lists: Lists | null }): ComponentChildren {
         <Prs v={v} now={now} />
       )}
       <footer>
-        {isDemo ? null : (
+        {isDemo || !DEMO_BUTTON ? null : (
           <button type="button" class="demo-toggle" onClick={() => void toggleDemo()}>
             Show demo
           </button>
@@ -2188,7 +2187,7 @@ document.addEventListener('keydown', e => {
 restoreState()
 request('ui/initialize', {
   protocolVersion: '2026-01-26',
-  appInfo: { name: 'inbox', version: '0.1.0' },
+  appInfo: { name: 'inbox', version: '0.2.0' },
   appCapabilities: { tools: {} },
 })
   .then(r => {
