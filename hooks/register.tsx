@@ -226,6 +226,8 @@ const LEAVE_BAR_STEPS = LEAVE_BAR_CELLS * 2
 // After a jump, how long the new tab's top edge takes to draw in, in steps.
 const DRAW_IN_MS = 200
 const DRAW_IN_STEPS = 4
+// After a resize, how long the inline pane waits before it scrolls back to the open row.
+const RESIZE_SCROLL_MS = 100
 const DEMO = atom({ plugin: 'inbox', key: 'demo' } as const, null as DemoCopy | null)
 const TOOLS_REFUSED_TEXT =
   "Claude cannot record or close items here: your organization's settings block the inbox's tools."
@@ -628,6 +630,8 @@ let recordedRows: { isDemo: boolean; ids: RowRecord<Tab> } | null = null
 let jumped: { tab: Tab; at: number } | null = null
 /** Whether the pane last drew inline, where the open row scrolls to the window's top so its keys stay in view. */
 let isInlinePane = false
+/** The inline pane's size at its last draw, as columns by rows, or null when it last drew docked. */
+let inlineSize: string | null = null
 let isSaved = false
 let queue: Promise<void> = Promise.resolve()
 // Counts the conversations this process has run, and the saved ledgers [Try again] put in place,
@@ -2937,6 +2941,16 @@ export const register: Register = on => {
     ])
     // A hot reload keeps TYPING but empties fieldSeeds, so an open field takes its seed again here.
     if (typing !== null && !fieldSeeds.has(typing)) fieldSeeds.set(typing, (await read($, DRAFTS))[typing] ?? '')
+    // A resize rewraps the rows above the open one, which keeps its old offset and slides off the window's top.
+    // The scroll waits a moment, so it measures the redraw at the new size.
+    const size = isInline ? `${e.props.bodyColumns}x${e.props.scroll.bodyRows}` : null
+    if (size !== null && inlineSize !== null && size !== inlineSize) {
+      void $.clock
+        .sleep(RESIZE_SCROLL_MS)
+        .then(() => scrollToOpenRow($, tab))
+        .catch(() => undefined)
+    }
+    inlineSize = size
     const shownPrs = drawnPrs(prState, ledger.prs, lastActions, now)
     const prViews = shownPrs.map(x => x.pr)
     const pal = paletteFor(theme, look)
