@@ -3771,8 +3771,8 @@ export const register: Register = on => {
         ...(f && !f.age ? [{ text: f.text, color: f.isFailure ? pal.tone.error : pal.muted }] : []),
       ]
 
-      // Inline, the pane's window can be shorter than the open row, and a key scrolled out of view does not
-      // take its letter. So the body gives up lines until the row fits. A tab's first row opens with the window at
+      // Inline, the pane's window can be shorter than the open row, which hides its keys and so their letters.
+      // So the body gives up lines until the row fits. A tab's first row opens with the window at
       // the top, under the demo notice, the tab row and its group's title; select() scrolls any other row to its top.
       const textWidth = e.props.bodyColumns - columns.textAt - 1
       const bodyLines =
