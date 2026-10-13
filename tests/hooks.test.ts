@@ -922,7 +922,7 @@ test('a finding Claude records while the pane shows an empty tab brings the pane
   expect(await pane.find({ key: 'new-f4' })).toBeUndefined()
 })
 
-test('findings that arrive one by one after the pane moves to them leave the top one open', async ($, on) => {
+test('findings that arrive one by one after the pane moves to them keep the first one open', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])
   on('ui.panes', () => ({ value: [{ id: 'inbox', title: 'Inbox', isShown: true, isFocused: true, isPlaced: true }] }))
@@ -935,8 +935,8 @@ test('findings that arrive one by one after the pane moves to them leave the top
     await clock.settle()
   }
   await clock.advance(NEW_ROW_MS)
-  expect(await pane.find({ key: 'address-f3' })).toBeDefined()
-  expect(await pane.find({ key: 'address-f1' })).toBeUndefined()
+  expect(await pane.find({ key: 'address-f1' })).toBeDefined()
+  expect(await pane.find({ key: 'address-f3' })).toBeUndefined()
 })
 
 test('t opens a field for the person’s own words: a question’s words go to Claude, which closes it once they answer it, and a reply hands a finding to Claude', async ($, on) => {

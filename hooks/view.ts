@@ -538,6 +538,15 @@ export function firstWaiting(rows: RowWait[]): string | null {
 }
 
 /**
+ * The row a tab that drew its first waiting row open keeps open once the rows `added` arrive: its first waiting row
+ * among the rest, so a row that arrives above does not close the one the person is reading. Null when none of the
+ * rest waits, and the tab then opens a new row.
+ */
+export function keptOpen(rows: RowWait[], added: readonly string[]): string | null {
+  return firstWaiting(rows.filter(r => !added.includes(r.id)))
+}
+
+/**
  * The row to open once the open row `closedId` was answered, closed or handed off: the next row in `rows` that still
  * waits on the person, else the nearest one before it. Null when none waits, or when `rows` lacks `closedId`.
  */

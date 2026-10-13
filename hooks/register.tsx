@@ -162,6 +162,7 @@ import {
   settledRowIds,
   allRows,
   firstWaiting,
+  keptOpen,
   listWaits,
   rowAfterClose,
   shortAgo,
@@ -1638,6 +1639,21 @@ async function followNewRows($: EngineInterface, isOpening = false) {
     prs: prState.isFetching ? null : [...prs.map(x => `pr ${x.pr.ref}`), ...ids.prs],
   })
   if (!isShown) return
+  // A tab that drew its first waiting row open keeps that row open when rows arrive above it. PR rows arrive from a
+  // fetch and are left out, as they are when the pane follows new rows.
+  const keeps = (['needsYou', 'findings'] as const).flatMap(t => {
+    const id = added[t].length > 0 ? keptOpen(tabWaits(t, view, prViews, lastActions), added[t]) : null
+    return id === null ? [] : [{ t, cursor: { id, index: ids[t].indexOf(id), openedAt: 0 } }]
+  })
+  if (keeps.length > 0) {
+    await update($, SELECTION, s => {
+      const next = { ...s }
+      for (const { t, cursor } of keeps) if (s[t].id === null && s[t].openedAt === 0) next[t] = cursor
+      return next
+    })
+    // Rows that arrive above push the kept row down, so an inline pane scrolls it back to the window's top.
+    if (isInlinePane && keeps.some(k => k.t === tab)) void scrollToOpenRow($, tab)
+  }
   const arrived = TABS.flatMap(t => added[t.id])
   if (arrived.length > 0) {
     await update($, ARRIVAL, () => ({ ids: arrived, at: now }))

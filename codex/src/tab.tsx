@@ -38,6 +38,7 @@ import {
   isFailure,
   isGuarded,
   firstWaiting,
+  keptOpen,
   listWaits,
   NEW_ROW_MS,
   PRESS_GUARD_MS,
@@ -369,6 +370,11 @@ function applyView(next: View, seq: number) {
     entering.add(id)
   }
   if (added.length > 0) drawIn(NEW_ROW_MS)
+  // A tab that drew its first waiting row open keeps that row open when rows arrive above it, as the mod's pane does.
+  for (const t of TAB_IDS) {
+    const id = !selection[t] && rows.added[t].length > 0 ? keptOpen(tabWaits(next, t), rows.added[t]) : null
+    if (id) selection[t] = { id, openedAt: 0 }
+  }
   // The first view moves the tab toward the rows each tab lists, as later ones do toward rows that just appeared.
   follow(next, isOpening ? openRows(next) : rows.added)
   draw()

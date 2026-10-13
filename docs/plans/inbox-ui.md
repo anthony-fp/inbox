@@ -96,7 +96,7 @@ The rule, in the terminal: a question's handle shows a number only when a typed 
 
 **Which row is open.**
 
-- When the pane or tab opens, its first row that still waits on the person is open. A handed-off row stays closed until clicked, and a tab with no waiting row has none open. `firstWaiting` in `hooks/view.ts` picks the row for every look. When the pane or tab opens on a tab that shows only its empty text, it moves to the first other tab that lists rows, as it does when rows arrive there. `followTo` in `hooks/arrivals.ts` decides for both.
+- When the pane or tab opens, its first row that still waits on the person is open. A handed-off row stays closed until clicked, and a tab with no waiting row has none open. `firstWaiting` in `hooks/view.ts` picks the row for every look. Once a row is open that way, rows that arrive above it arrive closed and it stays open, so the row the person is reading does not close under them. `keptOpen` in `hooks/view.ts` picks it. When the pane or tab opens on a tab that shows only its empty text, it moves to the first other tab that lists rows, as it does when rows arrive there. `followTo` in `hooks/arrivals.ts` decides for both.
 - A click on a closed row's title opens it. A click on an open row's title does nothing.
 - After a press, the pressed row shows its result in place.
 - When a press answers, closes or hands off the open row, the next row that still waits on the person opens, its buttons guarded. With none below it, the nearest one above opens. Rows already handed off are skipped. `rowAfterClose` in `hooks/view.ts` picks the row for every look.
