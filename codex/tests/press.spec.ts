@@ -184,11 +184,11 @@ test('a run step on a question sends its command and leaves the question open, a
     ],
   })
   const local = (result: LocalResult) => feedbackText({ is: 'local', result }, 'codex')
-  assert.equal(local(pending), 'Copying env line\u2002·\u2002Opening .env.local…')
-  assert.equal(local(finishedResult(pending, [null, null], 60)), '✓ Copied env line\u2002·\u2002Opened .env.local')
+  assert.equal(local(pending), 'Copying env line\u2007·\u2002Opening .env.local…')
+  assert.equal(local(finishedResult(pending, [null, null], 60)), '✓ Copied env line\u2007·\u2002Opened .env.local')
   assert.equal(
     local(finishedResult(pending, [null, 'it no longer exists'], 60)),
-    'Copied env line\u2002·\u2002Could not open .env.local: it no longer exists',
+    'Copied env line\u2007·\u2002Could not open .env.local: it no longer exists',
   )
 })
 

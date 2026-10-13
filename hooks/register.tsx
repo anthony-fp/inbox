@@ -3414,17 +3414,6 @@ export const register: Register = on => {
       )
     // A desktop native button is assumed to draw about 2 columns wider than its label.
     const buttonFrame = look === 'desktop' ? 2 : 0
-    // Desktop wraps a `truncate-end` Text too, so a line that must stay one line, `inset`
-    // columns in, is clipped here. The fold line clips in both looks, at one character
-    // per cell in the terminal, so both end it the same way.
-    const clipLine = (text: string, inset: number) =>
-      clipLabel(
-        text,
-        Math.max(
-          12,
-          Math.floor((e.props.bodyColumns - 3 - inset) * (look === 'desktop' ? DESKTOP_CLIP_CHARS_PER_CELL : 1)) - 1,
-        ),
-      )
     // A closed row's one line: `before` muted, the title, then `after`. A row's last action takes the place of
     // its age, as "✓ Discuss 1m ago". A narrow desktop pane drops the age, not the action.
     const closedLine = (row: Row) => {
@@ -4449,20 +4438,18 @@ export const register: Register = on => {
       outcome: string,
       at: number,
       undo: RowPress | PrPress | null,
-      inset: number,
       isQueued = false,
       isLapsed = false,
     ) => {
       if (look === 'desktop') {
-        // One line, as the Codex tab draws it: the ask, its outcome muted after it, and Undo at the right.
+        // As the Codex tab draws it: the ask, its outcome muted after it, wrapping together, and Undo at the right.
         const after = `${DOT}${isQueued ? `Queued: ${outcome}` : outcome}`
-        const reserved = Math.ceil(after.length / DESKTOP_CHARS_PER_CELL) + (undo ? UNDO_CELLS + 1 : 0)
         return (
           <Box flexDirection="column">
             <Box flexDirection="row" alignItems="center">
               <Box flexGrow={1} flexShrink={1}>
-                <Text wrap="truncate-end">
-                  {clipLine(what, inset + reserved)}
+                <Text wrap="wrap">
+                  {what}
                   <Text color={pal.muted}>{after}</Text>
                 </Text>
               </Box>
@@ -4499,7 +4486,6 @@ export const register: Register = on => {
       const undo = r.actions.find(a => a.press.action === 'undo')?.press ?? null
       if (look === 'desktop') {
         const after = `${DOT}${state.isQueued ? `Queued: ${state.label}` : state.label}`
-        const reserved = DESKTOP_MARK_CELLS + markExtra(r.id) + 4 + (undo ? UNDO_CELLS + 1 : DESKTOP_SIDE_CELLS)
         return desktopFrame({
           key: `settled-${r.id}`,
           markCells: DESKTOP_MARK_CELLS + markExtra(r.id),
@@ -4509,8 +4495,8 @@ export const register: Register = on => {
           padY: space.settledPad,
           isCentered: true,
           children: [
-            <Text wrap="truncate-end">
-              {clipLine(r.title, reserved + Math.ceil(after.length / DESKTOP_CHARS_PER_CELL))}
+            <Text wrap="wrap">
+              {r.title}
               <Text color={pal.muted}>{after}</Text>
             </Text>,
             undo ? null : leaveBar(state.at, state.isLapsed),
@@ -4518,15 +4504,7 @@ export const register: Register = on => {
         })
       }
       const columns = columnsFor(pos, markExtra(r.id))
-      const content = settledContent(
-        r.title,
-        state.label,
-        state.at,
-        undo,
-        columns.textAt,
-        state.isQueued,
-        state.isLapsed,
-      )
+      const content = settledContent(r.title, state.label, state.at, undo, state.isQueued, state.isLapsed)
       // The ✓ waits for the answer to reach Claude; the blank keeps the row's text in line.
       const mark = state.isQueued ? <Text> </Text> : <Text color={pal.muted}>✓</Text>
       // In a group's tree, or flat as Findings lists its rows. On desktop it pads itself as a closed row does.
@@ -4699,7 +4677,6 @@ export const register: Register = on => {
               action: 'pr-undo',
               ref: pr.ref,
             },
-            7,
             false,
             true,
           ),

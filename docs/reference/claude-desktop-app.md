@@ -240,6 +240,7 @@ Read this before designing any desktop UI for the inbox. It lists what a mod can
 | Button props | Only key, label, hotkey, action, plain, dimColor, variant, role, autoFocus, hover, onPress. No width, padding, flex, color, bold, border, icon, disabled or tooltip. Any other prop fails the whole tree. | stated (list); inferred (absences) | types:1060-1152 (`ButtonProps`), 9309-9311 (`RenderElement`), 9323-9389 (`RenderElement` Button) |
 | Button children | A string label only on 2.1.293. String and `Text` children need engine 2.1.295. On 2.1.295 a `Text` child draws inside the button, but its `dimColor` draws no dimmer than the label. TypeScript does not catch an element child, because every element constructor accepts children. The types say a press on an Svg or Raster "goes on an enclosing Button", but a Button is a leaf and cannot enclose anything. | verified live (string on 2.1.293, Text child on 2.1.295); stated (TypeScript, contradiction) | live; desktop.md:3, :130; mods.md:668, :1469; types:9320 (`RenderElement` Button), 3744-3756 (`ElementChildren`, `ElementConstructor`), 9579, 9610 |
 | Clicks | Buttons and Clients take clicks, and a Box takes none. A press carries surface `'desktop'`. Clicks on Input, Select and Link were not tested. | verified live (Button, Client, Box) | live; desktop.md:53 |
+| Slash command (`/inbox`) | Once the session has started, `/inbox` is in the app's `/` menu and runs. Sent as the first message of a new session, it is refused with "/inbox isn't a command here", and the app sends the text to the model as a prompt. | verified live (2026-10-12, engine 2.1.296) | live |
 | Hotkeys | Do nothing. A Button's hotkey logs no press while the pane is focused. The types do not limit hotkeys to the terminal, and the docs say a small key shows beside the label. The live result wins. | verified live | live; desktop.md:54; types:1071-1078 (`ButtonProps.hotkey`); mods.md:656-659 |
 | Button `action` chord | Terminal only. | stated | types:1083-1086 (`ButtonProps.action`); mods.md:662 |
 | Focus | The pane and the band each keep a focus ring. The `focus` request on open is not a grant. If the focused Button is missing from the next drawing, the app takes focus off the pane, and the next click only refocuses it (anthropics/claude-code#100874). Keeping the same key avoids this. `$.ui.focus` acts only in a site that holds the keyboard. | verified live; stated | live; types:13736-13739 (`UiFocusComponent`), 7350-7356 (`PaneOpenArgs.focus`), 13712 (`ui.focus`) |
@@ -315,7 +316,6 @@ Read this before designing any desktop UI for the inbox. It lists what a mod can
 - **`$.ui.notify`.** Retest once the app runs 2.1.295. Check the session's engine version first.
 - **The real redraw rate on desktop.** Log redraw timestamps under rapid state changes.
 - **Which surface fires `onPress` when a terminal and the desktop share a session.** Attach both and click.
-- **Whether `/inbox` appears in the app's `/` menu.** Type `/` in a desktop session.
 - **Whether the app shows failure and reload lines.** Break the mod with the watch variable set and look.
 
 ## Connectors and MCP
@@ -401,7 +401,6 @@ Each check runs in a local Code-mode session in the app unless noted.
 | Whether the app's parent settings seat the guard, and what it drops | Check whether `prompt.context` runs (the inbox's context reaches Claude). Check the debug log for the guard. |
 | Whether scheduled and Dispatch sessions attach | Run a scheduled task. Check `claude agents --json` and the store for a new session entry. |
 | Whether `$.ui.notify` works on desktop | Needs an app engine at 2.1.295 or later. Call it and watch for an OS notification. |
-| Whether `/inbox` appears in the `/` menu | Type `/` in a Code-mode session. |
 | Whether a mod can call `mcp__ccd_*` tools | Call `mcp__ccd_view__show_pane` from the mod and log the result. |
 
 ## Sources

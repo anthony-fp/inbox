@@ -37,8 +37,11 @@ const OPTIONS_FOLD_AT = 5
 // question letters them. The digits switch tabs, and the letters left out are the
 // keys of a Needs you row's other actions and of moving the selection.
 export const CHOICE_KEYS = [...'abcfghilm']
-/** The dot between parts of a drawn line, as "title · 3m ago". En spaces, wider than a space, set it apart. */
-export const DOT = '\u2002·\u2002'
+/**
+ * The dot between parts of a drawn line, as "title · 3m ago", set apart by spaces wider than a space. The one before
+ * it is a figure space, which never breaks, so a wrapped line ends with the dot instead of starting with it.
+ */
+export const DOT = '\u2007·\u2002'
 
 /** The Findings tab's groups, one per kind, in the order it lists them, and each kind's mark, drawn in its tone. */
 export const FINDING_GROUPS: Record<Finding['kind'], { title: string; mark: string; tone: 'issue' | 'done' }> = {

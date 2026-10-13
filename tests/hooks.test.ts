@@ -479,9 +479,9 @@ test('a task handed to Claude folds and leaves the count until Claude’s reply 
   expect(ran.at(-1)).toEqual(['open', '/tmp/project/.env.local'])
   // A success note is not red. The first task's failure stays red on its collapsed line.
   expect(
-    (await pane.find({ type: 'Text', text: '✓ Copied env line\u2002·\u2002Opened .env.local' }))?.props.color,
+    (await pane.find({ type: 'Text', text: '✓ Copied env line\u2007·\u2002Opened .env.local' }))?.props.color,
   ).not.toBe(red)
-  expect((await pane.find({ type: 'Text', text: '\u2002·\u2002Could not open load.md' }))?.props.color).toBe(red)
+  expect((await pane.find({ type: 'Text', text: '\u2007·\u2002Could not open load.md' }))?.props.color).toBe(red)
   // An open or copy does not make its button read "again".
   expect((await pane.find({ key: 'help-i2-0-key' }))?.props.label).toBe('Copy env line and open .env.local')
   await clock.advance(SETTLED_MS)
@@ -716,15 +716,15 @@ test('the band is [Open inbox] and the counts, the same while working and after 
   // One line: [Open inbox] and the counts, with no title, goal or step.
   const standing = await band()
   expect(await standing.find({ key: 'open-inbox' })).toBeDefined()
-  expect(await standing.find({ text: /^Needs you 2\u2002·\u2002Findings 1$/ })).toBeDefined()
+  expect(await standing.find({ text: /^Needs you 2\u2007·\u2002Findings 1$/ })).toBeDefined()
   expect(await standing.find({ text: /Use Node or Python|Add a greeting CLI|Waiting on two choices/ })).toBeUndefined()
 
   const working = await band({ isWorking: true })
-  expect(await working.find({ text: /^Needs you 2\u2002·\u2002Findings 1$/ })).toBeDefined()
+  expect(await working.find({ text: /^Needs you 2\u2007·\u2002Findings 1$/ })).toBeDefined()
 
   // Coming back after 15 idle minutes adds nothing.
   await clock.advance(16 * 60_000)
-  expect(await standing.find({ text: /^Needs you 2\u2002·\u2002Findings 1$/ })).toBeDefined()
+  expect(await standing.find({ text: /^Needs you 2\u2007·\u2002Findings 1$/ })).toBeDefined()
   expect(await standing.find({ text: /Plan written|last active/ })).toBeUndefined()
 
   // [Open inbox] opens the pane on Needs you with its top row open, from another row and tab.
@@ -1068,7 +1068,7 @@ test('a press during a turn reads Queued until its prompt enters, and one that w
   submitAnswer = 'hold'
   await pane.press({ key: 'explain-i1-key' })
   await clock.settle()
-  expect(await pane.find({ text: /^\u2002·\sQueued:\sExplain$/ })).toBeDefined()
+  expect(await pane.find({ text: /^\u2007·\sQueued:\sExplain$/ })).toBeDefined()
   await pane.press({ key: 'select-i2' })
   await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'typekey-i2' })
@@ -1079,7 +1079,7 @@ test('a press during a turn reads Queued until its prompt enters, and one that w
   await arrive($)
   await clock.settle()
   await pane.press({ key: 'select-i1' })
-  expect(await pane.find({ text: /^\u2002·\s✓\sExplained$/ })).toBeDefined()
+  expect(await pane.find({ text: /^\u2007·\s✓\sExplained$/ })).toBeDefined()
   expect(await pane.find({ text: /Queued/ })).toBeUndefined()
 
   // A hook refuses a typed answer: the question opens again, and the words go back into its field.
@@ -1159,7 +1159,7 @@ test('Claude closes an item or finding that no longer applies, by the id it read
   submitAnswer = 'hold'
   await pane.press({ key: 'explain-i1-key' })
   await clock.settle()
-  expect(await pane.find({ text: /^\u2002·\sQueued:\sExplain/ })).toBeDefined()
+  expect(await pane.find({ text: /^\u2007·\sQueued:\sExplain/ })).toBeDefined()
   // The user answered i1 in their own message: it closes with their answer, shown in place.
   // No answer of the person's waits to reach Claude, so it settles with a ✓, though the Explain is still queued.
   expect((await close({ id: 'i1', answer: 'Deno' })).result).toBe(
@@ -1376,7 +1376,7 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   await pane.press({ key: 'tab-prs' })
   await clock.settle()
   expect(await pane.find({ text: /Add a greeting CLI/ })).toBeDefined()
-  for (const line of ['Blocked', /^\u2002·\sconflicts with main$/])
+  for (const line of ['Blocked', /^\u2007·\sconflicts with main$/])
     expect(await pane.find({ text: line })).toBeDefined()
   // A blocked PR offers no Merge.
   expect(await pane.find({ key: 'merge-acme/greet#12' })).toBeUndefined()
@@ -1385,7 +1385,7 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   await pane.press({ key: 'resolve-acme/greet#12' })
   expect(sent.at(-1)).toContain('PR #12 (https://github.com/acme/greet/pull/12) conflicts with main.')
   await clock.settle()
-  expect(await pane.find({ text: /✓ Asked to resolve conflicts\u2002·/ })).toBeDefined()
+  expect(await pane.find({ text: /✓ Asked to resolve conflicts\u2007·/ })).toBeDefined()
   expect((await pane.find({ key: 'resolve-acme/greet#12' }))?.props.label).toBe('Resolve conflicts again')
 
   // Open PR reports on the block, and a failed open reads in a color, not muted as its reasons are.
@@ -1434,10 +1434,10 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   submitAnswer = 'hold'
   await pane.press({ key: 'retry-T1' })
   await clock.settle()
-  expect(await pane.find({ text: /^\u2002·\sQueued:\sAddress$/ })).toBeDefined()
+  expect(await pane.find({ text: /^\u2007·\sQueued:\sAddress$/ })).toBeDefined()
   await arrive($)
   await clock.settle()
-  expect(await pane.find({ text: /^\u2002·\sAddressed$/ })).toBeDefined()
+  expect(await pane.find({ text: /^\u2007·\sAddressed$/ })).toBeDefined()
 
   // Sent to Claude, the thread folds out of the count, and keeps its keys, until the reviewer answers.
   expect((await pane.find({ key: 'address-T1-key' }))?.props.label).toBe('Address again')
@@ -1592,7 +1592,7 @@ test('a PR’s Dismiss settles its block with Undo, which brings it back, a read
   await pane.press({ key: 'merge-acme/greet#12' })
   expect(sent.at(-1)).toContain('Merge PR #12 (https://github.com/acme/greet/pull/12) into main.')
   await clock.settle()
-  expect(await pane.find({ text: /✓ Asked to merge\u2002·/ })).toBeDefined()
+  expect(await pane.find({ text: /✓ Asked to merge\u2007·/ })).toBeDefined()
   expect((await pane.find({ key: 'merge-acme/greet#12' }))?.props.label).toBe('Merge again')
   // The PR stops being ready after the pane drew it and before Merge lands: nothing is sent.
   const merges = sent.length
