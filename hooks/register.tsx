@@ -3989,19 +3989,13 @@ export const register: Register = on => {
     const keyColumn = Math.max(...keyList.map(k => k.keys.length)) + 2
 
     // The tab bar is drawn on the pane's own background, as part of the pane's
-    // title bar, with when the inbox last updated at its right end, or under the
-    // tabs when the pane is too narrow. Inline, its names line up with the group titles.
-    // When the status does not fit beside the tabs, a desktop pane puts it under them, one part per line,
-    // half a line below them, so it does not read as the first tab's caption.
+    // title bar. Inline, its names line up with the group titles.
     // Desktop draws the tabs in a Client, whose region takes the pointer over each whole tab.
-    // The tabs Box pads the bar by 1 column on each side, and puts 3 between the tabs and the status.
+    // The tabs Box pads the bar by 1 column on each side.
     const tabSizes = desktopTabSizes(
       TABS.map(({ id, label }) => ({ label, count: tabCounts[id] })),
       e.props.bodyColumns - 2,
     )
-    const tabsWidth = tabSizes.widths.reduce((sum, w) => sum + w, 0) + tabSizes.gap * (tabSizes.widths.length - 1)
-    const isStatusBelow =
-      look === 'desktop' && tabsWidth + 3 + Math.ceil(status.length / DESKTOP_CHARS_PER_CELL) + 2 > e.props.bodyColumns
     const tabProps: TabsProps | null = hasClient
       ? {
           tabs: TABS.map(({ id, label }, n) => ({
@@ -4044,16 +4038,7 @@ export const register: Register = on => {
     const terminalTabsWidth = TABS.reduce((sum, t) => sum + tabText(t.id, t.label).length + 2 * TAB_PAD.length + 1, 1)
     const pad = terminalTabsWidth <= e.props.bodyColumns ? TAB_PAD : ' '
     const tabs = (
-      <Box
-        paddingLeft={isInline ? 2 : 1}
-        paddingRight={1}
-        flexDirection={isStatusBelow ? 'column' : 'row'}
-        flexWrap="wrap"
-        alignItems={isStatusBelow ? 'flex-start' : 'center'}
-        justifyContent="space-between"
-        columnGap={3}
-        rowGap={isStatusBelow ? 1 : 0}
-      >
+      <Box paddingLeft={isInline ? 2 : 1} paddingRight={1} flexDirection="row">
         <Box flexDirection="row" flexWrap="wrap" columnGap={isInline ? 3 : look === 'desktop' ? 2 : 1}>
           {hasClient && tabProps ? (
             <elements.Client key="tabs" module="./tabs-client.tsx" height={TAB_HEIGHT} props={tabProps} />
@@ -4151,31 +4136,34 @@ export const register: Register = on => {
                 )
               })}
         </Box>
-        <Box flexDirection={isStatusBelow ? 'column' : 'row'} columnGap={2}>
-          {/* Desktop draws dimColor as plain text, so the status takes the ages' dimmer gray there. */}
-          {look === 'desktop' ? <Text color={pal.age}>{status}</Text> : <Text dimColor>{status}</Text>}
-        </Box>
       </Box>
     )
+    // Desktop draws dimColor as plain text, so the status takes the ages' dimmer gray there.
+    const statusText = look === 'desktop' ? <Text color={pal.age}>{status}</Text> : <Text dimColor>{status}</Text>
     // Each takes its own line under the tab row, so the status beside the tabs never moves for one.
     const statusBlock = statusLines.some(Boolean) ? (
       <Box flexDirection="column" paddingX={isInline ? 2 : 1} paddingTop={1}>
         {statusLines}
       </Box>
     ) : null
-    // The footer's one line opens the list of keys as a drawer above it. The
-    // drawer is absolute, so it covers the rows above instead of moving the line.
+    // The footer's one line says when the inbox last updated, at its right end, and, where keys work, opens the list
+    // of keys as a drawer above it. The drawer is absolute, so it covers the rows above instead of moving the line.
     const footer = (
       <Box flexDirection="column" paddingX={1} paddingTop={blankLine}>
-        <Box flexDirection="row" paddingX={1}>
-          <Button
-            plain
-            dimColor
-            key="key-list"
-            label={isKeyListShown ? '▾ Keys' : '▴ Keys'}
-            onPress={() => void update($, IS_KEY_LIST_SHOWN, shown => !shown)}
-          />
-          {isKeyListShown ? (
+        <Box flexDirection="row" paddingX={1} justifyContent="space-between" columnGap={3}>
+          {look === 'desktop' ? (
+            <Box />
+          ) : (
+            <Button
+              plain
+              dimColor
+              key="key-list"
+              label={isKeyListShown ? '▾ Keys' : '▴ Keys'}
+              onPress={() => void update($, IS_KEY_LIST_SHOWN, shown => !shown)}
+            />
+          )}
+          {statusText}
+          {look !== 'desktop' && isKeyListShown ? (
             <Box
               position="absolute"
               bottom={1}
@@ -4977,7 +4965,7 @@ export const register: Register = on => {
           {tab === 'findings' ? findingsView() : tab === 'prs' ? prsView() : needsYouView()}
         </Box>
         {/* Desktop takes no keys: a Button's hotkey does nothing there, so it gets neither the list of keys nor the hidden Buttons. */}
-        {look === 'desktop' ? null : footer}
+        {footer}
         {look === 'desktop' ? null : (
           <Box display="none">
             {keyBindings([...tabKeys, ...moveKeys])}
