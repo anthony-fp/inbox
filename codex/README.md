@@ -6,10 +6,6 @@ and the findings Codex recorded. The list shows in
 an Inbox tab beside the conversation, and its buttons send your answer to
 Codex as your own message.
 
-Status: built. The tab runs in the Codex desktop app. Presses, Dismiss, Undo
-and row switching were checked there on 2026-10-10. After a reinstall, the
-server reloads its handler without restarting the app.
-
 ## Install
 
 ```sh
@@ -30,6 +26,9 @@ Then, in the desktop app:
    The hooks give Codex the inbox at each prompt, record what it does, and
    update the inbox after each reply.
 2. Open the Inbox tab beside the conversation.
+
+To update, run `codex plugin marketplace upgrade`, then
+`codex plugin add inbox@inbox`, and start a new chat.
 
 ## What it costs
 

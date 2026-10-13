@@ -17,7 +17,9 @@ that session.
 
 - It makes one Sonnet call after each of Claude's replies. See [Cost](#cost).
 - The PRs tab needs the GitHub CLI, `gh`, signed in.
-- It was built and tested with Claude Code 2.1.292.
+- It was built and tested with Claude Code 2.1.296.
+- There is also a version for the Codex desktop app. See
+  [codex/README.md](codex/README.md) to install it.
 
 To update, run `claude plugin update inbox`, then `/reload-plugins` in any
 session that's already open.

@@ -7,7 +7,6 @@ import type { Effect, PrActionId } from './presses'
 import {
   inPrOrder,
   parseRef,
-  prNeedsYou,
   prompts,
   prRefs,
   readiness,
