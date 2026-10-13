@@ -4683,9 +4683,9 @@ export const register: Register = on => {
           `settled-pr:${pr.ref}`,
         ),
       ])
-    // A desktop PR block's checks or threads, under a group title that says their kind once. The title sits a line
-    // below the lines above it and next to its first row, whose own padding is the only gap, so it reads as that
-    // group's heading.
+    // A PR block's checks or threads, under a group title that says their kind once. The title sits a line below
+    // the lines above it. On desktop it sits next to its first row, whose own padding is the only gap; in the
+    // terminal a connector line separates them, as under every other group title.
     const prRowGroup = (title: string, group: Row[], key: string) =>
       group.length === 0
         ? []
@@ -4693,6 +4693,7 @@ export const register: Register = on => {
             <Box key={`group-${key}`} marginTop={blankLine}>
               {groupTitle(title, group.length)}
             </Box>,
+            ...(look === 'desktop' ? [] : titleGap()),
             ...divided(
               group.map((r, n) => listRow(r, childPos(n, group.length))),
               key,
