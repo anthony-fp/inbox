@@ -490,7 +490,7 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
         return ok({
           protocolVersion: (params?.protocolVersion as string) ?? '2025-06-18',
           capabilities: { tools: {}, resources: {} },
-          serverInfo: { name: 'inbox', version: '0.2.0' },
+          serverInfo: { name: 'inbox', version: '0.2.1' },
         })
       case 'tools/list':
         return ok({ tools })

@@ -275,7 +275,7 @@ upload doesn't mean the listing is ready to submit."
   and installs locally anyway** [repo, live] (codex/plugin/.codex-plugin/plugin.json:1-17).
   [inference] "Codex package validation" means the submission portal's upload
   checks, not local install. The docs do not say so.
-- **The repo's manifest today:** `name` and `version` "0.2.0", `author.name`,
+- **The repo's manifest today:** `name` and `version` "0.2.1", `author.name`,
   `"mcpServers": "./.mcp.json"`, `"hooks": "./hooks/hooks.json"`, and an
   `interface` with `displayName` "Inbox", `category` "Developer Tools" and
   `capabilities: ["Interactive"]` (codex/plugin/.codex-plugin/plugin.json:1-17).
