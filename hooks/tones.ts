@@ -1,7 +1,7 @@
 /**
  * The status colors every inbox surface draws: the terminal's dark and light themes, the Codex tab's CSS, which
- * codex/build.mjs writes from these, and the Claude desktop pane's Svg marks. Each was checked against the pane,
- * the cards, the selected tab and the selected row of the appearance it names, and holds only there.
+ * codex/build.mjs writes from these, and the Claude desktop pane's Svg marks. Each meets its contrast only on the
+ * pane, cards, selected tab and selected row of the appearance it names.
  */
 
 export type ToneName = 'needsYou' | 'issue' | 'findings' | 'prs' | 'done' | 'error'

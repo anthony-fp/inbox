@@ -1922,7 +1922,7 @@ test('/clear and /resume switch the inbox to the other conversation, and each ke
 const SAVED_SESSION = {
   savedAt: 900_000,
   ledger: {
-    card: { goal: 'Add a greeting CLI', done: [], now: 'Waiting on a choice', running: [], updatedAt: 900_000 },
+    card: { goal: 'Add a greeting CLI', done: [], now: 'Waiting on a choice', running: [] },
     items: [
       {
         id: 'i1',

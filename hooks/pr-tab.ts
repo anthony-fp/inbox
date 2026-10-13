@@ -204,7 +204,7 @@ export const PR_TONES: Record<PrStatus, 'needsYou' | 'done' | 'findings' | 'erro
   closed: 'error',
 }
 
-/** A press on a PR block, one of its review threads, or a failing check's row. Only the mod has PRs. */
+/** A press on a PR block, one of its review threads, or a failing check's row. */
 export type PrPress =
   | { action: 'thread-address' | 'thread-draft' | 'thread-discuss' | 'thread-open'; ref: string; thread: string }
   | { action: 'pr-conflicts' | 'pr-address-all' | 'pr-merge' | 'pr-open' | 'pr-dismiss' | 'pr-undo'; ref: string }

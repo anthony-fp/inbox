@@ -185,7 +185,6 @@ export function readThreads(json: string): PrThread[] {
           path: t.path,
           line: t.line ?? t.originalLine,
           body: (first?.body ?? '').trim(),
-          replies: Math.max(0, t.comments.totalCount - 1),
           url: first?.url ?? '',
           at: Date.parse(first?.createdAt ?? '') || null,
         }

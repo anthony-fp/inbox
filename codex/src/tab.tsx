@@ -72,7 +72,7 @@ import { ENTER_MS, EXIT_MS, isMoving, MOVE_MS, ROW_STATE_MS, stepRow } from './r
 import type { RowState, RowTarget, RowTrack } from './rows'
 import { drawnSettled, POLL_MS, PRESS_TIMEOUT_MS, settledIds, settledSeen } from './settle'
 
-type Tone = 'needsYou' | 'issue' | 'findings' | 'done' | 'error'
+type Tone = 'needsYou' | 'findings' | 'done' | 'error'
 
 /** The tabs: Needs you and Findings list the ledger's rows, PRs lists what the server fetched from GitHub. */
 type ShownTab = Tab | 'prs'
@@ -1361,7 +1361,6 @@ type ClosedLine = {
   at: number
 }
 
-/** A list's closed items or findings behind `▸ N Closed`, each with how it closed and when. */
 /** Text an agent wrote, with its inline markdown as elements. Preact escapes each span's text, so no HTML gets through. */
 function inlineHtml(text: string) {
   return parseInline(text).map(s => {
@@ -1369,7 +1368,7 @@ function inlineHtml(text: string) {
     if (s.italic) node = <i>{node}</i>
     if (s.bold) node = <b>{node}</b>
     if (s.strike) node = <s>{node}</s>
-    // As in the Claude panes: the label, then its URL. A plain anchor's click in the tab's frame is untested.
+    // As in the Claude panes: the label, then its URL.
     return s.link ? (
       <>
         <u>{node}</u>

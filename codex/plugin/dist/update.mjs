@@ -383,8 +383,7 @@ function applyUpdate(ledger, u, now, turn, promptAt = now) {
     goal: u.card.goal || prev?.goal || "",
     done: u.card.done.length > 0 ? u.card.done : prev?.done ?? [],
     now: u.card.now || prev?.now || "",
-    running: u.card.running,
-    updatedAt: now
+    running: u.card.running
   };
   const stillAsked = new Set(u.updated.filter((c) => c.options || c.rec).map((c) => c.id));
   const closing = new Map(u.closed.filter((c) => !stillAsked.has(c.id)).map((c) => [c.id, c.outcome]));

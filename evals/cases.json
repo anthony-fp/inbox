@@ -9,8 +9,7 @@
         "goal": "Add caching to the product API",
         "done": ["Profiled slow endpoints"],
         "now": "Waiting on cache choice",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [
         {
@@ -52,8 +51,7 @@
         "goal": "Add caching to the product API",
         "done": ["Profiled slow endpoints"],
         "now": "Waiting on cache choice",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [
         {
@@ -91,8 +89,7 @@
         "goal": "Add caching to the product API",
         "done": ["Profiled slow endpoints"],
         "now": "Waiting on cache choice",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [
         {
@@ -132,8 +129,7 @@
         "goal": "Add caching to the product API",
         "done": ["Profiled slow endpoints"],
         "now": "Waiting on cache choice",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [
         {
@@ -188,8 +184,7 @@
         "goal": "Add caching to the product API",
         "done": ["Profiled slow endpoints"],
         "now": "Waiting on cache choice",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [],
       "closed": [
@@ -225,8 +220,7 @@
         "goal": "Add caching to the product API",
         "done": ["Profiled slow endpoints"],
         "now": "Waiting on cache choice",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": []
     },
@@ -252,8 +246,7 @@
         "goal": "Add caching to the product API",
         "done": ["Profiled slow endpoints"],
         "now": "Waiting on cache choice",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": []
     },
@@ -279,8 +272,7 @@
         "goal": "Ship the greeting CLI v1",
         "done": ["Arg parser fixed"],
         "now": "Preparing the release",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [],
       "findings": [
@@ -327,8 +319,7 @@
         "goal": "Ship the greeting CLI v1",
         "done": ["Arg parser fixed"],
         "now": "Preparing the release",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [],
       "findings": [
@@ -375,8 +366,7 @@
         "goal": "Ship the greeting CLI v1",
         "done": ["Arg parser fixed"],
         "now": "Preparing the release",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [],
       "findings": [
@@ -423,8 +413,7 @@
         "goal": "Ship the greeting CLI v1",
         "done": ["Arg parser fixed"],
         "now": "Preparing the release",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [],
       "findings": [
@@ -471,8 +460,7 @@
         "goal": "Ship last_seen_at",
         "done": ["Migration written"],
         "now": "Waiting on production run",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": []
     },
@@ -499,8 +487,7 @@
         "goal": "Ship last_seen_at",
         "done": ["Migration written"],
         "now": "Waiting on production run",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": []
     },
@@ -527,8 +514,7 @@
         "goal": "Ship last_seen_at",
         "done": ["Migration written"],
         "now": "Waiting on production run",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": []
     },
@@ -554,8 +540,7 @@
         "goal": "Ship last_seen_at",
         "done": ["Migration written"],
         "now": "Waiting on production run",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": []
     },
@@ -581,8 +566,7 @@
         "goal": "Clean up the reports app before release",
         "done": ["Report export fixed"],
         "now": "Finishing the export work",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [],
       "findings": [
@@ -632,8 +616,7 @@
         "goal": "Clean up the reports app before release",
         "done": ["Report export fixed"],
         "now": "Finishing the export work",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [],
       "findings": [
@@ -683,8 +666,7 @@
         "goal": "Clean up the reports app before release",
         "done": ["Report export fixed"],
         "now": "Finishing the export work",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [
         {
@@ -743,8 +725,7 @@
         "goal": "Clean up the reports app before release",
         "done": ["Report export fixed"],
         "now": "Finishing the export work",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [],
       "findings": [
@@ -790,8 +771,7 @@
         "goal": "Clean up the reports app before release",
         "done": ["Report export fixed"],
         "now": "Finishing the export work",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [],
       "findings": [
@@ -840,8 +820,7 @@
         "goal": "Clean up the reports app before release",
         "done": ["Report export fixed"],
         "now": "Finishing the export work",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [],
       "findings": [
@@ -887,8 +866,7 @@
         "goal": "Ship the reports export",
         "done": ["Export streams rows"],
         "now": "Finishing the export",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [
         {
@@ -929,8 +907,7 @@
         "goal": "Ship the reports export",
         "done": ["Export streams rows"],
         "now": "Finishing the export",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [
         {
@@ -971,8 +948,7 @@
         "goal": "Ship the reports export",
         "done": ["Export streams rows"],
         "now": "Finishing the export",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [
         {
@@ -1012,8 +988,7 @@
         "goal": "Ship the reports export",
         "done": ["Export streams rows"],
         "now": "Finishing the export",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [
         {
@@ -1072,8 +1047,7 @@
         "goal": "Ship the reports export",
         "done": [],
         "now": "Waiting on the cache decision",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [
         {
@@ -1110,8 +1084,7 @@
         "goal": "Ship the reports export",
         "done": [],
         "now": "Waiting on the cache decision",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [
         {
@@ -1148,8 +1121,7 @@
         "goal": "Ship the reports export",
         "done": ["Export streams rows"],
         "now": "Waiting on sign in to npm so the agent can publish",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [
         {
@@ -1206,8 +1178,7 @@
         "goal": "Ship the reports export",
         "done": ["Export streams rows"],
         "now": "Waiting on check the export page in the light theme",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [
         {
@@ -1264,8 +1235,7 @@
         "goal": "Fix the flaky checkout test",
         "done": [],
         "now": "Fixing the checkout test",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [],
       "findings": [],
@@ -1298,8 +1268,7 @@
         "goal": "Rename BASE to API_URL across the app",
         "done": [],
         "now": "Renaming the env var",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [],
       "findings": [],
@@ -1332,8 +1301,7 @@
         "goal": "Add flags to the greet CLI",
         "done": [],
         "now": "Adding flags",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [],
       "findings": [],
@@ -1362,8 +1330,7 @@
         "goal": "Ship the search page to staging",
         "done": ["Rebuilt the deploy branch"],
         "now": "Waiting on the staging deploy",
-        "running": [],
-        "updatedAt": 0
+        "running": []
       },
       "items": [
         {

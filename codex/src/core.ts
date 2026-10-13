@@ -207,8 +207,6 @@ export type View = InboxView & {
 /**
  * The view as the server sends it to the tab, with the session the call came
  * from. The tab sends `thread` back with each press, which reads as stale in any other session.
- */
-/**
  * `devPage` is the address of the page the server serves now. A tab showing another page replaces itself with it.
  * The name is older than installed builds reloading, and tabs open from older builds still read it.
  * `serverBuild` is the fingerprint build.mjs stamped into the running server. `serverLoadError` says why a newer

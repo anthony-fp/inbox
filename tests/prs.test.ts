@@ -168,10 +168,10 @@ describe('prs', () => {
     expect(threads.map(t => t.at)).toEqual([Date.parse('2026-10-08T09:30:00Z'), null, null])
     expect(threads[0]?.reply?.at).toBe(Date.parse('2026-10-08T10:00:00Z'))
     // T3 is outdated with no reply: a later commit changed its lines, so it no longer waits on the viewer.
-    expect(threads.map(t => [t.id, t.isWaiting, t.isLinesChanged, t.line, t.replies])).toEqual([
-      ['T1', true, false, 4, 1],
-      ['T4', false, false, 2, 0],
-      ['T3', true, true, 9, 0],
+    expect(threads.map(t => [t.id, t.isWaiting, t.isLinesChanged, t.line])).toEqual([
+      ['T1', true, false, 4],
+      ['T4', false, false, 2],
+      ['T3', true, true, 9],
     ])
     expect(readiness({ ...view, threads, fetchedAt: 0, error: null }).text).toBe(
       'Blocked: 1 failing check, changes requested, 1 thread waiting on you',

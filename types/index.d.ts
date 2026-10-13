@@ -4,7 +4,6 @@ export type Card = {
   done: string[]
   now: string
   running: string[]
-  updatedAt: number
 }
 
 /** Something the agent put to the person that is still unanswered. */
@@ -125,10 +124,10 @@ export type Finding = {
   at: number
 }
 
-/** A finding that closed, and how, as `Closed` says it for an item. */
 /** A list with its own Closed fold: each Needs you group and each kind of finding. */
 export type FoldKind = Item['kind'] | Finding['kind']
 
+/** A finding that closed, and how, as `Closed` says it for an item. */
 export type ClosedFinding = Finding & Pick<Closed, 'how' | 'outcome'> & { closedAt: number }
 
 export type PrCheck = {
@@ -159,7 +158,6 @@ export type PrThread = {
   path: string
   line: number | null
   body: string
-  replies: number
   url: string
   /** When its first comment was written; null when GitHub gave no time, or for a thread saved before the mod kept it. */
   at: number | null
@@ -233,7 +231,7 @@ export type Presence = {
    */
   turnsStarted: number
   turnsApplied: number
-  /** The minute of the last clock tick, so the "last active" text redraws. */
+  /** The minute of the last clock tick while away, so the pane's ages redraw each minute. */
   minute: number
 }
 

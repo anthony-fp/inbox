@@ -318,7 +318,7 @@ export type Exchange = {
 export type Press = { id: string; action: 'answer' | 'explain' | 'run' | 'done' }
 
 export type Update = {
-  card: Omit<Card, 'updatedAt'>
+  card: Card
   closed: { id: string; outcome: string }[]
   added: (Omit<Item, 'id' | 'turn' | 'at' | 'helps'> & { helps: Help[] })[]
   /** Helps for items already open. */
@@ -882,7 +882,6 @@ export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number
     done: u.card.done.length > 0 ? u.card.done : (prev?.done ?? []),
     now: u.card.now || prev?.now || '',
     running: u.card.running,
-    updatedAt: now,
   }
   // An UPDATE says its question still waits, so it outweighs a CLOSED line for the same question.
   const stillAsked = new Set(u.updated.filter(c => c.options || c.rec).map(c => c.id))

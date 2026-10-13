@@ -7,7 +7,7 @@
 //   atoms and constants: `const LEDGER`; palettes: `const PALETTES`; the look of a surface: `function lookOf`
 //   model-read guidance: `guidanceText` in hooks/ledger.ts; per-reply update: `function runUpdate`, `function queueUpdate`
 //   stop and dialogs: `function setStop`, `function openDialog`; PR fetches: `function fetchPrs`
-//   PR presses: `function applyPrPress`; press runner: `async function runPress`; demo: `runDemoPress`
+//   PR presses: `applyPrPress` in pr-tab.ts; press runner: `async function runPress`; demo: `runDemoPress`
 //   engine hooks: `export const register`; band: `component: 'AbovePrompt'`; pane: `component: 'Pane'`
 //   desktop Clients: `const hasClient`; PR block in the pane: `const prBlock`
 
@@ -219,7 +219,6 @@ const FOLD_HOVER = atom({ plugin: 'inbox', key: 'foldHover' } as const, null as 
 const OPTIONS_SHOWN = atom({ plugin: 'inbox', key: 'optionsShown' } as const, [] as string[])
 const IS_KEY_LIST_SHOWN = atom({ plugin: 'inbox', key: 'isKeyListShown' } as const, false)
 const UNREADABLE = atom({ plugin: 'inbox', key: 'unreadable' } as const, null as string | null)
-// How long a closed item's row stays in place, with its outcome, before it moves to Closed.
 // The bar under a just-closed row, in cells. It loses half a cell per step of SETTLED_MS, so the pane redraws that often.
 const LEAVE_BAR_CELLS = 12
 const LEAVE_BAR_STEPS = LEAVE_BAR_CELLS * 2
@@ -240,20 +239,20 @@ const DESKTOP_TYPING = true
 // From this many columns, the desktop pane shows each closed row's age.
 const DESKTOP_WIDE_AT = 50
 // About how many characters of desktop's proportional text fit in one column of `bodyColumns`: sentences and
-// the tab labels measured 1.23 to 1.30, bold or not. A guess too high is cut from the muted text after a title.
+// the tab labels run 1.23 to 1.30, bold or not. A guess too high is cut from the muted text after a title.
 const DESKTOP_CHARS_PER_CELL = 1.25
 // A lower guess for text that must stay one line, since desktop wraps text that is too long. A run of wide
-// letters such as "n" measured about 1.03.
+// letters such as "n" runs about 1.03.
 const DESKTOP_CLIP_CHARS_PER_CELL = 1.1
 const DESKTOP_TAB_PAD = '\u00a0'.repeat(3)
 // A text line in the Claude app pane, in points: a one-line row padded by half a line above and below
-// measured 37.8 pt (2026-10-10).
+// is 37.8 pt.
 const DESKTOP_LINE_PT = 19
-// One column of `bodyColumns` in the Claude app pane, in points: 15.8 px at 2x (2026-10-09).
+// One column of `bodyColumns` in the Claude app pane, in points: 15.8 px at 2x.
 const DESKTOP_CELL_PT = 7.9
 // The desktop Undo button's width, in columns.
 const UNDO_CELLS = 9
-// The app's own buttons, measured in the pane (2026-10-11): 23 pt tall, corners of 6 pt and a 14 px label. Dark:
+// The app's own buttons in the pane: 23 pt tall, corners of 6 pt and a 14 px label. Dark:
 // a 10% white fill and #f0efec text. Light: a near-white fill, a 1 pt outline about 10% black, and #0b0b0b text.
 const UNDO_HEIGHT_PT = 23
 /**
@@ -380,7 +379,7 @@ const ROW_COLUMNS = {
 } as const
 // A desktop list line's mark column and its side column, for the age, in columns. See docs/plans/desktop-layout.md.
 const DESKTOP_MARK_CELLS = 1
-// How far a row frame's transparent border insets its content, in points: 13.2 pt, measured in the pane (2026-10-11).
+// How far a row frame's transparent border insets its content, in points.
 const FRAME_INSET_PT = 13.2
 const DESKTOP_SIDE_CELLS = 5
 // The terminal row's side column: a short age, as "27m", with a cell on each side.
@@ -492,7 +491,6 @@ const LIGHT_PALETTE: Palette = {
 // only in the default and muted colors, and puts status colors on markers.
 // A color name such as "black" is drawn as fixed RGB, so each color is a theme
 // key whose value in that ANSI theme is the palette color named beside it.
-// Checked with Ghostty's default palette and its "Apple System Colors Light".
 const DARK_ANSI_PALETTE: Palette = {
   body: 'inverseText', // black
   raised: 'inactive', // white
@@ -2190,10 +2188,6 @@ function outcomeText(d: Pick<Closed, 'outcome'>): string {
 }
 
 /**
- * What the band and the pane draw: the session's own state, or the samples
- * `/inbox demo` shows in its place.
- */
-/**
  * The desktop tab bar's sizes for `columns`: each tab's width, the gap between tabs, and whether the counts
  * show. A label is sized as bold text at DESKTOP_CHARS_PER_CELL plus 1 cell of slack. While the tabs do not
  * fit, the padding drops from 2 to 1, then the gap, then the counts.
@@ -2855,7 +2849,7 @@ export const register: Register = on => {
     const hasClient = look === 'desktop' && 'Client' in elements
     // The mobile app draws no text field, so there the typed reply is not offered; nor on desktop without DESKTOP_TYPING.
     const Input = 'Input' in elements && (look === 'terminal' || DESKTOP_TYPING) ? elements.Input : null
-    // Narrow, the desktop pane puts its status under the tabs and drops closed rows' ages.
+    // Narrow, the desktop pane drops closed rows' ages.
     const isNarrowDesktop = look === 'desktop' && e.props.bodyColumns < DESKTOP_WIDE_AT
     // The terminal draws a row's age in its side column, so no line repeats it.
     const isAgeInSide = look === 'terminal'
@@ -3325,7 +3319,7 @@ export const register: Register = on => {
     const pressable = (keys: KeyAction[]) => keys.filter(k => Input || !k.key.startsWith('typekey-'))
     // Under a just-closed row, a thin bar that empties as its time in place runs out.
     // ─ is a light line across a cell and ╴ across its left half, so the bar shrinks by half cells.
-    const leaveBar = (at: number, isLapsed: boolean) => {
+    const leaveBar = (at: number) => {
       if (look !== 'terminal') return null
       const halves = Math.ceil((Math.max(0, SETTLED_MS - (now - at)) / SETTLED_MS) * LEAVE_BAR_STEPS)
 
@@ -4184,7 +4178,7 @@ export const register: Register = on => {
     )
     // Desktop draws dimColor as plain text, so the status takes the ages' dimmer gray there.
     const statusText = look === 'desktop' ? <Text color={pal.age}>{status}</Text> : <Text dimColor>{status}</Text>
-    // Each takes its own line under the tab row, so the status beside the tabs never moves for one.
+    // Each takes its own line under the tab row.
     const statusBlock = statusLines.some(Boolean) ? (
       <Box flexDirection="column" paddingX={isInline ? 2 : 1} paddingTop={1}>
         {statusLines}
@@ -4522,7 +4516,7 @@ export const register: Register = on => {
                 </Box>
               ) : null}
             </Box>
-            {undo ? null : leaveBar(at, isLapsed)}
+            {undo ? null : leaveBar(at)}
           </Box>
         )
       }
@@ -4538,7 +4532,7 @@ export const register: Register = on => {
             </Text>
             {undo ? undoButton(undo, at) : null}
           </Box>
-          {undo ? null : leaveBar(at, isLapsed)}
+          {undo ? null : leaveBar(at)}
         </Box>
       )
     }
@@ -4562,7 +4556,7 @@ export const register: Register = on => {
               {r.title}
               <Text color={pal.muted}>{after}</Text>
             </Text>,
-            undo ? null : leaveBar(state.at, state.isLapsed),
+            undo ? null : leaveBar(state.at),
           ],
         })
       }

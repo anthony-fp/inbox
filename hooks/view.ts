@@ -69,7 +69,7 @@ export function isGuarded(openedAt: number, now: number): boolean {
   return openedAt > 0 && now - openedAt < PRESS_GUARD_MS
 }
 
-/** When the item list last changed, whether its source is working, and its error, if any. */
+/** Whether the per-turn update is running, and the error to show, if any. */
 export type ItemStatus = { isUpdating: boolean; error: string | null }
 
 export type ViewInput = {
@@ -371,7 +371,7 @@ export const TABS: readonly { id: Tab; label: string; hotkey: string }[] = [
   { id: 'findings', label: 'Findings', hotkey: '2' },
   { id: 'prs', label: 'PRs', hotkey: '3' },
 ]
-/** The tabs that list the ledger's rows. Only the Claude pane has PRs. */
+/** The tabs whose rows come from the ledger. The PRs tab's rows come from GitHub. */
 export const ROW_TABS = TABS.filter((t): t is (typeof TABS)[number] & { id: 'needsYou' | 'findings' } => t.id !== 'prs')
 
 /** What an empty tab says, with the agent named, as "Claude" or "Codex". */
