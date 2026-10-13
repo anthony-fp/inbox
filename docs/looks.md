@@ -56,6 +56,7 @@ Change a rule in its owner. Do not change it in a reader.
 | Question handles | `hooks/ledger.ts:questionNumbers`, read by `hooks/view.ts:inboxView` | The terminal look only. It draws `1)` or `•`. Desktop and Codex draw no handle on a question. |
 | Finding groups and handles | `hooks/view.ts:FINDING_GROUPS`, `hooks/view.ts:drawnLists` | All three looks. Each lists findings under an Issues and an Opportunities title and draws the kind's mark as the handle. A handed-off finding draws ✓ instead. |
 | Row state | `hooks/view.ts:RowState`, `hooks/presses.ts:isHandedOff` | All three looks |
+| Which row opens: by default, and after a press closes the open row | `hooks/view.ts:firstWaiting`, `hooks/view.ts:rowAfterClose` | All three looks |
 | Feedback text | `hooks/view.ts:feedbackText`, `hooks/view.ts:feedbackOf` | Terminal and desktop through the pane, Codex through the tab |
 | Done labels | `hooks/view.ts:DONE_LABELS` | All three looks |
 | Action order | `hooks/view.ts:actionsOf` | All three looks |
@@ -79,7 +80,7 @@ Some rules are still written once per adapter. Each is a place where the looks c
 | --- | --- | --- |
 | Row content: mark, second line, finding head, text-field hint, file line | `hooks/register.tsx:itemRow`, `hooks/register.tsx:findingRow`, `codex/src/tab.tsx:itemRow`, `codex/src/tab.tsx:findingRow` | Two copies until step 6 of `docs/plans/three-looks.md` |
 | Copy strings: status line, empty findings text, Undo, Try again, Send, Cancel, group titles | `hooks/register.tsx` and `codex/src/tab.tsx` | Two copies until step 6 of `docs/plans/three-looks.md` |
-| Empty-tab rule and default open row | `hooks/register.tsx:followNewRows`, `hooks/register.tsx:topRow`, `codex/src/arrivals.ts:isShownEmpty`, `codex/src/tab.tsx:selectedIndex` | Two copies until step 8 of `docs/plans/three-looks.md`. Their inputs differ but their results agree today. |
+| Empty-tab rule | `hooks/register.tsx:followNewRows`, `codex/src/arrivals.ts:isShownEmpty` | Two copies until step 8 of `docs/plans/three-looks.md`. Their inputs differ but their results agree today. |
 | Per-reply update, activity cap of 40, Undo's `told.closed` cleanup | `hooks/register.tsx:runUpdate`, `hooks/register.tsx:noteActivity`, `codex/src/update.ts:applied`, `codex/src/core.ts:noteActivity`, `codex/src/server.ts:makeServer` | Two copies until step 9 of `docs/plans/three-looks.md` |
 | Open effect and demo press | `hooks/register.tsx:openPath`, `hooks/register.tsx:runDemoPress`, `codex/src/server.ts:makeServer` | Two copies until step 9 of `docs/plans/three-looks.md` |
 

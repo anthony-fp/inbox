@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import { applyPress, finishedResult } from '../../hooks/presses'
 import type { PressResult, RowPress } from '../../hooks/presses'
 import { recordClose, recordFinding } from '../../hooks/tools'
-import { closedShown, feedbackText, SETTLED_MS } from '../../hooks/view'
+import { closedShown, feedbackText, firstWaiting, listWaits, SETTLED_MS } from '../../hooks/view'
 import type { RowView } from '../../hooks/view'
 import type { Item, LocalResult } from '../../types'
 import { followTo } from '../../hooks/arrivals'
@@ -293,7 +293,7 @@ test('the tab lists Needs you in the mod’s order, numbers only the questions a
     ['i1', '•', 'handedOff'],
   ])
   assert.equal(v.needsYou.count, 4)
-  assert.equal(v.needsYou.topId, 'i3')
+  assert.equal(firstWaiting(listWaits(v).needsYou), 'i3')
 
   // Once the person sends any message, a typed number no longer reaches the batch.
   const after = viewOf(notePrompt(state, 'thanks', 20).state, 30)
@@ -435,7 +435,7 @@ test('Dismiss settles a row in place with Undo, and Undo puts it back open where
   )
   // It leaves the count while it settles.
   assert.equal(settled.count, 1)
-  assert.equal(settled.topId, 'i2')
+  assert.equal(firstWaiting(listWaits(viewOf(dismissed, 60)).needsYou), 'i2')
   const undone = after(dismissed, { action: 'undo', id: 'i1' })
   const back = viewOf(undone, 70).needsYou
   assert.deepEqual(

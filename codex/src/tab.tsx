@@ -37,6 +37,7 @@ import {
   hasAge,
   isFailure,
   isGuarded,
+  firstWaiting,
   listWaits,
   NEW_ROW_MS,
   PRESS_GUARD_MS,
@@ -485,7 +486,7 @@ function isNotSent(v: View, id: string): boolean {
 async function act(rowId: string, press: RowPress | PrPress, onSent?: () => void, pending = 'Sending…') {
   // Undo is pressed on a row that just closed, and a PR block's actions on no row.
   if (press.action !== 'undo' && !rowId.startsWith('pr:')) keepPressedOpen(rowId)
-  const wasWaiting = !!view && shownWaits(view).some(r => r.id === rowId && r.isWaiting)
+  const wasWaiting = !!view && tabWaits(view, tab).some(r => r.id === rowId && r.isWaiting)
   sending.set(rowId, pending)
   errors.delete(rowId)
   notes.delete(rowId)
@@ -521,14 +522,14 @@ async function act(rowId: string, press: RowPress | PrPress, onSent?: () => void
   }
 }
 
-/** The shown tab's rows in drawn order, and whether each still waits on the person. */
-function shownWaits(v: View): RowWait[] {
-  return tab === 'prs'
+/** A tab's rows in drawn order, and whether each still waits on the person. */
+function tabWaits(v: View, t: ShownTab): RowWait[] {
+  return t === 'prs'
     ? prRowWaits(
         v.prs.drawn.filter(x => !x.isSettled).map(x => x.pr),
         v.lastActions,
       )
-    : listWaits(v)[tab]
+    : listWaits(v)[t]
 }
 
 /**
@@ -537,7 +538,7 @@ function shownWaits(v: View): RowWait[] {
  */
 function openAfterClose(v: View, id: string) {
   if (selection[tab]?.id !== id) return
-  const rows = shownWaits(v)
+  const rows = tabWaits(v, tab)
   if (rows.find(r => r.id === id)?.isWaiting) return
   const next = rowAfterClose(rows, id)
   const index = next === null ? -1 : tabRows(v, tab).findIndex(r => r.id === next)
@@ -971,7 +972,7 @@ async function undo(r: RowView) {
 
 /**
  * The open row's index, or -1 when none is open. A tab where no row opened yet
- * draws its top row open. Once the open row leaves, none is open: a row
+ * draws its first waiting row open. Once the open row leaves, none is open: a row
  * opening under the pointer would catch a second click.
  */
 function selectedIndex(rows: Row[], t: ShownTab, v: View): number {
@@ -986,8 +987,7 @@ function selectedIndex(rows: Row[], t: ShownTab, v: View): number {
     open(t, rows[index]!.id, index)
     return index
   }
-  // In Needs you the top row that counts, else the first, as when every task is handed off.
-  const id = (t === 'needsYou' ? v.needsYou.topId : null) ?? rows[0]?.id
+  const id = firstWaiting(tabWaits(v, t))
 
   return id ? rows.findIndex(r => r.id === id) : -1
 }

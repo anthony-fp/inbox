@@ -161,11 +161,12 @@ import {
   settledIn,
   settledRowIds,
   allRows,
+  firstWaiting,
   listWaits,
   rowAfterClose,
   shortAgo,
 } from './view'
-import type { DrawnEntry, InboxView, ModLook, PlannedKey, RowView } from './view'
+import type { DrawnEntry, InboxView, ModLook, PlannedKey, RowView, RowWait } from './view'
 import {
   CLOSE_DESCRIPTION,
   CLOSE_SCHEMA,
@@ -1274,8 +1275,8 @@ function openPane($: EngineInterface) {
 }
 
 /**
- * Opens the shown tab's top row, as the pane opens. With no row to open, the
- * tab draws its top row open by default once one arrives.
+ * Opens the shown tab's first waiting row, as the pane opens. With none, the
+ * tab draws its first waiting row open by default once one arrives.
  */
 async function openTopRow($: EngineInterface) {
   const [{ view, ledger, prViews: prState, lastActions, now }, tab] = await Promise.all([drawnState($), read($, TAB)])
@@ -1283,7 +1284,7 @@ async function openTopRow($: EngineInterface) {
     .filter(x => !x.isSettled)
     .map(x => x.pr)
   const ids = tabRowIds(view, prViews)[tab]
-  const top = topRow(tab, ids, view)
+  const top = firstWaiting(tabWaits(tab, view, prViews, lastActions))
   if (top === null) await update($, SELECTION, s => ({ ...s, [tab]: NO_CURSOR }))
   else await select($, tab, top, ids.indexOf(top))
 }
@@ -1304,7 +1305,7 @@ async function openInbox($: EngineInterface) {
   // asking for the pane, and below 144 columns, once the person has closed it, leaves it unplaced.
   await openPane($)
   const { view } = await drawnState($)
-  if (view.needsYou.topId !== null) await update($, TAB, () => 'needsYou' as const)
+  if (view.needsYou.count > 0) await update($, TAB, () => 'needsYou' as const)
   else if ((await read($, TAB)) === 'prs') await findPrs($)
   await followNewRows($, true)
   await openTopRow($)
@@ -1436,7 +1437,7 @@ async function scrollToOpenRow($: EngineInterface, tab: Tab) {
       .filter(x => !x.isSettled)
       .map(x => x.pr)
     const cursor = selection[tab]
-    const id = cursor.id ?? (cursor.openedAt === 0 ? topRow(tab, tabRowIds(view, prViews)[tab], view) : null)
+    const id = cursor.id ?? (cursor.openedAt === 0 ? firstWaiting(tabWaits(tab, view, prViews, lastActions)) : null)
     if (id !== null) return scrollToRow($, id)
   }
   await $.ui.scroll({ in: PANE, to: 'start' }).catch(() => undefined)
@@ -1532,12 +1533,9 @@ async function openLeftRows($: EngineInterface) {
       .catch(() => undefined)
 }
 
-/**
- * The row a tab draws open before any row was opened there: in Needs you the
- * top row that counts, else the first, as when every task is handed off.
- */
-function topRow(tab: Tab, ids: string[], view: InboxView): string | null {
-  return (tab === 'needsYou' ? view.needsYou.topId : null) ?? ids[0] ?? null
+/** The shown tab's rows in drawn order, and whether each still waits on the person. */
+function tabWaits(tab: Tab, view: InboxView, prViews: PrView[], lastActions: Record<string, LastAction>): RowWait[] {
+  return tab === 'prs' ? prRowWaits(prViews, lastActions) : listWaits(view)[tab]
 }
 
 /**
@@ -2020,7 +2018,7 @@ async function shownWaits($: EngineInterface) {
 
   return {
     tab,
-    rows: tab === 'prs' ? prRowWaits(prViews, lastActions) : listWaits(view)[tab],
+    rows: tabWaits(tab, view, prViews, lastActions),
     ids: tabRowIds(view, prViews)[tab],
   }
 }
@@ -3281,7 +3279,15 @@ export const register: Register = on => {
     const indexOf = new Map(ids.map((id, n) => [id, n]))
     const cursor = selection[tab]
     const settledIds = new Set(settledRowIds(allRows(view)))
-    const at = selectedIndex(ids, cursor, topRow(tab, ids, view), id => settledIds.has(id))
+    const top = firstWaiting(
+      tabWaits(
+        tab,
+        view,
+        shownPrs.filter(x => !x.isSettled).map(x => x.pr),
+        lastActions,
+      ),
+    )
+    const at = selectedIndex(ids, cursor, top, id => settledIds.has(id))
     // The open row's buttons ignore clicks for a moment after it opens, and draw dim meanwhile.
     const isOpenGuarded = isGuarded(cursor.openedAt, now)
     const isNew = (id: string) => arrival !== null && arrival.ids.includes(id) && now - arrival.at < NEW_ROW_MS

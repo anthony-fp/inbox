@@ -159,8 +159,6 @@ export type InboxView = {
   needsYou: {
     /** Open questions, and open tasks that are not handed off. */
     count: number
-    /** The first row that counts. */
-    topId: string | null
     questions: RowView[]
     tasks: RowView[]
     /** Every close the ledger keeps, newest first, settled rows included. */
@@ -532,6 +530,14 @@ export function listWaits(v: InboxView): { needsYou: RowWait[]; findings: RowWai
 }
 
 /**
+ * The row a tab draws open before any row was opened there: its first row that still waits on the person. A handed-off
+ * row stays collapsed until clicked, and with none waiting no row is open.
+ */
+export function firstWaiting(rows: RowWait[]): string | null {
+  return rows.find(r => r.isWaiting)?.id ?? null
+}
+
+/**
  * The row to open once the open row `closedId` was answered, closed or handed off: the next row in `rows` that still
  * waits on the person, else the nearest one before it. Null when none waits, or when `rows` lacks `closedId`.
  */
@@ -743,7 +749,6 @@ export function inboxView({
   return {
     needsYou: {
       count: counted.length,
-      topId: counted[0]?.id ?? null,
       questions: questionRows,
       tasks: taskRows,
       closed: { questions: closed.filter(d => d.kind === 'question'), tasks: closed.filter(d => d.kind === 'task') },
