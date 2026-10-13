@@ -25,7 +25,7 @@ Test a change to text a model reads before keeping it. Small rewordings change b
 Every action shows what it did as soon as it is pressed. When Discuss showed nothing, a person sent the same message four or five times.
 
 - Each `Action` declares its `kind`, a `PressKind`.
-- A Talk or Hand-off press leaves a ✓ and its label on the row, as in "✓ Discussed". It stores its action id from `actionId()`, so the same action then reads "… again".
+- A Talk or Hand-off press leaves a ✓ and its label on the row, as in "✓ Discussed". A Talk press reads "Explaining…" or "Discussing…" until the agent's reply, and a handed-off row the reply left open reads "Still open". It stores its action id from `actionId()`, so the same action then reads "… again".
 - A Local press, an open or a copy, shows "Opening x…" on its row, then its result: "✓ Opened x", or in red why it could not. It never reports through a toast.
 - A Mark or View press shows itself, as closing a row or opening the text field does.
 - Every Button's press runs `runPress()`. It applies a row press with `applyPress()` and a PR press with `applyPrPress()`, then records the row's last action, so a click and a key press record the same.

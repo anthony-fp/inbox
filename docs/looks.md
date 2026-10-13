@@ -19,6 +19,7 @@ Shared modules are in `hooks/`. Both hosts import them. They import nothing from
 | `hooks/tools.ts` | Shared module. The record_finding and close tools. |
 | `hooks/demo.ts` | Shared module. Sample data for `/inbox demo` and the Codex demo. |
 | `hooks/layout.ts` | Shared module. Sizes the desktop look and the Codex tab share. |
+| `hooks/inline.ts` | Shared module. Inline markdown in the agent's text, as spans each look draws. |
 | `hooks/register.tsx` | Mod adapter. Draws the terminal and desktop looks, and also runs the band, the PRs tab, the per-reply update and the press runner. |
 | `hooks/tabs-client.tsx` | Mod only. A Client region for the desktop tab bar, so each tab takes clicks over its whole shape. |
 | `hooks/row-client.tsx` | Mod only. A Client region for a closed row in the desktop pane. |
@@ -84,7 +85,7 @@ Some rules are still written once per adapter. Each is a place where the looks c
 
 ## Differences on purpose
 
-A difference is on purpose when a look cannot do something or the product decided it. Anything not listed here is drift. Two rows below are drift and are marked.
+A difference is on purpose when a look cannot do something or the product decided it. Anything not listed here is drift.
 
 | Topic | Terminal | Desktop | Codex | Why | Where |
 | --- | --- | --- | --- | --- | --- |
@@ -99,7 +100,7 @@ A difference is on purpose when a look cannot do something or the product decide
 | PR data | The mod runs gh through the engine, on a timer while the person is around. | Same as terminal. | The server runs gh through `deps.exec` in the session's folder, and refetches on a view when the last fetch is over 2 minutes old. It tries `gh`, then the Homebrew folders. | The desktop app may start the server without Homebrew on its PATH. | `hooks/register.tsx:fetchPrsNow`, `codex/src/server.ts:fetchPrs`, `codex/src/gh.ts:ghFinder` |
 | Settle window | A row stays in place for `SETTLED_MS` from the close. | Same as terminal. | The server lists a row as settled for `SETTLED_MS` plus two polls from the close. The tab draws it in place for `SETTLED_MS` from the first poll that lists it. | The tab only learns of a close at its next poll. | `codex/src/settle.ts:SETTLE_WINDOW_MS`, `codex/src/settle.ts:drawnSettled` |
 | Failed per-reply update | Keeps `turnsApplied`. | Same as terminal. | Advances `turnsApplied`. | The mod has a catch-up that retries. Codex has none, so a handed-off row would stay folded. | `hooks/register.tsx:queueUpdate`, `codex/src/update.ts:applied` |
-| Primary buttons | None. A plain terminal Button ignores `variant`. The recommended option ends "(recommended)". | The recommended option, Done and Address. | Only the recommended option, with no "(recommended)" text. Drift, fixed in step 6. | `docs/plans/inbox-ui.md` says the desktop pane makes the recommended option, or else Done or Address, the primary button. | `hooks/register.tsx:keyedButton`, `codex/src/tab.tsx:KeyButton` |
+| Primary buttons | None. A plain terminal Button ignores `variant`. The recommended option ends "(recommended)". | The recommended option, Done and Address. | The recommended option, Done and Address, as on desktop. | `docs/plans/inbox-ui.md` says the desktop pane makes the recommended option, or else Done or Address, the primary button. | `hooks/register.tsx:keyedButton`, `codex/src/tab.tsx:KeyButton` |
 | Finding path display | The file name, in Claude Code's inline-code color. | Same as terminal. The pane has no font props. | The file name in the mono font, on a soft chip. The full path shows on hover. | The full path is long and shows a private folder. | `hooks/register.tsx:findingRow`, `codex/src/tab.tsx:findingRow` |
 | Clipping | The adapter clips to the cell width, one character per cell. | The adapter clips with a measured characters-per-cell estimate. | CSS wraps and truncates. | Shared text is never pre-shortened. Each adapter knows its own width. | `hooks/register.tsx:rowClientProps`, `hooks/register.tsx:DESKTOP_CLIP_CHARS_PER_CELL` |
 | Closed row age | Always drawn. | Dropped below 50 columns. | Always drawn. | A narrow desktop pane has no room for it. | `hooks/register.tsx:DESKTOP_WIDE_AT` |

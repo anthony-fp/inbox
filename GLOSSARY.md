@@ -41,7 +41,8 @@ PRs tabs.
 
 **Card**:
 The short summary of where the session stands: its goal, what's done, and
-what's happening now.
+what's happening now. The inbox model writes it, and the agent reads it in
+the `inbox:` text beside each prompt. No look draws it.
 
 **New row**:
 A row a look lists for the first time since it last recorded its rows. It
@@ -49,8 +50,10 @@ draws a bar for a few seconds, and a look showing an empty tab moves to it.
 
 **Last action**:
 What an item or PR in the pane says after the person presses one of its
-actions: a ✓ and the action's label, as in "✓ Discuss · 1m ago". Each keeps
-only its latest.
+actions: a ✓ and the action in the past tense, as in "✓ Discussed · 1m ago".
+Explain and Discuss read "Explaining…" or "Discussing…" until the agent
+replies. A row handed to the agent that its reply left open reads "Still
+open". Each keeps only its latest.
 
 ### Looks and hosts
 

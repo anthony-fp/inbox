@@ -26,8 +26,9 @@ session that's already open.
 
 ## Using it
 
-A line above your prompt shows what the session is working on and how many
-things are waiting on you.
+A line above your prompt counts what needs you and the findings waiting, with
+a button that opens the panel. When Claude stops on an error, the stop shows
+on a second line.
 
 Type `/inbox` to see them. It opens a panel with three tabs:
 
@@ -43,15 +44,13 @@ can also have Claude fix a finding, mark a task done, or dismiss anything you
 don't need.
 
 In the terminal, `1`, `2` and `3` switch tabs, `j` and `k` move up and down,
-and an action's letter runs it. The Codex tab takes the same keys without
-showing the letters. In the Claude desktop app, you click. ctrl+x tab moves
-focus in the terminal from the prompt to the line above it, then to the panel, then back to the prompt. When
-the tab you're on is empty and something new
-arrives on another tab, the panel switches to it.
+and an action's letter runs it. ctrl+x tab moves focus from the prompt to the
+line above it, then to the panel, then back to the prompt. The Codex tab takes
+the same keys without showing the letters. In the Claude desktop app, you
+click.
 
-The line above the prompt counts what needs you and the findings waiting,
-with a button that opens the panel. When Claude stops on an error, the stop
-shows on a second line.
+When the tab you're on is empty and something new arrives on another tab, the
+panel switches to it.
 
 To see every part with sample items, run `/inbox demo`. Presses on them change
 only the samples and send nothing. Press Hide demo, or run the command again,

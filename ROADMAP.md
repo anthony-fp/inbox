@@ -1,6 +1,6 @@
 # Roadmap
 
-Planned work. None of it is built yet.
+Planned work, not built yet.
 
 - **Claude writes its own items.** One tool lets Claude record its
   questions, its tasks and its calls, and close them. It replaces `record_finding`.
@@ -24,7 +24,7 @@ Planned work. None of it is built yet.
 - **Every open session in one view.** The inbox shows what each open
   session needs from you, not only the current one. The store already keeps
   each session's ledger under `s:<session id>`.
-- **More PR actions.** Merge from the PRs tab, flag a description that no
-  longer matches the diff, and buttons for a self-review and screenshots.
+- **More PR actions.** Flag a description that no longer matches the diff,
+  and buttons for a self-review and screenshots.
 - **A choice of model.** The per-turn call always uses Sonnet. A
   `userConfig` option could make it switchable.
