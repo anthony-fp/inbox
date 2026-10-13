@@ -670,9 +670,10 @@ export function inboxView({
       }),
     )
   const closed = [...ledger.closed].reverse()
-  // Listed in the Closed fold as the person's choice, while the ledger keeps them open for the agent to close.
+  // Listed in the Closed fold as the person's choice, while the ledger keeps them open for the agent to close. Like a
+  // close, one counts from the press; each fold leaves out the rows it still draws settled.
   const fixesSent: ClosedFinding[] = ledger.findings
-    .filter(f => isFixSettled(f.id))
+    .filter(f => isFixSent(lastActions[f.id]))
     .map(f => ({ ...f, how: 'answered', outcome: fixLabel(f), closedAt: lastActions[f.id]!.at }))
 
   return {
