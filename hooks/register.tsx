@@ -2310,7 +2310,12 @@ async function turnOn($: EngineInterface) {
     toolsRefused = true
   }
   await Promise.all([
-    $.command.register({ name: 'inbox', description: 'Show where this session stands and what is waiting on you' }),
+    // /inbox only opens the pane, so it runs at once instead of waiting for the running turn to end.
+    $.command.register({
+      name: 'inbox',
+      description: 'Show where this session stands and what is waiting on you',
+      immediate: true,
+    }),
     $.tool
       .register({
         name: 'record_finding',

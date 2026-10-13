@@ -106,6 +106,7 @@ A difference is on purpose when a look cannot do something or the product decide
 | Clipping | The adapter clips to the cell width, one character per cell. | The adapter clips with a measured characters-per-cell estimate. | CSS wraps and truncates. | Shared text is never pre-shortened. Each adapter knows its own width. | `hooks/register.tsx:rowClientProps`, `hooks/register.tsx:DESKTOP_CLIP_CHARS_PER_CELL` |
 | Closed row age | Always drawn. | Dropped below 50 columns. | Always drawn. | A narrow desktop pane has no room for it. | `hooks/register.tsx:DESKTOP_WIDE_AT` |
 | Colors | The Claude Code theme's palette. | Hex palettes for the dark and light themes, else translucent gray fills. | The host's theme and style variables, applied as CSS variables. | Each look matches its host app. | `hooks/register.tsx:paletteFor`, `codex/src/tab.tsx:applyHost` |
+| `/inbox` during a turn | Runs at once. | Waits until the turn ends. | No command. The Inbox tab opens at any time. | The command is registered `immediate`. The desktop app sends a typed command through Claude Code's prompt queue, which holds it until the turn ends whatever `immediate` says, as checked in Claude Code 2.1.296. | `hooks/register.tsx:turnOn` |
 | Look for mobile and VS Code | Used. | Not used. | Not used. | The engine's `surface` can be `mobile` or `vscode`, which nobody has checked. They get the terminal look. | `hooks/register.tsx:lookOf` |
 
 ## After you change X, check Y
