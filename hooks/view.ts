@@ -513,6 +513,43 @@ export function entryId(x: DrawnEntry<{ id: string }>): string {
   return 'row' in x ? x.row.id : x.settled.id
 }
 
+/** A row in its tab's drawn order, and whether it still waits on the person. */
+export type RowWait = { id: string; isWaiting: boolean }
+
+/** The Needs you and Findings rows in drawn order. A row that just closed is among them, as not waiting. */
+export function listWaits(v: InboxView): { needsYou: RowWait[]; findings: RowWait[] } {
+  const lists = drawnLists(
+    v,
+    () => true,
+    r => r,
+  )
+  const waits = (entries: DrawnEntry<RowView>[]) =>
+    entries.map(x =>
+      'row' in x ? { id: x.row.id, isWaiting: x.row.state.is === 'open' } : { id: x.settled.id, isWaiting: false },
+    )
+
+  return { needsYou: waits([...lists.questions, ...lists.tasks]), findings: waits(lists.findings) }
+}
+
+/**
+ * The row to open once the open row `closedId` was answered, closed or handed off: the next row in `rows` that still
+ * waits on the person, else the nearest one before it. Null when none waits, or when `rows` lacks `closedId`.
+ */
+export function rowAfterClose(rows: RowWait[], closedId: string): string | null {
+  const at = rows.findIndex(r => r.id === closedId)
+  if (at < 0) return null
+
+  return (
+    (
+      rows.slice(at + 1).find(r => r.isWaiting) ??
+      rows
+        .slice(0, at)
+        .reverse()
+        .find(r => r.isWaiting)
+    )?.id ?? null
+  )
+}
+
 /** A list's open rows in order. */
 export function rowsIn<R>(entries: DrawnEntry<R>[]): R[] {
   return entries.flatMap(x => ('row' in x ? [x.row] : []))

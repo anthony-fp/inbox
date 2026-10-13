@@ -12,7 +12,6 @@ import {
   baseName,
   capitalized,
   clipLabel,
-  isFoldingPress,
   noteText,
   pendingResult,
   stepEffects,
@@ -38,16 +37,18 @@ import {
   hasAge,
   isFailure,
   isGuarded,
+  listWaits,
   NEW_ROW_MS,
   PRESS_GUARD_MS,
+  rowAfterClose,
   rowKeyPlan,
   SETTLED_MS,
   settledIn,
   shortAgo,
 } from '../../hooks/view'
 import { ROW_PAD_PT } from '../../hooks/layout'
-import type { DrawnEntry, DrawnLists, Feedback, PlannedKey, RowView } from '../../hooks/view'
-import { PR_TONES, prCheckId, prMarkId, prRetryOf, prThreadId, threadSentIn } from '../../hooks/pr-tab'
+import type { DrawnEntry, DrawnLists, Feedback, PlannedKey, RowView, RowWait } from '../../hooks/view'
+import { PR_TONES, prCheckId, prMarkId, prRetryOf, prRowWaits, prThreadId, threadSentIn } from '../../hooks/pr-tab'
 import type { PrPress } from '../../hooks/pr-tab'
 import {
   commentLine,
@@ -183,7 +184,7 @@ let tab: ShownTab = 'needsYou'
 // Each tab's open row, and when a click or key opened it; 0 when it was open by default when pressed.
 // Null until a row opens there: the tab then draws its top row open.
 // `index` is the row's place when it opened, so the row in that place opens once it leaves.
-// A null id: the person's hand-off closed the open row, and none opens until they open one.
+// A null id: a press closed the open row with no other row waiting, and none opens until the person opens one.
 const selection: Record<ShownTab, { id: string | null; openedAt: number; index?: number } | null> = {
   needsYou: null,
   findings: null,
@@ -484,7 +485,7 @@ function isNotSent(v: View, id: string): boolean {
 async function act(rowId: string, press: RowPress | PrPress, onSent?: () => void, pending = 'Sending…') {
   // Undo is pressed on a row that just closed, and a PR block's actions on no row.
   if (press.action !== 'undo' && !rowId.startsWith('pr:')) keepPressedOpen(rowId)
-  const before = view?.lastActions[rowId]
+  const wasWaiting = !!view && shownWaits(view).some(r => r.id === rowId && r.isWaiting)
   sending.set(rowId, pending)
   errors.delete(rowId)
   notes.delete(rowId)
@@ -501,11 +502,7 @@ async function act(rowId: string, press: RowPress | PrPress, onSent?: () => void
     // A sample press went through on the demo's copy, so its typed words go as a real press's do.
     // After the view, so `onSent` reads the rows as they are after the press.
     if (!r.error && r.note !== 'stale') onSent?.()
-    // A hand-off closes its row to its one line, where the press reads in place of the age. An open or copy keeps
-    // the row's hand-off, with its time, so only the hand-off's own press closes the row.
-    const after = r.view?.lastActions[rowId]
-    if (!r.error && r.note !== 'stale' && after?.at !== before?.at && isFoldingPress(rowId, after))
-      selection[tab] = { id: null, openedAt: Date.now() }
+    if (!r.error && r.note !== 'stale' && r.view && wasWaiting) openAfterClose(r.view, rowId)
     if (r.note && view && isListed(view, rowId)) {
       notes.set(rowId, { text: noteText(r.note), at: Date.now() })
       drawIn(SETTLED_MS)
@@ -522,6 +519,35 @@ async function act(rowId: string, press: RowPress | PrPress, onSent?: () => void
     sending.delete(rowId)
     draw()
   }
+}
+
+/** The shown tab's rows in drawn order, and whether each still waits on the person. */
+function shownWaits(v: View): RowWait[] {
+  return tab === 'prs'
+    ? prRowWaits(
+        v.prs.drawn.filter(x => !x.isSettled).map(x => x.pr),
+        v.lastActions,
+      )
+    : listWaits(v)[tab]
+}
+
+/**
+ * Once a press stopped the shown tab's open row `id` waiting on the person, as an answer, a close or a hand-off does,
+ * opens the next row that still waits. With none waiting, no row is open.
+ */
+function openAfterClose(v: View, id: string) {
+  if (selection[tab]?.id !== id) return
+  const rows = shownWaits(v)
+  if (rows.find(r => r.id === id)?.isWaiting) return
+  const next = rowAfterClose(rows, id)
+  const index = next === null ? -1 : tabRows(v, tab).findIndex(r => r.id === next)
+  if (next === null || index < 0) {
+    selection[tab] = { id: null, openedAt: Date.now() }
+    return
+  }
+  open(tab, next, index)
+  // After the press's own draw, which draws the row open.
+  setTimeout(revealSelected, 0)
 }
 
 /** Copies a press's text. The row's result already reads "✓ Copied", so only a failure says more. */

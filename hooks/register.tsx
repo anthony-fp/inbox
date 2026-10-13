@@ -58,6 +58,7 @@ import {
   prMarkId,
   prRetryOf,
   prRowId,
+  prRowWaits,
   prThreadId,
   threadSentIn,
 } from './pr-tab'
@@ -117,7 +118,6 @@ import {
   demoRecord,
   demoTurns,
   doneWake,
-  isFoldingPress,
   localPath,
   markSentToAgent,
   openCommands,
@@ -161,6 +161,8 @@ import {
   settledIn,
   settledRowIds,
   allRows,
+  listWaits,
+  rowAfterClose,
   shortAgo,
 } from './view'
 import type { DrawnEntry, InboxView, ModLook, PlannedKey, RowView } from './view'
@@ -1573,16 +1575,13 @@ function redrawAfterNewRows($: EngineInterface, at: number, now: number) {
 
 /** Each tab's selectable row ids, in the order the pane lists them: rows that just closed are left out. */
 function tabRowIds(view: InboxView, prViews: PrView[]): Record<Tab, string[]> {
-  const ids = (rows: RowView[]) => rows.filter(r => r.state.is !== 'settled').map(r => r.id)
+  const listed = drawnLists(
+    view,
+    () => false,
+    r => r.id,
+  ).byTab
 
-  return {
-    needsYou: NEEDS_YOU_GROUPS.flatMap(g => ids(view.needsYou[g.list])),
-    findings: ids(view.findings.rows),
-    prs: prViews.flatMap(pr => [
-      ...failingChecks(pr).map(c => prCheckId(pr, c)),
-      ...waitingThreads(pr).map(t => prThreadId(pr, t)),
-    ]),
-  }
+  return { ...listed, prs: prRowWaits(prViews, {}).map(r => r.id) }
 }
 
 /**
@@ -1839,7 +1838,8 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
   // Undo is pressed on a row that just closed, and a PR block's actions on no row.
   const rowId = pressRowId(p)
   if (p.action !== 'undo' && !rowId.startsWith('pr:')) await keepPressedOpen($, rowId)
-  if (await read($, DEMO)) return runDemoPress($, p)
+  const wasWaiting = (await shownWaits($)).rows.some(r => r.id === rowId && r.isWaiting)
+  if (await read($, DEMO)) return runDemoPress($, p, wasWaiting)
   const [now, presence, lastActions, prState] = await Promise.all([
     $.clock.now(),
     read($, PRESENCE),
@@ -1898,9 +1898,7 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
   ])
   // The sidebar line stops counting a handed-off row at once.
   if (lasts.some(l => l.kind === 'handoff')) void publishStatus($)
-  // An open or copy keeps the row's hand-off, with its time, so only the hand-off's own press closes the row.
-  const isFolding = pressed.lasts[rowId]?.at === now && isFoldingPress(rowId, pressed.lasts[rowId])
-  if (isFolding) await closePressed($)
+  const isMoved = await openAfterClose($, rowId, wasWaiting)
   if (!('ref' in p) && p.action === 'done')
     void $.clock
       .sleep(SETTLED_MS)
@@ -1942,8 +1940,8 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
   // A typed reply that did not send goes back into its draft.
   if (failed.isRowFailed && !('ref' in p) && p.action === 'type')
     await update($, DRAFTS, d => (d[p.id] ? d : { ...d, [p.id]: p.text }))
-  // A hand-off that did not send gave nothing away, so its row opens again to show why, with [Try again].
-  if (failed.isRowFailed && isFolding) await reopenPressed($, rowId)
+  // A press that did not send gave nothing away, so its row opens again to show why, with [Try again].
+  if (failed.isRowFailed && isMoved) await reopenPressed($, rowId)
   void publishStatus($)
 }
 
@@ -1985,17 +1983,37 @@ function applyAnyPress(
   return { ledger: r.ledger, lasts: r.last ? { [p.id]: r.last } : {}, drop: [], effects: r.effects }
 }
 
-/**
- * Closes the shown tab's open row, as after a hand-off pressed on it, so the row draws as its one line. No other row
- * opens in its place, and none opens by default, until the person opens one.
- */
-async function closePressed($: EngineInterface) {
-  const [tab, openedAt] = await Promise.all([read($, TAB), $.clock.now()])
-  await update($, SELECTION, s => ({ ...s, [tab]: { id: null, index: s[tab].index, openedAt } }))
+/** The shown tab's rows in drawn order, whether each still waits on the person, and each one's place for the cursor. */
+async function shownWaits($: EngineInterface) {
+  const [{ ledger, prViews: prState, lastActions, view, now }, tab] = await Promise.all([drawnState($), read($, TAB)])
+  const prViews = drawnPrs(prState, ledger.prs, lastActions, now)
+    .filter(x => !x.isSettled)
+    .map(x => x.pr)
+
+  return {
+    tab,
+    rows: tab === 'prs' ? prRowWaits(prViews, lastActions) : listWaits(view)[tab],
+    ids: tabRowIds(view, prViews)[tab],
+  }
 }
 
 /**
- * Opens again the row `closePressed` closed, where it was. Unguarded, as `keepPressedOpen` leaves a row: the person
+ * Once a press stopped the shown tab's open row `id` waiting on the person, as an answer, a close or a hand-off does,
+ * opens the next row that still waits. With none waiting, no row is open. Returns whether it moved the open row.
+ */
+async function openAfterClose($: EngineInterface, id: string, wasWaiting: boolean): Promise<boolean> {
+  const [{ tab, rows, ids }, selection, now] = await Promise.all([shownWaits($), read($, SELECTION), $.clock.now()])
+  if (!wasWaiting || selection[tab].id !== id || rows.find(r => r.id === id)?.isWaiting) return false
+  const next = rowAfterClose(rows, id)
+  const index = next === null ? -1 : ids.indexOf(next)
+  if (next !== null && index >= 0) await select($, tab, next, index)
+  else await update($, SELECTION, s => ({ ...s, [tab]: { id: null, index: s[tab].index, openedAt: now } }))
+
+  return true
+}
+
+/**
+ * Opens again the row a hand-off closed, where it was. Unguarded, as `keepPressedOpen` leaves a row: the person
  * was pressing on it, so [Try again] takes a click at once.
  */
 async function reopenPressed($: EngineInterface, id: string) {
@@ -2016,7 +2034,7 @@ async function selectRestored($: EngineInterface, id: string) {
  * nothing: each send, open or copy becomes its row's sample note instead.
  * Rows still settle, fold, undo and show their ✓ on the copy.
  */
-async function runDemoPress($: EngineInterface, p: RowPress | PrPress) {
+async function runDemoPress($: EngineInterface, p: RowPress | PrPress, wasWaiting: boolean) {
   const now = await $.clock.now()
   const rowId = pressRowId(p)
   if (!('ref' in p) && p.action === 'type') await update($, TYPING, t => (t === p.id ? null : t))
@@ -2048,8 +2066,7 @@ async function runDemoPress($: EngineInterface, p: RowPress | PrPress) {
       return rest
     })
   if (!('stale' in pressed) && !('ref' in p) && p.action === 'undo') await selectRestored($, p.id)
-  if (!('stale' in pressed) && pressed.lasts[rowId]?.at === now && isFoldingPress(rowId, pressed.lasts[rowId]))
-    await closePressed($)
+  if (!('stale' in pressed)) await openAfterClose($, rowId, wasWaiting)
   // A fresh copy redraws the pane: once a note's SETTLED_MS ends, with the sample reply to a sample message, and at
   // each step of a leave bar.
   if ('stale' in pressed || pressed.effects.length > 0)

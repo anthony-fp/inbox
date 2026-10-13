@@ -98,7 +98,8 @@ The rule, in the terminal: a question's handle shows a number only when a typed 
 
 - When the pane or tab opens, the top row is open.
 - A click on a closed row's title opens it. A click on an open row's title does nothing.
-- After a press, the pressed row shows its result in place. No other row opens on its own.
+- After a press, the pressed row shows its result in place.
+- When a press answers, closes or hands off the open row, the next row that still waits on the person opens, its buttons guarded. With none below it, the nearest one above opens. Rows already handed off are skipped. `rowAfterClose` in `hooks/view.ts` picks the row for every look.
 
 **The press guard.** An action button ignores presses for 0.4 s after its row opens (`PRESS_GUARD_MS`). During that time the row's buttons draw dim (`dimColor` on a mod `Button`, `disabled` in HTML), so an ignored press shows why. A double-click on a closed row's title opens the row with its first click, and the second click lands on a button that just drew under the pointer.
 
@@ -109,9 +110,9 @@ Every press is one of five kinds. The kind decides what the screen shows at once
 | Kind | What it does | What shows at once |
 |---|---|---|
 | **Talk** | Sends a message asking Claude to talk or draft. The row's work is not given away. | The row stays open and in the count. Its age, on the row's top line, open or closed, reads where the message is: `Queued: Explain` until it reaches Claude, `Explaining…` until Claude's reply, then `✓ Explained · 1m ago`. The top line is the kind line where the row has one, else the title's line. The press adds no line. The button reads "Explain again". |
-| **Hand-off** | Sends a message that gives the work to Claude. | The row closes to its one line, its handle a ✓, and leaves the count. Its age reads the press, as `Run load script · 1m ago`. No other row opens in its place. It stays closed after Claude's reply, and the re-entry rule below says when it counts again. A PR block, which is always open, records `✓ Asked to resolve conflicts` on the block. |
+| **Hand-off** | Sends a message that gives the work to Claude. | The row closes to its one line, its handle a ✓, and leaves the count. Its age reads the press, as `Run load script · 1m ago`. The next row that waits opens. It stays closed after Claude's reply, and the re-entry rule below says when it counts again. A PR block, which is always open, records `✓ Asked to resolve conflicts` on the block. |
 | **Local** | Opens or copies on the person's machine. | A note on the row at once: `Opening settings.json…` or `Copying npm test…`. The result replaces it: `✓ Opened settings.json`, or in red, `Could not open settings.json: it was moved`. |
-| **Mark** | Changes state, and sends nothing while it can be undone. | The row settles in place with the Mark's own label, `✓ Done` or `✓ Dismissed`, and an [Undo] button, then leaves after 5.12 s. |
+| **Mark** | Changes state, and sends nothing while it can be undone. | The row settles in place with the Mark's own label, `✓ Done` or `✓ Dismissed`, and an [Undo] button, then leaves after 5.12 s. The next row that waits opens. |
 | **View** | Changes only what is on screen, or reloads it. | The change itself: a view opens or closes, a row unfolds, a tab switches, a status reads `Refreshing PRs`. |
 
 The View kind covers [Open inbox], the tab buttons, [All 7 options], the Closed fold, Show demo and Hide demo, Undo and Retry. [Try again] repeats a failed press, so it takes that press's kind.

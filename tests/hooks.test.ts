@@ -1223,8 +1223,8 @@ test('Dismiss settles a question in place with Undo, which brings it back open a
   await pane.press({ key: 'dismiss-i1' })
   expect(await pane.find({ key: 'settled-i1' })).toBeDefined()
   expect(await pane.find({ text: /^Dismissed$/ })).toBeDefined()
-  // No other row opens in its place, where a second click would land.
-  expect(await pane.find({ key: 'explain-i2-key' })).toBeUndefined()
+  expect(await pane.find({ key: 'explain-i2-key' })).toBeDefined()
+  expect((await pane.find({ key: 'dismiss-i2' }))?.props.dimColor).toBe(true)
   expect(await prompt('carry on')).toContain(closedLine)
   // A reload while it settles still shows it.
   await start()
@@ -1251,12 +1251,11 @@ test('Dismiss settles a question in place with Undo, which brings it back open a
   expect((await pane.find({ key: 'dismiss-i1' }))?.props.dimColor).toBeUndefined()
   await pane.press({ key: 'dismiss-i1' })
   expect(await pane.find({ key: 'settled-i1' })).toBeDefined()
-  // Once its time in place ends, it leaves for the Closed fold, and the row in its place opens, its buttons dim a moment.
+  // Once its time in place ends, it leaves for the Closed fold.
   await clock.advance(SETTLED_MS)
   expect(await pane.find({ key: 'settled-i1' })).toBeUndefined()
   expect((await pane.find({ key: 'fold-question' }))?.props.label).toBe('▸ 1 closed')
   expect(await pane.find({ key: 'explain-i2-key' })).toBeDefined()
-  expect((await pane.find({ key: 'dismiss-i2' }))?.props.dimColor).toBe(true)
 })
 
 test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, its buttons send its conflicts and thread and say so, and its failing check waits on the person', async ($, on) => {
@@ -1471,7 +1470,7 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
     await $.command.run({ command: 'inbox', args: '' } as never)
     await fetched
   }
-  await pane.press({ key: 'address-T1' })
+  await pane.press({ key: 'address-T1-key' })
   expect(sent.length).toBe(sends)
   expect(await pane.find({ text: /^This changed before your press\. Nothing was sent\.$/ })).toBeDefined()
 })

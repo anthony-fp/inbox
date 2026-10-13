@@ -2,9 +2,10 @@
 // their rows, and what each press on them does. Each host stores the PRs and runs gh its own way.
 
 import type { LastAction, Ledger, PressKind, PrCheck, PrThread, PrView, PrViews } from '../types'
-import { localLast, pendingResult, recordPress, withQueued } from './presses'
+import { isFoldingPress, localLast, pendingResult, recordPress, withQueued } from './presses'
 import type { Effect, PrActionId } from './presses'
 import {
+  failingChecks,
   inPrOrder,
   parseRef,
   prompts,
@@ -15,9 +16,11 @@ import {
   threadsOnYou,
   THREADS_QUERY,
   VIEW_FIELDS,
+  waitingThreads,
 } from './prs'
 import type { IsThreadSent, PrStatus } from './prs'
 import { SETTLED_MS } from './view'
+import type { RowWait } from './view'
 
 /** How many of a conversation's linked PRs the tab fetches and shows: the newest ones. */
 export const MAX_PRS = 12
@@ -164,6 +167,24 @@ export function threadSentIn(lastActions: Record<string, LastAction>): IsThreadS
 
     return last?.kind === 'handoff' && last.delivery?.state !== 'failed' && last.at > ((t.reply ?? t).at ?? 0)
   }
+}
+
+/**
+ * The rows of the PR blocks `prs` in drawn order, each block's review threads then its failing checks, and whether
+ * each still waits on the person: a thread not sent to the agent, a check whose Fix was not handed off.
+ */
+export function prRowWaits(prs: PrView[], lastActions: Record<string, LastAction>): RowWait[] {
+  const isSent = threadSentIn(lastActions)
+
+  return prs.flatMap(pr => [
+    ...waitingThreads(pr).map(t => ({ id: prThreadId(pr, t), isWaiting: !isSent(pr, t) })),
+    ...failingChecks(pr).map(c => {
+      const id = prCheckId(pr, c)
+      const last = lastActions[id]
+
+      return { id, isWaiting: !isFoldingPress(id, last) || last?.delivery?.state === 'failed' }
+    }),
+  ])
 }
 
 /** A PR the session still tracks: one of the newest it linked, or the current branch's. */
