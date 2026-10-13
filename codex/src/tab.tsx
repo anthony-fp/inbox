@@ -66,7 +66,7 @@ import {
 import type { Finding, Item, PrCheck, PrThread, PrView } from '../../types'
 import { followTo } from '../../hooks/arrivals'
 import { parseInline } from '../../hooks/inline'
-import { isShownEmpty, newRows, TAB_IDS, TAB_OF } from './arrivals'
+import { isShownEmpty, newRows, openRows, TAB_IDS, TAB_OF } from './arrivals'
 import type { FoldGroup, Group, SeenRows, Tab } from './arrivals'
 import type { TabView as View } from './core'
 import type { PressReply } from './server'
@@ -360,6 +360,7 @@ function applyView(next: View, seq: number) {
   // A dismissed PR's block draws settled until its time is up.
   for (const { pr, isSettled } of next.prs.drawn)
     if (isSettled) drawIn(Math.max(0, SETTLED_MS - (next.at - (next.lastActions[prMarkId(pr.ref)]?.at ?? next.at))))
+  const isOpening = TAB_IDS.every(t => rowsSeen[t] === undefined)
   const rows = newRows(rowsSeen, next)
   rowsSeen = rows.seen
   const added = [...rows.added.needsYou, ...rows.added.findings]
@@ -368,7 +369,8 @@ function applyView(next: View, seq: number) {
     entering.add(id)
   }
   if (added.length > 0) drawIn(NEW_ROW_MS)
-  follow(next, rows.added)
+  // The first view moves the tab toward the rows each tab lists, as later ones do toward rows that just appeared.
+  follow(next, isOpening ? openRows(next) : rows.added)
   draw()
 }
 

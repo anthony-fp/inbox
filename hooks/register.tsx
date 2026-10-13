@@ -1655,11 +1655,12 @@ async function followNewRows($: EngineInterface, isOpening = false) {
       view.findings.rows.length === 0 && !unfolded.some(kind => view.findings.closed.some(f => f.kind === kind)),
     prs: prs.length === 0 && !prState.isFetching,
   }[tab]
+  // Opening, the pane moves toward the rows each tab lists, as it later does toward rows that just appeared.
   const to = followTo(
     TABS.map(t => t.id),
     tab,
     isEmpty,
-    added,
+    isOpening ? { needsYou: ids.needsYou, findings: ids.findings, prs: [] } : added,
   )
   if (to) await jumpTo($, to)
 }

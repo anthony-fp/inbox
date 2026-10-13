@@ -27,15 +27,14 @@ export function recordRows<T extends string>(
 }
 
 /**
- * The tab to move to for rows that just appeared: while the shown tab shows only its empty text, the first other
- * tab in `tabs` with new rows. Null when the look stays. The look then draws that tab's top row open, not the
- * new row itself, so rows that arrive above it later keep the top row the open one.
+ * The tab to move to for `rows`, the rows that just appeared, or as a look opens, the rows each tab lists: while the
+ * shown tab shows only its empty text, the first other tab in `tabs` with rows. Null when the look stays. The look then opens that tab's first waiting row.
  */
 export function followTo<T extends string>(
   tabs: readonly T[],
   shown: T,
   isShownEmpty: boolean,
-  added: Record<T, string[]>,
+  rows: Record<T, string[]>,
 ): T | null {
-  return isShownEmpty ? (tabs.find(t => t !== shown && added[t].length > 0) ?? null) : null
+  return isShownEmpty ? (tabs.find(t => t !== shown && rows[t].length > 0) ?? null) : null
 }

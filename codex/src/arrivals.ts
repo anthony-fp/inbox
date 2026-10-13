@@ -31,6 +31,13 @@ function listedIds(v: InboxView): Record<Tab, string[]> {
   }
 }
 
+/** Each tab's row ids that have not closed. */
+export function openRows(v: InboxView): Record<Tab, string[]> {
+  const open = (rows: RowView[]) => rows.filter(r => r.state.is !== 'settled').map(r => r.id)
+
+  return { needsYou: open([...v.needsYou.questions, ...v.needsYou.tasks]), findings: open(v.findings.rows) }
+}
+
 /** Records a view's rows, and returns by tab the ids the tab had not seen. The first view adds none. */
 export function newRows(seen: SeenRows, v: InboxView): { seen: SeenRows; added: Record<Tab, string[]> } {
   return recordRows(seen, listedIds(v))
