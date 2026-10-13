@@ -8,7 +8,7 @@ import { inboxView, perTurnStatus } from '../../hooks/view'
 import type { InboxView } from '../../hooks/view'
 import { drawnPrs, linkedPrs, olderPrsText, threadSentIn } from '../../hooks/pr-tab'
 import { prNeedsYou, prRefs } from '../../hooks/prs'
-import type { LastAction, PrView } from '../../types'
+import type { LastAction, PrView, Turns } from '../../types'
 import { PRESS_TIMEOUT_MS, SETTLE_WINDOW_MS } from './settle'
 import type { Heard, SessionState } from './state'
 import { CODEX } from './texts'
@@ -197,6 +197,8 @@ export type View = InboxView & {
   running: string[]
   /** Each row's last press, by row id. The tab draws from each row's feedback; a tab loaded before that still reads this. */
   lastActions: Record<string, LastAction>
+  /** The turn counts each row's feedback reads, as "Explaining…" until the reply to its press. */
+  turns: Turns
   prs: PrTab
   /** When the view was drawn, for the rows' ages. */
   at: number
@@ -269,6 +271,7 @@ export function viewOf(s: SessionState, now: number): View {
     done: l.card?.done ?? [],
     running: l.card?.running ?? [],
     lastActions,
+    turns: { turnsStarted: s.presence.turnsStarted, turnsApplied: s.presence.turnsApplied },
     prs: prTabOf(s, lastActions, now),
     at: now,
   }

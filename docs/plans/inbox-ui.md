@@ -118,8 +118,8 @@ Every press is one of five kinds. The kind decides what the screen shows at once
 
 | Kind | What it does | What shows at once |
 |---|---|---|
-| **Talk** | Sends a message asking Claude to talk or draft. The row's work is not given away. | The row stays open and in the count. Its age becomes `✓ Explained just now`, in the past tense, on the row's top line, open or closed: the kind line where the row has one, else the title's line. The button reads "Explain again". |
-| **Hand-off** | Sends a message that gives the work to Claude. | The row leaves the count and shows `✓ Addressed just now` where its age was, until the re-entry rule below brings it back. A PR block, which is always open, records `✓ Asked to resolve conflicts` on the block. |
+| **Talk** | Sends a message asking Claude to talk or draft. The row's work is not given away. | The row stays open and in the count. Its age, on the row's top line, open or closed, reads where the message is: `Queued: Explain` until it reaches Claude, `Explaining…` until Claude's reply, then `✓ Explained · 1m ago`. The top line is the kind line where the row has one, else the title's line. The press adds no line. The button reads "Explain again". |
+| **Hand-off** | Sends a message that gives the work to Claude. | The row closes to its one line, marked ✓, and leaves the count. Its age reads `✓ Handed off: Run load script · 1m ago`. No other row opens in its place. It stays closed after Claude's reply, and the re-entry rule below says when it counts again. A PR block, which is always open, records `✓ Asked to resolve conflicts` on the block. |
 | **Local** | Opens or copies on the person's machine. | A note on the row at once: `Opening settings.json…` or `Copying npm test…`. The result replaces it: `✓ Opened settings.json`, or in red, `Could not open settings.json: it was moved`. |
 | **Mark** | Changes state, and sends nothing while it can be undone. | The row settles in place with the Mark's own label, `✓ Done` or `✓ Dismissed`, and an [Undo] button, then leaves after 5.12 s. |
 | **View** | Changes only what is on screen, or reloads it. | The change itself: a view opens or closes, a row unfolds, a tab switches, a status reads `Refreshing PRs`. |
@@ -153,10 +153,10 @@ Each client's signal:
 
 **Undo.** These Marks get Undo, in every client: an item's Done and Dismiss, a finding's Dismiss, and a PR's Dismiss. Undo puts the row back where it was, open, in its state before the press. If the close already reached Claude in carry text, the next carry text reports the item reopened. The Codex and Claude-mode servers record Undo as they record the Mark.
 
-**Re-entry after a hand-off.** A handed-off row waits on Claude until Claude has had one reply to act on it. Then, if the row still waits on the person, it unfolds.
+**Re-entry after a hand-off.** A handed-off row waits on Claude until Claude has replied once. If the row still waits on the person then, it counts again and takes back its own handle. Its age reads `Still open after Run load script · 3m ago`. It stays closed until the person opens it.
 
-- Tasks: this is today's rule, `isTaskHandedOff` in `hooks/presses.ts`. The row unfolds once the update for a turn started after the press has applied.
-- Findings: the same turn rule (decision 1). Today Address and Discuss remove the finding on press (`actOnFinding`, `hooks/register.tsx:1104-1107`), so there is nothing to unfold.
+- Questions and tasks: the row waits until the update for a turn started after the press has applied (`isHandedOff` in `hooks/presses.ts`). An update that failed counts, since the reply has ended. A typed reply hands a question off as it does a task.
+- Findings: the same turn rule, for a typed reply. Fix settles the row and lists it in the Closed fold instead.
 - Review threads keep today's rule, because GitHub says when they change. A sent thread unfolds when a newer comment arrives.
 - Claude mode has no turns. A row unfolds when Claude's next inbox tool call arrives after the hand-off reached Claude, with the item still open.
 

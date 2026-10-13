@@ -134,7 +134,7 @@ test('a run step hands the task to Codex: it folds until the turn it started is 
   assert.deepEqual(viewOf(summarized, 80).needsYou.tasks[0]?.state, { is: 'open' })
 })
 
-test('a run step on a question sends its command and leaves the question open, and a step that copies and opens sends nothing and reads as one note', () => {
+test('a run step on a question sends its command and folds the question, which stays open in the ledger, and a step that copies and opens sends nothing and reads as one note', () => {
   const w = withItems()
   const question = w.ledger.items[0]!
   const s: SessionState = {
@@ -164,7 +164,7 @@ test('a run step on a question sends its command and leaves the question open, a
     run.ledger.items.map(i => i.id),
     ['i1'],
   )
-  assert.equal(viewOf(after(s, { action: 'step', id: 'i1', step: 0, label: 'Run tests' }), 60).needsYou.count, 1)
+  assert.equal(viewOf(after(s, { action: 'step', id: 'i1', step: 0, label: 'Run tests' }), 60).needsYou.count, 0)
 
   const copyOpen = pressed(s, { action: 'step', id: 'i1', step: 1, label: 'Copy env line and open .env.local' })
   const pending = {

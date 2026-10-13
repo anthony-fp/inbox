@@ -12,6 +12,7 @@ import {
   baseName,
   capitalized,
   clipLabel,
+  isFoldingPress,
   noteText,
   pendingResult,
   stepEffects,
@@ -182,7 +183,8 @@ let tab: ShownTab = 'needsYou'
 // Each tab's open row, and when a click or key opened it; 0 when it was open by default when pressed.
 // Null until a row opens there: the tab then draws its top row open.
 // `index` is the row's place when it opened, so the row in that place opens once it leaves.
-const selection: Record<ShownTab, { id: string; openedAt: number; index?: number } | null> = {
+// A null id: the person's hand-off closed the open row, and none opens until they open one.
+const selection: Record<ShownTab, { id: string | null; openedAt: number; index?: number } | null> = {
   needsYou: null,
   findings: null,
   prs: null,
@@ -471,7 +473,7 @@ function isListed(v: View, id: string): boolean {
 function isNotSent(v: View, id: string): boolean {
   return (
     allRows(v).some(r => r.id === id && r.feedback?.is === 'notSent') ||
-    feedbackOf(id, v.lastActions[id], undefined, v.at)?.is === 'notSent'
+    feedbackOf(id, v.lastActions[id], undefined, v.turns, v.at)?.is === 'notSent'
   )
 }
 
@@ -482,6 +484,7 @@ function isNotSent(v: View, id: string): boolean {
 async function act(rowId: string, press: RowPress | PrPress, onSent?: () => void, pending = 'Sending…') {
   // Undo is pressed on a row that just closed, and a PR block's actions on no row.
   if (press.action !== 'undo' && !rowId.startsWith('pr:')) keepPressedOpen(rowId)
+  const before = view?.lastActions[rowId]
   sending.set(rowId, pending)
   errors.delete(rowId)
   notes.delete(rowId)
@@ -498,6 +501,11 @@ async function act(rowId: string, press: RowPress | PrPress, onSent?: () => void
     // A sample press went through on the demo's copy, so its typed words go as a real press's do.
     // After the view, so `onSent` reads the rows as they are after the press.
     if (!r.error && r.note !== 'stale') onSent?.()
+    // A hand-off closes its row to its one line, where the press reads in place of the age. An open or copy keeps
+    // the row's hand-off, with its time, so only the hand-off's own press closes the row.
+    const after = r.view?.lastActions[rowId]
+    if (!r.error && r.note !== 'stale' && after?.at !== before?.at && isFoldingPress(rowId, after))
+      selection[tab] = { id: null, openedAt: Date.now() }
     if (r.note && view && isListed(view, rowId)) {
       notes.set(rowId, { text: noteText(r.note), at: Date.now() })
       drawIn(SETTLED_MS)
@@ -755,7 +763,7 @@ function prThreadRow(v: View, pr: PrView, t: PrThread): Row {
       },
     ],
     hidden: [],
-    feedback: feedbackOf(id, v.lastActions[id], undefined, v.at),
+    feedback: feedbackOf(id, v.lastActions[id], undefined, v.turns, v.at),
   }
 }
 
@@ -804,7 +812,7 @@ function prCheckRow(v: View, pr: PrView, c: PrCheck): Row {
     ],
     more: [],
     hidden: [],
-    feedback: feedbackOf(id, v.lastActions[id], undefined, v.at),
+    feedback: feedbackOf(id, v.lastActions[id], undefined, v.turns, v.at),
   }
 }
 
@@ -943,6 +951,7 @@ async function undo(r: RowView) {
 function selectedIndex(rows: Row[], t: ShownTab, v: View): number {
   const s = selection[t]
   if (s) {
+    if (s.id === null) return -1
     const at = rows.findIndex(r => r.id === s.id)
     // While the open row still draws, as one just closed or leaving, none is open. Once it is gone, the row now in
     // its place opens, guarded as a click would open it.
@@ -1098,13 +1107,17 @@ function ListRow({
   const bar = isNew(row.id) ? ` new tone-bar-${tone}` : ''
   const handle = <span class={`mark ${row.handleTone ?? row.kind ?? ''}`}>{row.handle}</span>
 
-  // A row's last action reads under its title, as "✓ Discuss", and its age, when it has one, takes the side column, so
-  // the ages stay one column. It is muted unless it failed: a done row's ✓ is already green. A press still out reads
-  // there too, as "Sending…", so nothing under the line moves while it runs.
+  // A row's last press that reads with an age, as "✓ Explained", takes the age's place: in the side column while the
+  // row is closed, so the row keeps its one line, and after the title while it is open, its age in the side column.
+  // A note, a failure or a press still out, as "Sending…", reads under the title instead. It is muted unless it
+  // failed: a done row's ✓ is already green.
   const pending = sending.get(row.id)
   const f = isFeedbackShown(row) ? row.feedback : null
-  const last = pending ?? (f ? feedbackLabel(row) : null)
-  const side = pending ? null : f && hasAge(f) ? shortAgo(now - f.at) : last ? null : row.age
+  const label = pending ?? (f ? feedbackLabel(row) : null)
+  const ageAt = !pending && f && hasAge(f) ? f.at : null
+  const isInSide = ageAt !== null && !isSelected && !isClosing
+  const last = isInSide ? null : label
+  const side = ageAt !== null ? `${isInSide ? `${label} ` : ''}${shortAgo(now - ageAt)}` : last ? null : row.age
   const afterTone = !pending && isFailure(row.feedback) ? 'error' : undefined
 
   // The same elements draw the row open and closed, so its line stays put and only the panel under it comes and goes.
@@ -1565,7 +1578,8 @@ function prLastLine(v: View, id: string): { text: string; isError: boolean } | n
   const note = noteOf(id)
   if (note) return { text: note, isError: false }
   // A Dismiss left on a PR that is tracked again, as one a later reply links, is over.
-  const f = v.lastActions[id]?.action === 'pr-dismiss' ? null : feedbackOf(id, v.lastActions[id], undefined, v.at)
+  const f =
+    v.lastActions[id]?.action === 'pr-dismiss' ? null : feedbackOf(id, v.lastActions[id], undefined, v.turns, v.at)
   if (!f) return null
   const text = feedbackText(f, 'codex')
 

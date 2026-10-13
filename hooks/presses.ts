@@ -109,19 +109,36 @@ export function stepsOf(item: Item, extraSteps: HelpStep[]): HelpStep[] {
 }
 
 /**
- * A task or finding handed to the agent waits on the agent until the update
- * for a turn started after the press has applied. Still open then, the agent's
- * reply did not finish it, so it waits on the person again. Counts lower than
- * at the press were reset, so the row no longer folds. A hand-off whose message
- * failed to send gave nothing away.
+ * Whether a press's message still waits on the agent's reply: until the update for a turn started after the press
+ * has applied. Counts lower than at the press were reset, so it no longer waits. A message that failed to send waits
+ * on nothing.
+ */
+export function isAwaitingReply(
+  last: Pick<LastAction, 'turnsStarted' | 'delivery'> | undefined,
+  turns: Turns,
+): boolean {
+  const pressed = last?.delivery?.state !== 'failed' ? last?.turnsStarted : undefined
+
+  return pressed !== undefined && pressed <= turns.turnsStarted && turns.turnsApplied <= pressed
+}
+
+/**
+ * A task or finding handed to the agent waits on the agent until its reply. Still open then, the reply did not
+ * finish it, so it waits on the person again.
  */
 export function isHandedOff(
   last: Pick<LastAction, 'kind' | 'turnsStarted' | 'delivery'> | undefined,
   turns: Turns,
 ): boolean {
-  const pressed = last?.kind === 'handoff' && last.delivery?.state !== 'failed' ? last.turnsStarted : undefined
+  return last?.kind === 'handoff' && isAwaitingReply(last, turns)
+}
 
-  return pressed !== undefined && pressed <= turns.turnsStarted && turns.turnsApplied <= pressed
+/**
+ * Whether a press handed its question, task or finding row to the agent, so the row closes to its one line and stays
+ * closed. Fix settles its row instead, and a review thread waits on GitHub.
+ */
+export function isFoldingPress(id: string, last: Pick<LastAction, 'kind' | 'action'> | undefined): boolean {
+  return /^[if]\d+$/.test(id) && last?.kind === 'handoff' && last.action !== 'address'
 }
 
 /**
@@ -491,6 +508,16 @@ export function demoRecord(
     ),
     isSample: effects.length > 0,
   }
+}
+
+/**
+ * The demo's turn counts after a press. A sample message starts a sample turn, so its row reads "Explaining…" or
+ * folds, and `isReplied` ends every sample turn, as a reply would, a few seconds later.
+ */
+export function demoTurns(turns: Turns, effects: Effect[], isReplied = false): Turns {
+  if (isReplied) return { ...turns, turnsApplied: turns.turnsStarted }
+
+  return effects.some(e => e.kind === 'send') ? { ...turns, turnsStarted: turns.turnsStarted + 1 } : turns
 }
 
 /** What a host does for a press's effects: opens, copies and sends its own way, and saves state. */

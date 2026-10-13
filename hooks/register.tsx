@@ -123,7 +123,9 @@ import {
   capitalized,
   clipLabel,
   demoRecord,
+  demoTurns,
   doneWake,
+  isFoldingPress,
   localLast,
   localPath,
   markSentToAgent,
@@ -1076,15 +1078,17 @@ function queueUpdate($: EngineInterface, next: { ex: Exchange; turnsStarted: num
       (): LedgerState => 'failed',
     )
     if (at !== conversation) return
-    // An exchange covers the turns started by its end; a catch-up, those started before it ran.
+    // An exchange covers the turns started by its end; a catch-up, those started before it ran. A failed update
+    // counts too, as Codex's does: the reply has ended, so a row waiting on it stops reading "Explaining…". The
+    // failed state still runs a catch-up.
     const applied = next?.turnsStarted ?? turnsStarted
     await update($, PRESENCE, p => ({
       ...p,
       ledgerState: state,
       isUpdating: false,
-      turnsApplied: state === 'current' ? Math.max(p.turnsApplied, applied) : p.turnsApplied,
+      turnsApplied: Math.max(p.turnsApplied, applied),
     }))
-    // A task handed to Claude unfolds once the update for its turn applies.
+    // A row waiting on Claude's reply counts again, or reads its ✓, once the update for its turn applies.
     void publishStatus($)
   })
   // A rejected link would skip every later update, so the chain swallows it.
@@ -1869,6 +1873,9 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
   ])
   // The sidebar line stops counting a handed-off row at once.
   if (lasts.some(l => l.kind === 'handoff')) void publishStatus($)
+  // An open or copy keeps the row's hand-off, with its time, so only the hand-off's own press closes the row.
+  const isFolding = pressed.lasts[rowId]?.at === now && isFoldingPress(rowId, pressed.lasts[rowId])
+  if (isFolding) await closePressed($)
   if (!('ref' in p) && p.action === 'done')
     void $.clock
       .sleep(SETTLED_MS)
@@ -1910,6 +1917,8 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
   // A typed reply that did not send goes back into its draft.
   if (failed.isRowFailed && !('ref' in p) && p.action === 'type')
     await update($, DRAFTS, d => (d[p.id] ? d : { ...d, [p.id]: p.text }))
+  // A hand-off that did not send gave nothing away, so its row opens again to show why, with [Try again].
+  if (failed.isRowFailed && isFolding) await selectRestored($, rowId)
   void publishStatus($)
 }
 
@@ -1951,6 +1960,15 @@ function applyAnyPress(
   return { ledger: r.ledger, lasts: r.last ? { [p.id]: r.last } : {}, drop: [], effects: r.effects }
 }
 
+/**
+ * Closes the shown tab's open row, as after a hand-off pressed on it, so the row draws as its one line. No other row
+ * opens in its place, and none opens by default, until the person opens one.
+ */
+async function closePressed($: EngineInterface) {
+  const [tab, openedAt] = await Promise.all([read($, TAB), $.clock.now()])
+  await update($, SELECTION, s => ({ ...s, [tab]: { id: null, index: s[tab].index, openedAt } }))
+}
+
 /** Selects a row Undo brought back, in its own tab. */
 async function selectRestored($: EngineInterface, id: string) {
   const ids = tabRowIds((await drawnState($)).view, [])
@@ -1985,6 +2003,7 @@ async function runDemoPress($: EngineInterface, p: RowPress | PrPress) {
       ledger: r.ledger,
       lastActions: withLasts(d.lastActions, lasts, r.drop),
       notes: isSample ? { ...notes, [rowId]: { note: 'sample' as const, at: now } } : notes,
+      turns: demoTurns(d.turns, r.effects),
     }
   })
   const pressed = applied
@@ -1995,11 +2014,14 @@ async function runDemoPress($: EngineInterface, p: RowPress | PrPress) {
       return rest
     })
   if (!('stale' in pressed) && !('ref' in p) && p.action === 'undo') await selectRestored($, p.id)
-  // A fresh copy redraws the pane: once a note's SETTLED_MS ends, and at each step of a leave bar.
+  if (!('stale' in pressed) && pressed.lasts[rowId]?.at === now && isFoldingPress(rowId, pressed.lasts[rowId]))
+    await closePressed($)
+  // A fresh copy redraws the pane: once a note's SETTLED_MS ends, with the sample reply to a sample message, and at
+  // each step of a leave bar.
   if ('stale' in pressed || pressed.effects.length > 0)
     void $.clock
       .sleep(SETTLED_MS)
-      .then(() => update($, DEMO, d => d && { ...d }))
+      .then(() => update($, DEMO, d => d && { ...d, turns: demoTurns(d.turns, [], true) }))
       .catch(() => undefined)
   if (isClosing) redrawWhileLeaving($, SETTLED_MS)
 }
@@ -2817,7 +2839,7 @@ export const register: Register = on => {
         ? { rowPad: 2 * DESKTOP_ROW_PAD, settledPad: 2 * DESKTOP_ROW_PAD, buttonGap: 1, isFoldGapped: false }
         : { rowPad: blankLine, settledPad: 0, buttonGap: 2, isFoldGapped: true }
     const [
-      { ledger, prViews: prState, lastActions, notes, stop, view, isDemo, isUnread, now },
+      { ledger, prViews: prState, lastActions, notes, turns, stop, view, isDemo, isUnread, now },
       tab,
       selection,
       theme,
@@ -3292,7 +3314,7 @@ export const register: Register = on => {
     // A last action reads "✓ Discuss · 1m ago", or "Queued: Discuss · 1m ago". A row whose own mark is a ✓
     // leaves out the second one. A note and a Local result read alone, with no age. A failure is red.
     const feedbackLabel = (id: string, row?: Row) => {
-      const f = feedbackOf(id, lastActions[id], notes[id], now)
+      const f = feedbackOf(id, lastActions[id], notes[id], turns, now)
       if (!f) return null
 
       return hasAge(f)
@@ -3533,7 +3555,7 @@ export const register: Register = on => {
       )
     }
     const sideAge = (row: Row) => {
-      const f = feedbackOf(row.id, lastActions[row.id], notes[row.id], now)
+      const f = feedbackOf(row.id, lastActions[row.id], notes[row.id], turns, now)
       const at = f && hasAge(f) ? f.at : row.at
       return at === undefined ? '' : shortAgo(now - at)
     }

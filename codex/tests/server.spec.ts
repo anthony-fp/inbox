@@ -108,7 +108,7 @@ test('a press drawn in another thread, or on a row that changed, reads stale and
   assert.deepEqual(s.lastActions, before.lastActions)
 })
 
-test('a press reads Queued until Codex takes its message as a prompt, then ✓', async () => {
+test('a press reads Queued until Codex takes its message as a prompt, then Explaining… until the reply, then ✓', async () => {
   const { dir, call } = await setup(0)
   const r = await call('inbox_press', { press: { action: 'explain', id: 'i1' }, thread: 's1' }, { thread_id: 's1' })
   assert.deepEqual(r.result.structuredContent.view.needsYou.questions[0]?.feedback, {
@@ -123,7 +123,13 @@ test('a press reads Queued until Codex takes its message as a prompt, then ✓',
   )
   // UserPromptSubmit carries the message the tab queued.
   const arrived = notePrompt(s, s.sent[0]!.text, 200).state
-  assert.deepEqual(viewOf(arrived, 200).needsYou.questions[0]?.feedback, { is: 'done', label: 'Explained', at: 100 })
+  assert.deepEqual(viewOf(arrived, 200).needsYou.questions[0]?.feedback, {
+    is: 'working',
+    label: 'Explaining…',
+    at: 100,
+  })
+  const replied = { ...arrived, presence: { ...arrived.presence, turnsApplied: arrived.presence.turnsStarted } }
+  assert.deepEqual(viewOf(replied, 300).needsYou.questions[0]?.feedback, { is: 'done', label: 'Explained', at: 100 })
 })
 
 test('a press whose message fails to send is undone, and its row says why with [Try again]', async () => {

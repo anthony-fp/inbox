@@ -11,6 +11,7 @@ import type { PrPress } from '../../hooks/pr-tab'
 import {
   applyPress,
   demoRecord,
+  demoTurns,
   doneWake,
   localPath,
   markSentToAgent,
@@ -33,6 +34,7 @@ import { noteToolCall, viewOf } from './core'
 import type { TabView } from './core'
 import { demoState } from './demo'
 import { ghFinder, ghIn } from './gh'
+import { SETTLED_MS } from '../../hooks/view'
 import { SETTLE_WINDOW_MS } from './settle'
 import { readState, updateState } from './state'
 import type { SessionState } from './state'
@@ -415,8 +417,19 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     const r = thread === id ? pressOn(s, p) : ({ stale: true } as const)
     if ('stale' in r) return { view: await served(s, id, true), copy: null, error: null, note: 'stale' }
     const { lasts, isSample } = demoRecord(r.lasts, r.effects)
-    const next: SessionState = { ...s, ledger: r.ledger, lastActions: withLasts(s.lastActions, lasts, r.drop) }
+    const next: SessionState = {
+      ...s,
+      ledger: r.ledger,
+      lastActions: withLasts(s.lastActions, lasts, r.drop),
+      presence: { ...s.presence, ...demoTurns(s.presence, r.effects) },
+    }
     demos.set(id, next)
+    // The sample reply, as the mod's demo gives it, once the sample note has shown.
+    if (r.effects.some(e => e.kind === 'send'))
+      setTimeout(() => {
+        const d = demos.get(id)
+        if (d) demos.set(id, { ...d, presence: { ...d.presence, ...demoTurns(d.presence, [], true) } })
+      }, SETTLED_MS).unref()
 
     return { view: await served(next, id, true), copy: null, error: null, note: isSample ? 'sample' : null }
   }

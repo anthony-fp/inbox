@@ -446,15 +446,19 @@ test('a task handed to Claude folds and leaves the count until Claude’s reply 
   const pane = await $.ui.mount(PANE)
   expect(await band.find({ text: /Needs you 2/ })).toBeDefined()
 
-  // Run hands the task to Claude: it folds to what was sent, and leaves the count in the band and the tab.
+  // Run hands the task to Claude: it closes to its one line, which reads what was sent, and leaves the count in the
+  // band and the tab.
   await pane.press({ key: 'help-i1-0' })
   await clock.settle()
   expect(sent.at(-1)).toContain('./load.sh')
   expect(await pane.find({ text: /Run load script/ })).toBeDefined()
+  expect(await pane.find({ key: 'help-i1-1' })).toBeUndefined()
   expect(await band.find({ text: /Needs you 1/ })).toBeDefined()
 
-  // Its other steps still show: a copy says where to run the command, and an open of a missing file says so in red,
-  // with no toast. Neither brings the task back into the count.
+  // Opened again, its other steps still show: a copy says where to run the command, and an open of a missing file
+  // says so in red, with no toast. Neither brings the task back into the count.
+  await pane.press({ key: 'title-i1' })
+  await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'help-i1-1' })
   await clock.settle()
   expect(copied).toEqual(['npm login'])
@@ -980,7 +984,7 @@ test('t opens a field for the person’s own words: a question’s words go to C
   // [Send] sends them as the answer.
   await pane.press({ key: 'send-i1' })
   expect(sent.at(-1)).toBe('Re "Use Node or Python?": Deno, actually')
-  expect((await pane.find({ key: 'row-i1' }))?.text).toMatch(/✓\sReplied/)
+  expect((await pane.find({ key: 'row-i1' }))?.text).toMatch(/^✓Use Node or Python\?\s·\sReplied/)
   await $.tool.call({ tool: 'mcp__inbox__close', id: 'i1', answer: 'Deno' } as never)
   await clock.settle()
   expect(await pane.find({ key: 'row-i1' })).toBeUndefined()
@@ -1079,7 +1083,7 @@ test('a press during a turn reads Queued until its prompt enters, and one that w
   await arrive($)
   await clock.settle()
   await pane.press({ key: 'select-i1' })
-  expect(await pane.find({ text: /^\u2007·\s✓\sExplained$/ })).toBeDefined()
+  expect(await pane.find({ text: /^\u2007·\sExplaining…$/ })).toBeDefined()
   expect(await pane.find({ text: /Queued/ })).toBeUndefined()
 
   // A hook refuses a typed answer: the question opens again, and the words go back into its field.
@@ -1093,12 +1097,13 @@ test('a press during a turn reads Queued until its prompt enters, and one that w
   expect(await pane.find({ key: 'row-i1' })).toBeDefined()
   expect(drafts).toEqual({ i1: 'Deno, actually' })
   // A refused answer: the question opens again and counts, says why, and offers [Try again].
+  await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'answer-i1-0' })
   await clock.settle()
   expect(sent.at(-1)).toBe('Re "Use Node or Python?": Node')
   expect(await pane.find({ key: 'row-i1' })).toBeDefined()
   expect(await pane.find({ text: 'Not sent: a hook refused it' })).toBeDefined()
-  expect(await band.find({ text: /Needs you 2/ })).toBeDefined()
+  expect(await band.find({ text: /Needs you 1/ })).toBeDefined()
   // Nothing went, so no option reads "again".
   expect((await pane.find({ key: 'answer-i1-0-key' }))?.props.label).toBe('Node (recommended)')
 
@@ -1151,7 +1156,7 @@ test('Claude closes an item or finding that no longer applies, by the id it read
   await pane.press({ key: 'discuss-f3' })
   await clock.settle()
   expect(sent.at(-1)).toContain("Let's talk through this finding you recorded")
-  expect(await pane.find({ text: /Discussed/ })).toBeDefined()
+  expect(await pane.find({ text: /Discussing…/ })).toBeDefined()
   expect((await pane.find({ key: 'discuss-f3-key' }))?.props.label).toBe('Discuss again')
   expect(await band.find({ text: /Findings 1/ })).toBeDefined()
   await pane.press({ key: 'tab-needsYou' })
@@ -1419,7 +1424,7 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   await pane.press({ key: 'discuss-T1-key' })
   expect(sent.at(-1)).toContain("Let's talk through this review comment on PR #12")
   await clock.settle()
-  expect(await pane.find({ text: /Discussed/ })).toBeDefined()
+  expect(await pane.find({ text: /Discussing…/ })).toBeDefined()
   expect((await pane.find({ key: 'discuss-T1' }))?.props.label).toMatch(/Discuss again$/)
   // A hook refuses Address: the thread stays open and waiting, says why, and offers [Try again].
   submitAnswer = { drop: 'a hook refused it' }
@@ -1815,7 +1820,7 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   await pane.press({ key: 'typekey-d17' })
   await pane.input({ key: 'type-d17', text: 'Done in both.' })
   await clock.settle()
-  expect(await band.find({ text: /Needs you 5/ })).toBeDefined()
+  expect(await band.find({ text: /Needs you 6/ })).toBeDefined()
 
   // Done settles the sample task in place; Undo brings it back open; then it moves to Closed.
   await pane.press({ key: 'title-d14' })
@@ -1825,10 +1830,10 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   expect(await pane.find({ key: 'done-d14' })).toBeUndefined()
   expect(await pane.find({ key: 'settled-d14' })).toBeDefined()
   expect(await pane.find({ text: /Sign in to gh for the PRs tab/ })).toBeDefined()
-  expect(await band.find({ text: /Needs you 4/ })).toBeDefined()
+  expect(await band.find({ text: /Needs you 5/ })).toBeDefined()
   await pane.press({ key: 'undo-d14' })
   expect(await pane.find({ key: 'done-d14' })).toBeDefined()
-  expect(await band.find({ text: /Needs you 5/ })).toBeDefined()
+  expect(await band.find({ text: /Needs you 6/ })).toBeDefined()
   await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'done-d14' })
   await clock.advance(SETTLED_MS)
@@ -2099,7 +2104,7 @@ test('the desktop pane draws each action as one button and the tabs as one click
   await pane.pointer({ type: 'down', x: explainAt, y: 0, button: 'left', in: 'links-i2' })
   await clock.settle()
   expect(sent).toHaveLength(1)
-  expect(await pane.find({ text: /✓\sExplained/ })).toBeDefined()
+  expect(await pane.find({ text: /Explaining…/ })).toBeDefined()
 
   // A click anywhere on a tab shows it, here in its bottom quarter line at the Findings tab's right edge.
   const tabBar = async () => (await pane.find({ key: 'tabs' }))?.props.props as TabsProps

@@ -22,7 +22,9 @@ import {
   actionId,
   capitalized,
   clipLabel,
+  isAwaitingReply,
   isFixSent,
+  isFoldingPress,
   isHandedOff,
   isUndoable,
   noteText,
@@ -96,14 +98,17 @@ export type RowState =
   | { is: 'settled'; label: string; at: number; canUndo: boolean; isQueued: boolean; isLapsed: boolean }
 
 /**
- * What a row says about its last press: "✓ Explain · 1m ago". A Talk or Hand-off ✓
- * stays. Until its message arrives it reads "Queued: Explain · 1m ago", and once
- * it failed, "Not sent: <reason>" with the press [Try again] repeats, if any.
+ * What a row says about its last press: "✓ Explained · 1m ago". Until its message arrives it reads "Queued: Explain
+ * · 1m ago", and once it failed, "Not sent: <reason>" with the press [Try again] repeats, if any. A Talk press reads
+ * "Explaining…" until the agent's reply, so its ✓ claims only an explanation there is to read. A row a hand-off left
+ * open after the agent's reply reads "Still open after Run load script".
  * A Local press's result shows while pending, for SETTLED_MS once done,
  * and until the next press once failed. A newer note shows in their place for SETTLED_MS.
  */
 export type Feedback =
   | { is: 'done'; label: string; at: number }
+  | { is: 'working'; label: string; at: number }
+  | { is: 'stillOpen'; label: string; at: number }
   | { is: 'queued'; label: string; at: number }
   | { is: 'notSent'; reason: string; retry: RowPress | null }
   | { is: 'local'; result: LocalResult }
@@ -236,6 +241,7 @@ export function feedbackOf(
   id: string,
   last: LastAction | undefined,
   note: RowNote | undefined,
+  turns: Turns,
   now: number,
 ): Feedback | null {
   const result = last?.result
@@ -246,6 +252,10 @@ export function feedbackOf(
   const delivery = last.delivery
   if (delivery?.state === 'queued') return { is: 'queued', label: last.text, at: last.at }
   if (delivery?.state === 'failed') return { is: 'notSent', reason: delivery.reason, retry: retryOf(id, last) }
+  const isAwaiting = isAwaitingReply(last, turns)
+  const working = WORKING_LABELS[last.action]
+  if (last.kind === 'talk' && working && isAwaiting) return { is: 'working', label: working, at: last.at }
+  if (!isAwaiting && isFoldingPress(id, last)) return { is: 'stillOpen', label: last.text, at: last.at }
 
   // A step's own label is an instruction, as "Run load script", so a step handed to the agent says it was.
   const isHandedStep = last.kind === 'handoff' && last.action.startsWith('step-')
@@ -260,6 +270,14 @@ export function feedbackOf(
  */
 /** The Fix button's label for a finding, which its settled and closed rows read as the choice made. */
 const fixLabel = (f: Pick<Finding, 'kind'>) => (f.kind === 'opportunity' ? 'Do it' : 'Fix')
+
+/** What a Talk press reads while the agent's reply is still to come. */
+const WORKING_LABELS: Record<string, string> = {
+  explain: 'Explaining…',
+  discuss: 'Discussing…',
+  'thread-discuss': 'Discussing…',
+  'thread-draft': 'Drafting a reply…',
+}
 
 const DONE_LABELS: Record<string, (text: string) => string> = {
   address: () => 'Handed off',
@@ -281,9 +299,9 @@ export function isFailure(f: Feedback | null): boolean {
   return f?.is === 'notSent' || (f?.is === 'local' && f.result.state === 'failed')
 }
 
-/** Feedback that reads with its age: a press's ✓, or its message still queued. */
-export function hasAge(f: Feedback): f is Extract<Feedback, { is: 'done' | 'queued' }> {
-  return f.is === 'done' || f.is === 'queued'
+/** Feedback that reads with its age, in its place on the row's top line: a press's ✓, or where its message is. */
+export function hasAge(f: Feedback): f is Extract<Feedback, { is: 'done' | 'working' | 'stillOpen' | 'queued' }> {
+  return f.is === 'done' || f.is === 'working' || f.is === 'stillOpen' || f.is === 'queued'
 }
 
 // Where a copied command runs. The desktop app's composer is not known to take "!" for shell mode.
@@ -328,6 +346,10 @@ export function feedbackText(f: Feedback, look: Look): string {
       return `Not sent: ${f.reason}`
     case 'done':
       return `✓ ${f.label}`
+    case 'working':
+      return f.label
+    case 'stillOpen':
+      return `Still open after ${f.label}`
   }
 }
 
@@ -625,13 +647,14 @@ export function inboxView({
     return {
       ...row,
       state,
-      feedback: state.is === 'settled' ? null : feedbackOf(row.id, lastActions[row.id], notes[row.id], now),
+      feedback: state.is === 'settled' ? null : feedbackOf(row.id, lastActions[row.id], notes[row.id], turns, now),
       actions: actionsOf(row, lastActions[row.id], state),
     }
   }
   const itemRow = (item: Item): RowView => {
     const n = numbers.get(item.id)
-    const row = rowOf({
+
+    return rowOf({
       id: item.id,
       type: item.kind,
       // A question no typed number reaches takes a task's bullet: a "?" reads as a missing number.
@@ -642,9 +665,6 @@ export function inboxView({
       finding: null,
       steps: stepsOf(item, extraSteps[item.id] ?? []),
     })
-
-    // Questions never fold.
-    return item.kind === 'question' && row.state.is === 'handedOff' ? { ...row, state: { is: 'open' } } : row
   }
   const questionRows = questions.map(itemRow)
   const taskRows = tasks.map(itemRow)
