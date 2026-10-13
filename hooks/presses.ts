@@ -133,6 +133,11 @@ export function isHandedOff(
   return last?.kind === 'handoff' && isAwaitingReply(last, turns)
 }
 
+/** Whether a row id is the PR tab's: a PR block's `pr:` mark, or a review thread's or check's "<ref> thread <id>". */
+export function isPrRowId(id: string): boolean {
+  return id.startsWith('pr:') || id.includes(' ')
+}
+
 /**
  * Whether a press handed its row to the agent, so the row closes to its one line and stays closed: a question, task,
  * finding, review thread or check. Fix settles its finding's row instead, and a PR block is always open.

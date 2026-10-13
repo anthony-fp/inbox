@@ -26,6 +26,7 @@ import {
   isFixSent,
   isFoldingPress,
   isHandedOff,
+  isPrRowId,
   isUndoable,
   noteText,
   retryOf,
@@ -101,14 +102,14 @@ export type RowState =
  * What a row says about its last press: "✓ Explained · 1m ago". Until its message arrives it reads "Queued: Explain
  * · 1m ago", and once it failed, "Not sent: <reason>" with the press [Try again] repeats, if any. A Talk press reads
  * "Explaining…" until the agent's reply, so its ✓ claims only an explanation there is to read. A row a hand-off left
- * open after the agent's reply reads "Still open after Run load script".
+ * open after the agent's reply reads "Still open".
  * A Local press's result shows while pending, for SETTLED_MS once done,
  * and until the next press once failed. A newer note shows in their place for SETTLED_MS.
  */
 export type Feedback =
-  | { is: 'done'; label: string; at: number }
+  | { is: 'done'; label: string; at: number; isHandedStep?: true }
   | { is: 'working'; label: string; at: number }
-  | { is: 'stillOpen'; label: string; at: number }
+  | { is: 'stillOpen'; at: number }
   | { is: 'queued'; label: string; at: number }
   | { is: 'notSent'; reason: string; retry: RowPress | null }
   | { is: 'local'; result: LocalResult }
@@ -256,14 +257,16 @@ export function feedbackOf(
   const working = WORKING_LABELS[last.action]
   if (last.kind === 'talk' && working && isAwaiting) return { is: 'working', label: working, at: last.at }
   // A review thread or check waits on GitHub instead, so only a question, task or finding row reads it.
-  if (!isAwaiting && /^[if]\d+$/.test(id) && isFoldingPress(id, last))
-    return { is: 'stillOpen', label: last.text, at: last.at }
+  if (!isAwaiting && !isPrRowId(id) && isFoldingPress(id, last)) return { is: 'stillOpen', at: last.at }
 
-  // A step's own label is an instruction, as "Run load script", so a step handed to the agent says it was.
   const isHandedStep = last.kind === 'handoff' && last.action.startsWith('step-')
-  const label = DONE_LABELS[last.action]?.(last.text) ?? (isHandedStep ? `Handed off: ${last.text}` : last.text)
 
-  return { is: 'done', label, at: last.at }
+  return {
+    is: 'done',
+    label: DONE_LABELS[last.action]?.(last.text) ?? last.text,
+    at: last.at,
+    ...(isHandedStep ? { isHandedStep: true as const } : {}),
+  }
 }
 
 /**
@@ -347,11 +350,13 @@ export function feedbackText(f: Feedback, look: Look): string {
     case 'notSent':
       return `Not sent: ${f.reason}`
     case 'done':
-      return `✓ ${f.label}`
+      // A step's own label is an instruction, as "Run load script": "✓ Run load script" would read as run. A row whose
+      // handle is the ✓ draws the label alone, as its ✓ already says the step went to the agent.
+      return f.isHandedStep ? `✓ Handed off: ${f.label}` : `✓ ${f.label}`
     case 'working':
       return f.label
     case 'stillOpen':
-      return `Still open after ${f.label}`
+      return 'Still open'
   }
 }
 
