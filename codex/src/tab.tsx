@@ -1415,13 +1415,15 @@ function GroupEnd({
   return (
     <>
       <div class="group-end" data-motion={`end-${group}`}>
-        {empty ? <div class="group-empty">{empty}</div> : null}
-        {total > 0 ? (
-          <button type="button" class="fold" data-fold={group} onClick={() => toggleFold(group)}>
-            <Icon name={isUnfolded ? 'down' : 'right'} />
-            {foldLabel(total)}
-          </button>
-        ) : null}
+        <div class="group-end-content">
+          {empty ? <div class="group-empty">{empty}</div> : null}
+          {total > 0 ? (
+            <button type="button" class="fold" data-fold={group} onClick={() => toggleFold(group)}>
+              <Icon name={isUnfolded ? 'down' : 'right'} />
+              {foldLabel(total)}
+            </button>
+          ) : null}
+        </div>
       </div>
       {isListed ? (
         <div class="list closed-list" data-motion={`closed-${group}`}>
@@ -1939,8 +1941,9 @@ function unclip(el: HTMLElement) {
 }
 
 /**
- * A row entry's content height, which an animation of its own height does not change, as its scroll height does
- * while the animation holds it taller than its content. The entry's children stack with no gaps or padding.
+ * A row entry's or a group end's content height, which an animation of its own height does not change, as its scroll
+ * height does while the animation holds it taller or shorter than its content. Its children stack with no gaps or
+ * padding.
  */
 function contentHeight(el: HTMLElement): number {
   return [...el.children].reduce((sum, child) => sum + child.getBoundingClientRect().height, 0)
@@ -1970,10 +1973,11 @@ function animateDraw(before: Heights, changed: ReadonlySet<string>) {
     entering.clear()
     return
   }
-  // In the draw that starts a row's exit or entry, other heights move on that row's curve. A group's empty line then
-  // grows or closes at the rate the row collapses or grows beside it, so the rows below move one way.
+  // In the draw that starts a row's exit or entry, the heights of elements that are not rows move on that row's curve.
+  // A group's empty line then grows or closes at the rate the row collapses or grows beside it, so the rows below move
+  // one way. A row keeps the usual move: the draw that brings it to rest comes when that move ends.
   const started = new Set([...changed].map(key => drawnRows.get(key)?.track.state))
-  const move: KeyframeAnimationOptions = started.has('leaving')
+  const besideRow: KeyframeAnimationOptions = started.has('leaving')
     ? { ...EXIT, fill: 'none' }
     : started.has('entering')
       ? ENTER
@@ -1990,8 +1994,9 @@ function animateDraw(before: Heights, changed: ReadonlySet<string>) {
     if (state && changed.has(key) && startState(el, state, from)) continue
     // A closing, settling or leaving row runs its own animation to its end.
     if (state === 'closing' || state === 'settling' || state === 'leaving') continue
-    // A Closed list's scroll height is its content's: only its own close shrinks it, which runs apart from this.
-    const target = state ? contentHeight(el) : el.scrollHeight
+    // A group's end clips its content at the top while it moves, which its scroll height leaves out. A Closed list's
+    // scroll height is its content's: only its own close shrinks it, which runs apart from this.
+    const target = state || el.classList.contains('group-end') ? contentHeight(el) : el.scrollHeight
     if (isFresh) {
       // A Closed list that just unfolded grows in.
       if (!state && entering.delete(key)) growIn(el, target)
@@ -2003,7 +2008,7 @@ function animateDraw(before: Heights, changed: ReadonlySet<string>) {
     const opacity = anims.length > 0 ? Number(getComputedStyle(el).opacity) : 1
     for (const a of anims) a.cancel()
     if (Math.abs(height - target) < 1 && opacity > 0.99) continue
-    tween(el, { height, opacity }, { height: target, opacity: 1 }, move)
+    tween(el, { height, opacity }, { height: target, opacity: 1 }, state ? MOVE : besideRow)
   }
   // Rows that arrived on another tab show at once when that tab shows them, not later.
   entering.clear()

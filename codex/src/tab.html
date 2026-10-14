@@ -500,14 +500,17 @@
       }
 
       /*
-       * Holds a group's empty line and fold, margins included, so its height can move as one. Its content sits at its
-       * bottom, so while it grows, a fold already shown stays in view and the empty line slides in above it.
+       * Holds a group's empty line and fold, so its height can move as one. Its content sits at its bottom, so while it
+       * grows, a fold already shown stays in view and the empty line slides in above it.
        */
       .group-end {
         display: flex;
         flex-direction: column;
         justify-content: flex-end;
-        align-items: flex-start;
+      }
+      /* Keeps the fold's margin inside, so its height is the whole end's content height. */
+      .group-end-content {
+        display: flow-root;
       }
       /* A group's line in place of its rows while it has none open, where a row's text would start. */
       .group-empty {
