@@ -183,10 +183,10 @@ let pollFailures = 0
 let readAt = 0
 let tab: ShownTab = 'needsYou'
 // Each tab's open row, and when a click or key opened it; 0 when it was open by default when pressed.
-// Null until a row opens there: the tab then draws its top row open.
+// Null until a row opens there, and again once a press closed the open row with no other row waiting: the tab then
+// draws its first waiting row open.
 // `index` is the row's place when it opened, so the row in that place opens once it leaves.
-// A null id: a press closed the open row with no other row waiting, and none opens until the person opens one.
-const selection: Record<ShownTab, { id: string | null; openedAt: number; index?: number } | null> = {
+const selection: Record<ShownTab, { id: string; openedAt: number; index?: number } | null> = {
   needsYou: null,
   findings: null,
   prs: null,
@@ -538,7 +538,8 @@ function tabWaits(v: View, t: ShownTab): RowWait[] {
 
 /**
  * Once a press stopped the shown tab's open row `id` waiting on the person, as an answer, a close or a hand-off does,
- * opens the next row that still waits. With none waiting, no row is open.
+ * opens the next row that still waits. With none waiting, the tab goes back to opening its first waiting row, so a
+ * row a later reply brings opens.
  */
 function openAfterClose(v: View, id: string) {
   if (selection[tab]?.id !== id) return
@@ -547,7 +548,7 @@ function openAfterClose(v: View, id: string) {
   const next = rowAfterClose(rows, id)
   const index = next === null ? -1 : tabRows(v, tab).findIndex(r => r.id === next)
   if (next === null || index < 0) {
-    selection[tab] = { id: null, openedAt: Date.now() }
+    selection[tab] = null
     return
   }
   open(tab, next, index)
@@ -947,6 +948,11 @@ function stepLists(v: View): { lists: Lists; changed: Set<string> } {
     }
     lists[LIST_OF[group]] = drawn
   }
+  // The Findings tab draws a group per kind, so each takes its entries from the stepped list, leaving rows included.
+  lists.findingGroups = lists.findingGroups.map(g => ({
+    ...g,
+    entries: lists.findings.filter(x => ('row' in x ? x.row.kind : x.settled.finding?.kind) === g.kind),
+  }))
   for (const id of [...drawnRows.keys()]) if (!kept.has(id)) drawnRows.delete(id)
   return { lists, changed }
 }
@@ -975,14 +981,11 @@ async function undo(r: RowView) {
 }
 
 /**
- * The open row's index, or -1 when none is open. A tab where no row opened yet
- * draws its first waiting row open. Once the open row leaves, none is open: a row
- * opening under the pointer would catch a second click.
+ * The open row's index, or -1 when none is open. A tab with no open row chosen draws its first waiting row open.
  */
 function selectedIndex(rows: Row[], t: ShownTab, v: View): number {
   const s = selection[t]
   if (s) {
-    if (s.id === null) return -1
     const at = rows.findIndex(r => r.id === s.id)
     // While the open row still draws, as one just closed or leaving, none is open. Once it is gone, the row now in
     // its place opens, guarded as a click would open it.
@@ -1247,7 +1250,12 @@ function SettledView({ settled: r, panel }: { settled: RowView; panel: Row | und
             ) : null}
           </div>
           {state.canUndo ? (
-            <button type="button" class="key undo" disabled={isUndoing} onClick={() => void undo(r)}>
+            <button
+              type="button"
+              class={isUndoing ? 'key undo undoing' : 'key undo'}
+              disabled={isUndoing}
+              onClick={() => void undo(r)}
+            >
               {/* The delay is set once, when it is drawn: the animation keeps its own time after that. */}
               <span
                 key={start}
@@ -1257,8 +1265,8 @@ function SettledView({ settled: r, panel }: { settled: RowView; panel: Row | und
                   if (el && !el.style.animationDelay) el.style.animationDelay = `-${Math.max(0, Date.now() - start)}ms`
                 }}
               />
-              {isUndoing ? null : <Icon name="undo" />}
-              {isUndoing ? 'Undoing…' : 'Undo'}
+              <Icon name="undo" />
+              Undo
             </button>
           ) : null}
         </div>
@@ -1335,24 +1343,29 @@ function ItemGroup({
   now: number
 }) {
   const title = kind === 'question' ? 'Questions' : 'Tasks'
-  const closed = itemsClosed(v, kind, entries)
-  // A leaving row no longer counts.
-  const rows = entries.flatMap(x => ('row' in x && drawnRows.get(x.row.id)?.track.state !== 'leaving' ? [x.row] : []))
+  const rest = staying(entries)
+  const closed = itemsClosed(v, kind, rest)
+  const rows = rest.flatMap(x => ('row' in x ? [x.row] : []))
 
   return (
     <section>
       {/* A row handed to Codex stays listed but leaves the count. */}
       <GroupTitle title={title} count={rows.filter(r => !r.fold).length} />
-      {entries.length === 0 ? <div class="group-empty">{groupEmptyText(title)}</div> : null}
       <Entries entries={entries} group={kind} all={all} now={now} />
-      <ClosedFold
+      <GroupEnd
         group={kind}
+        empty={rest.length === 0 ? groupEmptyText(title) : null}
         closed={closed}
-        total={closedTotal(v.needsYou.closed[kind === 'question' ? 'questions' : 'tasks'], settledIn(entries))}
+        total={closedTotal(v.needsYou.closed[kind === 'question' ? 'questions' : 'tasks'], settledIn(rest))}
         now={now}
       />
     </section>
   )
+}
+
+/** A list's entries without the rows leaving it, which no longer count: its empty line and Closed fold stand in for them. */
+function staying(entries: Entry[]): Entry[] {
+  return entries.filter(x => drawnRows.get(entryId(x))?.track.state !== 'leaving')
 }
 
 /** A closed item or finding as a Closed fold lists it. */
@@ -1383,29 +1396,42 @@ function inlineHtml(text: string) {
   })
 }
 
-function ClosedFold({
+/**
+ * What a group draws after its rows: its empty line while no row stays, and its Closed fold. One element holds both,
+ * so when a group's last row leaves, they grow in while the row collapses above them, and the rows below move once.
+ */
+function GroupEnd({
   group,
+  empty,
   closed,
   total,
   now,
 }: {
   group: FoldGroup
+  /** The group's empty line, or null while a row stays. */
+  empty: string | null
   closed: ClosedLine[]
   /** Every close the fold keeps, which its label counts. `closed` lists the newest few. */
   total: number
   now: number
 }) {
-  if (total === 0) return null
   const earlier = earlierLabel(total, closed.length)
   const isUnfolded = unfolded.has(group)
-  const isListed = isUnfolded || closingFolds.has(group)
+  const isListed = total > 0 && (isUnfolded || closingFolds.has(group))
 
   return (
     <>
-      <button type="button" class="fold" data-fold={group} onClick={() => toggleFold(group)}>
-        <Icon name={isUnfolded ? 'down' : 'right'} />
-        {foldLabel(total)}
-      </button>
+      <div class="group-end" data-motion={`end-${group}`}>
+        <div class="group-end-content">
+          {empty ? <div class="group-empty">{empty}</div> : null}
+          {total > 0 ? (
+            <button type="button" class="fold" data-fold={group} onClick={() => toggleFold(group)}>
+              <Icon name={isUnfolded ? 'down' : 'right'} />
+              {foldLabel(total)}
+            </button>
+          ) : null}
+        </div>
+      </div>
       {isListed ? (
         <div class="list closed-list" data-motion={`closed-${group}`}>
           {closed.map(d => (
@@ -1480,7 +1506,7 @@ function NeedsYou({ v, lists, now }: { v: View; lists: Lists; now: number }) {
 
 function Findings({ v, lists, now }: { v: View; lists: Lists; now: number }) {
   // A finding stays listed until Codex closes it or the person dismisses it. Then it settles and moves to Closed.
-  const settled = settledIn(lists.findings)
+  const settled = settledIn(staying(lists.findings))
   const closedOf = (kind: Finding['kind']) => v.findings.closed.filter(f => f.kind === kind)
   const shown = (kind: Finding['kind']) =>
     closedShown(closedOf(kind), settled).map(f => ({
@@ -1503,17 +1529,16 @@ function Findings({ v, lists, now }: { v: View; lists: Lists; now: number }) {
   return (
     <main>
       {lists.findingGroups.map(g => {
-        // A leaving row no longer counts, and a row handed to Codex stays listed but leaves the count.
-        const rows = g.entries.flatMap(x =>
-          'row' in x && drawnRows.get(x.row.id)?.track.state !== 'leaving' ? [x.row] : [],
-        )
+        // A row handed to Codex stays listed but leaves the count.
+        const rest = staying(g.entries)
+        const rows = rest.flatMap(x => ('row' in x ? [x.row] : []))
         return (
           <section>
             <GroupTitle title={g.title} count={rows.filter(r => !r.fold).length} />
-            {g.entries.length === 0 ? <div class="group-empty">{groupEmptyText(g.title)}</div> : null}
             <Entries entries={g.entries} group="finding" all={lists.byTab.findings} now={now} />
-            <ClosedFold
+            <GroupEnd
               group={g.kind}
+              empty={rest.length === 0 ? groupEmptyText(g.title) : null}
               closed={shown(g.kind)}
               total={closedTotal(closedOf(g.kind), settled)}
               now={now}
@@ -1544,7 +1569,12 @@ function SettledPr({ v, pr }: { v: View; pr: PrView }) {
             <span class="outcome-label">{`${DOT}Dismissed`}</span>
             {error ? <span class="tone-error">{`${DOT}${error}`}</span> : null}
           </div>
-          <button type="button" class="key undo" disabled={isUndoing} onClick={() => void undoPr(id, pr.ref)}>
+          <button
+            type="button"
+            class={isUndoing ? 'key undo undoing' : 'key undo'}
+            disabled={isUndoing}
+            onClick={() => void undoPr(id, pr.ref)}
+          >
             <span
               key={start}
               class={isUndoing ? 'time-left paused' : 'time-left'}
@@ -1553,8 +1583,8 @@ function SettledPr({ v, pr }: { v: View; pr: PrView }) {
                 if (el && !el.style.animationDelay) el.style.animationDelay = `-${Math.max(0, Date.now() - start)}ms`
               }}
             />
-            {isUndoing ? null : <Icon name="undo" />}
-            {isUndoing ? 'Undoing…' : 'Undo'}
+            <Icon name="undo" />
+            Undo
           </button>
         </div>
       </div>
@@ -1923,8 +1953,9 @@ function unclip(el: HTMLElement) {
 }
 
 /**
- * A row entry's content height, which an animation of its own height does not change, as its scroll height does
- * while the animation holds it taller than its content. The entry's children stack with no gaps or padding.
+ * A row entry's or a group end's content height, which an animation of its own height does not change, as its scroll
+ * height does while the animation holds it taller or shorter than its content. Its children stack with no gaps or
+ * padding.
  */
 function contentHeight(el: HTMLElement): number {
   return [...el.children].reduce((sum, child) => sum + child.getBoundingClientRect().height, 0)
@@ -1954,6 +1985,15 @@ function animateDraw(before: Heights, changed: ReadonlySet<string>) {
     entering.clear()
     return
   }
+  // In the draw that starts a row's exit or entry, the heights of elements that are not rows move on that row's curve.
+  // A group's empty line then grows or closes at the rate the row collapses or grows beside it, so the rows below move
+  // one way. A row keeps the usual move: the draw that brings it to rest comes when that move ends.
+  const started = new Set([...changed].map(key => drawnRows.get(key)?.track.state))
+  const besideRow: KeyframeAnimationOptions = started.has('leaving')
+    ? { ...EXIT, fill: 'none' }
+    : started.has('entering')
+      ? ENTER
+      : MOVE
   for (const el of document.querySelectorAll<HTMLElement>('[data-motion]')) {
     const key = el.dataset.motion!
     const was = before.get(key)
@@ -1966,8 +2006,9 @@ function animateDraw(before: Heights, changed: ReadonlySet<string>) {
     if (state && changed.has(key) && startState(el, state, from)) continue
     // A closing, settling or leaving row runs its own animation to its end.
     if (state === 'closing' || state === 'settling' || state === 'leaving') continue
-    // A Closed list's scroll height is its content's: only its own close shrinks it, which runs apart from this.
-    const target = state ? contentHeight(el) : el.scrollHeight
+    // A group's end clips its content at the top while it moves, which its scroll height leaves out. A Closed list's
+    // scroll height is its content's: only its own close shrinks it, which runs apart from this.
+    const target = state || el.classList.contains('group-end') ? contentHeight(el) : el.scrollHeight
     if (isFresh) {
       // A Closed list that just unfolded grows in.
       if (!state && entering.delete(key)) growIn(el, target)
@@ -1979,7 +2020,7 @@ function animateDraw(before: Heights, changed: ReadonlySet<string>) {
     const opacity = anims.length > 0 ? Number(getComputedStyle(el).opacity) : 1
     for (const a of anims) a.cancel()
     if (Math.abs(height - target) < 1 && opacity > 0.99) continue
-    tween(el, { height, opacity }, { height: target, opacity: 1 }, MOVE)
+    tween(el, { height, opacity }, { height: target, opacity: 1 }, state ? MOVE : besideRow)
   }
   // Rows that arrived on another tab show at once when that tab shows them, not later.
   entering.clear()

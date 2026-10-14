@@ -32,8 +32,8 @@ DONE: Reducer built on its own branch
 DONE: 422 unit tests pass
 NOW: Waiting on approval to run input tests
 RUNNING: vite dev: http://localhost:5173
-NEW: decide | 1 | Rename Send.swift to Herdr? | Yes / No | yes
-NEW: decide | 2 | Cut TODOS.md down to open items? | - | -
+NEW: decide | 1 | Rename greet.mjs to hello.mjs? | Yes / No | yes
+NEW: decide | 2 | Cut CHANGELOG.md down to this release? | - | -
 NEW: do | - | Test pinch zoom on your Mac | - | -`
 
 describe('parseReply', () => {
@@ -135,7 +135,6 @@ describe('parseReply', () => {
       { kind: 'copy', text: '{ "env": {} }', name: 'settings snippet' },
       { kind: 'run', command: 'node --version', name: null },
     ])
-    // A sign-in command needs the person's terminal, so it becomes a copy button.
     expect(u?.added[1]?.helps).toEqual([{ kind: 'terminal', command: 'npm login', name: null }])
     expect(u?.helped).toEqual([
       { id: 'i4', help: { kind: 'link', url: 'https://example.com/tokens', name: 'token page' } },
@@ -289,7 +288,7 @@ describe('applyUpdate', () => {
       {
         id: 'i1',
         kind: 'question',
-        ask: 'Rename Send.swift to Herdr?',
+        ask: 'Rename greet.mjs to hello.mjs?',
         label: '1',
         outcome: 'yes, renamed',
         how: 'update',
@@ -316,7 +315,7 @@ describe('applyUpdate', () => {
   test('merges a reworded copy of an open item instead of adding it', () => {
     const first = applyUpdate(
       EMPTY,
-      parseReply('NEW: decide | 2 | Make Papercuts backups use cp -n with a letter suffix? | Yes / No | Yes')!,
+      parseReply('NEW: decide | 2 | Make release backups use cp -n with a letter suffix? | Yes / No | Yes')!,
       1,
       1,
     )
@@ -324,16 +323,16 @@ describe('applyUpdate', () => {
       first,
       parseReply(
         [
-          'NEW: decide | - | Use cp -n and a letter suffix for same-day Papercuts backups? | Yes / No | Yes',
-          'NEW: decide | - | Also back up TODOS.md before triage? | Yes / No | -',
+          'NEW: decide | - | Use cp -n and a letter suffix for same-day release backups? | Yes / No | Yes',
+          'NEW: decide | - | Also back up CHANGELOG.md before triage? | Yes / No | -',
         ].join('\n'),
       )!,
       2,
       2,
     )
     expect(again.items.map(i => i.ask)).toEqual([
-      'Make Papercuts backups use cp -n with a letter suffix?',
-      'Also back up TODOS.md before triage?',
+      'Make release backups use cp -n with a letter suffix?',
+      'Also back up CHANGELOG.md before triage?',
     ])
   })
 
@@ -342,8 +341,8 @@ describe('applyUpdate', () => {
     const recommended = applyUpdate(first, parseReply('UPDATE: i1 | - | No')!, 2, 2)
     expect(recommended.items[0]).toMatchObject({ options: ['Yes', 'No'], rec: 'No' })
 
-    const narrowed = applyUpdate(recommended, parseReply('UPDATE: i1 | Herdr / HerdrKit | -')!, 3, 3)
-    expect(narrowed.items[0]).toMatchObject({ options: ['Herdr', 'HerdrKit'], rec: null })
+    const narrowed = applyUpdate(recommended, parseReply('UPDATE: i1 | hello.mjs / hello.mts | -')!, 3, 3)
+    expect(narrowed.items[0]).toMatchObject({ options: ['hello.mjs', 'hello.mts'], rec: null })
 
     const task = applyUpdate(first, parseReply('UPDATE: i3 | Done / Skip | Done')!, 2, 2)
     expect(task.items[2]).toEqual(first.items[2])
@@ -362,13 +361,18 @@ describe('applyUpdate', () => {
 
   test('an UPDATE keeps a question that a CLOSED line in the same answer names', () => {
     const first = applyUpdate(EMPTY, parseReply(REPLY)!, 1, 1)
-    const both = applyUpdate(first, parseReply('CLOSED: i1 | renamed\nUPDATE: i1 | Herdr / HerdrKit | Herdr')!, 2, 2)
-    expect(both.items[0]).toMatchObject({ id: 'i1', options: ['Herdr', 'HerdrKit'], rec: 'Herdr' })
+    const both = applyUpdate(
+      first,
+      parseReply('CLOSED: i1 | renamed\nUPDATE: i1 | hello.mjs / hello.mts | hello.mjs')!,
+      2,
+      2,
+    )
+    expect(both.items[0]).toMatchObject({ id: 'i1', options: ['hello.mjs', 'hello.mts'], rec: 'hello.mjs' })
   })
 
   test('does not add an item that is already open', () => {
     const first = applyUpdate(EMPTY, parseReply(REPLY)!, 1, 1)
-    const again = applyUpdate(first, parseReply('NEW: decide | 1 | rename send.swift to herdr | - | -')!, 2, 2)
+    const again = applyUpdate(first, parseReply('NEW: decide | 1 | rename greet.mjs to hello.mjs | - | -')!, 2, 2)
     expect(again.items.length).toBe(3)
   })
 
@@ -379,10 +383,15 @@ describe('applyUpdate', () => {
       5000,
       0,
     ],
-    ['the ask of an item closed during the update', 'NEW: decide | - | Rename Send.swift to Herdr? | - | -', 5000, 0],
+    [
+      'the ask of an item closed during the update',
+      'NEW: decide | - | Rename greet.mjs to hello.mjs? | - | -',
+      5000,
+      0,
+    ],
     [
       'a restated ask of an item closed during the update',
-      'NEW: decide | - | Should Send.swift be renamed to Herdr? | - | -',
+      'NEW: decide | - | Should greet.mjs be renamed to hello.mjs? | - | -',
       5000,
       0,
     ],
@@ -398,14 +407,19 @@ describe('applyUpdate', () => {
       6000,
       1,
     ],
-    ['the ask of an item closed before the prompt', 'NEW: decide | - | Rename Send.swift to Herdr? | - | -', 6000, 1],
-    ['an unrelated question', 'NEW: decide | 9 | Cut TODOS.md down to open items? | - | -', 5000, 1],
+    [
+      'the ask of an item closed before the prompt',
+      'NEW: decide | - | Rename greet.mjs to hello.mjs? | - | -',
+      6000,
+      1,
+    ],
+    ['an unrelated question', 'NEW: decide | 9 | Cut CHANGELOG.md down to this release? | - | -', 5000, 1],
   ]
   for (const [name, line, promptAt, added] of repeats)
     test(`a NEW line with ${name} is ${added === 0 ? 'dropped' : 'added'}`, () => {
       const first = applyUpdate(
         { ...EMPTY, turn: 1 },
-        parseReply('NEW: decide | 1 | Rename Send.swift to Herdr? | - | -')!,
+        parseReply('NEW: decide | 1 | Rename greet.mjs to hello.mjs? | - | -')!,
         1000,
         1,
       )
@@ -581,13 +595,13 @@ describe('answerNote', () => {
 
   test('maps numbered answers to the latest batch by label', () => {
     const note = answerNote({ ...ledger, turn: 2 }, '1. yes\n2. keep it')
-    expect(note).toContain('1 → "Rename Send.swift to Herdr?"')
-    expect(note).toContain('2 → "Cut TODOS.md down to open items?"')
+    expect(note).toContain('1 → "Rename greet.mjs to hello.mjs?"')
+    expect(note).toContain('2 → "Cut CHANGELOG.md down to this release?"')
   })
 
   test('maps answers written on one line', () => {
     const note = answerNote({ ...ledger, turn: 2 }, '1. node 2. yes')
-    expect(note).toContain('2 → "Cut TODOS.md down to open items?"')
+    expect(note).toContain('2 → "Cut CHANGELOG.md down to this release?"')
   })
 
   test('does not read a number mid-sentence as an answer', () => {
@@ -612,9 +626,9 @@ describe('questionNumbers', () => {
     { ...EMPTY, turn: 1 },
     parseReply(
       [
-        'NEW: decide | - | Rename Send.swift? | Yes / No | -',
+        'NEW: decide | - | Rename greet.mjs? | Yes / No | -',
         'NEW: do | - | Test pinch zoom | - | -',
-        'NEW: decide | - | Cut TODOS.md? | Yes / No | -',
+        'NEW: decide | - | Cut CHANGELOG.md? | Yes / No | -',
       ].join('\n'),
     )!,
     1,
@@ -626,7 +640,7 @@ describe('questionNumbers', () => {
       ['i1', 1],
       ['i3', 3],
     ])
-    expect(answerNote({ ...batch, turn: 2 }, '3. yes')).toContain('3 → "Cut TODOS.md?"')
+    expect(answerNote({ ...batch, turn: 2 }, '3. yes')).toContain('3 → "Cut CHANGELOG.md?"')
   })
 
   test('numbers only labeled items when any label has a number', () => {
@@ -661,7 +675,7 @@ describe('carryText', () => {
     expect(carryText(EMPTY, 'T')).toBe(null)
     const text = carryText(applyUpdate(EMPTY, parseReply(REPLY)!, 1, 1), 'T')
     expect(text).toContain('Goal: Move annotation queue logic')
-    expect(text).toContain('(1) "Rename Send.swift to Herdr?"')
+    expect(text).toContain('(1) "Rename greet.mjs to hello.mjs?"')
   })
 })
 
@@ -704,7 +718,7 @@ describe("the person's own commands", () => {
 describe('statusLine', () => {
   test('names the first waiting item after the count, and says where the work stands when nothing waits', () => {
     const waiting = applyUpdate(EMPTY, parseReply(REPLY)!, 1, 1)
-    expect(statusLine(waiting, null, [])).toBe('3 · Rename Send.swift to Herdr?')
+    expect(statusLine(waiting, null, [])).toBe('3 · Rename greet.mjs to hello.mjs?')
     const settled = applyUpdate(
       waiting,
       parseReply('GOAL: g\nNOW: Reducer merged\nCLOSED: i1 | yes\nCLOSED: i2 | no\nCLOSED: i3 | done')!,

@@ -25,7 +25,6 @@ test('a session starts with the guidance, records the prompt, and ends the turn 
   const started = await readState(dir, 's1')
   assert.equal(started.root, root)
   assert.equal(started.cliPath, '/apps/codex')
-  // A resumed conversation still holds the guidance, and this one has no ledger yet.
   assert.equal(
     await handleHook(input('SessionStart', { cwd: root, source: 'resume', transcript_path: transcript }), deps),
     null,
@@ -80,11 +79,9 @@ test('each hook records that it ran, with the turn UserPromptSubmit saw, and the
       promptMissedAt: null,
     },
   )
-  // A subagent's prompt carries this chat's session id, but is not one of its turns.
   await handleHook(input('UserPromptSubmit', { prompt: 'Review', turn_id: 'a1', agent_id: 'agent-1' }), deps)
   assert.deepEqual([(await heard()).prompts, (await heard()).promptTurns], [1, ['t1']])
   clock = 3000
-  // A reply with no text still ends a turn the Stop hook saw.
   await handleHook(input('Stop', { turn_id: 't1', last_assistant_message: '' }), deps)
   const h = await heard()
   assert.deepEqual([h.stopAt, h.stops], [3000, 1])
@@ -125,7 +122,6 @@ test('a session saved by an older build loads converted, as the mod converts its
     snapshots: { '/repo': { head: null, dirty: {} } },
     recordedRuns: ['e1'],
     turn: { person: 'Run the tests', activity: [], press: null, sentBack: ['Tests pass.'] },
-    // Sent before the server kept the row and the queued id.
     sent: [{ text: 'Re "Ship it?": Yes', press: { id: 'i1', action: 'answer' }, at: 1 }],
     pending: [
       {
@@ -158,14 +154,12 @@ test('a session saved by an older build loads converted, as the mod converts its
       decided: [{ id: 'i0', ask: 'Rename it?', outcome: 'dismissed', at: 1 }],
       notes: [{ id: 'f1', kind: 'issue', title: 'No lint', detail: '', path: null, at: 1 }],
     },
-    // Last actions as this plugin saved them before they had a kind.
     lastActions: {
       i1: { action: 'explain', text: 'Explain sent', at: 1 },
       i2: { action: 'typed', text: 'Reply sent', at: 1, isHandoff: true, turnsStarted: 1 },
       i3: { action: 'step-0', text: 'Run seed script sent', at: 1, isHandoff: true, turnsStarted: 1 },
       f2: { action: 'address', text: 'Sent to Codex to fix', at: 1, title: 'No tests' },
       f3: { action: 'discuss', text: 'Discuss sent', at: 1, title: 'No docs' },
-      // The table has no row for a typed reply to a finding, so it records nothing now.
       f4: { action: 'typedFinding', text: 'Reply sent', at: 1, title: 'No types' },
     },
   }
@@ -180,23 +174,18 @@ test('a session saved by an older build loads converted, as the mod converts its
     f2: { kind: 'handoff', action: 'address', text: 'Address', at: 1 },
     f3: { kind: 'talk', action: 'discuss', text: 'Discuss', at: 1 },
   })
-  // The old Explain reads as today's, on the question it was pressed on.
   const question = viewOf(s, 2).needsYou.questions[0]
   assert.equal(question && question.feedback && feedbackText(question.feedback, 'codex'), '✓ Explained')
   assert.ok(question?.actions.some(a => a.label === 'Explain again'))
-  // Its arrival changes no row.
   assert.deepEqual(
     s.sent.map(x => [x.row, x.queuedId]),
     [[null, null]],
   )
   assert.deepEqual(notePrompt(s, 'Re "Ship it?": Yes', 2).state.lastActions, s.lastActions)
-  // Saved and read again, a converted file stays as it is.
   await updateState(dir, 's1', x => x)
   assert.deepEqual((await readState(dir, 's1')).lastActions, s.lastActions)
   for (const key of ['top', 'checks', 'snapshots', 'recordedRuns']) assert.equal(key in s, false, key)
-  // Its hooks ran before they kept a record, so the tab does not say they are skipped.
   assert.equal(viewOf(s, 2).heard, 'heard')
-  // No turn of it was recorded, so a tool call in the turn running now is not read as a skipped prompt.
   assert.equal(viewOf(noteToolCall(s, 't9', 3), 3).heard, 'heard')
   assert.deepEqual(s.turn, { person: 'Run the tests', activity: [], press: null })
   assert.equal('checks' in (s.pending[0]?.ex ?? {}), false)

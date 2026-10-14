@@ -66,7 +66,6 @@ function withItems(): SessionState {
   }
 }
 
-/** A press on a state's ledger, at time 50, as a host applies it. */
 function pressed(s: SessionState, p: RowPress): PressResult {
   return applyPress(s.ledger, s.lastActions[p.id], p, {
     now: 50,
@@ -75,7 +74,6 @@ function pressed(s: SessionState, p: RowPress): PressResult {
   })
 }
 
-/** The state after a press that went through, with its last action on its row. */
 function after(s: SessionState, p: RowPress): SessionState {
   const r = pressed(s, p)
   assert.ok(!('stale' in r))
@@ -99,18 +97,13 @@ test('an answer names its option by text: it closes the question and sends the a
 test('a press drawn for a row that left or changed is stale, and changes and sends nothing', () => {
   const s = withItems()
   const stale: unknown[] = [
-    // The row is gone.
     { action: 'answer', id: 'i9', option: 'Fix add.js' },
-    // The option is no longer among the question's, or comes from a tab that sent its index.
     { action: 'answer', id: 'i1', option: 'Delete the test' },
     { action: 'answer', id: 'i1', option: 0 },
-    // The step at that place has another label now.
     { action: 'step', id: 'i2', step: 0, label: 'Run the old script' },
-    // Undo has nothing to undo while the item is open.
     { action: 'undo', id: 'i1' },
   ]
   for (const p of stale) assert.deepEqual(pressed(s, p as RowPress), { stale: true })
-  // A blank typed reply goes through and does nothing.
   assert.deepEqual(pressed(s, { action: 'type', id: 'i2', text: '  ' }), { ledger: s.ledger, last: null, effects: [] })
 })
 
@@ -133,7 +126,6 @@ test('a run step hands the task to Codex: it folds until the turn it started is 
   const s = after(withItems(), p)
   const folded = viewOf(s, 60)
   assert.deepEqual(folded.needsYou.tasks[0]?.state, { is: 'handedOff' })
-  // Its message waits for the running turn to end.
   assert.deepEqual(folded.needsYou.tasks[0]?.feedback, { is: 'queued', label: 'Run seed script', at: 50 })
   assert.equal(folded.needsYou.count, 1)
 
@@ -222,7 +214,6 @@ test('an open or copy on a handed-off task keeps it folded and out of the count,
     '✓ Copied npm login. Run it in a terminal, or type ! and paste.',
   )
   assert.equal(feedbackText({ is: 'local', result }, 'desktop'), '✓ Copied npm login. Run it in Terminal.')
-  // A success note gives way to the hand-off's own feedback after a few seconds: its message is still queued.
   const done = { ...copied, lastActions: { i2: { ...copied.lastActions.i2!, result } } }
   assert.equal(viewOf(done, 60).needsYou.tasks[0]?.feedback?.is, 'local')
   assert.deepEqual(viewOf(done, 55 + SETTLED_MS).needsYou.tasks[0]?.feedback, {
@@ -232,7 +223,6 @@ test('an open or copy on a handed-off task keeps it folded and out of the count,
   })
 })
 
-/** An open question or task asked in reply `turn`. */
 function asked(id: string, kind: Item['kind'], turn: number): Item {
   return { id, kind, label: null, ask: `Ask ${id}`, options: [], rec: null, helps: [], turn, at: turn }
 }
@@ -268,7 +258,6 @@ test('Needs you lists the newest reply first and keeps each older reply in the o
 
 test('the tab lists Needs you in the mod’s order, numbers only the questions a typed number answers, and counts what waits', () => {
   const s = emptyState('s1')
-  // An older question and task stay open after the latest reply asked a question, a task and a question.
   const state: SessionState = {
     ...s,
     ledger: {
@@ -284,7 +273,6 @@ test('the tab lists Needs you in the mod’s order, numbers only the questions a
         asked('i5', 'question', 2),
       ],
     },
-    // The older task was handed to Codex in the turn that is running.
     lastActions: { i1: { kind: 'handoff', action: 'type', text: 'Reply', at: 1, turnsStarted: 2 } },
     presence: { ...s.presence, turnsStarted: 2, turnsApplied: 2 },
   }
@@ -292,7 +280,6 @@ test('the tab lists Needs you in the mod’s order, numbers only the questions a
   const rows = (list: RowView[]) => list.map(r => [r.id, r.handle, r.state.is])
   assert.deepEqual(rows(v.needsYou.questions), [
     ['i3', '1)', 'open'],
-    // The task in the batch takes position 2, as a typed "2." would answer it.
     ['i5', '3)', 'open'],
     ['i2', '•', 'open'],
   ])
@@ -303,7 +290,6 @@ test('the tab lists Needs you in the mod’s order, numbers only the questions a
   assert.equal(v.needsYou.count, 4)
   assert.equal(firstWaiting(listWaits(v).needsYou), 'i3')
 
-  // Once the person sends any message, a typed number no longer reaches the batch.
   const after = viewOf(notePrompt(state, 'thanks', 20).state, 30)
   assert.deepEqual(
     after.needsYou.questions.map(r => r.handle),
@@ -355,7 +341,6 @@ test('the tab reads Updating… while exchanges wait for the inbox model, and sh
     { isUpdating: viewOf(waiting, 60).status.isUpdating, error: viewOf(waiting, 60).status.error },
     { isUpdating: true, error: null },
   )
-  // Codex does not rerun a failed update, so the error promises no retry.
   assert.equal(viewOf(s, 60).status.error, 'Last update failed. Items from that reply may be missing.')
 })
 
@@ -392,14 +377,12 @@ test('Fix hands a finding off: it settles as the choice made, then lists in the 
     moved.closed.map(f => [f.id, f.outcome]),
     [['f3', 'Fix']],
   )
-  // Discuss talks it through, and it stays open and counted.
   const discussed = viewOf(after(s, { action: 'discuss', id: 'f3' }), 60).findings
   assert.deepEqual(
     discussed.rows.map(r => [r.id, r.state.is, r.actions.find(a => a.press.action === 'discuss')?.label]),
     [['f3', 'open', 'Discuss again']],
   )
   assert.equal(discussed.count, 1)
-  // Closed by Codex, it settles in place with no Undo, then leaves the list for the Findings tab's Closed fold.
   const closedBy = { ...sent, ledger: recordClose(CODEX, sent.ledger, { id: 'f3', reason: 'fixed' }, 90).ledger }
   assert.deepEqual(
     viewOf(closedBy, 100).findings.rows.map(r => [r.id, r.state, r.actions]),
@@ -417,7 +400,6 @@ test('Fix hands a finding off: it settles as the choice made, then lists in the 
     closed.findings.closed.map(f => [f.id, f.title, f.outcome]),
     [['f3', 'No lint script', 'closed by Codex: fixed']],
   )
-  // Dismiss closes a finding without sending anything.
   const dismissed = pressed(s, { action: 'dismiss', id: 'f3' })
   assert.ok(!('stale' in dismissed))
   assert.deepEqual(dismissed.effects, [])
@@ -441,7 +423,6 @@ test('Dismiss settles a row in place with Undo, and Undo puts it back open where
       ],
     ],
   )
-  // It leaves the count while it settles.
   assert.equal(settled.count, 1)
   assert.equal(firstWaiting(listWaits(viewOf(dismissed, 60)).needsYou), 'i2')
   const undone = after(dismissed, { action: 'undo', id: 'i1' })
@@ -452,7 +433,6 @@ test('Dismiss settles a row in place with Undo, and Undo puts it back open where
   )
   assert.equal(back.count, 2)
   assert.deepEqual(undone.ledger.closed, [])
-  // Undo again, or on a row Codex answered or closed, finds nothing to undo.
   assert.ok('stale' in pressed(undone, { action: 'undo', id: 'i1' }))
   const answered = after(s, { action: 'answer', id: 'i1', option: 'Fix add.js' })
   assert.ok('stale' in pressed(answered, { action: 'undo', id: 'i1' }))
@@ -477,7 +457,6 @@ test('Dismiss settles a row in place with Undo, and Undo puts it back open where
     },
   }
   assert.ok('stale' in pressed(expired, { action: 'undo', id: 'i1' }))
-  // A dismissed finding comes back the same way.
   const withFinding = {
     ...s,
     ledger: recordFinding(CODEX, s.ledger, { kind: 'issue', title: 'No lint script', detail: 'Only tests run.' }, 10)
@@ -493,13 +472,11 @@ test('Dismiss settles a row in place with Undo, and Undo puts it back open where
 test('the tab draws a settled row for SETTLED_MS from its first poll, then lists it in the Closed fold while the server still lists it settled', () => {
   const s = withItems()
   const dismissed = after(s, { action: 'dismiss', id: 'i1' })
-  // The first poll that lists the close comes 2 s after it.
   let seen = settledSeen(new Map(), settledIds(viewOf(dismissed, 2050)), 2050)
   assert.deepEqual([...drawnSettled(seen, 2050)], ['i1'])
   const fold = (now: number) =>
     closedShown(viewOf(dismissed, now).needsYou.closed.questions, drawnSettled(seen, now)).map(d => d.id)
   assert.deepEqual(fold(2050), [])
-  // Past the tab's own SETTLED_MS and the row's exit, the server still lists it as settled, and the tab shows it in the fold.
   const later = 2050 + SETTLED_MS + EXIT_MS + 1
   seen = settledSeen(seen, settledIds(viewOf(dismissed, later)), later)
   assert.equal(viewOf(dismissed, later).needsYou.questions[0]?.state.is, 'settled')
@@ -517,36 +494,27 @@ test('Codex closing an item reads as Codex in its outcome', () => {
 
 test('the tab says the hooks were not heard when none ran, when a tool call comes in a turn no prompt recorded, or when two prompts saw no Stop', () => {
   const s = withItems()
-  // No hook ran in this session.
   assert.equal(viewOf(s, 10).heard, 'none')
   const started = noteHook(s, 'start', 10)
   assert.equal(viewOf(started, 10).heard, 'heard')
-  // UserPromptSubmit recorded turn t1. Codex's tool call in turn t2 shows it skipped that prompt.
   const prompted = noteHook(started, 'prompt', 20, 't1')
   assert.equal(viewOf(noteToolCall(prompted, 't1', 30), 30).heard, 'heard')
   const missed = noteToolCall(prompted, 't2', 30)
   assert.equal(viewOf(missed, 30).heard, 'partial')
-  // A prompt recorded after the miss shows the hook runs again.
   assert.equal(viewOf(noteHook(noteHook(missed, 'stop', 35), 'prompt', 40, 't3'), 40).heard, 'heard')
-  // Two prompts and no Stop: the replies never reach the inbox model.
   const twice = noteHook(prompted, 'prompt', 50, 't2')
   assert.equal(viewOf(twice, 50).heard, 'partial')
   assert.equal(viewOf(noteHook(twice, 'stop', 60), 60).heard, 'heard')
-  // A second prompt in the same turn, such as a steer, is one turn.
   assert.equal(viewOf(noteHook(prompted, 'prompt', 50, 't1'), 50).heard, 'heard')
-  // SessionStart did not run, as when the plugin came after the chat opened, but the other hooks did.
   assert.equal(viewOf(noteHook(noteHook(s, 'prompt', 20, 't1'), 'stop', 30), 30).heard, 'partial')
-  // With no turn id, a call between a Stop and the next prompt reads as missed.
   const stopped = noteHook(prompted, 'stop', 40)
   assert.equal(viewOf(noteToolCall(stopped, null, 45), 45).heard, 'partial')
   assert.equal(viewOf(noteToolCall(prompted, null, 25), 25).heard, 'heard')
-  // The demo's samples show no such text.
   assert.equal(viewOf(demoState(10), 10).heard, 'heard')
 })
 
 test('a tool call in a turn the prompt hook recorded, after a Stop sent Codex back, is not read as a skipped prompt', () => {
   const prompted = noteHook(noteHook(withItems(), 'start', 10), 'prompt', 20, 't1')
-  // Another plugin's Stop hook blocked the reply, and Codex goes on in turn t1.
   const sentBack = noteHook(prompted, 'stop', 30)
   const called = noteToolCall(sentBack, 't1', 40)
   assert.equal(called.heard.promptMissedAt, null)
@@ -572,12 +540,9 @@ test('the tab moves from an empty Needs you to Findings when it opens on a findi
     followTo(TAB_IDS, 'needsYou', isShownEmpty(opened, 'needsYou', new Set(), new Set()), openRows(opened)),
     'findings',
   )
-  // While Needs you says the hooks were not heard, it stays on that warning.
   assert.equal(viewOf({ ...withFinding, heard: NOTHING_HEARD }, 20).heard, 'none')
   assert.equal(followed({ ...withFinding, heard: NOTHING_HEARD }), null)
-  // A tab that shows rows stays where it is.
   assert.equal(followed({ ...withFinding, ledger: withItems().ledger }), null)
-  // The same rows in the next poll are not new.
   assert.deepEqual(newRows(next.seen, viewOf(withFinding, 30)).added, { needsYou: [], findings: [] })
 })
 
@@ -611,7 +576,6 @@ const RESTS: Record<RowTarget, RowState | null> = {
   gone: null,
 }
 
-// The states that draw the open row's panel. A leaving row draws it when it left from one of these.
 const WITH_PANEL = new Set<RowState>(['opening', 'open', 'closing', 'settling'])
 const trackOf = (state: RowState, hasPanel = WITH_PANEL.has(state)): RowTrack => ({ state, since: 0, hasPanel })
 
@@ -619,21 +583,17 @@ test('every row state reaches every target, and a row drawing its panel keeps it
   for (const state of ROW_STATES)
     for (const target of ROW_TARGETS) {
       const first = stepRow(trackOf(state), target, 0)
-      // A panel showing goes only to a state that keeps it while the row shrinks: closing, settling or leaving.
       if (WITH_PANEL.has(state) && first)
         assert.ok(
           first.hasPanel && (WITH_PANEL.has(first.state) || first.state === 'leaving'),
           `${state} toward ${target} dropped its panel as ${first.state}`,
         )
-      // With time passing, the row comes to rest in its target's form within two moves, or is removed.
       let track = first
       for (let n = 0; n < 2 && track && track.state !== RESTS[target]; n++)
         track = stepRow(track, target, track.since + ROW_STATE_MS[track.state])
       assert.equal(track?.state ?? null, RESTS[target], `${state} toward ${target}`)
-      // At rest, only an open row draws the panel.
       if (track) assert.equal(track.hasPanel, track.state === 'open', `${state} toward ${target}`)
     }
-  // A row that leaves open keeps its panel while it fades, and one that leaves closed draws none.
   assert.equal(stepRow(trackOf('open'), 'gone', 0)?.hasPanel, true)
   assert.equal(stepRow(trackOf('closed'), 'gone', 0)?.hasPanel, false)
 })
@@ -642,9 +602,7 @@ test('a row turned around mid-move starts the new move at once, and with reduced
   assert.equal(stepRow(trackOf('closing'), 'open', 50)?.state, 'opening')
   assert.equal(stepRow(trackOf('opening'), 'closed', 50)?.state, 'closing')
   assert.equal(stepRow(trackOf('settling'), 'open', 50)?.state, 'opening')
-  // A row growing in closed that becomes the open row opens from where it is.
   assert.equal(stepRow(trackOf('entering', false), 'open', 50)?.state, 'opening')
-  // A move that has not had its time keeps its start, so its animation is not restarted.
   const closing = trackOf('closing')
   assert.equal(stepRow(closing, 'closed', 50), closing)
   for (const state of ROW_STATES)
@@ -654,7 +612,6 @@ test('a row turned around mid-move starts the new move at once, and with reduced
         RESTS[target],
         `${state} toward ${target}`,
       )
-  // A row the view just brought in grows in the form it arrived in, unless motion is reduced.
   assert.deepEqual(stepRow(undefined, 'open', 0, true), { state: 'entering', since: 0, hasPanel: true })
   assert.equal(stepRow(undefined, 'closed', 0, true)?.hasPanel, false)
   assert.equal(stepRow(undefined, 'closed', 0, true, true)?.state, 'closed')

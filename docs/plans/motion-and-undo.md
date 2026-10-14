@@ -62,7 +62,7 @@ The settled row in the Codex tab is one line, as tall as an open row's closed li
 
 Pressing Undo:
 
-- The button reads "Undoing…" and takes no second press. The fill stops, and the row does not leave while the press is out.
+- The button keeps its label, so it keeps its width and the line keeps its wrap. Its arrow turns, and it takes no second press. The fill stops, and the row does not leave while the press is out.
 - On success, the row grows back to its open form in place. The row coming back is the result, so no note says "Undo".
 - On failure, the error follows the title and outcome, in the error color, while the row has time left. It wraps, so none of it is cut. If the row's time is up, the row leaves and the error shows under the tab row.
 
