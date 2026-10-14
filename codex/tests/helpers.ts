@@ -9,7 +9,6 @@ export function tempDir(): string {
   return mkdtempSync(join(tmpdir(), 'inbox-codex-'))
 }
 
-/** Records every command, answering it with `answer`. */
 export function fakeRunner(answer: (args: string[]) => { code: number; stdout: string; stderr: string }) {
   const calls: string[][] = []
   const exec: Run = args => {
