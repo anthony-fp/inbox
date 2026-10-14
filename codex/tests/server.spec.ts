@@ -71,7 +71,6 @@ test('a press sends its message into the tab’s thread with the codex binary th
   assert.equal(r.result.structuredContent.error, null)
   assert.equal(r.result.structuredContent.note, null)
   assert.deepEqual(calls, [['/apps/codex', 'queue', '--thread', 's1', '--message', 'Re "Ship it?": Yes']])
-  // The answered question settles in place before it leaves.
   assert.deepEqual(
     r.result.structuredContent.view.needsYou.questions.map(q => [q.id, q.state.is]),
     [['i1', 'settled']],
@@ -88,13 +87,11 @@ test('a press sends its message into the tab’s thread with the codex binary th
 test('a press drawn in another thread, or on a row that changed, reads stale and sends and saves nothing', async () => {
   const { dir, calls, call } = await setup(0)
   const before = await readState(dir, 's1')
-  // The tab drew the press for another thread, or is an old tab that sends none.
   for (const thread of ['s2', undefined]) {
     const r = await call('inbox_press', { ...ANSWER, thread }, { thread_id: 's1' })
     assert.equal(r.result.structuredContent.note, 'stale')
     assert.equal(r.result.content[0]?.text, 'This changed before your press. Nothing was sent.')
   }
-  // Codex closed the question before the person's typed answer reached it.
   await updateState(dir, 's1', s => ({ ...s, ledger: { ...s.ledger, items: [] } }))
   const typed = await call(
     'inbox_press',
@@ -121,7 +118,6 @@ test('a press reads Queued until Codex takes its message as a prompt, then Expla
     s.sent.map(x => [x.row, x.queuedId]),
     [['i1', 'q1']],
   )
-  // UserPromptSubmit carries the message the tab queued.
   const arrived = notePrompt(s, s.sent[0]!.text, 200).state
   assert.deepEqual(viewOf(arrived, 200).needsYou.questions[0]?.feedback, {
     is: 'working',
@@ -135,7 +131,6 @@ test('a press reads Queued until Codex takes its message as a prompt, then Expla
 test('a press whose message fails to send is undone, and its row says why with [Try again]', async () => {
   const { dir, call } = await setup(1)
   const r = await call('inbox_press', ANSWER, { thread_id: 's1' })
-  // The tab keeps a typed draft only when the reply says the press failed.
   assert.match(r.result.structuredContent.error ?? '', /Not sent: no such thread/)
   const question = r.result.structuredContent.view.needsYou.questions[0]
   assert.equal(question?.state.is, 'open')
@@ -174,7 +169,6 @@ test('a close Codex read, then undone, is reported again when the row closes a s
   )
   await press('dismiss')
   assert.match(await prompt('and now?'), closedLine)
-  // Dismiss and Undo send nothing.
   assert.deepEqual(calls, [])
 })
 
@@ -190,7 +184,6 @@ test('the tab opens from the app-only inbox_view tool, and the model’s inbox t
     ui: { resourceUri: tabUri('<html></html>'), visibility: ['app'] },
     'openai/ui': { entrypoints: [{ type: 'thread' }] },
   })
-  // Codex keeps a page by its address, so a changed page needs a new one.
   assert.notEqual(tabUri('<html></html>'), tabUri('<html>changed</html>'))
   const read = (await handle({ jsonrpc: '2.0', id: 2, method: 'resources/read' })) as {
     result: { contents: { uri: string }[] }
@@ -238,7 +231,6 @@ test('the inbox tool answers in text: the count, each row that waits, and where 
         },
       ],
       findings: [{ id: 'f3', kind: 'issue', title: 'No lint script', detail: 'Only tests run.', path: null, at: 3 }],
-      // The question came in the reply to the latest prompt, so a "1" in the next one answers it.
       turn: 1,
       batchTurn: 1,
     },
@@ -260,7 +252,6 @@ test('the inbox tool answers in text: the count, each row that waits, and where 
       'Open the Inbox tab to act on these.',
     ].join('\n'),
   )
-  // A row that just closed still settles in the tab, but no longer waits.
   await call('inbox_press', { press: { action: 'dismiss', id: 'i2' }, thread: 's1' }, { thread_id: 's1' })
   await call('inbox_press', { press: { action: 'dismiss', id: 'f3' }, thread: 's1' }, { thread_id: 's1' })
   const one = await call('inbox', {}, codex)
@@ -301,7 +292,6 @@ test('a tool call from Codex in a turn UserPromptSubmit never recorded shows the
   assert.equal(await viewed(), 'heard')
   await call('close', { id: 'i1', reason: 'done' }, { 'x-codex-turn-metadata': { session_id: 's1', turn_id: 't1' } })
   assert.equal(await viewed(), 'heard')
-  // A subagent's call carries the root's session id, in a turn the root's prompt hook never sees.
   await call('inbox', {}, { 'x-codex-turn-metadata': { session_id: 's1', thread_id: 'sub1', turn_id: 'u1' } })
   await call('inbox', {}, { 'x-codex-turn-metadata': { session_id: 's1', parent_thread_id: 's1', turn_id: 'u2' } })
   assert.equal(await viewed(), 'heard')
@@ -336,7 +326,6 @@ test('a press in the demo changes only the demo, sends nothing into the conversa
   assert.equal(r.result.structuredContent.view.needsYou.questions.find(q => q.id === first.id)?.state.is, 'settled')
   assert.equal(r.result.structuredContent.note, 'sample')
   assert.equal(r.result.content[0]?.text, 'Sample entry: nothing was sent.')
-  // A copy step copies nothing in the demo: its row gets the same note.
   const copyTask = demo.result.structuredContent.needsYou.tasks.find(t =>
     t.steps[0]?.step.every(h => h.kind === 'copy'),
   )
@@ -393,7 +382,6 @@ test('an Open step shows a file macOS would run in Finder, opens any other file,
     parts: [{ kind: 'open', name: 'notes.md', isCommand: false, error: null }],
     at: 100,
   })
-  // A file that is gone fails on its row; the reply's error is only for a message that was not sent.
   const moved = await step(2, 'Open moved.md')
   assert.equal(moved.result.structuredContent.error, null)
   assert.deepEqual((await readState(dir, 's1')).lastActions.i2?.result, {
@@ -418,7 +406,6 @@ test('an open still pending after the press timeout shows nothing on its row, an
     at,
     result: pending(at),
   })
-  // The server's clock reads 100: one press began before the timeout, one just now.
   const staleAt = 100 - PRESS_TIMEOUT_MS - 1
   await updateState(dir, 's1', s => ({
     ...s,

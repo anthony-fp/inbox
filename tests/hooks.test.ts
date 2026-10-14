@@ -27,33 +27,22 @@ const BAND = {
   },
 }
 
-// What the per-turn ledger model answers; a test can make it fail.
 let ledgerReply = LEDGER_REPLY
 
-// Prompts the mod sent as the person's own, as the engine's chain received them.
 let sent: string[] = []
 
-// Every command the mod ran, such as the herdr call that publishes the sidebar line.
 let ran: string[][] = []
 
-// How the session takes the mod's own prompts. `enter`: the prompt enters and its row is stored at once,
-// as when Claude is idle. `hold`: it waits behind a running turn, and its row is stored at `arrive()`.
-// `{ drop }`: a hook refuses it.
 let submitAnswer: 'enter' | 'hold' | { drop: string } = 'enter'
-// The prompts held behind the running turn, which `arrive()` stores.
 let held: { text: string; origin: PromptOrigin }[] = []
 let promptRows = 0
 
-// What another plugin's Stop hook answers; a test can make it send Claude back.
 let stopBlock: string | undefined
 
-// gh's answers by command; anything else but `open` fails, as gh does outside a repo with no PR.
-// `hold` delays an answer until it resolves, as a slow network would.
 let ghAnswers: {
   match: (argv: readonly string[]) => boolean
   stdout: string
   hold?: () => Promise<void>
-  // Makes the call fail with this message.
   fails?: string
 }[] = []
 
@@ -86,33 +75,22 @@ const PANE = {
   },
 }
 
-// The apps drawing the session when it starts. A REPL start sets isInteractive instead.
 let surfaces: RenderSurface[] = []
 
-// The files on disk, by absolute path; any other path is not there.
 let files: string[] = []
 
-// What the mod put on the clipboard, and the toasts it showed.
 let copied: string[] = []
 let toasts: string[] = []
 
-// The Claude Code theme /config reports. With none, the pane draws text in no status color.
 let theme = ''
 
-// Runs once, before the next press or Enter in a drawing reaches its handler, as a change landing between a draw and a press does.
 let beforeAct: (() => Promise<unknown>) | undefined
 
-// The mod's own store, as JSON text by key, which outlives the session.
 let stored = new Map<string, string>()
-// Makes the store refuse to read a saved session, with this reason.
 let storeRefusal: string | undefined
-// Delays the store's read of a saved session until it resolves.
 let storeHold: (() => Promise<void>) | undefined
-// Makes the engine refuse the mod's tools, as an organization's settings can, with this reason.
 let toolRefusal: string | undefined
-// The ids of the panes the mod opened or raised, in order.
 let panesOpened: string[] = []
-// The ids of the panes the mod closed, in order.
 let panesClosed: string[] = []
 
 async function runBeforeAct() {
@@ -121,10 +99,6 @@ async function runBeforeAct() {
   await act?.()
 }
 
-/**
- * Stores a prompt's own row, as Claude Code does once the prompt enters. The kit
- * does not for a plugin's own prompt, so the test raises it.
- */
 async function storePrompt($: Engine, prompt: { text: string; origin: PromptOrigin }) {
   const row = {
     message: { type: 'user' as const, role: 'user' as const, content: [{ type: 'text' as const, text: prompt.text }] },
@@ -135,7 +109,6 @@ async function storePrompt($: Engine, prompt: { text: string; origin: PromptOrig
   await $.session.append(row)
 }
 
-/** The running turn ends, and the prompts held behind it enter. */
 async function arrive($: Engine) {
   const prompts = held
   held = []
@@ -196,7 +169,6 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   on('session.id', () => ({ value: 'session-1' }))
   on('session.end', ($, e) => ({ sessionId: e.sessionId }))
   on('session.root', () => ({ value: '/tmp/project' }))
-  // Outside Herdr unless a test passes HERDR_PANE_ID.
   on('env.get', ($, e) => ({ value: vars[e.name] }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
   on('tool.register', ($, e) => (toolRefusal ? { deny: toolRefusal } : { value: { tool: `mcp__inbox__${e.name}` } }))
@@ -251,9 +223,7 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   on('classic.Stop', () => (stopBlock ? { block: stopBlock } : {}))
   on('classic.SessionStart', () => ({}))
   on('tool.call', () => ({ result: 'ok', text: 'ok' }))
-  // The engine asks the person, as for a file outside the project.
   on('tool.check', () => ({ decision: 'ask' as const }))
-  // The band with nothing to show falls through to the engine's own, drawn empty here.
   on('ui.render', ($, e) => $.ui.resolve(e).Box({}))
   on('ui.press', async ($, e, next) => {
     await runBeforeAct()
@@ -265,7 +235,6 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   })
 }
 
-/** The sidebar lines the mod published to Herdr, in order. */
 function sidebarLines(): string[] {
   return ran.filter(argv => argv[0] === 'herdr').map(argv => argv.find(a => a.startsWith('inbox='))?.slice(6) ?? '')
 }
@@ -289,24 +258,20 @@ test('a reply becomes a card and open items, and "1. yes" carries the question',
   expect(prompts.length).toBe(1)
   expect(prompts[0]).toContain('<person>\nadd a greeting cli\n</person>')
 
-  // The band counts what waits; the rows are in /inbox.
   const band = await $.ui.mount({ plugin: 'inbox', surface: 'terminal', ...BAND })
   expect(await band.find({ text: /Needs you 2/ })).toBeDefined()
   expect(await band.find({ text: /Use Node or Python\?|Name the command greet\?/ })).toBeUndefined()
 
   const answered = await $.prompt.submit({ text: '1. node\n2. yes', wait: false, origin: { kind: 'composer' } })
   expect(answered.context?.join('\n')).toContain('1 → "Use Node or Python?"')
-  // Claude reads the open items beside a prompt, and again only after they change.
   expect(answered.context?.join('\n')).toContain('Waiting on the user:\n- [i1] (1) "Use Node or Python?"')
   const unchanged = await $.prompt.submit({ text: 'also add a --loud flag', wait: false, origin: { kind: 'composer' } })
   expect(unchanged.context?.join('\n') ?? '').not.toContain('Waiting on the user')
 
-  // Pressing an answer in the pane sends it as the person's message and closes the item.
   const pane = await $.ui.mount(PANE)
   await pane.press({ key: 'answer-i1-0' })
   expect(sent).toEqual(['Re "Use Node or Python?": Node'])
   expect(await pane.find({ key: 'row-i1' })).toBeUndefined()
-  // The per-turn update reads the pressed answer as the person's message.
   await $.turn.complete({ answer: 'Using Node.', durationMs: 5, isAborted: false, turnId: 't2', reason: 'answer' })
   await clock.settle()
   expect(prompts.at(-1)).toContain('Re "Use Node or Python?": Node\n</person>')
@@ -315,7 +280,6 @@ test('a reply becomes a card and open items, and "1. yes" carries the question',
 test('a question’s handle is the number a typed answer reaches, and the band counts what the tab counts', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [], { HERDR_PANE_ID: 'p1' })
-  // A HELP line's command must appear in Claude's reply.
   const reply = async (text: string, turnId: string) => {
     await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
     await $.turn.start({ text, turnId })
@@ -325,7 +289,6 @@ test('a question’s handle is the number a typed answer reaches, and the band c
 
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   await reply('add a greeting cli', 't1')
-  // The next reply asks two new questions and leaves two tasks; the first reply's questions stay open.
   ledgerReply = [
     'NOW: Waiting on the flags',
     'NEW: decide | 1 | Add a --loud flag? | yes / no | yes',
@@ -339,7 +302,6 @@ test('a question’s handle is the number a typed answer reaches, and the band c
   const pane = await $.ui.mount(PANE)
   const band = await $.ui.mount({ plugin: 'inbox', surface: 'terminal', ...BAND })
   const handle = async (id: string) => (await pane.find({ key: `select-${id}` }))?.props.label
-  // The latest reply's questions lead, numbered as a typed answer reaches them, and older ones take a bullet.
   expect(await pane.find({ key: 'explain-i3-key' })).toBeDefined()
   expect([await handle('i3'), await handle('i5'), await handle('i1'), await handle('i2')]).toEqual([
     '1)',
@@ -350,13 +312,10 @@ test('a question’s handle is the number a typed answer reaches, and the band c
   expect(await band.find({ text: /Needs you 6/ })).toBeDefined()
   expect(await pane.find({ text: /^ 6$/ })).toBeDefined()
 
-  // "1." answers the row drawn as 1).
   const answered = await $.prompt.submit({ text: '1. yes', wait: false, origin: { kind: 'composer' } })
   expect(answered.context?.join('\n')).toContain('1 → "Add a --loud flag?"')
-  // After any message of the person's, a typed number no longer reaches the batch.
   expect(await handle('i3')).toBe('•')
 
-  // A task handed to Claude leaves the band's count and the tab's alike.
   await pane.press({ key: 'select-i4' })
   await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'help-i4-0' })
@@ -364,12 +323,10 @@ test('a question’s handle is the number a typed answer reaches, and the band c
   expect(await band.find({ text: /Needs you 5/ })).toBeDefined()
   expect(await pane.find({ text: /^ 5$/ })).toBeDefined()
 
-  // The sidebar names the pane's top row, even when the latest reply lists a task first.
   ledgerReply = ['NEW: do | - | Water the plants | - | -', 'NEW: decide | 1 | Ship it? | yes / no | yes'].join('\n')
   await reply('ship it', 't3')
   expect(await handle('i8')).toBe('1)')
   expect(sidebarLines().at(-1)).toBe('8 · Ship it?')
-  // With no question in the latest reply, the newest older question leads.
   ledgerReply = 'NEW: do | - | Feed the cat | - | -'
   await reply('one more task', 't4')
   expect(sidebarLines().at(-1)).toBe('9 · Ship it?')
@@ -446,8 +403,6 @@ test('a task handed to Claude folds and leaves the count until Claude’s reply 
   const pane = await $.ui.mount(PANE)
   expect(await band.find({ text: /Needs you 2/ })).toBeDefined()
 
-  // Run hands the task to Claude: it closes to its one line, which reads what was sent, and leaves the count in the
-  // band and the tab.
   await pane.press({ key: 'help-i1-0' })
   await clock.settle()
   expect(sent.at(-1)).toContain('./load.sh')
@@ -456,8 +411,6 @@ test('a task handed to Claude folds and leaves the count until Claude’s reply 
   expect(await band.find({ text: /Needs you 1/ })).toBeDefined()
   expect(await pane.find({ key: 'help-i2-0' })).toBeDefined()
 
-  // Opened again, its other steps still show: a copy says where to run the command, and an open of a missing file
-  // says so in red, with no toast. Neither brings the task back into the count.
   await pane.press({ key: 'title-i1' })
   await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'help-i1-1' })
@@ -470,11 +423,9 @@ test('a task handed to Claude folds and leaves the count until Claude’s reply 
   expect(red).toBeDefined()
   expect(toasts).toEqual([])
   expect(await band.find({ text: /Needs you 1/ })).toBeDefined()
-  // A failure stays until the next press on its row.
   await clock.advance(SETTLED_MS)
   expect(await pane.find({ text: 'Could not open load.md: it no longer exists' })).toBeDefined()
 
-  // A step that copies and opens reads as one note, which clears after a few seconds.
   files = ['/tmp/project/.env.local']
   await pane.press({ key: 'select-i2' })
   await clock.advance(PRESS_GUARD_MS)
@@ -482,18 +433,15 @@ test('a task handed to Claude folds and leaves the count until Claude’s reply 
   await clock.settle()
   expect(copied.at(-1)).toBe('API_KEY=x')
   expect(ran.at(-1)).toEqual(['open', '/tmp/project/.env.local'])
-  // A success note is not red. The first task's failure stays red on its collapsed line.
   expect(
     (await pane.find({ type: 'Text', text: '✓ Copied env line\u2007·\u2002Opened .env.local' }))?.props.color,
   ).not.toBe(red)
   expect((await pane.find({ type: 'Text', text: '\u2007·\u2002Could not open load.md' }))?.props.color).toBe(red)
-  // An open or copy does not make its button read "again".
   expect((await pane.find({ key: 'help-i2-0-key' }))?.props.label).toBe('Copy env line and open .env.local')
   await clock.advance(SETTLED_MS)
   expect(await pane.find({ text: /Opened \.env\.local/ })).toBeUndefined()
   await pane.press({ key: 'title-i1' })
 
-  // The turn that answers the send ends with the task still open, so it waits on the person again.
   ledgerReply = 'NOW: The load script needs your password'
   await $.turn.start({ text: 'For "Run the load script", run this', turnId: 't2' })
   await $.turn.complete({ answer: 'It needs sudo.', durationMs: 5, isAborted: false, turnId: 't2', reason: 'answer' })
@@ -526,7 +474,6 @@ test('a question with 7 options shows 4 until [All 7 options], draws its steps a
   const pane = await $.ui.mount(PANE)
   const hotkey = async (key: string) => (await pane.find({ key: `${key}-key` }))?.props.hotkey
 
-  // The first 4 options show, then [All 7 options], then the steps, which take the next letters.
   expect(await pane.find({ key: 'answer-i1-3' })).toBeDefined()
   expect(await pane.find({ key: 'answer-i1-4' })).toBeUndefined()
   expect(await hotkey('answer-i1-4')).toBeUndefined()
@@ -537,13 +484,11 @@ test('a question with 7 options shows 4 until [All 7 options], draws its steps a
     await hotkey('help-i1-0'),
     await hotkey('help-i1-2'),
   ]).toEqual(['a', 'f', 'g', 'i'])
-  // The recommended option leads, and its drawn label marks it, after its letter.
   expect((await pane.find({ key: 'answer-i1-3' }))?.props.label).toBe(': Green (recommended)')
 
   await pane.press({ key: 'all-options-i1' })
   expect(await pane.find({ key: 'answer-i1-6' })).toBeDefined()
   expect(await pane.find({ key: 'all-options-i1' })).toBeUndefined()
-  // 7 options and 3 steps: the last step has no letter, and still draws.
   expect([await hotkey('answer-i1-6'), await hotkey('help-i1-0'), await hotkey('help-i1-1')]).toEqual(['i', 'l', 'm'])
   expect(await hotkey('help-i1-2')).toBeUndefined()
   expect((await pane.find({ key: 'help-i1-2' }))?.props.label).toBe('Run c script')
@@ -558,7 +503,6 @@ test('last actions an earlier build saved convert once by the table, and a task 
     'NOW: Waiting on the load script\nNEW: do | - | Run the load script | - | -\nHELP: new 1 | run | ./load.sh | load script'
   const LAST_ACTIONS = { plugin: 'inbox', key: 'lastActions' } as const
   const at = 1_000_000
-  // An earlier build's last actions, by button key: one per row of the conversion, and ones that record nothing now.
   const thread = (id: string) => `acme/greet#12 thread ${id}`
   const old: Record<string, Record<string, unknown>> = {
     i1: {
@@ -577,7 +521,6 @@ test('last actions an earlier build saved convert once by the table, and a task 
     i5: { action: 'explain', text: 'Explain sent', at },
     f6: { action: 'address-f6', text: 'Sent to Claude to fix', at },
     f7: { action: 'discuss-f7', text: 'Discuss sent', at },
-    // Saved with a kind, by a build that still kept where a removed finding stood.
     f9: {
       kind: 'handoff',
       action: 'address',
@@ -609,20 +552,16 @@ test('last actions an earlier build saved convert once by the table, and a task 
     [thread('T1')]: { kind: 'handoff', action: 'thread-address', text: 'Address', at },
     [thread('T2')]: { kind: 'talk', action: 'thread-draft', text: 'Draft reply', at },
     [thread('T3')]: { kind: 'talk', action: 'thread-discuss', text: 'Discuss', at },
-    // Saved as not handing off, so it stays a talk.
     'pr:acme/greet#12': { kind: 'talk', action: 'pr-conflicts', text: 'Resolve conflicts', at },
     'pr:acme/greet#13': { kind: 'handoff', action: 'pr-address-all', text: 'Address all 2 threads', at },
   }
-  // While set, the mod's next write of its last actions saves this instead, as an earlier build left them.
   let saving: unknown = null
-  // The last actions the mod wrote last.
   let saved: unknown = null
   on('state.set', LAST_ACTIONS, ($, e, next) => {
     const write = saving ? { ...e, value: saving as never } : e
     saved = write.value
     return next(write)
   })
-  // The open folds the same earlier build saved: Findings' Closed fold, and the tasks' fold under its old kind.
   let savingUnfolded: unknown = null
   let savedUnfolded: unknown = null
   on('state.set', { plugin: 'inbox', key: 'unfolded' } as const, ($, e, next) => {
@@ -630,7 +569,6 @@ test('last actions an earlier build saved convert once by the table, and a task 
     savedUnfolded = write.value
     return next(write)
   })
-  // Its open rows, with no time each opened.
   const oldCursor = { id: 'i1', index: 0 }
   let savingOpen: { selection: unknown } | null = null
   const savedOpen: { selection?: unknown } = {}
@@ -652,7 +590,6 @@ test('last actions an earlier build saved convert once by the table, and a task 
     detail: 'Old name.',
   })
   await $.tool.call({ tool: 'mcp__inbox__close', id: 'f2', reason: 'fixed' } as never)
-  // A reload under the earlier build leaves its last actions; the next reload converts them.
   saving = old
   savingUnfolded = ['finding', 'do']
   savingOpen = {
@@ -682,12 +619,10 @@ test('last actions an earlier build saved convert once by the table, and a task 
   expect(savedUnfolded).toEqual(['issue', 'opportunity', 'task'])
   expect(savedOpen).toEqual(openConverted)
 
-  // The task handed off by the old Run still folds, and waits on no one.
   const pane = await $.ui.mount(PANE)
   const band = await $.ui.mount({ plugin: 'inbox', surface: 'terminal', ...BAND })
   expect(await pane.find({ text: /Run load script/ })).toBeDefined()
   expect(await band.find({ text: /Needs you/ })).toBeUndefined()
-  // Findings' Closed fold stays open across the reloads. The closed finding shows there once it has settled.
   await clock.advance(SETTLED_MS)
   await pane.press({ key: 'tab-findings' })
   expect((await pane.find({ key: 'fold-issue' }))?.props.label).toBe('▾ 1 closed')
@@ -711,7 +646,6 @@ test('the band is [Open inbox] and the counts, the same while working and after 
     detail: 'It names the old command.',
   })
 
-  // One line: [Open inbox] and the counts, with no title, goal or step.
   const standing = await band()
   expect(await standing.find({ key: 'open-inbox' })).toBeDefined()
   expect(await standing.find({ text: /^Needs you 2\u2007·\u2002Findings 1$/ })).toBeDefined()
@@ -720,12 +654,10 @@ test('the band is [Open inbox] and the counts, the same while working and after 
   const working = await band({ isWorking: true })
   expect(await working.find({ text: /^Needs you 2\u2007·\u2002Findings 1$/ })).toBeDefined()
 
-  // Coming back after 15 idle minutes adds nothing.
   await clock.advance(16 * 60_000)
   expect(await standing.find({ text: /^Needs you 2\u2007·\u2002Findings 1$/ })).toBeDefined()
   expect(await standing.find({ text: /Plan written|last active/ })).toBeUndefined()
 
-  // [Open inbox] opens the pane on Needs you with its top row open, from another row and tab.
   const pane = await $.ui.mount(PANE)
   await pane.press({ key: 'select-i2' })
   await pane.press({ key: 'tab-findings' })
@@ -740,7 +672,6 @@ test('resumed into a conversation it cannot fork yet, it catches up from the tra
   const clock = mock.clock(on, { now: 1_000_000 })
   const prompts: string[] = []
   world($, on, prompts)
-  // A resumed session: earlier turns, but no request from this process to fork.
   on('session.turns', () => ({ value: 3 }))
   on('model.fork', () => ({ value: { isAnswered: false as const, reason: 'nothing-to-fork' as const } }))
   const said = (role: 'user' | 'assistant', text: string) => ({ role, text, toolUses: [] })
@@ -755,7 +686,6 @@ test('resumed into a conversation it cannot fork yet, it catches up from the tra
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   await clock.settle()
   const conversation = prompts.at(-1)?.match(/<conversation>\n([\s\S]*?)\n<\/conversation>/)?.[1]
-  // The mod's own context rows are not part of the conversation it summarizes.
   expect(conversation).toBe(
     'Person: Add a greeting CLI. Node or Python?\nAgent: The plan is written. 1. Node or Python? 2. Name the command greet?',
   )
@@ -779,7 +709,6 @@ test('after a failed update, the next reply catches up over the whole conversati
   await $.prompt.submit({ text: 'add a greeting cli', wait: false, origin: { kind: 'composer' } })
   await $.turn.complete({ answer: 'Plan ready.', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
   await clock.settle()
-  // Findings and items share one id counter, so after i1 and i2 this finding is f3.
   await $.tool.call({
     tool: 'mcp__inbox__record_finding',
     kind: 'issue',
@@ -789,20 +718,16 @@ test('after a failed update, the next reply catches up over the whole conversati
 
   const pane = await $.ui.mount(PANE)
   expect(await pane.find({ text: /Use Node or Python\?/ })).toBeDefined()
-  // An open item says how long it has waited.
   expect(await pane.find({ text: 'now' })).toBeDefined()
-  // Only the selected item shows its actions; Next moves the selection.
   expect(await pane.find({ key: 'explain-i2-key' })).toBeUndefined()
   await pane.press({ key: 'next' })
   expect(await pane.find({ key: 'explain-i2-key' })).toBeDefined()
   await pane.press({ key: 'previous' })
-  // Explain asks Claude about the item and leaves it open.
   await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'explain-i1-key' })
   expect(sent.at(-1)).toContain('"Use Node or Python?"\nOptions: Node / Python')
   expect(await pane.find({ text: /Use Node or Python\?/ })).toBeDefined()
 
-  // This turn's update fails, so the next reply re-reads the whole conversation.
   ledgerReply = 'not a ledger'
   await $.turn.complete({ answer: 'Using Node.', durationMs: 5, isAborted: false, turnId: 't2', reason: 'answer' })
   await clock.settle()
@@ -815,15 +740,12 @@ test('after a failed update, the next reply catches up over the whole conversati
     reason: 'answer',
   })
   await clock.settle()
-  // It closes what the conversation handled, keeps what still waits, and adds what is new.
   expect(await pane.find({ key: 'row-i1' })).toBeUndefined()
-  // The question shows under the open ones, with its outcome under it.
   expect(await pane.find({ text: /^Use Node or Python\?$/ })).toBeDefined()
   expect(await pane.find({ text: /^Node$/ })).toBeDefined()
   expect(await pane.find({ text: /Name the command greet\?/ })).toBeDefined()
   expect(await pane.find({ text: /Review the welcome copy/ })).toBeDefined()
   expect(await pane.find({ text: /update failed/ })).toBeUndefined()
-  // The finding the update closed settles in its place, with no Undo, since the person did not close it.
   await pane.press({ key: 'tab-findings' })
   expect(await pane.find({ key: 'row-f3' })).toBeUndefined()
   expect(await pane.find({ key: 'settled-f3' })).toBeDefined()
@@ -846,8 +768,6 @@ test('a reload that cuts off the end-of-turn hook catches up on load', async ($,
   await $.turn.start({ text: 'add a greeting cli', turnId: 't1' })
   await $.turn.complete({ answer: 'Plan ready.', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
   await clock.settle()
-  // A turn with no prompt, as a task notification starts, ends in a reload that runs
-  // no turn.complete hook, as when the turn edited the mod.
   await $.turn.start({ text: '', turnId: 't2' })
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   await clock.settle()
@@ -970,7 +890,6 @@ test('t opens a field for the person’s own words: a question’s words go to C
   const pane = await $.ui.mount(PANE)
   expect(await pane.find({ key: 'type-i1' })).toBeUndefined()
   await pane.press({ key: 'typekey-i1' })
-  // A blank Enter or [Send] sends nothing and keeps the field open.
   await pane.input({ key: 'type-i1', text: ' ' })
   await clock.settle()
   expect(await pane.find({ key: 'type-i1' })).toBeDefined()
@@ -978,7 +897,6 @@ test('t opens a field for the person’s own words: a question’s words go to C
   await clock.settle()
   expect(await pane.find({ key: 'type-i1' })).toBeDefined()
   await pane.input({ key: 'type-i1', text: 'Deno, actually', kind: 'change' })
-  // [Cancel] closes the field and keeps the words, which also outlast opening another row.
   await pane.press({ key: 'cancel-i1' })
   expect(await pane.find({ key: 'type-i1' })).toBeUndefined()
   expect(sent).toEqual([])
@@ -987,7 +905,6 @@ test('t opens a field for the person’s own words: a question’s words go to C
   await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'typekey-i1' })
   expect((await pane.find({ key: 'type-i1' }))?.props.value).toBe('Deno, actually')
-  // [Send] sends them as the answer.
   await pane.press({ key: 'send-i1' })
   expect(sent.at(-1)).toBe('Re "Use Node or Python?": Deno, actually')
   expect((await pane.find({ key: 'row-i1' }))?.text).toMatch(/^✓Use Node or Python\?\s·\sReplied/)
@@ -1011,7 +928,6 @@ test('a press on a question Claude closed since the draw sends nothing and says 
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])
   on('ui.focus', () => ({}))
-  // The typed words a stale press keeps, as the mod last saved them.
   let drafts: unknown = null
   on('state.set', { plugin: 'inbox', key: 'drafts' } as const, ($, e, next) => {
     drafts = e.value
@@ -1032,7 +948,6 @@ test('a press on a question Claude closed since the draw sends nothing and says 
   const pane = await $.ui.mount(PANE)
   const stale = /^This changed before your press\. Nothing was sent\.$/
 
-  // Claude closes the question after the pane drew it and before the press lands.
   beforeAct = close('i1')
   await pane.press({ key: 'answer-i1-0' })
   expect(sent).toEqual([])
@@ -1040,7 +955,6 @@ test('a press on a question Claude closed since the draw sends nothing and says 
   await clock.advance(9000)
   expect(await pane.find({ text: stale })).toBeUndefined()
 
-  // The pressed row left, so the row in its place opens.
   await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'typekey-i2' })
   beforeAct = close('i2')
@@ -1074,7 +988,6 @@ test('a press during a turn reads Queued until its prompt enters, and one that w
   const pane = await $.ui.mount(PANE)
   const band = await $.ui.mount({ plugin: 'inbox', surface: 'terminal', ...BAND })
 
-  // A turn runs, so the mod's prompts wait behind it.
   submitAnswer = 'hold'
   await pane.press({ key: 'explain-i1-key' })
   await clock.settle()
@@ -1085,14 +998,12 @@ test('a press during a turn reads Queued until its prompt enters, and one that w
   await pane.input({ key: 'type-i2', text: 'yes' })
   await clock.settle()
   expect(await pane.find({ text: /Queued:\sReply/ })).toBeDefined()
-  // The turn ends and both prompts enter.
   await arrive($)
   await clock.settle()
   await pane.press({ key: 'select-i1' })
   expect(await pane.find({ text: /^\u2007·\sExplaining…$/ })).toBeDefined()
   expect(await pane.find({ text: /Queued/ })).toBeUndefined()
 
-  // A hook refuses a typed answer: the question opens again, and the words go back into its field.
   submitAnswer = { drop: 'a hook refused it' }
   await pane.press({ key: 'select-i1' })
   await clock.advance(PRESS_GUARD_MS)
@@ -1102,17 +1013,14 @@ test('a press during a turn reads Queued until its prompt enters, and one that w
   expect(sent.at(-1)).toBe('Re "Use Node or Python?": Deno, actually')
   expect(await pane.find({ key: 'row-i1' })).toBeDefined()
   expect(drafts).toEqual({ i1: 'Deno, actually' })
-  // A refused answer: the question opens again and counts, says why, and offers [Try again].
   await pane.press({ key: 'answer-i1-0' })
   await clock.settle()
   expect(sent.at(-1)).toBe('Re "Use Node or Python?": Node')
   expect(await pane.find({ key: 'row-i1' })).toBeDefined()
   expect(await pane.find({ text: 'Not sent: a hook refused it' })).toBeDefined()
   expect(await band.find({ text: /Needs you 1/ })).toBeDefined()
-  // Nothing went, so no option reads "again".
   expect((await pane.find({ key: 'answer-i1-0-key' }))?.props.label).toBe('Node (recommended)')
 
-  // Claude reads none of the unsent words, beside the next prompt or in the next exchange.
   submitAnswer = 'enter'
   const next = await $.prompt.submit({ text: 'carry on', wait: false, origin: { kind: 'composer' } })
   expect(next.context?.join('\n') ?? '').not.toMatch(/→ (Node|Deno)/)
@@ -1121,7 +1029,6 @@ test('a press during a turn reads Queued until its prompt enters, and one that w
   expect(prompts.at(-1)).toContain('carry on\n</person>')
   expect(prompts.at(-1)).not.toContain('Re "Use Node or Python?"')
 
-  // [Try again] repeats the answer, which closes the question.
   await pane.press({ key: 'retry-i1' })
   await clock.settle()
   expect(sent.at(-1)).toBe('Re "Use Node or Python?": Node')
@@ -1156,7 +1063,6 @@ test('Claude closes an item or finding that no longer applies, by the id it read
   const pane = await $.ui.mount(PANE)
   const band = await $.ui.mount({ plugin: 'inbox', surface: 'terminal', ...BAND })
 
-  // Discuss talks the finding through and leaves it open and counted.
   await pane.press({ key: 'tab-findings' })
   await pane.press({ key: 'discuss-f3' })
   await clock.settle()
@@ -1165,13 +1071,10 @@ test('Claude closes an item or finding that no longer applies, by the id it read
   expect((await pane.find({ key: 'discuss-f3-key' }))?.props.label).toBe('Discuss again')
   expect(await band.find({ text: /Findings 1/ })).toBeDefined()
   await pane.press({ key: 'tab-needsYou' })
-  // An Explain waits behind the running turn.
   submitAnswer = 'hold'
   await pane.press({ key: 'explain-i1-key' })
   await clock.settle()
   expect(await pane.find({ text: /^\u2007·\sQueued:\sExplain/ })).toBeDefined()
-  // The user answered i1 in their own message: it closes with their answer, shown in place.
-  // No answer of the person's waits to reach Claude, so it settles with a ✓, though the Explain is still queued.
   expect((await close({ id: 'i1', answer: 'Deno' })).result).toBe(
     'Closed i1. The user sees it in the /inbox pane with its outcome.',
   )
@@ -1186,7 +1089,6 @@ test('Claude closes an item or finding that no longer applies, by the id it read
     'Not closed: no open item or finding has the id i9.',
   )
 
-  // After a few seconds the rows leave for the group's closed items, which start folded.
   await clock.advance(9000)
   expect(await pane.find({ key: 'settled-i1' })).toBeUndefined()
   expect(await pane.find({ text: /^Deno$/ })).toBeUndefined()
@@ -1194,7 +1096,6 @@ test('Claude closes an item or finding that no longer applies, by the id it read
   expect(await pane.find({ text: /^Deno$/ })).toBeDefined()
   expect(await pane.find({ text: /^Closed by Claude: no longer applies$/ })).toBeDefined()
 
-  // The closed finding leaves its list for its group's own Closed fold.
   await pane.press({ key: 'tab-findings' })
   expect(await pane.find({ key: 'row-f3' })).toBeUndefined()
   expect(await pane.find({ text: 'No open issues' })).toBeDefined()
@@ -1225,39 +1126,32 @@ test('Dismiss settles a question in place with Undo, which brings it back open a
   await clock.settle()
   const pane = await $.ui.mount(PANE)
 
-  // Dismiss settles the question where it was, with Undo, and Claude reads it closed beside the next prompt.
   await pane.press({ key: 'dismiss-i1' })
   expect(await pane.find({ key: 'settled-i1' })).toBeDefined()
   expect(await pane.find({ text: /^Dismissed$/ })).toBeDefined()
   expect(await pane.find({ key: 'explain-i2-key' })).toBeDefined()
   expect((await pane.find({ key: 'dismiss-i2' }))?.props.dimColor).toBe(true)
   expect(await prompt('carry on')).toContain(closedLine)
-  // A reload while it settles still shows it.
   await start()
   await clock.settle()
   expect(await pane.find({ key: 'settled-i1' })).toBeDefined()
-  // Undo brings it back where it was, open with its options and selected, though another row was.
   await pane.press({ key: 'select-i2' })
   await pane.press({ key: 'undo-i1' })
   expect(await pane.find({ key: 'settled-i1' })).toBeUndefined()
   expect(await pane.find({ key: 'answer-i1-0' })).toBeDefined()
   expect(await pane.find({ key: 'answer-i1-1' })).toBeDefined()
-  // Just after the row opens, its buttons draw dim and a click does nothing, as a double-click's second would.
   await clock.advance(100)
   expect((await pane.find({ key: 'dismiss-i1' }))?.props.dimColor).toBe(true)
   await pane.press({ key: 'dismiss-i1' })
   expect(await pane.find({ key: 'settled-i1' })).toBeUndefined()
-  // Its key works at once. Dismissed again, the close reaches Claude again.
   await pane.press({ key: 'dismiss-i1-key' })
   expect(await pane.find({ key: 'settled-i1' })).toBeDefined()
   expect(await prompt('and now?')).toContain(closedLine)
-  // Brought back once more, a click once the moment passed works.
   await pane.press({ key: 'undo-i1' })
   await clock.advance(500)
   expect((await pane.find({ key: 'dismiss-i1' }))?.props.dimColor).toBeUndefined()
   await pane.press({ key: 'dismiss-i1' })
   expect(await pane.find({ key: 'settled-i1' })).toBeDefined()
-  // Once its time in place ends, it leaves for the Closed fold.
   await clock.advance(SETTLED_MS)
   expect(await pane.find({ key: 'settled-i1' })).toBeUndefined()
   expect((await pane.find({ key: 'fold-question' }))?.props.label).toBe('▸ 1 closed')
@@ -1268,10 +1162,8 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])
   ledgerReply = 'NOW: Waiting on review\nNEW: do | - | Mark #12 ready for review | - | -'
-  // Whether the reviewer has answered since the thread was sent to Claude, and whether it was resolved on GitHub.
   let hasReply = false
   let isResolved = false
-  // Runs once each PR fetch has saved what it found.
   let onFetched: (() => void) | undefined
   on('state.set', { plugin: 'inbox', key: 'prViews' } as const, async ($, e, next) => {
     const r = await next(e)
@@ -1314,7 +1206,6 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
                   nodes: [
                     {
                       id: 'T1',
-                      // A thread resolved on GitHub leaves the PR's list.
                       isResolved,
                       isOutdated: false,
                       path: 'bin/greet',
@@ -1366,12 +1257,9 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   await clock.settle()
 
   const pane = await $.ui.mount(PANE)
-  // The task names the PR only by number, and still links to it.
   expect((await pane.find({ key: 'help-i1-0-key' }))?.props.label).toBe('Open PR #12')
-  // The row says the PR is opening while `open` runs, then that it opened.
   let opened = () => {}
   ghAnswers.push({ match: argv => argv[0] === 'open', stdout: '', hold: () => new Promise(r => (opened = r)) })
-  // The press returns its work, so it resolves only once `open` does.
   const pressing = pane.press({ key: 'help-i1-0' })
   await clock.settle()
   expect(ran.at(-1)).toEqual(['open', 'https://github.com/acme/greet/pull/12'])
@@ -1387,17 +1275,14 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   expect(await pane.find({ text: /Add a greeting CLI/ })).toBeDefined()
   for (const line of ['Blocked', /^\u2007·\sconflicts with main$/])
     expect(await pane.find({ text: line })).toBeDefined()
-  // A blocked PR offers no Merge.
   expect(await pane.find({ key: 'merge-acme/greet#12' })).toBeUndefined()
 
-  // A press that sends says so where it was pressed, and the button then reads "again".
   await pane.press({ key: 'resolve-acme/greet#12' })
   expect(sent.at(-1)).toContain('PR #12 (https://github.com/acme/greet/pull/12) conflicts with main.')
   await clock.settle()
   expect(await pane.find({ text: /✓ Asked to resolve conflicts\u2007·/ })).toBeDefined()
   expect((await pane.find({ key: 'resolve-acme/greet#12' }))?.props.label).toBe('Resolve conflicts again')
 
-  // Open PR reports on the block, and a failed open reads in a color, not muted as its reasons are.
   const muted = (await pane.find({ type: 'Text', text: /conflicts with main$/ }))?.props.color
   expect(await pane.find({ text: '✓ Opened PR #12' })).toBeUndefined()
   await pane.press({ key: 'open-acme/greet#12' })
@@ -1426,14 +1311,12 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   expect(ran.at(-1)).toEqual(['open', 'https://github.com/acme/greet/actions/runs/7/job/1'])
   expect(await pane.find({ text: '✓ Opened the log' })).toBeDefined()
 
-  // A thread's keys say so too, pressed by hotkey or by click.
   await pane.press({ key: 'previous' })
   await pane.press({ key: 'discuss-T1-key' })
   expect(sent.at(-1)).toContain("Let's talk through this review comment on PR #12")
   await clock.settle()
   expect(await pane.find({ text: /Discussing…/ })).toBeDefined()
   expect((await pane.find({ key: 'discuss-T1' }))?.props.label).toMatch(/Discuss again$/)
-  // A hook refuses Address: the thread stays open and waiting, says why, and offers [Try again].
   submitAnswer = { drop: 'a hook refused it' }
   await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'address-T1' })
@@ -1442,7 +1325,6 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   await clock.settle()
   expect(await pane.find({ text: 'Not sent: a hook refused it' })).toBeDefined()
   expect((await pane.find({ key: 'address-T1-key' }))?.props.label).toBe('Address')
-  // Tried again during a turn, it folds at once and reads Queued until its prompt enters.
   submitAnswer = 'hold'
   await pane.press({ key: 'retry-T1' })
   await clock.settle()
@@ -1451,12 +1333,10 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   await clock.settle()
   expect(await pane.find({ text: /^\u2007·\sAddressed$/ })).toBeDefined()
 
-  // Sent to Claude, the thread closes to its line and folds out of the count until the reviewer answers.
   expect(await pane.find({ key: 'address-T1-key' })).toBeUndefined()
   await pane.press({ key: 'title-acme/greet#12 thread T1' })
   await clock.advance(PRESS_GUARD_MS)
   expect((await pane.find({ key: 'address-T1-key' }))?.props.label).toBe('Address again')
-  // Opening it on GitHub keeps it folded and out of the count.
   await pane.press({ key: 'open-T1' })
   await clock.settle()
   expect(ran.at(-1)).toEqual(['open', 'https://github.com/acme/greet/pull/12#r1'])
@@ -1468,7 +1348,6 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   await clock.settle()
   expect(await pane.find({ text: /Still unquoted/ })).toBeDefined()
 
-  // The thread is resolved on GitHub, and a refresh drops it, after the pane drew it and before Address lands.
   const sends = sent.length
   beforeAct = async () => {
     isResolved = true
@@ -1499,7 +1378,6 @@ test('opening the PRs tab while another PR fetch runs still finds the branch’s
   const noThreads = JSON.stringify({ data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } } })
   let isSlow = true
   ghAnswers.push(
-    // The linked PR's first fetch is still running when the tab opens.
     {
       match: argv => argv.includes('view') && argv.includes('12'),
       stdout: view(12, 'Linked work'),
@@ -1529,7 +1407,6 @@ test('opening the PRs tab while another PR fetch runs still finds the branch’s
 test('a PR’s Dismiss settles its block with Undo, which brings it back, a ready PR’s Merge asks Claude unless it stopped being ready, and a fetch keeps a Dismiss made while it ran, and the branch PR when its lookup fails', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])
-  // The review decision GitHub reports for every PR.
   let decision = 'APPROVED'
   const view = (number: number, title: string) =>
     JSON.stringify({
@@ -1544,7 +1421,6 @@ test('a PR’s Dismiss settles its block with Undo, which brings it back, a read
       statusCheckRollup: [],
     })
   const noThreads = JSON.stringify({ data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } } })
-  // Runs once each PR fetch has saved what it found.
   let onFetched: (() => void) | undefined
   on('state.set', { plugin: 'inbox', key: 'prViews' } as const, async ($, e, next) => {
     const r = await next(e)
@@ -1590,26 +1466,22 @@ test('a PR’s Dismiss settles its block with Undo, which brings it back, a read
   expect(await pane.find({ text: /Branch work/ })).toBeDefined()
   const linked = () => (JSON.parse(stored.get('s:session-1') ?? '{}') as { ledger?: { prs: string[] } }).ledger?.prs
 
-  // Dismiss settles the PR's block in place, with Undo, and the session no longer tracks it.
   await pane.press({ key: 'dismiss-pr-acme/greet#12' })
   expect(await pane.find({ key: 'settled-pr:acme/greet#12' })).toBeDefined()
   expect(await pane.find({ key: 'open-acme/greet#12' })).toBeUndefined()
   expect(linked()).toEqual([])
-  // Undo brings the block back as it was.
   await pane.press({ key: 'undo-pr:acme/greet#12' })
   expect(await pane.find({ key: 'settled-pr:acme/greet#12' })).toBeUndefined()
   expect(await pane.find({ key: 'open-acme/greet#12' })).toBeDefined()
   expect(linked()).toEqual(['acme/greet#12'])
   await clock.advance(3000)
 
-  // A ready PR offers Merge. Pressing it hands the merge to Claude and says so.
   expect(await pane.find({ key: 'merge-acme/greet#12' })).toBeDefined()
   await pane.press({ key: 'merge-acme/greet#12' })
   expect(sent.at(-1)).toContain('Merge PR #12 (https://github.com/acme/greet/pull/12) into main.')
   await clock.settle()
   expect(await pane.find({ text: /✓ Asked to merge\u2007·/ })).toBeDefined()
   expect((await pane.find({ key: 'merge-acme/greet#12' }))?.props.label).toBe('Merge again')
-  // The PR stops being ready after the pane drew it and before Merge lands: nothing is sent.
   const merges = sent.length
   await clock.advance(PRESS_GUARD_MS)
   beforeAct = async () => {
@@ -1623,17 +1495,14 @@ test('a PR’s Dismiss settles its block with Undo, which brings it back, a read
   expect(await pane.find({ text: /^This changed before your press\. Nothing was sent\.$/ })).toBeDefined()
   decision = 'APPROVED'
 
-  // Showing the tab again looks up the branch's PR, which fails, and holds on the linked PR.
   branchFails = 'HTTP 502'
   isSlow = true
   await pane.press({ key: 'tab-needsYou' })
   await pane.press({ key: 'tab-prs' })
   await pane.press({ key: 'dismiss-pr-acme/greet#12' })
   isSlow = false
-  // The first Dismiss's time in place has ended, and this one's has not.
   await clock.advance(2500)
   expect(await pane.find({ key: 'settled-pr:acme/greet#12' })).toBeDefined()
-  // The fetch kept the dismissed PR's block while it settles, and it leaves after.
   await clock.advance(2600)
   expect(await pane.find({ key: 'settled-pr:acme/greet#12' })).toBeDefined()
   await clock.advance(SETTLED_MS)
@@ -1641,7 +1510,6 @@ test('a PR’s Dismiss settles its block with Undo, which brings it back, a read
   expect(await pane.find({ text: /Linked work/ })).toBeUndefined()
   expect(await pane.find({ text: /Branch work/ })).toBeDefined()
 
-  // The branch PR says its lookup failed, with [Retry], which looks it up again at once.
   expect(await pane.find({ text: 'Last refresh failed: HTTP 502' })).toBeDefined()
   expect(await pane.find({ text: 'Refreshing…' })).toBeUndefined()
   branchFails = undefined
@@ -1650,7 +1518,6 @@ test('a PR’s Dismiss settles its block with Undo, which brings it back, a read
   const before = lookups()
   await pane.press({ key: 'refresh-acme/greet#13' })
   await clock.settle()
-  // While it looks, the failure stays, "Refreshing…" shows under it, and [Retry] stays drawn.
   expect(await pane.find({ text: 'Last refresh failed: HTTP 502' })).toBeDefined()
   expect(await pane.find({ text: 'Refreshing…' })).toBeDefined()
   expect(await pane.find({ key: 'refresh-acme/greet#13' })).toBeDefined()
@@ -1674,7 +1541,6 @@ test('a stop and an open permission prompt lead the sidebar line until they clea
   } as never)
   await clock.settle()
   expect(sidebarLines().at(-1)).toBe('Allow push main to origin?')
-  // The prompt closes when its own call returns.
   await $.tool.call({ tool: 'Bash', command: 'git push', description: 'Push main to origin' } as never)
   await clock.settle()
   expect(sidebarLines().at(-1)).toBe('')
@@ -1683,21 +1549,17 @@ test('a stop and an open permission prompt lead the sidebar line until they clea
   await clock.settle()
   expect(sidebarLines().at(-1)).toBe('! Signed out: /login')
   const band = await $.ui.mount({ plugin: 'inbox', surface: 'terminal', ...BAND })
-  // The stop draws under the counts, so [Open inbox] stays where it always is.
   expect(await band.find({ text: /Run \/login, then send a message to resume\./ })).toBeDefined()
   expect(await band.find({ key: 'open-inbox' })).toBeDefined()
   expect(await band.find({ text: 'Nothing needs you' })).toBeDefined()
-  // Resuming before /login would stop again, so the pane offers no [Resume].
   const pane = await $.ui.mount(PANE)
   expect(await pane.find({ key: 'resume' })).toBeUndefined()
   expect(await band.find({ key: 'resume' })).toBeUndefined()
-  // The next turn means the session runs again.
   await $.turn.start({ text: 'logged in, go on', turnId: 't2' })
   await clock.settle()
   expect(await band.find({ text: /Stopped/ })).toBeUndefined()
   expect(sidebarLines().at(-1)).toBe('')
 
-  // An API error resumes from the pane: [Resume] sends what the person would type.
   await $.classic.StopFailure({ error: 'server_error' } as never)
   await clock.settle()
   expect(await pane.find({ text: /API error \(server_error\)\./ })).toBeDefined()
@@ -1707,7 +1569,6 @@ test('a stop and an open permission prompt lead the sidebar line until they clea
   expect(sent.at(-1)).toBe('Continue')
   expect((await band.find({ key: 'resume' }))?.props.label).toBe('Resuming…')
   expect((await pane.find({ key: 'resume' }))?.props.label).toBe('Resuming…')
-  // A second press while it sends sends nothing more.
   await band.press({ key: 'resume' })
   await pane.press({ key: 'resume' })
   await clock.settle()
@@ -1724,14 +1585,12 @@ test('a reply another Stop hook sends Claude back from reaches the per-turn call
 
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   await $.prompt.submit({ text: 'fix the parser', wait: false, origin: { kind: 'composer' } })
-  // A test run with a pipe runs as Claude wrote it.
   const piped = await $.tool.call({
     tool: 'Bash',
     command: 'npm test 2>&1 | tail -5',
     description: 'Run tests',
   } as never)
   expect(piped.deny).toBeUndefined()
-  // A reply that claims the tests pass ends the turn.
   const claimed = await $.classic.Stop({
     stop_hook_active: false,
     last_assistant_message: 'Fixed the parser. All tests pass.',
@@ -1753,7 +1612,6 @@ test('a reply another Stop hook sends Claude back from reaches the per-turn call
     reason: 'answer',
   })
   await clock.settle()
-  // The reply Claude was sent back from reaches the update, though it is not the final answer.
   expect(prompts.at(-1)).toContain('Should I also rename the helper?')
   expect(prompts.at(-1)).not.toContain('All tests pass.')
 })
@@ -1767,7 +1625,6 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   const branchRef = demo.prViews.branchRef!
   const linkedRef = demo.ledger.prs.find(ref => ref !== branchRef)!
   const [repo, linkedNumber] = linkedRef.split('#') as [string, string]
-  // The session links a real PR with a sample PR's ref, so a sample press that reached the real state would show.
   const view = (number: number, title: string) =>
     JSON.stringify({
       number,
@@ -1812,11 +1669,9 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   const band = await $.ui.mount({ plugin: 'inbox', surface: 'terminal', ...BAND })
   expect(await pane.find({ text: 'Sample entries. Presses send nothing.' })).toBeDefined()
   expect(await pane.find({ text: /Use Node or Python/ })).toBeUndefined()
-  // The band marks the sample counts as the demo's.
   expect(await band.find({ text: /^Demo: Needs you 7/ })).toBeDefined()
   for (const view of [pane, band]) expect(await view.find({ key: 'hide-demo' })).toBeDefined()
 
-  // An answer closes the sample question in place, and the status line says nothing was sent.
   await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'answer-d11-0' })
   await clock.settle()
@@ -1825,7 +1680,6 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   expect(await pane.find({ text: demo.ledger.items.find(i => i.id === 'd11')!.options[0] })).toBeDefined()
   expect(await pane.find({ text: SAMPLE })).toBeDefined()
 
-  // Explain says so on its row, then shows its ✓.
   await pane.press({ key: 'title-d17' })
   await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'explain-d17-key' })
@@ -1834,13 +1688,11 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   expect(await pane.find({ text: SAMPLE })).toBeUndefined()
   expect(await pane.find({ text: /✓\sExplain/ })).toBeDefined()
 
-  // A typed reply hands the task off on the copy: it folds and leaves the count.
   await pane.press({ key: 'typekey-d17' })
   await pane.input({ key: 'type-d17', text: 'Done in both.' })
   await clock.settle()
   expect(await band.find({ text: /Needs you 6/ })).toBeDefined()
 
-  // Done settles the sample task in place; Undo brings it back open; then it moves to Closed.
   await pane.press({ key: 'title-d14' })
   await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'done-d14' })
@@ -1863,10 +1715,8 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   expect(await pane.find({ text: literal(demo.ledger.findings[0]!.title) })).toBeDefined()
   await pane.press({ key: 'tab-prs' })
   expect(await pane.find({ text: literal(demo.prViews.views[branchRef]!.title) })).toBeDefined()
-  // The sample PRs are not looked up, and their buttons open nothing.
   await pane.press({ key: `open-${branchRef}` })
   expect(await pane.find({ text: SAMPLE })).toBeDefined()
-  // Dismiss settles the sample PR, then takes it off the copy, and leaves the session's PR with the same ref.
   await pane.press({ key: `dismiss-pr-${linkedRef}` })
   expect(await pane.find({ key: `settled-pr:${linkedRef}` })).toBeDefined()
   await clock.advance(SETTLED_MS)
@@ -1874,13 +1724,11 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   expect(stored.get('s:session-1')).toBe(saved)
   expect(ran.slice(ranBeforeDemo).filter(argv => argv[0] === 'gh' || argv[0] === 'open')).toEqual([])
 
-  // [Hide demo] on the PRs tab shows the session's own PRs and looks up the branch's PR.
   await pane.press({ key: 'hide-demo' })
   await clock.settle()
   expect(await pane.find({ text: /Real linked work/ })).toBeDefined()
   expect(await pane.find({ text: /Real branch work/ })).toBeDefined()
 
-  // [Hide demo] brings back the session's own rows, which no sample press touched.
   await pane.press({ key: 'tab-needsYou' })
   expect(await pane.find({ text: /Use Node or Python/ })).toBeDefined()
   expect(await pane.find({ key: 'explain-i1-key' })).toBeDefined()
@@ -1899,24 +1747,19 @@ test('/clear and /resume switch the inbox to the other conversation, and each ke
     await clock.settle()
   }
 
-  // An earlier build saved a last-session offer per folder; the first save deletes it.
   stored.set('p:/tmp/project', JSON.stringify(SAVED_SESSION))
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   await turn('add a greeting cli')
   expect(stored.has('p:/tmp/project')).toBe(false)
   const pane = await $.ui.mount(PANE)
   await pane.press({ key: 'answer-i1-0' })
-  // /clear goes on under a new id, without a session.start. As in the engine,
-  // $.session.id() still names the first conversation; the event names the new one.
   await $.session.end({ reason: 'clear', sessionId: 'session-1', resume: { id: 'session-1' } })
   await $.classic.SessionStart({ source: 'clear', session_id: 'session-2' })
   ledgerReply = 'GOAL: Fix the build\nNOW: Waiting\nNEW: decide | 1 | Pin the Node version? | Yes / No | Yes'
   await turn('fix the build')
-  // Ids restart at i1, and the first conversation's answer to its i1 does not mark this one.
   expect(await pane.find({ text: /Pin the Node version\?/ })).toBeDefined()
   expect(await pane.find({ text: /✓/ })).toBeUndefined()
   expect((await pane.find({ key: 'answer-i1-0' }))?.props.label).not.toMatch(/again/)
-  // /resume returns to the first conversation.
   await $.session.end({ reason: 'resume', sessionId: 'session-2', resume: { id: 'session-2' } })
   await $.classic.SessionStart({ source: 'resume', session_id: 'session-1' })
   await clock.settle()
@@ -1924,7 +1767,6 @@ test('/clear and /resume switch the inbox to the other conversation, and each ke
   expect(await pane.find({ text: /Name the command greet\?/ })).toBeDefined()
   expect(await pane.find({ text: /Pin the Node version\?/ })).toBeUndefined()
 
-  // The second conversation's items were saved under its own id.
   await $.session.end({ reason: 'resume', sessionId: 'session-1', resume: { id: 'session-1' } })
   await $.classic.SessionStart({ source: 'resume', session_id: 'session-2' })
   await clock.settle()
@@ -1932,7 +1774,6 @@ test('/clear and /resume switch the inbox to the other conversation, and each ke
   expect(await pane.find({ text: /Use Node or Python\?/ })).toBeUndefined()
 })
 
-// Conversation session-1 as an earlier process saved it, with one open question.
 const SAVED_SESSION = {
   savedAt: 900_000,
   ledger: {
@@ -1987,14 +1828,12 @@ test('a saved session the store cannot read shows as unreadable, not empty, unti
   await $.turn.complete({ answer: 'ok', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
   await clock.settle()
 
-  // A reload that finds the conversation still loaded needs no saved copy, so a failed read changes nothing.
   storeRefusal = 'the store is busy'
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   await clock.settle()
   expect(await pane.find({ text: /Could not read the inbox/ })).toBeUndefined()
   expect(await pane.find({ text: /Use Node or Python\?/ })).toBeDefined()
 
-  // /resume into it while the store refuses: the open pane says it could not read the inbox, not that nothing needs you.
   storeRefusal = undefined
   await $.session.end({ reason: 'clear', sessionId: 'session-1', resume: { id: 'session-1' } })
   await $.classic.SessionStart({ source: 'clear', session_id: 'session-2' })
@@ -2007,7 +1846,6 @@ test('a saved session the store cannot read shows as unreadable, not empty, unti
   expect(await pane.find({ text: 'Could not read the inbox.' })).toBeDefined()
   expect(await pane.find({ text: /Nothing needs you/ })).toBeUndefined()
 
-  // [Try again] stays drawn while it reads. While the store still refuses, it says so again.
   let readDone = () => {}
   storeHold = () => new Promise<void>(r => (readDone = r))
   await pane.press({ key: 'read-again' })
@@ -2020,7 +1858,6 @@ test('a saved session the store cannot read shows as unreadable, not empty, unti
   await clock.settle()
   expect(await pane.find({ text: 'Could not read the inbox.' })).toBeDefined()
 
-  // A turn and a finding meanwhile leave the saved copy as it was.
   ledgerReply = 'NOW: Looking at it'
   await $.prompt.submit({ text: 'keep going', wait: false, origin: { kind: 'composer' } })
   await $.turn.complete({ answer: 'ok', durationMs: 5, isAborted: false, turnId: 't2', reason: 'answer' })
@@ -2028,7 +1865,6 @@ test('a saved session the store cannot read shows as unreadable, not empty, unti
   await clock.settle()
   expect(stored.get('s:session-1')).toContain('Use Node or Python?')
 
-  // A reload after those turns still offers [Try again], and the next turn still leaves the saved copy as it was.
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   await clock.settle()
   expect(await pane.find({ text: 'Could not read the inbox.' })).toBeDefined()
@@ -2094,12 +1930,9 @@ test('the desktop pane draws each action as one button and the tabs as one click
 
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 36 } })
   const buttons = await pane.findAll({ type: 'Button' })
-  // No letters, hidden hotkey Buttons or list of keys: only clicks reach a desktop pane.
   expect(buttons.filter(b => b.props.hotkey !== undefined || String(b.props.label).startsWith(': '))).toEqual([])
   expect(buttons.map(b => b.key ?? '').filter(k => /-key$|^tab-key-|^next$|^previous$|^key-list$/.test(k))).toEqual([])
-  // The tabs are a Client region, not Buttons: a desktop Button is only as big as its label.
   expect(buttons.map(b => b.key ?? '').filter(k => k.startsWith('tab-'))).toEqual([])
-  // The recommended option is the desktop's primary button, and its label says so, as in the terminal.
   const recommended = await pane.find({ key: 'answer-i1-0' })
   expect([recommended?.props.label, recommended?.props.variant]).toEqual(['Node (recommended)', 'primary'])
   expect((await pane.find({ key: 'select-i2' }))?.type).toBe('Client')
@@ -2107,12 +1940,10 @@ test('the desktop pane draws each action as one button and the tabs as one click
   expect(((await pane.find({ key: 'select-i2' }))?.props.props as RowProps).side).toBe('3m')
   await pane.redraw({ ...PANE.props, bodyColumns: 69 })
 
-  // A click anywhere on a closed row opens it, and its actions work once the guard ends.
   await pane.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: 'select-i2' })
   await clock.settle()
   expect(await pane.find({ key: 'select-i2' })).toBeUndefined()
   await clock.advance(PRESS_GUARD_MS)
-  // Its follow-ups are plain text in one Client, which presses the one a click lands on.
   const links = (await pane.find({ key: 'links-i2' }))?.props.props as LinksProps
   const explainAt = links.links
     .slice(
@@ -2125,20 +1956,16 @@ test('the desktop pane draws each action as one button and the tabs as one click
   expect(sent).toHaveLength(1)
   expect(await pane.find({ text: /Explaining…/ })).toBeDefined()
 
-  // A click anywhere on a tab shows it, here in its bottom quarter line at the Findings tab's right edge.
   const tabBar = async () => (await pane.find({ key: 'tabs' }))?.props.props as TabsProps
   const { tabs, gap } = await tabBar()
   expect(tabs.map(t => t.id)).toEqual(['needsYou', 'findings', 'prs'])
   await pane.pointer({ type: 'down', x: tabs[0]!.width + gap + tabs[1]!.width - 1, y: 1.1, button: 'left', in: 'tabs' })
   await clock.settle()
   expect((await tabBar()).shown).toBe('findings')
-  // A click in the gap between tabs shows nothing new.
   await pane.pointer({ type: 'down', x: tabs[0]!.width, y: 1, button: 'left', in: 'tabs' })
   await clock.settle()
   expect((await tabBar()).shown).toBe('findings')
 
-  // A click anywhere on the Closed fold unfolds it. The click posts the state it asks for, so a
-  // second click before the redraw posts the same state, and the fold stays unfolded.
   await $.tool.call({ tool: 'mcp__inbox__record_finding', kind: 'issue', title: 'README is stale', detail: 'Old.' })
   await $.tool.call({ tool: 'mcp__inbox__close', id: 'f3', reason: 'fixed' } as never)
   await clock.advance(9000)
@@ -2155,7 +1982,6 @@ test('the desktop pane draws each action as one button and the tabs as one click
   expect((await fold()).isUnfolded).toBe(true)
   expect(await pane.find(closedItem)).toBeDefined()
 
-  // An open row outside a tree, as in Findings, draws: the engine refuses the whole drawing over one bad size.
   await $.tool.call({
     tool: 'mcp__inbox__record_finding',
     kind: 'issue',
@@ -2165,14 +1991,12 @@ test('the desktop pane draws each action as one button and the tabs as one click
   await clock.settle()
   expect(await pane.find({ text: 'Hot.' })).toBeDefined()
 
-  // The app draws its own close mark on the pane's title bar.
   expect(await pane.find({ key: 'close-pane' })).toBeUndefined()
 })
 
 test('a tool call after a hot reload, before the load converts the ledger, still applies', async ($, on) => {
   mock.clock(on, { now: 1 })
   world($, on, [])
-  // While set, the mod's ledger writes save it as a build before closedFindings existed left it.
   let strip = false
   on('state.set', { plugin: 'inbox', key: 'ledger' } as const, ($, e, next) => {
     if (!strip) return next(e)

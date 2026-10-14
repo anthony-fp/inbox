@@ -135,7 +135,6 @@ describe('parseReply', () => {
       { kind: 'copy', text: '{ "env": {} }', name: 'settings snippet' },
       { kind: 'run', command: 'node --version', name: null },
     ])
-    // A sign-in command needs the person's terminal, so it becomes a copy button.
     expect(u?.added[1]?.helps).toEqual([{ kind: 'terminal', command: 'npm login', name: null }])
     expect(u?.helped).toEqual([
       { id: 'i4', help: { kind: 'link', url: 'https://example.com/tokens', name: 'token page' } },

@@ -161,10 +161,7 @@ describe('prs', () => {
       [undefined, undefined, undefined],
     ])
     const threads = readThreads(THREADS)
-    // T1 is the viewer's note with a reply from sam, so it waits on the viewer.
-    // T4 is the viewer's own note with no reply yet, so it doesn't wait on the viewer.
     expect(threads[0]?.reply?.body).toBe('Quote the name.')
-    // The thread's time is its first comment's; a comment with none leaves it unknown.
     expect(threads.map(t => t.at)).toEqual([Date.parse('2026-10-08T09:30:00Z'), null, null])
     expect(threads[0]?.reply?.at).toBe(Date.parse('2026-10-08T10:00:00Z'))
     expect(threads.map(t => [t.id, t.isWaiting, t.isLinesChanged, t.line])).toEqual([
@@ -223,7 +220,6 @@ describe('prs', () => {
       status: 'waiting',
       text: 'Waiting: 1 thread sent to Claude, 1 check running',
     })
-    // A required review waits on others too. With nothing left on anyone, the PR is ready, which shows Merge.
     expect(readiness({ ...onOthers, checks: [], reviewDecision: 'REVIEW_REQUIRED' }, sent)).toMatchObject({
       status: 'waiting',
       text: 'Waiting: 1 thread sent to Claude, needs approval',
