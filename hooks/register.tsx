@@ -2947,6 +2947,7 @@ export const register: Register = on => {
       foldHover,
       isKeyListShown,
       optionsShown,
+      termProgram,
     ] = await Promise.all([
       drawnState($),
       read($, TAB),
@@ -2957,6 +2958,7 @@ export const register: Register = on => {
       read($, FOLD_HOVER),
       read($, IS_KEY_LIST_SHOWN),
       read($, OPTIONS_SHOWN),
+      $.env.get('TERM_PROGRAM'),
     ])
     // A hot reload keeps TYPING but empties fieldSeeds, so an open field takes its seed again here.
     if (typing !== null && !fieldSeeds.has(typing)) fieldSeeds.set(typing, (await read($, DRAFTS))[typing] ?? '')
@@ -4187,6 +4189,9 @@ export const register: Register = on => {
     // The docked terminal's tabs rest on a line in the unselected tabs' color, along their bottom row.
     const hasTabLine = !isInline && look !== 'desktop'
     const tabLine = pal.tab ?? pal.divider
+    // Terminal.app draws block characters from its font, which leaves a seam between a half block and the filled
+    // line beside it. There a tab is its filled name line alone.
+    const hasHalfLines = termProgram !== 'Apple_Terminal'
     const tabs = (
       <Box
         paddingLeft={isInline ? 2 : 1}
@@ -4247,13 +4252,14 @@ export const register: Register = on => {
                   )
 
                 // A tab is its name's line between half lines of its fill, ▄ above and ▀ below, so the name sits
-                // in the middle of a shape two lines tall. The selected tab is raised and bold. It has no colored
+                // in the middle of a shape two lines tall. Without half lines, its bottom line is the line the tabs
+                // rest on. The selected tab is raised and bold. It has no colored
                 // line along its top: that edge falls mid-cell, where the line would need a third color in a cell
                 // that draws two.
                 if (tab === id)
                   return (
                     <Box flexDirection="column" flexShrink={0}>
-                      <Text color={pal.raised}>{'▄'.repeat(width)}</Text>
+                      <Text color={pal.raised}>{(hasHalfLines ? '▄' : ' ').repeat(width)}</Text>
                       <Text backgroundColor={pal.raised}>
                         {pad}
                         <Text bold color={pal.raisedText} backgroundColor={pal.raised}>
@@ -4267,7 +4273,11 @@ export const register: Register = on => {
                         ) : null}
                         {pad}
                       </Text>
-                      <Text color={pal.raised}>{'▀'.repeat(width)}</Text>
+                      {hasHalfLines ? (
+                        <Text color={pal.raised}>{'▀'.repeat(width)}</Text>
+                      ) : (
+                        <Text color={tabLine}>{'─'.repeat(width)}</Text>
+                      )}
                     </Box>
                   )
 
@@ -4276,13 +4286,14 @@ export const register: Register = on => {
                 // with no tab fill draws no half lines: its bottom line is the line the tabs rest on, and only the
                 // name's line raises.
                 const show = () => void showTab($, id)
-                const edgeHover = pal.tab ? raiseEdge : { inverse: false }
+                const edgeFill = hasHalfLines ? pal.tab : undefined
+                const edgeHover = edgeFill ? raiseEdge : { inverse: false }
 
                 return (
                   <Box key={`tab-block-${id}`} flexDirection="column" flexShrink={0}>
                     <Button plain key={`tab-${id}-above`} hover={edgeHover} onPress={show}>
-                      {pal.tab ? (
-                        <Text color={pal.tab} hover={raiseEdge}>
+                      {edgeFill ? (
+                        <Text color={edgeFill} hover={raiseEdge}>
                           {'▄'.repeat(width)}
                         </Text>
                       ) : (
@@ -4301,8 +4312,8 @@ export const register: Register = on => {
                       <Button plain key={`tab-${id}-after`} label={pad} hover={raise} onPress={show} />
                     </Box>
                     <Button plain key={`tab-${id}-below`} hover={edgeHover} onPress={show}>
-                      {pal.tab ? (
-                        <Text color={pal.tab} hover={raiseEdge}>
+                      {edgeFill ? (
+                        <Text color={edgeFill} hover={raiseEdge}>
                           {'▀'.repeat(width)}
                         </Text>
                       ) : (
