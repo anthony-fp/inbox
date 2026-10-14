@@ -511,11 +511,27 @@
       /* Keeps the fold's margin inside, so its height is the whole end's content height. */
       .group-end-content {
         display: flow-root;
+        position: relative;
       }
       /* A group's line in place of its rows while it has none open, where a row's text would start. */
       .group-empty {
         padding: var(--row-pad) 14px var(--row-pad) var(--text-x);
         color: var(--muted);
+      }
+      /*
+       * A leaving empty line takes no height and stays where it was, above the fold, while the group's end shrinks
+       * and clips it from the top as rows grow in over it.
+       */
+      .group-empty.leaving {
+        position: absolute;
+        inset: auto 0 100% 0;
+        pointer-events: none;
+        animation: fade-out var(--enter) forwards;
+      }
+      @keyframes fade-out {
+        to {
+          opacity: 0;
+        }
       }
       /* The chevron centers in the mark column and the label starts at the rows' text, as a group's rows do. */
       .fold {

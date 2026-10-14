@@ -1354,7 +1354,7 @@ function ItemGroup({
       <Entries entries={entries} group={kind} all={all} now={now} />
       <GroupEnd
         group={kind}
-        empty={rest.length === 0 ? groupEmptyText(title) : null}
+        empty={groupEmpty(title, rest)}
         closed={closed}
         total={closedTotal(v.needsYou.closed[kind === 'question' ? 'questions' : 'tasks'], settledIn(rest))}
         now={now}
@@ -1366,6 +1366,19 @@ function ItemGroup({
 /** A list's entries without the rows leaving it, which no longer count: its empty line and Closed fold stand in for them. */
 function staying(entries: Entry[]): Entry[] {
   return entries.filter(x => drawnRows.get(entryId(x))?.track.state !== 'leaving')
+}
+
+/** A group's empty line, and whether it is leaving. */
+type GroupEmpty = { text: string; isLeaving: boolean }
+
+/**
+ * A group's empty line, drawn while no row stays. While the rows that stay are all entering, as when rows arrive in an
+ * empty group, the line stays drawn, leaving, so it fades out as they grow in over its place.
+ */
+function groupEmpty(title: string, rest: Entry[]): GroupEmpty | null {
+  const isArriving = rest.every(x => drawnRows.get(entryId(x))?.track.state === 'entering')
+
+  return rest.length === 0 || isArriving ? { text: groupEmptyText(title), isLeaving: rest.length > 0 } : null
 }
 
 /** A closed item or finding as a Closed fold lists it. */
@@ -1409,7 +1422,7 @@ function GroupEnd({
 }: {
   group: FoldGroup
   /** The group's empty line, or null while a row stays. */
-  empty: string | null
+  empty: GroupEmpty | null
   closed: ClosedLine[]
   /** Every close the fold keeps, which its label counts. `closed` lists the newest few. */
   total: number
@@ -1423,7 +1436,11 @@ function GroupEnd({
     <>
       <div class="group-end" data-motion={`end-${group}`}>
         <div class="group-end-content">
-          {empty ? <div class="group-empty">{empty}</div> : null}
+          {empty ? (
+            <div class={empty.isLeaving ? 'group-empty leaving' : 'group-empty'} aria-hidden={empty.isLeaving}>
+              {empty.text}
+            </div>
+          ) : null}
           {total > 0 ? (
             <button type="button" class="fold" data-fold={group} onClick={() => toggleFold(group)}>
               <Icon name={isUnfolded ? 'down' : 'right'} />
@@ -1538,7 +1555,7 @@ function Findings({ v, lists, now }: { v: View; lists: Lists; now: number }) {
             <Entries entries={g.entries} group="finding" all={lists.byTab.findings} now={now} />
             <GroupEnd
               group={g.kind}
-              empty={rest.length === 0 ? groupEmptyText(g.title) : null}
+              empty={groupEmpty(g.title, rest)}
               closed={shown(g.kind)}
               total={closedTotal(closedOf(g.kind), settled)}
               now={now}
