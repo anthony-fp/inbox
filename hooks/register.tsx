@@ -4219,21 +4219,20 @@ export const register: Register = on => {
                   )
 
                 // A tab is its name's line between half lines of its fill, ▄ above and ▀ below, so the name sits
-                // in the middle of a shape two lines tall. The selected tab is raised, with its name in its color.
-                // It has no colored line along its top: that edge falls mid-cell, where the line would need a
-                // third color in a cell that draws two.
-                if (tab === id) {
-                  const color = pal.tone[id] ?? pal.raisedText
+                // in the middle of a shape two lines tall. The selected tab is raised and bold. It has no colored
+                // line along its top: that edge falls mid-cell, where the line would need a third color in a cell
+                // that draws two.
+                if (tab === id)
                   return (
                     <Box flexDirection="column" flexShrink={0}>
                       <Text color={pal.raised}>{'▄'.repeat(width)}</Text>
                       <Text backgroundColor={pal.raised}>
                         {pad}
-                        <Text bold color={color} backgroundColor={pal.raised}>
+                        <Text bold color={pal.raisedText} backgroundColor={pal.raised}>
                           {label}
                         </Text>
                         {count > 0 ? (
-                          <Text bold color={color} backgroundColor={pal.raised}>
+                          <Text bold color={pal.tone[id] ?? pal.raisedText} backgroundColor={pal.raised}>
                             {' '}
                             {count}
                           </Text>
@@ -4243,7 +4242,6 @@ export const register: Register = on => {
                       <Text color={pal.raised}>{'▀'.repeat(width)}</Text>
                     </Box>
                   )
-                }
 
                 // Each line is a Button, so a click anywhere on the tab selects it. Under the pointer, the keyed
                 // Box raises the tab: its half lines by their glyphs' color, its name's line by its fill. A palette
