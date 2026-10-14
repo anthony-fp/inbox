@@ -33,8 +33,13 @@ To install from the desktop app instead, open a Code session and choose
 + > Plugins > Add plugin, then Manage plugins. `/plugin` does not run there.
 The inbox does not reach the app's cloud sessions.
 
-To update, run `claude plugin update inbox`, then `/reload-plugins` in any
-session that's already open.
+To update, run these, then `/reload-plugins` in any session that's already
+open:
+
+```sh
+claude plugin marketplace update inbox
+claude plugin update inbox
+```
 
 - It makes one Sonnet call after each of Claude's replies. See [Cost](#cost).
 - It was built and tested with Claude Code 2.1.296.
