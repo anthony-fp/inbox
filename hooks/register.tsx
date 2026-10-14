@@ -2325,7 +2325,6 @@ async function turnOn($: EngineInterface) {
       })
       .catch(refused),
     $.tool.register({ name: 'close', description: CLOSE_DESCRIPTION, inputSchema: CLOSE_SCHEMA }).catch(refused),
-    syncTheme($),
   ])
   // A pane kept across a hot reload is already drawn.
   if (toolsRefused) await redrawPane($)
@@ -2353,10 +2352,12 @@ async function loadConversation($: EngineInterface, id: string) {
   isReadingAgain = false
   // A reload stops any update the previous load had running, and state outlives
   // it, so an update in flight at load was cut off: record it as failed.
+  // The theme read at the start is gone after /clear, so each conversation reads it.
   const [presence, current, saved] = await Promise.all([
     update($, PRESENCE, p => (p.isUpdating ? { ...p, isUpdating: false, ledgerState: 'failed' as const } : p)),
     upgradeState($),
     readSaved($, id),
+    syncTheme($),
   ])
   // Only a conversation with no turns loaded yet needs its saved copy, so only that load's read decides
   // whether the copy is unreadable. Once turns ran, only [Try again] or another conversation clears UNREADABLE.
