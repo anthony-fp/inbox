@@ -3335,9 +3335,11 @@ export const register: Register = on => {
         ) : (
           <Box key={`keyed-${action.key}`} flexDirection="row">
             {hotkey ? (
-              <Text color={pal.key} dimColor={isOpenGuarded} hover={{ color: pal.muted, inverse: true }}>
-                {hotkey}
-              </Text>
+              <Box flexShrink={0}>
+                <Text color={pal.key} dimColor={isOpenGuarded} hover={{ color: pal.muted, inverse: true }}>
+                  {hotkey}
+                </Text>
+              </Box>
             ) : null}
             <Button
               plain
