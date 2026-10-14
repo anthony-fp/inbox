@@ -584,7 +584,10 @@
         margin: -3px 0 -3px 12px;
         background: color-mix(in oklab, var(--soft) 45%, transparent);
       }
-      /* While an Undo press is out, its arrow turns. Its label stays, so the pill keeps its width and the line its wrap. */
+      /* While an Undo press is out, its label and arrow dim and the arrow turns. The label stays, so the pill keeps its width and the line its wrap. */
+      .key.undo.undoing {
+        color: var(--muted);
+      }
       .key.undo.undoing .icon {
         animation: undo-turn 900ms linear infinite;
       }

@@ -26,7 +26,7 @@ Each row the shown tab draws, keyed by its id, is in one state:
 | `closing` | The line, and the panel, inert, while the height shrinks over it, 200 ms | `closed` |
 | `settling` | The settled line, and the panel the row last drew open, inert, while the height shrinks over it, 200 ms | `settled` |
 | `settled` | The settled line, with Undo and its countdown when the person's own Done or Dismiss closed it | |
-| `undoing` | The settled line while an Undo press is out: Undo's arrow turns and its countdown pauses | |
+| `undoing` | The settled line while an Undo press is out: Undo's label and arrow dim, the arrow turns and the countdown pauses | |
 | `leaving` | The row's last form, fading while its height collapses to 0, 200 ms | Removed. A settled row counts in the Closed fold from the start of its exit |
 
 At each draw the tab works out the form each row should have now, its target:
