@@ -752,22 +752,32 @@ test('after a failed update, the next reply catches up over the whole conversati
   expect(await pane.find({ key: 'undo-f3' })).toBeUndefined()
 })
 
-test('a reload that cuts off the end-of-turn hook catches up on load', async ($, on) => {
+test('a reload that cuts off the end-of-turn hook catches up on load, and a subagent’s turn leaves nothing to catch up', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])
-  on('model.fork', () => ({
-    value: {
-      isAnswered: true,
-      text: 'GOAL: Add a greeting CLI\nNOW: Waiting on the push\nNEW: decide | - | Push the branch to origin? | yes / no | yes',
-      usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
-    },
-  }))
+  let forks = 0
+  on('model.fork', () => {
+    forks++
+    return {
+      value: {
+        isAnswered: true,
+        text: 'GOAL: Add a greeting CLI\nNOW: Waiting on the push\nNEW: decide | - | Push the branch to origin? | yes / no | yes',
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      },
+    }
+  })
 
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   await $.prompt.submit({ text: 'add a greeting cli', wait: false, origin: { kind: 'composer' } })
   await $.turn.start({ text: 'add a greeting cli', turnId: 't1' })
   await $.turn.complete({ answer: 'Plan ready.', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
   await clock.settle()
+  const updates = forks
+  await $.turn.start({ text: 'Look around the repo', turnId: 's1', agentId: 'a1' })
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  expect(forks).toBe(updates)
+
   await $.turn.start({ text: '', turnId: 't2' })
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   await clock.settle()

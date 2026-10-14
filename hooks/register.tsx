@@ -2569,6 +2569,7 @@ export const register: Register = on => {
   })
 
   on('turn.start', async ($, e, next) => {
+    if (e.agentId) return next(e)
     isTurnRunning = true
     // A turn that starts means the session runs again. Counted here, before the
     // turn can end, since a reload can cut off its end-of-turn hook.
