@@ -692,6 +692,8 @@ Sources: [R#render-sites; IF#change-what-claude-code-already-draws; T: render-si
 ### Other elements
 
 - Text: `color`, `bold`, `dimColor`, `italic`, `underline`, `strikethrough`, `inverse`, `backgroundColor`, `wrap` (`'wrap'`, `'truncate'`, `'truncate-start'`, `'truncate-middle'`, `'truncate-end'`; types add `'end'`, `'middle'`). [IF; GA#text; T]
+  - 2.1.299 added `size`, `weight`, `mono` and `tabular`, and deprecated `bold` for `weight`. `bold: true` is read as `weight: 'semibold'`. [CL#2-1-299; T: `TextProps.bold`]
+  - Live, 2026-10-14, terminal 2.1.296: a pane with one Text `weight` was refused whole, with "ui.render (Pane) refused: Text prop "weight" is not allowed; the engine drew its own". The inbox keeps `bold` while any engine it supports is older than 2.1.299. The Claude desktop app v2.37337.1 bundles 2.1.295.
 - Box: flex layout, `gap`, `padding`, `margin`, `width`, `height`, `borderStyle` (ten names; any other "draws with no border"), `backgroundColor`, `position`, `hover`. Types add `display: 'flex' | 'none'` and `overflow`. [R#elements; GA#box; T]
 - Markdown takes `text`. Code takes `language` or `path`, `startLine`, `format: 'diff'`. [GA#markdown; GA#code]
 - Svg: `source` ≤131,072 characters; `alt` required "since a surface without the element draws nothing else of it"; `isInteractive: true` draws "in a script-less sandboxed frame" so hover and animation work. [GA#svg; T: `SvgProps`]
