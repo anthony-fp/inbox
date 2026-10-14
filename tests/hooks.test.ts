@@ -1890,6 +1890,33 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   expect(stored.get('s:session-1')).toBe(saved)
 })
 
+test('/inbox demo recording shows the sample entries without the notices that mark them as samples', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const demo = demoView(1_000_000)
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+
+  expect((await $.command.run({ command: 'inbox', args: 'demo recording' } as never)).text).toContain('for a recording')
+  const pane = await $.ui.mount(PANE)
+  const band = await $.ui.mount({ plugin: 'inbox', surface: 'terminal', ...BAND })
+  expect(await pane.find({ text: demo.ledger.items.find(i => i.id === 'd11')!.options[0] })).toBeDefined()
+  expect(await pane.find({ text: /Sample entries\./ })).toBeUndefined()
+  expect(await band.find({ text: /^Needs you 7/ })).toBeDefined()
+  for (const view of [pane, band]) expect(await view.find({ key: 'hide-demo' })).toBeUndefined()
+
+  await clock.advance(PRESS_GUARD_MS)
+  await pane.press({ key: 'answer-d11-0' })
+  await clock.settle()
+  expect(sent).toEqual([])
+  expect(await pane.find({ key: 'answer-d11-0' })).toBeUndefined()
+  expect(await pane.find({ text: 'Sample entry: nothing was sent.' })).toBeUndefined()
+
+  expect((await $.command.run({ command: 'inbox', args: 'demo' } as never)).text).toBe('Opened the inbox.')
+  expect((await $.command.run({ command: 'inbox', args: 'demo' } as never)).text).toContain('Run /inbox demo again')
+  expect(await pane.find({ text: /Sample entries\./ })).toBeDefined()
+  expect(await band.find({ text: /^Demo: Needs you 7/ })).toBeDefined()
+})
+
 test('/clear and /resume switch the inbox to the other conversation, and each keeps its saved items', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])

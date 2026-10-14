@@ -229,6 +229,7 @@ const DRAW_IN_STEPS = 4
 // After a resize, how long the inline pane waits before it scrolls back to the open row.
 const RESIZE_SCROLL_MS = 100
 const DEMO = atom({ plugin: 'inbox', key: 'demo' } as const, null as DemoCopy | null)
+const DEMO_RECORDING = atom({ plugin: 'inbox', key: 'isDemoRecording' } as const, false)
 const TOOLS_REFUSED_TEXT =
   "Claude cannot record or close items here: your organization's settings block the inbox's tools."
 const PR_POLL_MS = 2 * 60_000
@@ -2058,7 +2059,7 @@ async function selectRestored($: EngineInterface, id: string) {
 
 /**
  * Runs a press on the demo's copy. It changes only the copy and performs
- * nothing: each send, open or copy becomes its row's sample note instead.
+ * nothing: each send, open or copy becomes its row's sample note instead, except in a recording.
  * Rows still settle, fold, undo and show their ✓ on the copy.
  */
 async function runDemoPress($: EngineInterface, p: RowPress | PrPress, wasWaiting: boolean) {
@@ -2067,6 +2068,7 @@ async function runDemoPress($: EngineInterface, p: RowPress | PrPress, wasWaitin
   if (!('ref' in p) && p.action === 'type') await update($, TYPING, t => (t === p.id ? null : t))
   let applied = { stale: true } as Applied
   let isClosing = false
+  const isRecording = await read($, DEMO_RECORDING)
   await update($, DEMO, d => {
     if (!d) return d
     // The copy's own turn counts, so a sample hand-off folds by them.
@@ -2081,7 +2083,7 @@ async function runDemoPress($: EngineInterface, p: RowPress | PrPress, wasWaitin
       ...d,
       ledger: r.ledger,
       lastActions: withLasts(d.lastActions, lasts, r.drop),
-      notes: isSample ? { ...notes, [rowId]: { note: 'sample' as const, at: now } } : notes,
+      notes: isSample && !isRecording ? { ...notes, [rowId]: { note: 'sample' as const, at: now } } : notes,
       turns: demoTurns(d.turns, r.effects),
     }
   })
@@ -2266,31 +2268,46 @@ function desktopTabSizes(
 
 async function drawnState(
   $: EngineInterface,
-): Promise<DemoCopy & { view: InboxView; isDemo: boolean; isUnread: boolean; now: number }> {
-  const [ledger, stop, prViews, lastActions, notes, presence, demo, unreadable, now] = await Promise.all([
-    read($, LEDGER),
-    read($, STOP),
-    read($, PR_VIEWS),
-    read($, LAST_ACTIONS),
-    read($, NOTES),
-    read($, PRESENCE),
-    read($, DEMO),
-    read($, UNREADABLE),
-    $.clock.now(),
-  ])
+): Promise<DemoCopy & { view: InboxView; isDemo: boolean; showsDemoNotices: boolean; isUnread: boolean; now: number }> {
+  const [ledger, stop, prViews, lastActions, notes, presence, demo, isDemoRecording, unreadable, now] =
+    await Promise.all([
+      read($, LEDGER),
+      read($, STOP),
+      read($, PR_VIEWS),
+      read($, LAST_ACTIONS),
+      read($, NOTES),
+      read($, PRESENCE),
+      read($, DEMO),
+      read($, DEMO_RECORDING),
+      read($, UNREADABLE),
+      $.clock.now(),
+    ])
   const turns = { turnsStarted: presence.turnsStarted, turnsApplied: presence.turnsApplied }
   const drawn = demo ?? { ledger, stop, prViews, lastActions, notes, turns }
 
   // Needs you says this conversation's saved session could not be read, but not over the demo's samples.
   const isUnread = demo === null && unreadable === sessionId
 
-  return { ...drawn, view: viewOf({ ...drawn, now }, presence), isDemo: demo !== null, isUnread, now }
+  return {
+    ...drawn,
+    view: viewOf({ ...drawn, now }, presence),
+    isDemo: demo !== null,
+    showsDemoNotices: demo !== null && !isDemoRecording,
+    isUnread,
+    now,
+  }
 }
 
-/** Shows the demo's sample entries on a fresh copy, or ends the demo. */
-async function setDemo($: EngineInterface, isShown: boolean) {
+/**
+ * Shows the demo's sample entries on a fresh copy, or ends the demo. For a recording, the demo leaves out the notices
+ * that mark its entries as samples, so a video can show them as a session's own.
+ */
+async function setDemo($: EngineInterface, isShown: boolean, isRecording = false) {
   const now = await $.clock.now()
-  await update($, DEMO, () => (isShown ? demoView(now) : null))
+  await Promise.all([
+    update($, DEMO, () => (isShown ? demoView(now) : null)),
+    update($, DEMO_RECORDING, () => isShown && isRecording),
+  ])
   // The open rows and the field name the other entries' ids, so each tab draws its top row open again.
   await Promise.all([update($, SELECTION, () => NO_SELECTION), update($, TYPING, () => null)])
   // The copy starts with a row that just closed, whose leave bar runs down.
@@ -2516,6 +2533,7 @@ export const register: Register = on => {
         update($, STOP, () => null),
         update($, DIALOGS, () => []),
         update($, DEMO, () => null),
+        update($, DEMO_RECORDING, () => false),
         publishStatus($, true),
       ])
     }
@@ -2748,13 +2766,18 @@ export const register: Register = on => {
 
   on('command.run', { command: 'inbox' }, async ($, e) => {
     const isShown = (await read($, DEMO)) !== null
-    if (e.args.trim() === 'demo') await setDemo($, !isShown)
+    const args = e.args.trim().split(/\s+/).join(' ')
+    if (args === 'demo' || args === 'demo recording') await setDemo($, !isShown, args === 'demo recording')
     else if ((await read($, TAB)) === 'prs') await findPrs($)
-    const isDemo = (await read($, DEMO)) !== null
+    const [isDemo, isDemoRecording] = await Promise.all([read($, DEMO).then(d => d !== null), read($, DEMO_RECORDING)])
     await showInbox($)
 
     return {
-      text: isDemo ? 'Showing sample entries in the inbox. Run /inbox demo again to go back.' : 'Opened the inbox.',
+      text: !isDemo
+        ? 'Opened the inbox.'
+        : isDemoRecording
+          ? 'Showing sample entries without their notices, for a recording. Run /inbox demo to go back.'
+          : 'Showing sample entries in the inbox. Run /inbox demo again to go back.',
     }
   })
 
@@ -2815,7 +2838,7 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (!isOn || e.props.hasSurvey) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
-    const [{ ledger, stop, view, isDemo, now }, theme] = await Promise.all([drawnState($), read($, THEME)])
+    const [{ ledger, stop, view, showsDemoNotices, now }, theme] = await Promise.all([drawnState($), read($, THEME)])
     if (!stop && !ledger.card && ledger.items.length === 0 && ledger.findings.length === 0) return next(e)
     const pal = paletteFor(theme, lookOf(e.surface))
     // Each count as its tab reads: the tab's name, muted, then the count in the tab's color.
@@ -2832,7 +2855,7 @@ export const register: Register = on => {
       <Box flexDirection="row" alignItems="flex-start" gap={1}>
         <Box flexGrow={1} flexShrink={1} minWidth={0}>
           <Text wrap="truncate-end">
-            {isDemo ? <Text dimColor>Demo: </Text> : null}
+            {showsDemoNotices ? <Text dimColor>Demo: </Text> : null}
             {counts.length > 0 ? (
               counts.flatMap((p, n) => (n === 0 ? [p] : [<Text dimColor>{DOT}</Text>, p]))
             ) : (
@@ -2840,7 +2863,7 @@ export const register: Register = on => {
             )}
           </Text>
         </Box>
-        {isDemo ? <Button key="hide-demo" label="Hide demo" onPress={() => void setDemo($, false)} /> : null}
+        {showsDemoNotices ? <Button key="hide-demo" label="Hide demo" onPress={() => void setDemo($, false)} /> : null}
         <Button key="open-inbox" label="Open inbox" onPress={() => void openInbox($)} />
       </Box>
     )
@@ -2920,7 +2943,7 @@ export const register: Register = on => {
         ? { rowPad: 2 * DESKTOP_ROW_PAD, settledPad: 2 * DESKTOP_ROW_PAD, buttonGap: 1, isFoldGapped: false }
         : { rowPad: blankLine, settledPad: 0, buttonGap: 2, isFoldGapped: true }
     const [
-      { ledger, prViews: prState, lastActions, notes, turns, stop, view, isDemo, isUnread, now },
+      { ledger, prViews: prState, lastActions, notes, turns, stop, view, showsDemoNotices, isUnread, now },
       tab,
       selection,
       theme,
@@ -5059,7 +5082,7 @@ export const register: Register = on => {
     // k and the selected row's keys are Buttons in a hidden Box.
     const drawn = (
       <Box flexDirection="column" minHeight={isInline ? undefined : e.props.scroll.bodyRows} backgroundColor={pal.body}>
-        {isDemo ? (
+        {showsDemoNotices ? (
           // The notice is quiet, on one line with its button, as each app words a passing note.
           <Box
             flexDirection="row"

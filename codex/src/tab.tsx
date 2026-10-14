@@ -506,13 +506,15 @@ async function act(rowId: string, press: RowPress | PrPress, onSent?: () => void
     // After the view, so `onSent` reads the rows as they are after the press.
     if (!r.error && r.note !== 'stale') onSent?.()
     if (!r.error && r.note !== 'stale' && r.view && wasWaiting) openAfterClose(r.view, rowId)
-    if (r.note && view && isListed(view, rowId)) {
-      notes.set(rowId, { text: noteText(r.note), at: Date.now() })
+    // A recording build leaves out the note that marks a press as a sample's.
+    const note = DEMO_RECORDING && r.note === 'sample' ? null : r.note
+    if (note && view && isListed(view, rowId)) {
+      notes.set(rowId, { text: noteText(note), at: Date.now() })
       drawIn(SETTLED_MS)
       // A stale press's typed words go back into the field they were sent from.
-      if (r.note === 'stale' && press.action === 'type') typing = rowId
-    } else if (r.note) {
-      lineNote = { text: noteText(r.note), at: Date.now() }
+      if (note === 'stale' && press.action === 'type') typing = rowId
+    } else if (note) {
+      lineNote = { text: noteText(note), at: Date.now() }
       drawIn(SETTLED_MS)
     }
   } catch {
@@ -1846,7 +1848,7 @@ function App({ lists }: { lists: Lists | null }): ComponentChildren {
 
   return (
     <>
-      {isDemo ? (
+      {isDemo && !DEMO_RECORDING ? (
         <div class="demo-note">
           <span>{DEMO_NOTICE}</span>
           <button type="button" class="key ghost" onClick={() => void toggleDemo()}>

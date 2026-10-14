@@ -97,7 +97,9 @@ error, the stop shows on a second line. Codex has no such line.
 
 To see every part with sample items in Claude Code, run `/inbox demo`. Presses
 on them change only the samples and send nothing. Press Hide demo, or run the
-command again, to go back to your own items.
+command again, to go back to your own items. `/inbox demo recording` shows the
+same samples without the notices that mark them, for recording a video. Run
+`/inbox demo` to end it.
 
 ## Cost
 

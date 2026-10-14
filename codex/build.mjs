@@ -13,7 +13,9 @@
 //                          server runs the handler, with no restart.
 //
 // The tab shows its Show demo button only in --dev builds, or when INBOX_DEMO_BUTTON=1 is set for a build to try in
-// another install. Don't commit plugin/dist from such a build: --check would fail it.
+// another install. INBOX_DEMO_RECORDING=1 shows the button too, and the demo then leaves out the notices that mark its
+// entries as samples, for recording a video, as `/inbox demo recording` does in Claude Code. Don't commit plugin/dist
+// from either build: --check would fail it.
 
 import { createHash } from 'node:crypto'
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, watch, writeFileSync } from 'node:fs'
@@ -52,13 +54,18 @@ async function serverBuild() {
   return hash.digest('hex').slice(0, 12)
 }
 
-const isDemoButton = mode === '--dev' || process.env.INBOX_DEMO_BUTTON === '1'
+const isDemoRecording = process.env.INBOX_DEMO_RECORDING === '1'
+const isDemoButton = mode === '--dev' || process.env.INBOX_DEMO_BUTTON === '1' || isDemoRecording
 
 /** The tab's script, bundled for the browser, holding the fingerprint of the server sources it was built with. */
 async function buildTabScript(build) {
   const tab = await esbuild.build({
     absWorkingDir: here,
-    define: { SERVER_BUILD: JSON.stringify(build), DEMO_BUTTON: JSON.stringify(isDemoButton) },
+    define: {
+      SERVER_BUILD: JSON.stringify(build),
+      DEMO_BUTTON: JSON.stringify(isDemoButton),
+      DEMO_RECORDING: JSON.stringify(isDemoRecording),
+    },
     entryPoints: ['src/tab.tsx'],
     bundle: true,
     platform: 'browser',
