@@ -1970,10 +1970,14 @@ function animateDraw(before: Heights, changed: ReadonlySet<string>) {
     entering.clear()
     return
   }
-  // In the draw that starts a row's exit, other heights move on the exit's curve. A group's empty line and fold then
-  // grow at the rate the row collapses above them, so the rows below move one way.
-  const isExitDraw = [...changed].some(key => drawnRows.get(key)?.track.state === 'leaving')
-  const move: KeyframeAnimationOptions = isExitDraw ? { ...EXIT, fill: 'none' } : MOVE
+  // In the draw that starts a row's exit or entry, other heights move on that row's curve. A group's empty line then
+  // grows or closes at the rate the row collapses or grows beside it, so the rows below move one way.
+  const started = new Set([...changed].map(key => drawnRows.get(key)?.track.state))
+  const move: KeyframeAnimationOptions = started.has('leaving')
+    ? { ...EXIT, fill: 'none' }
+    : started.has('entering')
+      ? ENTER
+      : MOVE
   for (const el of document.querySelectorAll<HTMLElement>('[data-motion]')) {
     const key = el.dataset.motion!
     const was = before.get(key)

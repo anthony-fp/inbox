@@ -52,7 +52,8 @@ Rules that hold in every state:
 - **A move starts from the drawn height and opacity.** A row turned around mid-move, or closed while it still grows in, starts the new animation from where it is drawn.
 - **A row's end height is its content's height.** The tab adds up the heights of the row's children, which no animation of the row changes.
 - **A leaving row keeps its place.** The tab draws it where it last drew it until it is removed, in its Needs you group or its kind's Findings group.
-- **A group's empty line and Closed fold take a leaving row's place.** A leaving row no longer counts in its group, so they show from the draw that starts its exit. One element holds both, and its height grows on the exit's curve while the row collapses. The rows below then move once, in one direction.
+- **A group's empty line and Closed fold take a leaving row's place.** A leaving row no longer counts in its group, so they show from the draw that starts its exit. One element holds both, with its content at its bottom. Its height grows on the exit's curve while the row collapses, so a fold already shown stays in view and the empty line slides in above it. The rows below move once, in one direction.
+- **A row that arrives in an empty group takes the empty line's place.** The empty line goes in the draw that brings the row in, and its space closes on the entry's curve while the row grows. The rows below move only by the difference in height, in one direction.
 - **Rows of a tab not shown are forgotten.** They show their form at once when their tab shows.
 - **Reduced motion.** Every move ends in the draw that starts it.
 - **The line never moves** between `closed`, `opening`, `open` and `closing`, as [motion-and-undo.md](motion-and-undo.md) says.
