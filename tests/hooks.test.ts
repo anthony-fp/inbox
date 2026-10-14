@@ -436,7 +436,7 @@ test('a task handed to Claude folds and leaves the count until Claude’s reply 
   expect(
     (await pane.find({ type: 'Text', text: '✓ Copied env line\u2007·\u2002Opened .env.local' }))?.props.color,
   ).not.toBe(red)
-  expect((await pane.find({ type: 'Text', text: '\u2007·\u2002Could not open load.md' }))?.props.color).toBe(red)
+  expect((await pane.find({ type: 'Text', text: /Could not open load\.md/ }))?.props.color).toBe(red)
   expect((await pane.find({ key: 'help-i2-0-key' }))?.props.label).toBe('Copy env line and open .env.local')
   await clock.advance(SETTLED_MS)
   expect(await pane.find({ text: /Opened \.env\.local/ })).toBeUndefined()
