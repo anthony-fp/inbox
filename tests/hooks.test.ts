@@ -454,6 +454,7 @@ test('a task handed to Claude folds and leaves the count until Claude’s reply 
   expect(await pane.find({ text: /Run load script/ })).toBeDefined()
   expect(await pane.find({ key: 'help-i1-1' })).toBeUndefined()
   expect(await band.find({ text: /Needs you 1/ })).toBeDefined()
+  expect(await pane.find({ key: 'help-i2-0' })).toBeDefined()
 
   // Opened again, its other steps still show: a copy says where to run the command, and an open of a missing file
   // says so in red, with no toast. Neither brings the task back into the count.
@@ -906,6 +907,26 @@ test('a finding Claude records while the pane shows an empty tab brings the pane
   })
   await clock.settle()
   expect(await pane.find({ text: /Cache the API token/ })).toBeDefined()
+})
+
+test('/inbox opens on the tab that has rows when the tab it would show is empty', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  let isShown = false
+  on('ui.panes', () => ({ value: [{ id: 'inbox', title: 'Inbox', isShown, isFocused: isShown, isPlaced: isShown }] }))
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.tool.call({
+    tool: 'mcp__inbox__record_finding',
+    kind: 'issue',
+    title: 'No lint script',
+    detail: 'Only tests run.',
+  })
+  await clock.settle()
+  isShown = true
+  await $.command.run({ command: 'inbox', args: '' } as never)
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ key: 'address-f1' })).toBeDefined()
 })
 
 test('findings that arrive one by one after the pane moves to them keep the first one open', async ($, on) => {
@@ -1741,12 +1762,17 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])
   const SAMPLE = 'Sample entry: nothing was sent.'
+  const demo = demoView(1_000_000)
+  const literal = (text: string) => new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  const branchRef = demo.prViews.branchRef!
+  const linkedRef = demo.ledger.prs.find(ref => ref !== branchRef)!
+  const [repo, linkedNumber] = linkedRef.split('#') as [string, string]
   // The session links a real PR with a sample PR's ref, so a sample press that reached the real state would show.
   const view = (number: number, title: string) =>
     JSON.stringify({
       number,
       title,
-      url: `https://github.com/acme/storefront/pull/${number}`,
+      url: `https://github.com/${repo}/pull/${number}`,
       isDraft: false,
       state: 'OPEN',
       baseRefName: 'main',
@@ -1755,8 +1781,11 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
       statusCheckRollup: [],
     })
   ghAnswers.push(
-    { match: argv => argv.includes('view') && argv.includes('29'), stdout: view(29, 'Real linked work') },
-    { match: argv => argv.includes('view') && !argv.includes('29'), stdout: view(40, 'Real branch work') },
+    {
+      match: argv => argv.includes('view') && argv.includes(linkedNumber),
+      stdout: view(Number(linkedNumber), 'Real linked work'),
+    },
+    { match: argv => argv.includes('view') && !argv.includes(linkedNumber), stdout: view(40, 'Real branch work') },
     {
       match: argv => argv.includes('graphql'),
       stdout: JSON.stringify({ data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } } }),
@@ -1766,7 +1795,7 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   await $.prompt.submit({ text: 'add a greeting cli', wait: false, origin: { kind: 'composer' } })
   await $.turn.complete({
-    answer: 'Plan ready. Opened https://github.com/acme/storefront/pull/29.',
+    answer: `Plan ready. Opened https://github.com/${repo}/pull/${linkedNumber}.`,
     durationMs: 5,
     isAborted: false,
     turnId: 't1',
@@ -1775,7 +1804,7 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   await clock.settle()
   const saved = stored.get('s:session-1')
   expect(saved).toContain('Use Node or Python?')
-  expect(saved).toContain('acme/storefront#29')
+  expect(saved).toContain(linkedRef)
   const ranBeforeDemo = ran.length
 
   expect((await $.command.run({ command: 'inbox', args: 'demo' } as never)).text).toContain('Showing sample entries')
@@ -1793,7 +1822,7 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   await clock.settle()
   expect(sent).toEqual([])
   expect(await pane.find({ key: 'answer-d11-0' })).toBeUndefined()
-  expect(await pane.find({ text: 'Above' })).toBeDefined()
+  expect(await pane.find({ text: demo.ledger.items.find(i => i.id === 'd11')!.options[0] })).toBeDefined()
   expect(await pane.find({ text: SAMPLE })).toBeDefined()
 
   // Explain says so on its row, then shows its ✓.
@@ -1818,7 +1847,8 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   await clock.settle()
   expect(await pane.find({ key: 'done-d14' })).toBeUndefined()
   expect(await pane.find({ key: 'settled-d14' })).toBeDefined()
-  expect(await pane.find({ text: /Sign in to the Stripe CLI/ })).toBeDefined()
+  const doneTask = literal(demo.ledger.items.find(i => i.id === 'd14')!.ask)
+  expect(await pane.find({ text: doneTask })).toBeDefined()
   expect(await band.find({ text: /Needs you 5/ })).toBeDefined()
   await pane.press({ key: 'undo-d14' })
   expect(await pane.find({ key: 'done-d14' })).toBeDefined()
@@ -1826,21 +1856,21 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'done-d14' })
   await clock.advance(SETTLED_MS)
-  expect(await pane.find({ text: /Sign in to the Stripe CLI/ })).toBeUndefined()
+  expect(await pane.find({ text: doneTask })).toBeUndefined()
   expect(sent).toEqual([])
 
   await pane.press({ key: 'tab-findings' })
-  expect(await pane.find({ text: /The cart could load all its prices/ })).toBeDefined()
+  expect(await pane.find({ text: literal(demo.ledger.findings[0]!.title) })).toBeDefined()
   await pane.press({ key: 'tab-prs' })
-  expect(await pane.find({ text: /Add Apple Pay to checkout/ })).toBeDefined()
+  expect(await pane.find({ text: literal(demo.prViews.views[branchRef]!.title) })).toBeDefined()
   // The sample PRs are not looked up, and their buttons open nothing.
-  await pane.press({ key: 'open-acme/storefront#31' })
+  await pane.press({ key: `open-${branchRef}` })
   expect(await pane.find({ text: SAMPLE })).toBeDefined()
   // Dismiss settles the sample PR, then takes it off the copy, and leaves the session's PR with the same ref.
-  await pane.press({ key: 'dismiss-pr-acme/storefront#29' })
-  expect(await pane.find({ key: 'settled-pr:acme/storefront#29' })).toBeDefined()
+  await pane.press({ key: `dismiss-pr-${linkedRef}` })
+  expect(await pane.find({ key: `settled-pr:${linkedRef}` })).toBeDefined()
   await clock.advance(SETTLED_MS)
-  expect(await pane.find({ text: /Show shipping estimates in the cart/ })).toBeUndefined()
+  expect(await pane.find({ text: literal(demo.prViews.views[linkedRef]!.title) })).toBeUndefined()
   expect(stored.get('s:session-1')).toBe(saved)
   expect(ran.slice(ranBeforeDemo).filter(argv => argv[0] === 'gh' || argv[0] === 'open')).toEqual([])
 
@@ -2155,10 +2185,10 @@ test('a tool call after a hot reload, before the load converts the ledger, still
   await $.tool.call({ tool: 'mcp__inbox__record_finding', kind: 'issue', title: 'Second', detail: 'Two.' })
   strip = false
   const r = await $.tool.call({ tool: 'mcp__inbox__close', id: 'f1', reason: 'fixed' } as never)
-  expect(JSON.stringify(r)).toMatch(/f1/)
+  expect(r.result).toBe('Closed finding f1.')
 })
 
-test('every row and action in the demo is drawn in the terminal and desktop looks', async ($, on) => {
+test('every Needs you and Findings row in the demo, with its actions, is drawn in the terminal and desktop looks', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })

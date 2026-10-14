@@ -313,14 +313,17 @@ test('a tool call from Codex in a turn UserPromptSubmit never recorded shows the
 test('a press in the demo changes only the demo, sends nothing into the conversation, and says so', async () => {
   const { dir, calls, call } = await setup(0)
   const before = await readState(dir, 's1')
-  type Questions = {
+  type NeedsYou = {
     result: {
       structuredContent: {
-        needsYou: { questions: { id: string; state: { is: string }; item: { options: string[] } }[] }
+        needsYou: {
+          questions: { id: string; state: { is: string }; item: { options: string[] } }[]
+          tasks: { id: string; steps: { label: string; step: { kind: string }[] }[] }[]
+        }
       }
     }
   }
-  const demo = (await call('inbox_view', { demo: true }, { thread_id: 's1' })) as unknown as Questions
+  const demo = (await call('inbox_view', { demo: true }, { thread_id: 's1' })) as unknown as NeedsYou
   const first = demo.result.structuredContent.needsYou.questions.find(q => q.state.is === 'open')
   assert.ok(first)
   const option = first.item.options[0]
@@ -334,9 +337,13 @@ test('a press in the demo changes only the demo, sends nothing into the conversa
   assert.equal(r.result.structuredContent.note, 'sample')
   assert.equal(r.result.content[0]?.text, 'Sample entry: nothing was sent.')
   // A copy step copies nothing in the demo: its row gets the same note.
+  const copyTask = demo.result.structuredContent.needsYou.tasks.find(t =>
+    t.steps[0]?.step.every(h => h.kind === 'copy'),
+  )
+  assert.ok(copyTask)
   const copied = await call(
     'inbox_press',
-    { press: { action: 'step', id: 'd16', step: 0, label: 'Copy checkout URL' }, thread: 's1', demo: true },
+    { press: { action: 'step', id: copyTask.id, step: 0, label: copyTask.steps[0]!.label }, thread: 's1', demo: true },
     { thread_id: 's1' },
   )
   assert.equal(copied.result.structuredContent.note, 'sample')
@@ -627,7 +634,7 @@ test('a PR press sends its prompt through codex queue and records the press on i
   const { dir, calls, call } = await prServer(ghAnswer)
   const d = demoView(100)
   await updateState(dir, 's1', s => ({ ...s, ledger: { ...s.ledger, prs: d.ledger.prs }, prViews: d.prViews }))
-  const pr = d.prViews.views['acme/storefront#31']!
+  const pr = Object.values(d.prViews.views).find(v => v.threads.some(t => t.isWaiting))!
   const thread = pr.threads.find(t => t.isWaiting)!
   const r = await call('inbox_press', {
     press: { action: 'thread-address', ref: pr.ref, thread: thread.id },
@@ -648,9 +655,10 @@ test('a PR press with a failing queue says it was not sent and keeps the failure
   )
   const d = demoView(100)
   await updateState(dir, 's1', s => ({ ...s, ledger: { ...s.ledger, prs: d.ledger.prs }, prViews: d.prViews }))
-  const r = await call('inbox_press', { press: { action: 'pr-conflicts', ref: 'acme/storefront#31' }, thread: 's1' })
+  const ref = Object.values(d.prViews.views).find(v => v.mergeable === 'CONFLICTING')!.ref
+  const r = await call('inbox_press', { press: { action: 'pr-conflicts', ref }, thread: 's1' })
   assert.match(r.result.structuredContent.error ?? '', /no such thread/)
-  const last = (await readState(dir, 's1')).lastActions['pr:acme/storefront#31']
+  const last = (await readState(dir, 's1')).lastActions[`pr:${ref}`]
   assert.equal(last?.delivery?.state, 'failed')
 })
 
@@ -673,15 +681,13 @@ test('dismissing a linked PR unlinks it, and its view leaves once its settled bl
     ledger: { ...s.ledger, prs: d.ledger.prs },
     prViews: { ...d.prViews, branchRef: null },
   }))
-  const dismissed = await call('inbox_press', {
-    press: { action: 'pr-dismiss', ref: 'acme/storefront#29' },
-    thread: 's1',
-  })
+  const ref = d.ledger.prs.find(r => r !== d.prViews.branchRef)!
+  const dismissed = await call('inbox_press', { press: { action: 'pr-dismiss', ref }, thread: 's1' })
   const drawn = (v: PrView) => v.prs.drawn.map(x => x.pr.ref)
-  assert.ok(drawn(dismissed.result.structuredContent.view).includes('acme/storefront#29'))
-  assert.equal((await readState(dir, 's1')).ledger.prs.includes('acme/storefront#29'), false)
+  assert.ok(drawn(dismissed.result.structuredContent.view).includes(ref))
+  assert.equal((await readState(dir, 's1')).ledger.prs.includes(ref), false)
   t += SETTLE_WINDOW_MS
   const later = await call('inbox_view', {})
-  assert.equal(drawn(later.result.structuredContent).includes('acme/storefront#29'), false)
-  assert.equal('acme/storefront#29' in (await readState(dir, 's1')).prViews.views, false)
+  assert.equal(drawn(later.result.structuredContent).includes(ref), false)
+  assert.equal(ref in (await readState(dir, 's1')).prViews.views, false)
 })

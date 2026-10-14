@@ -167,7 +167,6 @@ describe('prs', () => {
     // The thread's time is its first comment's; a comment with none leaves it unknown.
     expect(threads.map(t => t.at)).toEqual([Date.parse('2026-10-08T09:30:00Z'), null, null])
     expect(threads[0]?.reply?.at).toBe(Date.parse('2026-10-08T10:00:00Z'))
-    // T3 is outdated with no reply: a later commit changed its lines, so it no longer waits on the viewer.
     expect(threads.map(t => [t.id, t.isWaiting, t.isLinesChanged, t.line])).toEqual([
       ['T1', true, false, 4],
       ['T4', false, false, 2],

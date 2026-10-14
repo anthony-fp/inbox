@@ -4,11 +4,19 @@ import { test } from 'node:test'
 import { applyPress, finishedResult } from '../../hooks/presses'
 import type { PressResult, RowPress } from '../../hooks/presses'
 import { recordClose, recordFinding } from '../../hooks/tools'
-import { closedShown, feedbackText, firstWaiting, listWaits, SETTLED_MS } from '../../hooks/view'
-import type { RowView } from '../../hooks/view'
+import {
+  closedShown,
+  feedbackText,
+  firstWaiting,
+  keptOpen,
+  listWaits,
+  rowAfterClose,
+  SETTLED_MS,
+} from '../../hooks/view'
+import type { RowView, RowWait } from '../../hooks/view'
 import type { Item, LocalResult } from '../../types'
 import { followTo } from '../../hooks/arrivals'
-import { isShownEmpty, newRows, TAB_IDS } from '../src/arrivals'
+import { isShownEmpty, newRows, openRows, TAB_IDS } from '../src/arrivals'
 import { endTurn, noteHook, notePrompt, noteToolCall, viewOf } from '../src/core'
 import { demoState } from '../src/demo'
 import { EXIT_MS, ROW_STATE_MS, stepRow } from '../src/rows'
@@ -545,7 +553,7 @@ test('a tool call in a turn the prompt hook recorded, after a Stop sent Codex ba
   assert.equal(viewOf(called, 40).heard, 'heard')
 })
 
-test('the tab moves from an empty Needs you to Findings when a poll brings a finding, and marks only rows new since its first view', () => {
+test('the tab moves from an empty Needs you to Findings when it opens on a finding or a poll brings one, and counts as new only rows added since its first view', () => {
   const s = noteHook(emptyState('s1'), 'start', 1)
   const first = newRows({}, viewOf(s, 10))
   assert.deepEqual(first.added, { needsYou: [], findings: [] })
@@ -559,6 +567,11 @@ test('the tab moves from an empty Needs you to Findings when a poll brings a fin
   const followed = (state: SessionState) =>
     followTo(TAB_IDS, 'needsYou', isShownEmpty(viewOf(state, 20), 'needsYou', new Set(), new Set()), next.added)
   assert.equal(followed(withFinding), 'findings')
+  const opened = viewOf(withFinding, 20)
+  assert.equal(
+    followTo(TAB_IDS, 'needsYou', isShownEmpty(opened, 'needsYou', new Set(), new Set()), openRows(opened)),
+    'findings',
+  )
   // While Needs you says the hooks were not heard, it stays on that warning.
   assert.equal(viewOf({ ...withFinding, heard: NOTHING_HEARD }, 20).heard, 'none')
   assert.equal(followed({ ...withFinding, heard: NOTHING_HEARD }), null)
@@ -566,6 +579,16 @@ test('the tab moves from an empty Needs you to Findings when a poll brings a fin
   assert.equal(followed({ ...withFinding, ledger: withItems().ledger }), null)
   // The same rows in the next poll are not new.
   assert.deepEqual(newRows(next.seen, viewOf(withFinding, 30)).added, { needsYou: [], findings: [] })
+})
+
+test('after a close the next waiting row opens, else the nearest one before it, and a row that arrives above leaves the open row open', () => {
+  const w = (id: string, isWaiting = true): RowWait => ({ id, isWaiting })
+  assert.equal(rowAfterClose([w('i1', false), w('i2', false), w('i3')], 'i1'), 'i3')
+  assert.equal(rowAfterClose([w('i1'), w('i2', false), w('i3', false)], 'i3'), 'i1')
+  assert.equal(rowAfterClose([w('i1', false), w('i2', false)], 'i2'), null)
+  assert.equal(rowAfterClose([w('i1')], 'i9'), null)
+  assert.equal(keptOpen([w('i3'), w('i1'), w('i2')], ['i3']), 'i1')
+  assert.equal(keptOpen([w('i3'), w('i1', false)], ['i3']), null)
 })
 
 const ROW_STATES: RowState[] = [
