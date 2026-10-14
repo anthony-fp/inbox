@@ -223,9 +223,6 @@ const UNREADABLE = atom({ plugin: 'inbox', key: 'unreadable' } as const, null as
 // The bar under a just-closed row, in cells. It loses half a cell per step of SETTLED_MS, so the pane redraws that often.
 const LEAVE_BAR_CELLS = 12
 const LEAVE_BAR_STEPS = LEAVE_BAR_CELLS * 2
-// After a jump, how long the new tab's top edge takes to draw in, in steps.
-const DRAW_IN_MS = 200
-const DRAW_IN_STEPS = 4
 // After a resize, how long the inline pane waits before it scrolls back to the open row.
 const RESIZE_SCROLL_MS = 100
 const DEMO = atom({ plugin: 'inbox', key: 'demo' } as const, null as DemoCopy | null)
@@ -454,11 +451,13 @@ type Palette = {
   key: string
   /** The tree's lines. */
   line: string
+  /** The tree's lines on `selection`, in its hue. Without one, `line`. */
+  selectionLine?: string
   /** The rules between rows. */
   divider: string
   /** Text in a status color. A tone left out draws its text in the default color. */
   tone: Partial<Record<Tone, string>>
-  /** A marker in a status color, such as ✓, and the selected tab's top line. */
+  /** A marker in a status color, such as ✓. */
   mark: Record<Tone, string>
 }
 
@@ -471,6 +470,7 @@ const DARK_PALETTE: Palette = {
   age: '#a3a3a3',
   key: DARK_TONES.key,
   line: '#505050',
+  selectionLine: '#5a6f88',
   divider: '#444444',
   tone: DARK_TONES,
   mark: { ...DARK_TONES, error: DARK_TONES.errorMark },
@@ -484,6 +484,7 @@ const LIGHT_PALETTE: Palette = {
   age: '#666666',
   key: LIGHT_TONES.key,
   line: '#afafaf',
+  selectionLine: '#7490b8',
   divider: '#c8c8c8',
   tone: LIGHT_TONES,
   mark: LIGHT_TONES,
@@ -626,8 +627,6 @@ let fetchingPrs: Promise<void> = Promise.resolve()
 let nextFetchFindsBranchPr: boolean | null = null
 // Each tab's row ids as of the last write that can add a row, so a row that appears later counts as new.
 let recordedRows: { isDemo: boolean; ids: RowRecord<Tab> } | null = null
-// The pane's latest jump to another tab, whose top edge draws in for DRAW_IN_MS. A reload may lose it mid-draw.
-let jumped: { tab: Tab; at: number } | null = null
 /** Whether the pane last drew inline, where the open row scrolls to the window's top so its keys stay in view. */
 let isInlinePane = false
 /** The inline pane's size at its last draw, as columns by rows, or null when it last drew docked. */
@@ -1570,23 +1569,12 @@ function newRows(isDemo: boolean, current: Record<Tab, string[] | null>): Record
   return added
 }
 
-/**
- * Moves the pane to a tab and opens a row there, or shows the tab's top when
- * there is none. The pane then redraws while the tab's top edge draws in.
- */
+/** Moves the pane to a tab and opens a row there, or shows the tab's top when there is none. */
 async function jumpTo($: EngineInterface, tab: Tab) {
-  const at = await $.clock.now()
-  jumped = { tab, at }
   await update($, TAB, () => tab)
   // With no row chosen, the tab draws its top row open, so rows that arrive above later move the open row with them.
   await update($, SELECTION, s => ({ ...s, [tab]: NO_CURSOR }))
   await scrollToOpenRow($, tab)
-  void (async () => {
-    for (let n = 1; n <= DRAW_IN_STEPS; n++) {
-      await $.clock.sleep(Math.max(0, at + (n * DRAW_IN_MS) / DRAW_IN_STEPS - (await $.clock.now())))
-      await update($, SELECTION, s => ({ ...s }))
-    }
-  })().catch(() => undefined)
 }
 
 /** Each tab's selectable row ids, in the order the pane lists them: rows that just closed are left out. */
@@ -2980,6 +2968,8 @@ export const register: Register = on => {
       // A hover prop set to undefined is refused, so the color is left out when the palette has none.
       ...(pal.raisedText ? { color: pal.raisedText } : {}),
     }
+    // A tab's half line, ▄ or ▀, raises by its glyph's color.
+    const raiseEdge = { dimColor: false, color: pal.raised, inverse: false }
 
     // One list row's content. Selected, a row shows its context line, its title
     // in full, its body and its keys; otherwise one line: `line`, or the title.
@@ -3499,10 +3489,10 @@ export const register: Register = on => {
     // the rest. The row clips, not this Box: once its row scrolled out of view,
     // Claude Code drew lines this Box clipped elsewhere in the pane (anthropics/claude-code#100030).
     // Desktop draws no tree: its lines differ in height, so stacked glyphs break into separate bars.
-    const branch = (pos: TreePos, lead = 0, left = 1) =>
+    const branch = (pos: TreePos, lead = 0, left = 1, color = pal.line) =>
       look === 'desktop' ? null : (
         <Box position="absolute" top={0} bottom={0} left={left} width={2}>
-          <Text color={pal.line}>{treeText(pos, lead)}</Text>
+          <Text color={color}>{treeText(pos, lead)}</Text>
         </Box>
       )
     // A row with no marker, such as a group's empty line, starts its text right after the tree.
@@ -4026,7 +4016,7 @@ export const register: Register = on => {
               <Text color={pal.age}>{sideAge(row)}</Text>
             </Box>
           ) : null}
-          {tree ? branch(tree, isSelected ? blankLine : 0) : null}
+          {tree ? (isSelected ? branch(tree, blankLine, 1, pal.selectionLine ?? pal.line) : branch(tree, 0)) : null}
           {/* What select() scrolls into view. Drawn on the selected row alone, so the key exists
           only once that row has redrawn expanded. */}
           {isSelected ? (
@@ -4157,8 +4147,23 @@ export const register: Register = on => {
     // The terminal tabs' width at full padding, with the 1-column gaps between them and the row's own padding.
     const terminalTabsWidth = TABS.reduce((sum, t) => sum + tabText(t.id, t.label).length + 2 * TAB_PAD.length + 1, 1)
     const pad = terminalTabsWidth <= e.props.bodyColumns ? TAB_PAD : ' '
+    // The docked terminal's tabs rest on a line in the unselected tabs' color, along their bottom row.
+    const hasTabLine = !isInline && look !== 'desktop'
+    const tabLine = pal.tab ?? pal.divider
     const tabs = (
-      <Box paddingLeft={isInline ? 2 : 1} paddingRight={1} flexDirection="row">
+      <Box
+        paddingLeft={isInline ? 2 : 1}
+        paddingRight={1}
+        flexDirection="row"
+        {...(hasTabLine ? { overflow: 'hidden' as const } : {})}
+      >
+        {/* ─ draws at the middle of its cell, where the tabs' ▀ ends, and the tabs draw over it. The tabs' Box
+            clips it, as a row clips the tree (anthropics/claude-code#100030). */}
+        {hasTabLine ? (
+          <Box position="absolute" bottom={0} left={0} right={0} height={1}>
+            <Text color={tabLine}>{'─'.repeat(e.props.bodyColumns)}</Text>
+          </Box>
+        ) : null}
         <Box flexDirection="row" flexWrap="wrap" columnGap={isInline ? 3 : look === 'desktop' ? 2 : 1}>
           {hasClient && tabProps ? (
             <elements.Client key="tabs" module="./tabs-client.tsx" height={TAB_HEIGHT} props={tabProps} />
@@ -4204,43 +4209,52 @@ export const register: Register = on => {
                     />
                   )
 
-                // The selected tab is a raised panel three lines tall, with its name on
-                // the middle line and a line of its color along the top edge. After a
-                // jump to it, the line draws in from the left.
-                const since = jumped?.tab === id ? now - jumped.at : DRAW_IN_MS
-                const edge = since < DRAW_IN_MS ? Math.max(1, Math.ceil((width * since) / DRAW_IN_MS)) : width
-                if (tab === id)
+                // A tab is its name's line between half lines of its fill, ▄ above and ▀ below, so the name sits
+                // in the middle of a shape two lines tall. The selected tab is raised, with its name in its color.
+                // It has no colored line along its top: that edge falls mid-cell, where the line would need a
+                // third color in a cell that draws two.
+                if (tab === id) {
+                  const color = pal.tone[id] ?? pal.raisedText
                   return (
                     <Box flexDirection="column" flexShrink={0}>
-                      <Text color={pal.mark[id]} backgroundColor={pal.raised}>
-                        {'▔'.repeat(edge) + ' '.repeat(width - edge)}
-                      </Text>
+                      <Text color={pal.raised}>{'▄'.repeat(width)}</Text>
                       <Text backgroundColor={pal.raised}>
                         {pad}
-                        <Text bold color={pal.raisedText} backgroundColor={pal.raised}>
+                        <Text bold color={color} backgroundColor={pal.raised}>
                           {label}
                         </Text>
                         {count > 0 ? (
-                          <Text bold color={pal.tone[id] ?? pal.raisedText} backgroundColor={pal.raised}>
+                          <Text bold color={color} backgroundColor={pal.raised}>
                             {' '}
                             {count}
                           </Text>
                         ) : null}
                         {pad}
                       </Text>
-                      <Text backgroundColor={pal.raised}>{' '.repeat(width)}</Text>
+                      <Text color={pal.raised}>{'▀'.repeat(width)}</Text>
                     </Box>
                   )
+                }
 
-                // Each line is a Button, so a click anywhere on the tab's three lines
-                // selects it. Under the pointer, the keyed Box raises all three as one
-                // panel, the selected tab's shape without its line.
+                // Each line is a Button, so a click anywhere on the tab selects it. Under the pointer, the keyed
+                // Box raises the tab: its half lines by their glyphs' color, its name's line by its fill. A palette
+                // with no tab fill draws no half lines: its bottom line is the line the tabs rest on, and only the
+                // name's line raises.
                 const show = () => void showTab($, id)
+                const edgeHover = pal.tab ? raiseEdge : { inverse: false }
 
                 return (
-                  <Box key={`tab-block-${id}`} flexDirection="column" flexShrink={0} backgroundColor={pal.tab}>
-                    <Button plain key={`tab-${id}-above`} label={' '.repeat(width)} hover={raise} onPress={show} />
-                    <Box flexDirection="row">
+                  <Box key={`tab-block-${id}`} flexDirection="column" flexShrink={0}>
+                    <Button plain key={`tab-${id}-above`} hover={edgeHover} onPress={show}>
+                      {pal.tab ? (
+                        <Text color={pal.tab} hover={raiseEdge}>
+                          {'▄'.repeat(width)}
+                        </Text>
+                      ) : (
+                        ' '.repeat(width)
+                      )}
+                    </Button>
+                    <Box flexDirection="row" backgroundColor={pal.tab}>
                       <Button plain key={`tab-${id}-before`} label={pad} hover={raise} onPress={show} />
                       <Button plain key={`tab-${id}`} label={label} hover={raise} onPress={show} />
                       {count > 0 ? (
@@ -4251,7 +4265,15 @@ export const register: Register = on => {
                       ) : null}
                       <Button plain key={`tab-${id}-after`} label={pad} hover={raise} onPress={show} />
                     </Box>
-                    <Button plain key={`tab-${id}-below`} label={' '.repeat(width)} hover={raise} onPress={show} />
+                    <Button plain key={`tab-${id}-below`} hover={edgeHover} onPress={show}>
+                      {pal.tab ? (
+                        <Text color={pal.tab} hover={raiseEdge}>
+                          {'▀'.repeat(width)}
+                        </Text>
+                      ) : (
+                        <Text color={tabLine}>{'─'.repeat(width)}</Text>
+                      )}
+                    </Button>
                   </Box>
                 )
               })}
@@ -5075,12 +5097,6 @@ export const register: Register = on => {
         ) : null}
         {tabs}
         {statusBlock}
-        {/* ▔ draws at the top of its cell, so the rule touches the tabs' bottom edge
-            and the rest of its row stands in for the blank line above the content.
-            It takes the unselected tabs' color, so they read as resting on it. */}
-        {isInline || look === 'desktop' ? null : (
-          <Text color={pal.tab ?? pal.divider}>{'▔'.repeat(e.props.bodyColumns)}</Text>
-        )}
         <Box flexDirection="column" paddingX={1} paddingTop={blankLine} flexGrow={1}>
           {tab === 'findings' ? findingsView() : tab === 'prs' ? prsView() : needsYouView()}
         </Box>
