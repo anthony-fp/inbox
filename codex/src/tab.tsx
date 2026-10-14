@@ -946,6 +946,11 @@ function stepLists(v: View): { lists: Lists; changed: Set<string> } {
     }
     lists[LIST_OF[group]] = drawn
   }
+  // The Findings tab draws a group per kind, so each takes its entries from the stepped list, leaving rows included.
+  lists.findingGroups = lists.findingGroups.map(g => ({
+    ...g,
+    entries: lists.findings.filter(x => ('row' in x ? x.row.kind : x.settled.finding?.kind) === g.kind),
+  }))
   for (const id of [...drawnRows.keys()]) if (!kept.has(id)) drawnRows.delete(id)
   return { lists, changed }
 }
@@ -1331,24 +1336,29 @@ function ItemGroup({
   now: number
 }) {
   const title = kind === 'question' ? 'Questions' : 'Tasks'
-  const closed = itemsClosed(v, kind, entries)
-  // A leaving row no longer counts.
-  const rows = entries.flatMap(x => ('row' in x && drawnRows.get(x.row.id)?.track.state !== 'leaving' ? [x.row] : []))
+  const rest = staying(entries)
+  const closed = itemsClosed(v, kind, rest)
+  const rows = rest.flatMap(x => ('row' in x ? [x.row] : []))
 
   return (
     <section>
       {/* A row handed to Codex stays listed but leaves the count. */}
       <GroupTitle title={title} count={rows.filter(r => !r.fold).length} />
-      {entries.length === 0 ? <div class="group-empty">{groupEmptyText(title)}</div> : null}
       <Entries entries={entries} group={kind} all={all} now={now} />
-      <ClosedFold
+      <GroupEnd
         group={kind}
+        empty={rest.length === 0 ? groupEmptyText(title) : null}
         closed={closed}
-        total={closedTotal(v.needsYou.closed[kind === 'question' ? 'questions' : 'tasks'], settledIn(entries))}
+        total={closedTotal(v.needsYou.closed[kind === 'question' ? 'questions' : 'tasks'], settledIn(rest))}
         now={now}
       />
     </section>
   )
+}
+
+/** A list's entries without the rows leaving it, which no longer count: its empty line and Closed fold stand in for them. */
+function staying(entries: Entry[]): Entry[] {
+  return entries.filter(x => drawnRows.get(entryId(x))?.track.state !== 'leaving')
 }
 
 /** A closed item or finding as a Closed fold lists it. */
@@ -1379,29 +1389,40 @@ function inlineHtml(text: string) {
   })
 }
 
-function ClosedFold({
+/**
+ * What a group draws after its rows: its empty line while no row stays, and its Closed fold. One element holds both,
+ * so when a group's last row leaves, they grow in while the row collapses above them, and the rows below move once.
+ */
+function GroupEnd({
   group,
+  empty,
   closed,
   total,
   now,
 }: {
   group: FoldGroup
+  /** The group's empty line, or null while a row stays. */
+  empty: string | null
   closed: ClosedLine[]
   /** Every close the fold keeps, which its label counts. `closed` lists the newest few. */
   total: number
   now: number
 }) {
-  if (total === 0) return null
   const earlier = earlierLabel(total, closed.length)
   const isUnfolded = unfolded.has(group)
-  const isListed = isUnfolded || closingFolds.has(group)
+  const isListed = total > 0 && (isUnfolded || closingFolds.has(group))
 
   return (
     <>
-      <button type="button" class="fold" data-fold={group} onClick={() => toggleFold(group)}>
-        <Icon name={isUnfolded ? 'down' : 'right'} />
-        {foldLabel(total)}
-      </button>
+      <div class="group-end" data-motion={`end-${group}`}>
+        {empty ? <div class="group-empty">{empty}</div> : null}
+        {total > 0 ? (
+          <button type="button" class="fold" data-fold={group} onClick={() => toggleFold(group)}>
+            <Icon name={isUnfolded ? 'down' : 'right'} />
+            {foldLabel(total)}
+          </button>
+        ) : null}
+      </div>
       {isListed ? (
         <div class="list closed-list" data-motion={`closed-${group}`}>
           {closed.map(d => (
@@ -1476,7 +1497,7 @@ function NeedsYou({ v, lists, now }: { v: View; lists: Lists; now: number }) {
 
 function Findings({ v, lists, now }: { v: View; lists: Lists; now: number }) {
   // A finding stays listed until Codex closes it or the person dismisses it. Then it settles and moves to Closed.
-  const settled = settledIn(lists.findings)
+  const settled = settledIn(staying(lists.findings))
   const closedOf = (kind: Finding['kind']) => v.findings.closed.filter(f => f.kind === kind)
   const shown = (kind: Finding['kind']) =>
     closedShown(closedOf(kind), settled).map(f => ({
@@ -1499,17 +1520,16 @@ function Findings({ v, lists, now }: { v: View; lists: Lists; now: number }) {
   return (
     <main>
       {lists.findingGroups.map(g => {
-        // A leaving row no longer counts, and a row handed to Codex stays listed but leaves the count.
-        const rows = g.entries.flatMap(x =>
-          'row' in x && drawnRows.get(x.row.id)?.track.state !== 'leaving' ? [x.row] : [],
-        )
+        // A row handed to Codex stays listed but leaves the count.
+        const rest = staying(g.entries)
+        const rows = rest.flatMap(x => ('row' in x ? [x.row] : []))
         return (
           <section>
             <GroupTitle title={g.title} count={rows.filter(r => !r.fold).length} />
-            {g.entries.length === 0 ? <div class="group-empty">{groupEmptyText(g.title)}</div> : null}
             <Entries entries={g.entries} group="finding" all={lists.byTab.findings} now={now} />
-            <ClosedFold
+            <GroupEnd
               group={g.kind}
+              empty={rest.length === 0 ? groupEmptyText(g.title) : null}
               closed={shown(g.kind)}
               total={closedTotal(closedOf(g.kind), settled)}
               now={now}
@@ -1950,6 +1970,10 @@ function animateDraw(before: Heights, changed: ReadonlySet<string>) {
     entering.clear()
     return
   }
+  // In the draw that starts a row's exit, other heights move on the exit's curve. A group's empty line and fold then
+  // grow at the rate the row collapses above them, so the rows below move one way.
+  const isExitDraw = [...changed].some(key => drawnRows.get(key)?.track.state === 'leaving')
+  const move: KeyframeAnimationOptions = isExitDraw ? { ...EXIT, fill: 'none' } : MOVE
   for (const el of document.querySelectorAll<HTMLElement>('[data-motion]')) {
     const key = el.dataset.motion!
     const was = before.get(key)
@@ -1975,7 +1999,7 @@ function animateDraw(before: Heights, changed: ReadonlySet<string>) {
     const opacity = anims.length > 0 ? Number(getComputedStyle(el).opacity) : 1
     for (const a of anims) a.cancel()
     if (Math.abs(height - target) < 1 && opacity > 0.99) continue
-    tween(el, { height, opacity }, { height: target, opacity: 1 }, MOVE)
+    tween(el, { height, opacity }, { height: target, opacity: 1 }, move)
   }
   // Rows that arrived on another tab show at once when that tab shows them, not later.
   entering.clear()

@@ -499,6 +499,10 @@
         border-radius: 10px;
       }
 
+      /* Holds a group's empty line and fold, margins included, so its height can move as one. */
+      .group-end {
+        display: flow-root;
+      }
       /* A group's line in place of its rows while it has none open, where a row's text would start. */
       .group-empty {
         padding: var(--row-pad) 14px var(--row-pad) var(--text-x);

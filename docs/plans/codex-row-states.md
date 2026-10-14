@@ -27,7 +27,7 @@ Each row the shown tab draws, keyed by its id, is in one state:
 | `settling` | The settled line, and the panel the row last drew open, inert, while the height shrinks over it, 200 ms | `settled` |
 | `settled` | The settled line, with Undo and its countdown when the person's own Done or Dismiss closed it | |
 | `undoing` | The settled line while an Undo press is out: "Undoing…", the countdown paused | |
-| `leaving` | The row's last form, fading while its height collapses to 0, 200 ms | Removed. A settled row then shows in the Closed fold |
+| `leaving` | The row's last form, fading while its height collapses to 0, 200 ms | Removed. A settled row counts in the Closed fold from the start of its exit |
 
 At each draw the tab works out the form each row should have now, its target:
 
@@ -51,7 +51,8 @@ Rules that hold in every state:
 - **Time ends a move, not the animation.** After each draw, the tab schedules one more draw for when the first moving row's move is due to end. That draw brings the row to rest, so an animation that never reports its end cannot hold a row.
 - **A move starts from the drawn height and opacity.** A row turned around mid-move, or closed while it still grows in, starts the new animation from where it is drawn.
 - **A row's end height is its content's height.** The tab adds up the heights of the row's children, which no animation of the row changes.
-- **A leaving row keeps its place.** The tab draws it where it last drew it until it is removed.
+- **A leaving row keeps its place.** The tab draws it where it last drew it until it is removed, in its Needs you group or its kind's Findings group.
+- **A group's empty line and Closed fold take a leaving row's place.** A leaving row no longer counts in its group, so they show from the draw that starts its exit. One element holds both, and its height grows on the exit's curve while the row collapses. The rows below then move once, in one direction.
 - **Rows of a tab not shown are forgotten.** They show their form at once when their tab shows.
 - **Reduced motion.** Every move ends in the draw that starts it.
 - **The line never moves** between `closed`, `opening`, `open` and `closing`, as [motion-and-undo.md](motion-and-undo.md) says.
