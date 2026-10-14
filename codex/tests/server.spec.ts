@@ -336,7 +336,7 @@ test('a press in the demo changes only the demo, sends nothing into the conversa
   // A copy step copies nothing in the demo: its row gets the same note.
   const copied = await call(
     'inbox_press',
-    { press: { action: 'step', id: 'd16', step: 0, label: 'Copy theme command' }, thread: 's1', demo: true },
+    { press: { action: 'step', id: 'd16', step: 0, label: 'Copy checkout URL' }, thread: 's1', demo: true },
     { thread_id: 's1' },
   )
   assert.equal(copied.result.structuredContent.note, 'sample')
@@ -627,7 +627,7 @@ test('a PR press sends its prompt through codex queue and records the press on i
   const { dir, calls, call } = await prServer(ghAnswer)
   const d = demoView(100)
   await updateState(dir, 's1', s => ({ ...s, ledger: { ...s.ledger, prs: d.ledger.prs }, prViews: d.prViews }))
-  const pr = d.prViews.views['petekp/inbox#31']!
+  const pr = d.prViews.views['acme/storefront#31']!
   const thread = pr.threads.find(t => t.isWaiting)!
   const r = await call('inbox_press', {
     press: { action: 'thread-address', ref: pr.ref, thread: thread.id },
@@ -648,9 +648,9 @@ test('a PR press with a failing queue says it was not sent and keeps the failure
   )
   const d = demoView(100)
   await updateState(dir, 's1', s => ({ ...s, ledger: { ...s.ledger, prs: d.ledger.prs }, prViews: d.prViews }))
-  const r = await call('inbox_press', { press: { action: 'pr-conflicts', ref: 'petekp/inbox#31' }, thread: 's1' })
+  const r = await call('inbox_press', { press: { action: 'pr-conflicts', ref: 'acme/storefront#31' }, thread: 's1' })
   assert.match(r.result.structuredContent.error ?? '', /no such thread/)
-  const last = (await readState(dir, 's1')).lastActions['pr:petekp/inbox#31']
+  const last = (await readState(dir, 's1')).lastActions['pr:acme/storefront#31']
   assert.equal(last?.delivery?.state, 'failed')
 })
 
@@ -674,14 +674,14 @@ test('dismissing a linked PR unlinks it, and its view leaves once its settled bl
     prViews: { ...d.prViews, branchRef: null },
   }))
   const dismissed = await call('inbox_press', {
-    press: { action: 'pr-dismiss', ref: 'petekp/inbox#29' },
+    press: { action: 'pr-dismiss', ref: 'acme/storefront#29' },
     thread: 's1',
   })
   const drawn = (v: PrView) => v.prs.drawn.map(x => x.pr.ref)
-  assert.ok(drawn(dismissed.result.structuredContent.view).includes('petekp/inbox#29'))
-  assert.equal((await readState(dir, 's1')).ledger.prs.includes('petekp/inbox#29'), false)
+  assert.ok(drawn(dismissed.result.structuredContent.view).includes('acme/storefront#29'))
+  assert.equal((await readState(dir, 's1')).ledger.prs.includes('acme/storefront#29'), false)
   t += SETTLE_WINDOW_MS
   const later = await call('inbox_view', {})
-  assert.equal(drawn(later.result.structuredContent).includes('petekp/inbox#29'), false)
-  assert.equal('petekp/inbox#29' in (await readState(dir, 's1')).prViews.views, false)
+  assert.equal(drawn(later.result.structuredContent).includes('acme/storefront#29'), false)
+  assert.equal('acme/storefront#29' in (await readState(dir, 's1')).prViews.views, false)
 })

@@ -60,7 +60,9 @@ Beats 1 to 7 need a real session, because the point is that an answer reaches th
 
 Beat 8 needs the same rows in all three apps, and presses that change nothing outside the recording. The demo gives both. Claude Code shows it with `/inbox demo`. Codex shows its Show demo button only in a build made with `INBOX_DEMO_BUTTON=1`. All three read the same sample data from `hooks/demo.ts`.
 
-The demo's rows are about the inbox itself, such as "Hotkeys vanish on selected rows in ANSI". A viewer who has never seen the project will not follow them. See the first open decision.
+The demo's rows describe work on an ordinary app: adding Apple Pay to a store's checkout page. A viewer who has never seen this project can follow them. Beat 8 answers "Show Apple Pay above the card form, or beside it?", opens the finding "Orders to Canada are taxed at US rates", and marks "Sign in to the Stripe CLI to forward webhooks" done.
+
+Reason: the earlier demo rows described the inbox itself, such as "Hotkeys vanish on selected rows in ANSI", and beat 8 is where viewers read rows most closely.
 
 ### Frame and theme
 
@@ -86,6 +88,5 @@ Start each script with a visible mark, such as switching to Findings and back, a
 
 ## Open decisions
 
-1. **Sample rows for the side-by-side beat.** Use the demo as it is, with rows about the inbox itself, or add a launch sample set about an ordinary app, such as a checkout page. A sample set means a change to `hooks/demo.ts` or a second set beside it. Recommended: a launch set, because beat 8 is where viewers read rows most closely.
-2. **Length.** 70 seconds suits a launch post. A 30-second cut would keep beats 2, 3, 8 and 9.
-3. **Music.** The plan assumes a track with a clear beat at 46 s, where the three columns appear.
+1. **Length.** 70 seconds suits a launch post. A 30-second cut would keep beats 2, 3, 8 and 9.
+2. **Music.** The plan assumes a track with a clear beat at 46 s, where the three columns appear.

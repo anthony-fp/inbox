@@ -1746,7 +1746,7 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
     JSON.stringify({
       number,
       title,
-      url: `https://github.com/petekp/inbox/pull/${number}`,
+      url: `https://github.com/acme/storefront/pull/${number}`,
       isDraft: false,
       state: 'OPEN',
       baseRefName: 'main',
@@ -1766,7 +1766,7 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   await $.prompt.submit({ text: 'add a greeting cli', wait: false, origin: { kind: 'composer' } })
   await $.turn.complete({
-    answer: 'Plan ready. Opened https://github.com/petekp/inbox/pull/29.',
+    answer: 'Plan ready. Opened https://github.com/acme/storefront/pull/29.',
     durationMs: 5,
     isAborted: false,
     turnId: 't1',
@@ -1775,7 +1775,7 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   await clock.settle()
   const saved = stored.get('s:session-1')
   expect(saved).toContain('Use Node or Python?')
-  expect(saved).toContain('petekp/inbox#29')
+  expect(saved).toContain('acme/storefront#29')
   const ranBeforeDemo = ran.length
 
   expect((await $.command.run({ command: 'inbox', args: 'demo' } as never)).text).toContain('Showing sample entries')
@@ -1793,7 +1793,7 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   await clock.settle()
   expect(sent).toEqual([])
   expect(await pane.find({ key: 'answer-d11-0' })).toBeUndefined()
-  expect(await pane.find({ text: 'Footer' })).toBeDefined()
+  expect(await pane.find({ text: 'Above' })).toBeDefined()
   expect(await pane.find({ text: SAMPLE })).toBeDefined()
 
   // Explain says so on its row, then shows its ✓.
@@ -1818,7 +1818,7 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   await clock.settle()
   expect(await pane.find({ key: 'done-d14' })).toBeUndefined()
   expect(await pane.find({ key: 'settled-d14' })).toBeDefined()
-  expect(await pane.find({ text: /Sign in to gh for the PRs tab/ })).toBeDefined()
+  expect(await pane.find({ text: /Sign in to the Stripe CLI/ })).toBeDefined()
   expect(await band.find({ text: /Needs you 5/ })).toBeDefined()
   await pane.press({ key: 'undo-d14' })
   expect(await pane.find({ key: 'done-d14' })).toBeDefined()
@@ -1826,21 +1826,21 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'done-d14' })
   await clock.advance(SETTLED_MS)
-  expect(await pane.find({ text: /Sign in to gh for the PRs tab/ })).toBeUndefined()
+  expect(await pane.find({ text: /Sign in to the Stripe CLI/ })).toBeUndefined()
   expect(sent).toEqual([])
 
   await pane.press({ key: 'tab-findings' })
-  expect(await pane.find({ text: /Catch-up could read only the turns/ })).toBeDefined()
+  expect(await pane.find({ text: /The cart could load all its prices/ })).toBeDefined()
   await pane.press({ key: 'tab-prs' })
-  expect(await pane.find({ text: /Switch tabs with 1, 2 and 3/ })).toBeDefined()
+  expect(await pane.find({ text: /Add Apple Pay to checkout/ })).toBeDefined()
   // The sample PRs are not looked up, and their buttons open nothing.
-  await pane.press({ key: 'open-petekp/inbox#31' })
+  await pane.press({ key: 'open-acme/storefront#31' })
   expect(await pane.find({ text: SAMPLE })).toBeDefined()
   // Dismiss settles the sample PR, then takes it off the copy, and leaves the session's PR with the same ref.
-  await pane.press({ key: 'dismiss-pr-petekp/inbox#29' })
-  expect(await pane.find({ key: 'settled-pr:petekp/inbox#29' })).toBeDefined()
+  await pane.press({ key: 'dismiss-pr-acme/storefront#29' })
+  expect(await pane.find({ key: 'settled-pr:acme/storefront#29' })).toBeDefined()
   await clock.advance(SETTLED_MS)
-  expect(await pane.find({ text: /Count turns to tell when a reload cut off an update/ })).toBeUndefined()
+  expect(await pane.find({ text: /Show shipping estimates in the cart/ })).toBeUndefined()
   expect(stored.get('s:session-1')).toBe(saved)
   expect(ran.slice(ranBeforeDemo).filter(argv => argv[0] === 'gh' || argv[0] === 'open')).toEqual([])
 
