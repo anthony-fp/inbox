@@ -366,6 +366,10 @@ function chevronSvg(isUnfolded: boolean, isHover: boolean): string {
  * flush. A Box in the hooks tree counts padding in half lines, so it pads twice this.
  */
 const DESKTOP_ROW_PAD = ROW_PAD_PT / DESKTOP_LINE_PT
+// In the terminal, the column a section's title starts at and its tree's │ runs in, so the line hangs from the
+// middle of the title's first letter. A box-drawing line sits mid-cell, and a title one column further on would
+// leave it half a cell to the letter's left.
+const TREE_LINE_AT = 2
 /**
  * Where a row's handle and its text start, in columns. In the terminal, a group's tree runs its │ in the lead, and a
  * flat row, as Findings lists them, has a 1-column lead. Desktop draws no tree, so every list there uses `desktop`,
@@ -373,7 +377,8 @@ const DESKTOP_ROW_PAD = ROW_PAD_PT / DESKTOP_LINE_PT
  * settled row all draw at these columns, so a row's title stays put as it opens, closes or settles.
  */
 const ROW_COLUMNS = {
-  tree: { lead: 4, handleAt: 4, textAt: 7 },
+  // The tree's ├─ and a blank, then the 3-column handle.
+  tree: { lead: TREE_LINE_AT + 3, handleAt: TREE_LINE_AT + 3, textAt: TREE_LINE_AT + 6 },
   flat: { lead: 1, handleAt: 3, textAt: 5 },
   desktop: { lead: 1, handleAt: 1, textAt: 3 },
 } as const
@@ -3481,15 +3486,15 @@ export const register: Register = on => {
       age: `${pressedAge(row) ?? (isAgeInSide ? '' : head.age)}${head.notes ?? ''}`,
     })
     // A section's children hang from its title like a directory listing. A
-    // child's row has a 1-column bar, 3 columns for the tree, 3 for its marker,
-    // then its text. `branch` draws the tree: ├─ on the child's first line, or
+    // child's row has a 1-column bar and a blank column, 3 columns for the tree,
+    // 3 for its marker, then its text. `branch` draws the tree: ├─ on the child's first line, or
     // └─ on the last child's, then │ below while siblings follow; `pass` is │
     // throughout, for a block between a title and its children. The lines sit
     // in an absolute Box that spans the row, however it wraps, and the row clips
     // the rest. The row clips, not this Box: once its row scrolled out of view,
     // Claude Code drew lines this Box clipped elsewhere in the pane (anthropics/claude-code#100030).
     // Desktop draws no tree: its lines differ in height, so stacked glyphs break into separate bars.
-    const branch = (pos: TreePos, lead = 0, left = 1, color = pal.line) =>
+    const branch = (pos: TreePos, lead = 0, left = TREE_LINE_AT, color = pal.line) =>
       look === 'desktop' ? null : (
         <Box position="absolute" top={0} bottom={0} left={left} width={2}>
           <Text color={color}>{treeText(pos, lead)}</Text>
@@ -3530,7 +3535,7 @@ export const register: Register = on => {
         <Box flexDirection="column" flexShrink={1} flexGrow={1} paddingRight={1}>
           {content}
         </Box>
-        {pos ? branch(pos, 0, 1 + 3 * depth) : null}
+        {pos ? branch(pos, 0, TREE_LINE_AT + markWidth * depth) : null}
       </Box>
     )
     const childPos = (n: number, count: number): TreePos => (n === count - 1 ? 'last' : 'mid')
@@ -3558,11 +3563,11 @@ export const register: Register = on => {
           : [
               isTree ? (
                 <Box key={`divider-${group}-${n}`} flexDirection="row">
-                  <Box width={1} flexShrink={0} />
-                  <Box width={6 + extra} flexShrink={0}>
+                  <Box width={TREE_LINE_AT} flexShrink={0} />
+                  <Box width={ROW_COLUMNS.tree.textAt - TREE_LINE_AT + extra} flexShrink={0}>
                     <Text color={pal.line}>│</Text>
                   </Box>
-                  {rule(9 + extra)}
+                  {rule(ROW_COLUMNS.tree.textAt + 2 + extra)}
                 </Box>
               ) : (
                 <Box key={`divider-${group}-${n}`} paddingLeft={5}>
@@ -4016,7 +4021,11 @@ export const register: Register = on => {
               <Text color={pal.age}>{sideAge(row)}</Text>
             </Box>
           ) : null}
-          {tree ? (isSelected ? branch(tree, blankLine, 1, pal.selectionLine ?? pal.line) : branch(tree, 0)) : null}
+          {tree
+            ? isSelected
+              ? branch(tree, blankLine, TREE_LINE_AT, pal.selectionLine ?? pal.line)
+              : branch(tree, 0)
+            : null}
           {/* What select() scrolls into view. Drawn on the selected row alone, so the key exists
           only once that row has redrawn expanded. */}
           {isSelected ? (
@@ -4358,7 +4367,7 @@ export const register: Register = on => {
           ),
         })
       ) : (
-        <Box paddingLeft={2}>
+        <Box paddingLeft={TREE_LINE_AT}>
           <Text>
             <Text bold>{title}</Text>
             {count > 0 ? <Text color={pal.muted}>{`${DOT}${count}`}</Text> : null}
@@ -4409,7 +4418,7 @@ export const register: Register = on => {
         : look === 'desktop'
           ? [<Box paddingTop={(2 * ROW_PAD_PT) / DESKTOP_LINE_PT} />]
           : [
-              <Box paddingLeft={1}>
+              <Box paddingLeft={TREE_LINE_AT}>
                 <Text color={pal.line}>{hasChildren ? '│' : ' '}</Text>
               </Box>,
             ]
@@ -4520,7 +4529,7 @@ export const register: Register = on => {
             // A line of the closed items' tree parts them from the fold line, as a group's title is parted from its rows.
             ...(isUnfolded && look !== 'desktop' && !isInline
               ? [
-                  <Box key={`fold-gap-${kind}`} paddingLeft={1 + markWidth}>
+                  <Box key={`fold-gap-${kind}`} paddingLeft={TREE_LINE_AT + markWidth}>
                     <Text color={pal.line}>│</Text>
                   </Box>,
                 ]

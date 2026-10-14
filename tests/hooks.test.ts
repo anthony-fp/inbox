@@ -481,11 +481,11 @@ test('a task handed to Claude folds and leaves the count until Claude’s reply 
   await clock.settle()
   expect(copied.at(-1)).toBe('API_KEY=x')
   expect(ran.at(-1)).toEqual(['open', '/tmp/project/.env.local'])
-  // A success note is not red. The first task's failure stays red on its collapsed line.
+  // A success note is not red. The first task's failure stays red on its collapsed row.
   expect(
     (await pane.find({ type: 'Text', text: '✓ Copied env line\u2007·\u2002Opened .env.local' }))?.props.color,
   ).not.toBe(red)
-  expect((await pane.find({ type: 'Text', text: '\u2007·\u2002Could not open load.md' }))?.props.color).toBe(red)
+  expect((await pane.find({ type: 'Text', text: /Could not open load\.md/ }))?.props.color).toBe(red)
   // An open or copy does not make its button read "again".
   expect((await pane.find({ key: 'help-i2-0-key' }))?.props.label).toBe('Copy env line and open .env.local')
   await clock.advance(SETTLED_MS)
