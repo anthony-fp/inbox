@@ -1158,6 +1158,35 @@ test('Dismiss settles a question in place with Undo, which brings it back open a
   expect(await pane.find({ key: 'explain-i2-key' })).toBeDefined()
 })
 
+test('once the person answers or closes the last waiting row, a row from a later reply opens', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const reply = async (text: string, turnId: string) => {
+    await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
+    await $.turn.start({ text, turnId })
+    await $.turn.complete({ answer: 'Noted.', durationMs: 5, isAborted: false, turnId, reason: 'answer' })
+    await clock.settle()
+  }
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  ledgerReply = 'NEW: decide | 1 | Use Node or Python? | Node / Python | Node'
+  await reply('add a greeting cli', 't1')
+  const pane = await $.ui.mount(PANE)
+  await pane.press({ key: 'answer-i1-0' })
+  await clock.advance(SETTLED_MS)
+
+  ledgerReply = 'CLOSED: i1 | Node chosen\nNEW: decide | 1 | Name the command greet? | Yes / No | Yes'
+  await reply('use node', 't2')
+  expect(await pane.find({ key: 'answer-i2-0' })).toBeDefined()
+
+  await clock.advance(PRESS_GUARD_MS)
+  await pane.press({ key: 'dismiss-i2' })
+  await clock.advance(SETTLED_MS)
+  ledgerReply = 'NEW: do | - | Run npm install | - | -'
+  await reply('carry on', 't3')
+  expect(await pane.find({ key: 'done-i3' })).toBeDefined()
+})
+
 test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, its buttons send its conflicts and thread and say so, and its failing check waits on the person', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])

@@ -528,8 +528,9 @@ export function listWaits(v: InboxView): { needsYou: RowWait[]; findings: RowWai
 }
 
 /**
- * The row a tab draws open before any row was opened there: its first row that still waits on the person. A handed-off
- * row stays collapsed until clicked, and with none waiting no row is open.
+ * The row a tab draws open while no row is chosen there, as before any row was opened or after a press closed the last
+ * waiting row: its first row that still waits on the person. A handed-off row stays collapsed until clicked, and with
+ * none waiting no row is open.
  */
 export function firstWaiting(rows: RowWait[]): string | null {
   return rows.find(r => r.isWaiting)?.id ?? null

@@ -183,10 +183,10 @@ let pollFailures = 0
 let readAt = 0
 let tab: ShownTab = 'needsYou'
 // Each tab's open row, and when a click or key opened it; 0 when it was open by default when pressed.
-// Null until a row opens there: the tab then draws its top row open.
+// Null until a row opens there, and again once a press closed the open row with no other row waiting: the tab then
+// draws its first waiting row open.
 // `index` is the row's place when it opened, so the row in that place opens once it leaves.
-// A null id: a press closed the open row with no other row waiting, and none opens until the person opens one.
-const selection: Record<ShownTab, { id: string | null; openedAt: number; index?: number } | null> = {
+const selection: Record<ShownTab, { id: string; openedAt: number; index?: number } | null> = {
   needsYou: null,
   findings: null,
   prs: null,
@@ -536,7 +536,8 @@ function tabWaits(v: View, t: ShownTab): RowWait[] {
 
 /**
  * Once a press stopped the shown tab's open row `id` waiting on the person, as an answer, a close or a hand-off does,
- * opens the next row that still waits. With none waiting, no row is open.
+ * opens the next row that still waits. With none waiting, the tab goes back to opening its first waiting row, so a
+ * row a later reply brings opens.
  */
 function openAfterClose(v: View, id: string) {
   if (selection[tab]?.id !== id) return
@@ -545,7 +546,7 @@ function openAfterClose(v: View, id: string) {
   const next = rowAfterClose(rows, id)
   const index = next === null ? -1 : tabRows(v, tab).findIndex(r => r.id === next)
   if (next === null || index < 0) {
-    selection[tab] = { id: null, openedAt: Date.now() }
+    selection[tab] = null
     return
   }
   open(tab, next, index)
@@ -973,14 +974,11 @@ async function undo(r: RowView) {
 }
 
 /**
- * The open row's index, or -1 when none is open. A tab where no row opened yet
- * draws its first waiting row open. Once the open row leaves, none is open: a row
- * opening under the pointer would catch a second click.
+ * The open row's index, or -1 when none is open. A tab with no open row chosen draws its first waiting row open.
  */
 function selectedIndex(rows: Row[], t: ShownTab, v: View): number {
   const s = selection[t]
   if (s) {
-    if (s.id === null) return -1
     const at = rows.findIndex(r => r.id === s.id)
     // While the open row still draws, as one just closed or leaving, none is open. Once it is gone, the row now in
     // its place opens, guarded as a click would open it.

@@ -2026,15 +2026,16 @@ async function shownWaits($: EngineInterface) {
 
 /**
  * Once a press stopped the shown tab's open row `id` waiting on the person, as an answer, a close or a hand-off does,
- * opens the next row that still waits. With none waiting, no row is open. Returns whether it moved the open row.
+ * opens the next row that still waits. With none waiting, the tab goes back to opening its first waiting row, so a
+ * row a later reply brings opens. Returns whether it moved the open row.
  */
 async function openAfterClose($: EngineInterface, id: string, wasWaiting: boolean): Promise<boolean> {
-  const [{ tab, rows, ids }, selection, now] = await Promise.all([shownWaits($), read($, SELECTION), $.clock.now()])
+  const [{ tab, rows, ids }, selection] = await Promise.all([shownWaits($), read($, SELECTION)])
   if (!wasWaiting || selection[tab].id !== id || rows.find(r => r.id === id)?.isWaiting) return false
   const next = rowAfterClose(rows, id)
   const index = next === null ? -1 : ids.indexOf(next)
   if (next !== null && index >= 0) await select($, tab, next, index)
-  else await update($, SELECTION, s => ({ ...s, [tab]: { id: null, index: s[tab].index, openedAt: now } }))
+  else await update($, SELECTION, s => ({ ...s, [tab]: { ...NO_CURSOR, index: s[tab].index } }))
 
   return true
 }
