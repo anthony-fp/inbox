@@ -538,7 +538,12 @@
       .closed-list {
         --mark-x: 41px;
         --text-x: 67px;
-        padding-top: 4px;
+      }
+      /* The gap above a Closed list's rows is content, not padding, so the list opens from and closes to 0. */
+      .closed-list::before {
+        content: '';
+        display: block;
+        height: 4px;
       }
       .closed-list .row {
         padding-top: calc(var(--row-pad) / 2);
@@ -578,6 +583,15 @@
         overflow: hidden;
         margin: -3px 0 -3px 12px;
         background: color-mix(in oklab, var(--soft) 45%, transparent);
+      }
+      /* While an Undo press is out, its arrow turns. Its label stays, so the pill keeps its width and the line its wrap. */
+      .key.undo.undoing .icon {
+        animation: undo-turn 900ms linear infinite;
+      }
+      @keyframes undo-turn {
+        to {
+          transform: rotate(-360deg);
+        }
       }
       .time-left {
         position: absolute;
@@ -690,8 +704,9 @@
         *::after {
           transition-duration: 0s !important;
         }
-        /* With no motion, Undo stays full and does not count down. */
-        .time-left {
+        /* With no motion, Undo stays full and does not count down, and its arrow does not turn. */
+        .time-left,
+        .key.undo.undoing .icon {
           animation: none;
         }
       }

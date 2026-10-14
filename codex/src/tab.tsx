@@ -1248,7 +1248,12 @@ function SettledView({ settled: r, panel }: { settled: RowView; panel: Row | und
             ) : null}
           </div>
           {state.canUndo ? (
-            <button type="button" class="key undo" disabled={isUndoing} onClick={() => void undo(r)}>
+            <button
+              type="button"
+              class={isUndoing ? 'key undo undoing' : 'key undo'}
+              disabled={isUndoing}
+              onClick={() => void undo(r)}
+            >
               {/* The delay is set once, when it is drawn: the animation keeps its own time after that. */}
               <span
                 key={start}
@@ -1258,8 +1263,8 @@ function SettledView({ settled: r, panel }: { settled: RowView; panel: Row | und
                   if (el && !el.style.animationDelay) el.style.animationDelay = `-${Math.max(0, Date.now() - start)}ms`
                 }}
               />
-              {isUndoing ? null : <Icon name="undo" />}
-              {isUndoing ? 'Undoing…' : 'Undo'}
+              <Icon name="undo" />
+              Undo
             </button>
           ) : null}
         </div>
@@ -1562,7 +1567,12 @@ function SettledPr({ v, pr }: { v: View; pr: PrView }) {
             <span class="outcome-label">{`${DOT}Dismissed`}</span>
             {error ? <span class="tone-error">{`${DOT}${error}`}</span> : null}
           </div>
-          <button type="button" class="key undo" disabled={isUndoing} onClick={() => void undoPr(id, pr.ref)}>
+          <button
+            type="button"
+            class={isUndoing ? 'key undo undoing' : 'key undo'}
+            disabled={isUndoing}
+            onClick={() => void undoPr(id, pr.ref)}
+          >
             <span
               key={start}
               class={isUndoing ? 'time-left paused' : 'time-left'}
@@ -1571,8 +1581,8 @@ function SettledPr({ v, pr }: { v: View; pr: PrView }) {
                 if (el && !el.style.animationDelay) el.style.animationDelay = `-${Math.max(0, Date.now() - start)}ms`
               }}
             />
-            {isUndoing ? null : <Icon name="undo" />}
-            {isUndoing ? 'Undoing…' : 'Undo'}
+            <Icon name="undo" />
+            Undo
           </button>
         </div>
       </div>
