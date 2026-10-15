@@ -19,3 +19,5 @@ launch-video/takes/
 launch-video/public/takes/
 # Music licensed for the post, not for sharing in this repo
 launch-video/public/music/
+# App icons copied from the installed apps, which are their makers' trademarks
+launch-video/public/icons/
