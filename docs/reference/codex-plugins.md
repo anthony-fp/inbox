@@ -887,7 +887,15 @@ Notes per event:
   same. The transcript's `session_meta` has `originator: "codex_exec"` and
   `source: "exec"` [live] (docs/plans/codex-plugin.md:329). Live, one of two
   recent `codex_exec` transcripts had `source: {subagent: …}` instead
-  [live 2026-10-08]. `isExecRun` checks either field (codex/src/transcript.ts:32-34).
+  [live 2026-10-08]. `isNonInteractiveRun` checks either field (codex/src/transcript.ts).
+- **Ephemeral threads.** An ephemeral thread has no live thread in the
+  session, so its hooks get `transcript_path: null` [source]
+  (GH/codex-rs/core/src/session/mod.rs `hook_transcript_path`;
+  core/src/session/session.rs, `config.ephemeral`). A normal thread's
+  transcript is written before the path is passed. The desktop app runs its
+  background jobs, such as suggesting the next message, as one-turn threads
+  that fire every hook and save no transcript [live 2026-10-15]. The hooks
+  skip a null path.
 - [inference] Hooks and their per-reply `codex exec` can fire in Codex CLI
   and local Work threads where no tab exists. The plugin has no surface gate.
 - **Telemetry.** OTel metrics `hooks.run` and `hooks.run.duration_ms`, tagged

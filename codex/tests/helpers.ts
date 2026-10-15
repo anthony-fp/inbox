@@ -32,5 +32,5 @@ export function hookDeps(dir: string, now = () => 1000): HookDeps & { updates: s
 }
 
 export function input(event: string, fields: Partial<HookInput> = {}): HookInput {
-  return { hook_event_name: event, session_id: 's1', ...fields }
+  return { hook_event_name: event, session_id: 's1', transcript_path: join(tmpdir(), 'rollout.jsonl'), ...fields }
 }

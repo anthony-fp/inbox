@@ -532,8 +532,8 @@ async function updateState(dir, sessionId, change) {
 
 // src/transcript.ts
 import { open } from "node:fs/promises";
-async function isExecRun(path) {
-  if (!path) return false;
+async function isNonInteractiveRun(path) {
+  if (path === null) return true;
   try {
     const file = await open(path, "r");
     try {
@@ -554,7 +554,7 @@ async function isExecRun(path) {
 async function handleHook(input, deps) {
   const id = input.session_id;
   const { dir, env, now } = deps;
-  if (!id || !env.INBOX_IN_EXEC && await isExecRun(input.transcript_path)) return null;
+  if (!id || !env.INBOX_IN_EXEC && await isNonInteractiveRun(input.transcript_path)) return null;
   const cliPath = env.CODEX_CLI_PATH || null;
   const withCli = (s) => cliPath && s.cliPath !== cliPath ? { ...s, cliPath } : s;
   switch (input.hook_event_name) {

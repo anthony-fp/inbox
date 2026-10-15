@@ -8,7 +8,7 @@ import { resolve } from 'node:path'
 import { activityOf, cleared, endTurn, noteActivity, noteHook, notePrompt, patchFiles, startContext } from './core'
 import { updateState } from './state'
 import type { SessionState } from './state'
-import { isExecRun } from './transcript'
+import { isNonInteractiveRun } from './transcript'
 
 export type HookInput = {
   hook_event_name: string
@@ -16,7 +16,7 @@ export type HookInput = {
   turn_id?: string
   /** Set when a subagent's hook fires. It carries the parent's session id. */
   agent_id?: string
-  transcript_path?: string
+  transcript_path: string | null
   cwd?: string
   source?: string
   prompt?: string
@@ -39,7 +39,7 @@ export async function handleHook(input: HookInput, deps: HookDeps): Promise<Reco
   const id = input.session_id
   const { dir, env, now } = deps
   // INBOX_IN_EXEC lets a test drive a whole session through `codex exec`.
-  if (!id || (!env.INBOX_IN_EXEC && (await isExecRun(input.transcript_path)))) return null
+  if (!id || (!env.INBOX_IN_EXEC && (await isNonInteractiveRun(input.transcript_path)))) return null
   // Every hook learns the codex binary the desktop app runs, for the server's `codex queue` and the update's `codex exec`.
   const cliPath = env.CODEX_CLI_PATH || null
   const withCli = (s: SessionState): SessionState => (cliPath && s.cliPath !== cliPath ? { ...s, cliPath } : s)

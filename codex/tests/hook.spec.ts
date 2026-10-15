@@ -100,16 +100,33 @@ test('a patch notes each edited file, resolved against the folder it ran in', as
   assert.deepEqual(s.turn.activity, ['edited /work/new/b.txt'])
 })
 
-test('hooks do nothing in a codex exec run', async () => {
+test('hooks do nothing in a codex exec run or an ephemeral thread', async () => {
   const dir = tempDir()
+  const deps = hookDeps(dir)
   const transcript = join(tempDir(), 'rollout.jsonl')
   writeFileSync(
     transcript,
     `${JSON.stringify({ type: 'session_meta', payload: { originator: 'codex_exec', source: 'exec' } })}\n`,
   )
-  const out = await handleHook(input('SessionStart', { cwd: '/', transcript_path: transcript }), hookDeps(dir))
+  const out = await handleHook(input('SessionStart', { cwd: '/', transcript_path: transcript }), deps)
   assert.equal(out, null)
   assert.equal((await readState(dir, 's1')).root, '')
+
+  for (const event of ['SessionStart', 'UserPromptSubmit', 'Stop'])
+    assert.equal(
+      await handleHook(
+        input(event, {
+          cwd: '/',
+          transcript_path: null,
+          prompt: 'Suggest the next message',
+          last_assistant_message: 'Fix the failing test.',
+        }),
+        deps,
+      ),
+      null,
+    )
+  assert.equal((await readState(dir, 's1')).root, '')
+  assert.deepEqual(deps.updates, [])
 })
 
 test('a session saved by an older build loads converted, as the mod converts its own', async () => {
