@@ -603,6 +603,10 @@ function paletteFor(theme: string, look: ModLook): Palette {
 // The blank columns on each side of a docked tab's name, which a click there also selects. A pane too narrow
 // for the three tabs at this padding draws them with one column each side instead.
 const TAB_PAD = '  '
+// From this many columns, the inline terminal pane draws its tabs in a column at its left, apart from the rows.
+const INLINE_RAIL_AT = 80
+// The blank columns between the inline tab column and the rows beside it.
+const RAIL_GUTTER = 2
 // The Needs you tab lists questions first, because each takes one key.
 const NEEDS_YOU_GROUPS: { kind: Item['kind']; title: string; list: 'questions' | 'tasks' }[] = [
   { kind: 'question', title: 'Questions', list: 'questions' },
@@ -3323,8 +3327,10 @@ export const register: Register = on => {
     // On desktop a follow-up (`isFollowUp`) draws as plain text, so the row's answers and main action stand out.
     const keyedButton =
       (rowId: string, isFollowUp = false) =>
-      ({ hotkey, kind: _kind, isMain, icon, ...action }: KeyAction) =>
-        look === 'desktop' ? (
+      ({ hotkey, kind: _kind, isMain, icon, ...action }: KeyAction) => {
+        const { label: _label, ...unlabeled } = action
+
+        return look === 'desktop' ? (
           <Button
             {...action}
             {...(isFollowUp ? { plain: true } : isMain ? { variant: 'primary' as const } : {})}
@@ -3333,24 +3339,25 @@ export const register: Register = on => {
             onPress={press => unlessGuarded($, rowId, press, action.onPress)}
           />
         ) : (
+          // The key letter is inside the Button, so the focus and hover highlights take it with the label.
           <Box key={`keyed-${action.key}`} flexDirection="row">
-            {hotkey ? (
-              <Box flexShrink={0}>
+            <Button
+              plain
+              {...unlabeled}
+              {...(isOpenGuarded ? { dimColor: true } : {})}
+              hover={{ color: pal.muted, inverse: true }}
+              onPress={press => unlessGuarded($, rowId, press, action.onPress)}
+            >
+              {hotkey ? (
                 <Text color={pal.key} dimColor={isOpenGuarded} hover={{ color: pal.muted, inverse: true }}>
                   {hotkey}
                 </Text>
-              </Box>
-            ) : null}
-            <Button
-              plain
-              {...action}
-              {...(isOpenGuarded ? { dimColor: true } : {})}
-              label={hotkey ? `: ${shownLabel(action)}` : shownLabel(action)}
-              hover={{ color: pal.muted, inverse: true }}
-              onPress={press => unlessGuarded($, rowId, press, action.onPress)}
-            />
+              ) : null}
+              {hotkey ? `: ${shownLabel(action)}` : shownLabel(action)}
+            </Button>
           </Box>
         )
+      }
     // On desktop, the follow-ups as plain text in a Client, which posts the key clicked.
     // Emptied here, after the drawing's reads, so a click that lands while they run still finds the last presses.
     followUpPresses.clear()
@@ -4306,8 +4313,50 @@ export const register: Register = on => {
     // Desktop draws dimColor as plain text, so the status takes the ages' dimmer gray there.
     const statusText = look === 'desktop' ? <Text color={pal.age}>{status}</Text> : <Text dimColor>{status}</Text>
     // Each takes its own line under the tab row.
+    const hasRail = isInline && look === 'terminal' && e.props.bodyColumns >= INLINE_RAIL_AT
+    // Each tab is one line of the column, padded to the column's width. Every cell of it is a Button, so a click
+    // anywhere on the line shows the tab. The shown tab is filled and bold, as the docked tabs draw it.
+    const railWidth = Math.max(...TABS.map(t => tabText(t.id, t.label).length)) + 2 * TAB_PAD.length
+    const rail = (
+      <Box flexDirection="column" flexShrink={0} paddingLeft={1} marginRight={RAIL_GUTTER}>
+        {TABS.map(({ id, label }) => {
+          const count = tabCounts[id]
+          const fill = ' '.repeat(railWidth - tabText(id, label).length - TAB_PAD.length)
+          if (tab === id)
+            return (
+              <Text key={`rail-${id}`} backgroundColor={pal.raised}>
+                {TAB_PAD}
+                <Text bold color={pal.raisedText} backgroundColor={pal.raised}>
+                  {label}
+                </Text>
+                {count > 0 ? (
+                  <Text bold color={pal.tone[id] ?? pal.raisedText} backgroundColor={pal.raised}>
+                    {' '}
+                    {count}
+                  </Text>
+                ) : null}
+                {fill}
+              </Text>
+            )
+          const show = () => void showTab($, id)
+
+          return (
+            <Box key={`rail-${id}`} flexDirection="row">
+              <Button plain key={`tab-${id}-before`} label={TAB_PAD} hover={raise} onPress={show} />
+              <Button plain key={`tab-${id}`} label={label} hover={raise} onPress={show} />
+              {count > 0 ? (
+                <Button plain key={`tab-${id}-count`} hover={raise} onPress={show}>
+                  <Text color={pal.tone[id]}> {count}</Text>
+                </Button>
+              ) : null}
+              <Button plain key={`tab-${id}-after`} label={fill} hover={raise} onPress={show} />
+            </Box>
+          )
+        })}
+      </Box>
+    )
     const statusBlock = statusLines.some(Boolean) ? (
-      <Box flexDirection="column" paddingX={isInline ? 2 : 1} paddingTop={1}>
+      <Box flexDirection="column" paddingX={hasRail ? 1 : isInline ? 2 : 1} paddingTop={hasRail ? 0 : 1}>
         {statusLines}
       </Box>
     ) : null
@@ -5094,13 +5143,15 @@ export const register: Register = on => {
     const selectedActions = selectedRow ? rowActions(selectedRow) : null
     const rowKeys = selectedActions ? [...selectedActions.keys, ...selectedActions.more, ...selectedActions.hidden] : []
 
-    // Docked, the pane takes at least the window's height, so the footer sits at
-    // its bottom edge until the content is taller than the window. The engine has
-    // no fixed footer, so past that it follows the content. Inline, the frame fits
-    // the tree. A pane takes a key only as a Button's hotkey, so the tab keys, j,
-    // k and the selected row's keys are Buttons in a hidden Box.
+    // The pane takes at least the room the engine gives its body, so the footer
+    // sits at its bottom edge until the content is taller. Inline, where the frame
+    // fits the tree, that keeps its height the same on every tab. The engine has
+    // no fixed footer, so past that it follows the content. A pane takes a key
+    // only as a Button's hotkey, so the tab keys, j, k and the selected row's keys
+    // are Buttons in a hidden Box.
+    const tabView = tab === 'findings' ? findingsView() : tab === 'prs' ? prsView() : needsYouView()
     const drawn = (
-      <Box flexDirection="column" minHeight={isInline ? undefined : e.props.scroll.bodyRows} backgroundColor={pal.body}>
+      <Box flexDirection="column" minHeight={e.props.scroll.bodyRows} backgroundColor={pal.body}>
         {showsDemoNotices ? (
           // The notice is quiet, on one line with its button, as each app words a passing note.
           <Box
@@ -5118,11 +5169,25 @@ export const register: Register = on => {
             <Button key="hide-demo" label="Hide demo" onPress={() => void setDemo($, false)} />
           </Box>
         ) : null}
-        {tabs}
-        {statusBlock}
-        <Box flexDirection="column" paddingX={1} paddingTop={blankLine} flexGrow={1}>
-          {tab === 'findings' ? findingsView() : tab === 'prs' ? prsView() : needsYouView()}
-        </Box>
+        {hasRail ? (
+          <Box flexDirection="row" flexGrow={1}>
+            {rail}
+            <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+              {statusBlock}
+              <Box flexDirection="column" paddingRight={1} flexGrow={1}>
+                {tabView}
+              </Box>
+            </Box>
+          </Box>
+        ) : (
+          [
+            tabs,
+            statusBlock,
+            <Box flexDirection="column" paddingX={1} paddingTop={blankLine} flexGrow={1}>
+              {tabView}
+            </Box>,
+          ]
+        )}
         {/* Desktop takes no keys: a Button's hotkey does nothing there, so it gets neither the list of keys nor the hidden Buttons. */}
         {footer}
         {look === 'desktop' ? null : (
