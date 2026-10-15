@@ -13,7 +13,11 @@ Codex. The inbox runs in three places:
 Each place draws the inbox in its host app's own style. The rules are the
 same in all three.
 
-[https://github.com/user-attachments/assets/560f80be-e6fb-484e-8a3f-7b4828b98fb2](https://github.com/user-attachments/assets/aae4edc0-a0dc-44d5-9851-7fd1d80499ee)
+
+
+https://github.com/user-attachments/assets/a493119c-4d8b-46e0-a18a-bd0ecf041b6b
+
+
 
 ## Install
 
