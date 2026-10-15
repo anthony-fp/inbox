@@ -4391,34 +4391,9 @@ export const register: Register = on => {
       </Box>
     ) : null
     // The footer's one line shows the status at its right end, and, where keys work, opens the list
-    // of keys as a drawer above it. Docked, the drawer is absolute, so it covers the rows above instead of moving
-    // the line. Inline it takes its own lines: the pane is only as tall as its rows, and would cut off its top.
-    const keyDrawer = (isAbsolute: boolean) => (
-      <Box
-        {...(isAbsolute ? { position: 'absolute' as const, bottom: 1, left: -1, right: -1 } : {})}
-        flexDirection="column"
-        paddingX={2}
-        paddingY={1}
-        backgroundColor={pal.raised}
-      >
-        {keyList.map(k => (
-          <Box key={`key-list-${k.keys}`} flexDirection="row">
-            <Box width={keyColumn} flexShrink={0}>
-              <Text bold color={pal.raisedText}>
-                {k.keys}
-              </Text>
-            </Box>
-            <Text color={pal.raisedText ?? pal.muted} wrap="wrap">
-              {k.does}
-            </Text>
-          </Box>
-        ))}
-      </Box>
-    )
-    const isKeyDrawerShown = look !== 'desktop' && isKeyListShown
+    // of keys as a drawer above it. The drawer is absolute, so it covers the rows above instead of moving the line.
     const footer = (
       <Box flexDirection="column" paddingX={1} paddingTop={blankLine}>
-        {isKeyDrawerShown && isInline ? keyDrawer(false) : null}
         <Box flexDirection="row" paddingX={1} justifyContent="space-between" columnGap={3}>
           {look === 'desktop' ? (
             <Box />
@@ -4432,7 +4407,31 @@ export const register: Register = on => {
             />
           )}
           {statusText}
-          {isKeyDrawerShown && !isInline ? keyDrawer(true) : null}
+          {look !== 'desktop' && isKeyListShown ? (
+            <Box
+              position="absolute"
+              bottom={1}
+              left={-1}
+              right={-1}
+              flexDirection="column"
+              paddingX={2}
+              paddingY={1}
+              backgroundColor={pal.raised}
+            >
+              {keyList.map(k => (
+                <Box key={`key-list-${k.keys}`} flexDirection="row">
+                  <Box width={keyColumn} flexShrink={0}>
+                    <Text bold color={pal.raisedText}>
+                      {k.keys}
+                    </Text>
+                  </Box>
+                  <Text color={pal.raisedText ?? pal.muted} wrap="wrap">
+                    {k.does}
+                  </Text>
+                </Box>
+              ))}
+            </Box>
+          ) : null}
         </Box>
       </Box>
     )
@@ -5174,14 +5173,15 @@ export const register: Register = on => {
     const selectedActions = selectedRow ? rowActions(selectedRow) : null
     const rowKeys = selectedActions ? [...selectedActions.keys, ...selectedActions.more, ...selectedActions.hidden] : []
 
-    // Docked, the pane takes at least the window's height, so the footer sits at
-    // its bottom edge until the content is taller than the window. The engine has
-    // no fixed footer, so past that it follows the content. Inline, the frame fits
-    // the tree. A pane takes a key only as a Button's hotkey, so the tab keys, j,
-    // k and the selected row's keys are Buttons in a hidden Box.
+    // The pane takes at least the room the engine gives its body, so the footer
+    // sits at its bottom edge until the content is taller. Inline, where the frame
+    // fits the tree, that keeps its height the same on every tab. The engine has
+    // no fixed footer, so past that it follows the content. A pane takes a key
+    // only as a Button's hotkey, so the tab keys, j, k and the selected row's keys
+    // are Buttons in a hidden Box.
     const tabView = tab === 'findings' ? findingsView() : tab === 'prs' ? prsView() : needsYouView()
     const drawn = (
-      <Box flexDirection="column" minHeight={isInline ? undefined : e.props.scroll.bodyRows} backgroundColor={pal.body}>
+      <Box flexDirection="column" minHeight={e.props.scroll.bodyRows} backgroundColor={pal.body}>
         {showsDemoNotices ? (
           // The notice is quiet, on one line with its button, as each app words a passing note.
           <Box
