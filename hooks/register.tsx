@@ -979,6 +979,14 @@ function redrawWhileLeaving($: EngineInterface, waitMs: number) {
   })().catch(() => undefined)
 }
 
+/** Runs `run` after `waitMs`, dropping a failure. */
+function later($: EngineInterface, waitMs: number, run: () => unknown) {
+  void (async () => {
+    await $.clock.sleep(waitMs)
+    await run()
+  })().catch(() => undefined)
+}
+
 /**
  * A reload cancels the redraws that were running, so this sets them again
  * until the latest of these ends, each SETTLED_MS after its time: a close, a
@@ -1158,9 +1166,8 @@ function isStoredSince(text: string, since: number): boolean {
 
 /** Appends context as a row only the model reads. Without it Claude still gets the prompt, so a refused append is ignored. */
 async function appendContext($: EngineInterface, context: string[]) {
-  await $.session
-    .append({ message: { type: 'user', content: [{ type: 'text', text: context.join('\n\n') }] } })
-    .catch(() => undefined)
+  const content = [{ type: 'text' as const, text: context.join('\n\n') }]
+  await $.session.append({ message: { type: 'user', content } }).catch(() => undefined)
 }
 
 /**
@@ -1408,10 +1415,7 @@ async function select($: EngineInterface, tab: Tab, id: string, index: number) {
   await update($, SELECTION, s => ({ ...s, [tab]: { id, index, openedAt } }))
   await update($, TYPING, t => (t === id ? t : null))
   // The row's buttons draw dim while guarded. A render cannot write state, so a fresh value redraws them once the guard ends.
-  void $.clock
-    .sleep(PRESS_GUARD_MS)
-    .then(() => update($, SELECTION, s => ({ ...s })))
-    .catch(() => undefined)
+  later($, PRESS_GUARD_MS, () => update($, SELECTION, s => ({ ...s })))
   await scrollToRow($, id)
 }
 
@@ -1422,9 +1426,8 @@ async function select($: EngineInterface, tab: Tab, id: string, index: number) {
  */
 async function scrollToRow($: EngineInterface, id: string) {
   for (let tries = 0; tries < 10; tries++) {
-    const result = await $.ui
-      .scroll({ in: PANE, to: { key: `view-${id}` }, block: isInlinePane ? 'start' : 'nearest' })
-      .catch((): UiScrollResult => ({}))
+    const block = isInlinePane ? 'start' : 'nearest'
+    const result = await $.ui.scroll({ in: PANE, to: { key: `view-${id}` }, block }).catch((): UiScrollResult => ({}))
     if (result.deny === undefined) return
     await $.clock.sleep(30)
   }
@@ -1530,11 +1533,7 @@ async function openLeftRows($: EngineInterface) {
     return isMoved ? moved : s
   })
   // The opened row's buttons draw dim while guarded; a fresh value redraws them once the guard ends.
-  if (isMoved)
-    void $.clock
-      .sleep(PRESS_GUARD_MS)
-      .then(() => update($, SELECTION, s => ({ ...s })))
-      .catch(() => undefined)
+  if (isMoved) later($, PRESS_GUARD_MS, () => update($, SELECTION, s => ({ ...s })))
 }
 
 /** The shown tab's rows in drawn order, and whether each still waits on the person. */
@@ -1788,21 +1787,18 @@ async function openUrl($: EngineInterface, url: string): Promise<string | null> 
  * cancels this leaves only a view the next fetch drops.
  */
 function leavePr($: EngineInterface, ref: string, at: number) {
-  void $.clock
-    .sleep(SETTLED_MS)
-    .then(async () => {
-      const [linked, mark] = await Promise.all([
-        read($, LEDGER).then(l => l.prs),
-        read($, LAST_ACTIONS).then(a => a[prMarkId(ref)]),
-      ])
-      if (mark?.action !== 'pr-dismiss' || mark.at !== at) return
-      await update($, PR_VIEWS, v => {
-        if (isTracked(v, linked, ref) || !(ref in v.views)) return v
-        const { [ref]: _left, ...views } = v.views
-        return { ...v, views }
-      })
+  later($, SETTLED_MS, async () => {
+    const [linked, mark] = await Promise.all([
+      read($, LEDGER).then(l => l.prs),
+      read($, LAST_ACTIONS).then(a => a[prMarkId(ref)]),
+    ])
+    if (mark?.action !== 'pr-dismiss' || mark.at !== at) return
+    await update($, PR_VIEWS, v => {
+      if (isTracked(v, linked, ref) || !(ref in v.views)) return v
+      const { [ref]: _left, ...views } = v.views
+      return { ...v, views }
     })
-    .catch(() => undefined)
+  })
 }
 
 /** The row any press was drawn on. */
@@ -1888,16 +1884,13 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
       'id' in p && p.action === 'type' ? update($, DRAFTS, d => ({ ...d, [p.id]: p.text })) : undefined,
     ])
     // The note shows for SETTLED_MS. Removing it then also redraws the pane.
-    void $.clock
-      .sleep(SETTLED_MS)
-      .then(() =>
-        update($, NOTES, n => {
-          if (n[rowId]?.at !== now) return n
-          const { [rowId]: _gone, ...rest } = n
-          return rest
-        }),
-      )
-      .catch(() => undefined)
+    later($, SETTLED_MS, () =>
+      update($, NOTES, n => {
+        if (n[rowId]?.at !== now) return n
+        const { [rowId]: _gone, ...rest } = n
+        return rest
+      }),
+    )
     return
   }
   const lasts = Object.values(pressed.lasts)
@@ -1921,11 +1914,7 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
   // The sidebar line stops counting a handed-off row at once.
   if (lasts.some(l => l.kind === 'handoff')) void publishStatus($)
   const isMoved = await openAfterClose($, rowId, wasWaiting)
-  if (!('ref' in p) && p.action === 'done')
-    void $.clock
-      .sleep(SETTLED_MS)
-      .then(() => wakeForDone($))
-      .catch(() => undefined)
+  if (!('ref' in p) && p.action === 'done') later($, SETTLED_MS, () => wakeForDone($))
   // Fix settles its finding's row as a close does, so it leaves once SETTLED_MS ends.
   if (!('ref' in p) && p.action === 'address') redrawWhileLeaving($, SETTLED_MS)
   if ('ref' in p && p.action === 'pr-dismiss') {
@@ -1952,17 +1941,10 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
   }
   const result = await runLocalEffects(host, pressed.effects, rowId, pressed.lasts[rowId]?.result)
   // A success note clears after SETTLED_MS. A fresh value is what redraws the pane then.
-  if (result?.state === 'done')
-    void $.clock
-      .sleep(SETTLED_MS)
-      .then(() => update($, LAST_ACTIONS, a => ({ ...a })))
-      .catch(() => undefined)
+  if (result?.state === 'done') later($, SETTLED_MS, () => update($, LAST_ACTIONS, a => ({ ...a })))
   // A message still on its way after QUEUED_AFTER_MS reads Queued from then. A fresh value is what redraws the pane.
   if (pressed.effects.some(e => e.kind === 'send'))
-    void $.clock
-      .sleep(QUEUED_AFTER_MS)
-      .then(() => update($, LAST_ACTIONS, a => ({ ...a })))
-      .catch(() => undefined)
+    later($, QUEUED_AFTER_MS, () => update($, LAST_ACTIONS, a => ({ ...a })))
   const failed = await runSends(host, pressed.effects, rowId, rows, now)
   if (!failed) return
   // A typed reply that did not send goes back into its draft.
@@ -2100,10 +2082,7 @@ async function runDemoPress($: EngineInterface, p: RowPress | PrPress, wasWaitin
   // A fresh copy redraws the pane: once a note's SETTLED_MS ends, with the sample reply to a sample message, and at
   // each step of a leave bar.
   if ('stale' in pressed || pressed.effects.length > 0)
-    void $.clock
-      .sleep(SETTLED_MS)
-      .then(() => update($, DEMO, d => d && { ...d, turns: demoTurns(d.turns, [], true) }))
-      .catch(() => undefined)
+    later($, SETTLED_MS, () => update($, DEMO, d => d && { ...d, turns: demoTurns(d.turns, [], true) }))
   if (isClosing) redrawWhileLeaving($, SETTLED_MS)
 }
 
@@ -2328,6 +2307,7 @@ async function turnOn($: EngineInterface) {
   const refused = () => {
     toolsRefused = true
   }
+  const findingText = findingDescription(CLAUDE_CODE)
   await Promise.all([
     // /inbox only opens the pane, so it runs at once instead of waiting for the running turn to end.
     $.command.register({
@@ -2335,13 +2315,7 @@ async function turnOn($: EngineInterface) {
       description: 'Show where this session stands and what is waiting on you',
       immediate: true,
     }),
-    $.tool
-      .register({
-        name: 'record_finding',
-        description: findingDescription(CLAUDE_CODE),
-        inputSchema: FINDING_SCHEMA,
-      })
-      .catch(refused),
+    $.tool.register({ name: 'record_finding', description: findingText, inputSchema: FINDING_SCHEMA }).catch(refused),
     $.tool.register({ name: 'close', description: CLOSE_DESCRIPTION, inputSchema: CLOSE_SCHEMA }).catch(refused),
   ])
   // A pane kept across a hot reload is already drawn.
@@ -2596,14 +2570,13 @@ export const register: Register = on => {
     }
   })
 
-  // The finding tool is listed up front, needs no permission prompt, and is served here.
+  // The inbox's tools are listed up front and answered here. A tool.call answer
+  // settles the call before the permission check, so they raise no prompt.
   on('tool.describe', { tool: FINDING_TOOL }, async ($, e, next) => ({ ...(await next(e)), isDeferred: false }))
-  on('tool.check', { tool: FINDING_TOOL }, () => ({ decision: 'allow' }))
   on('tool.call', { tool: FINDING_TOOL }, async ($, e) => ({
     result: await runTool($, recordFinding, e as unknown as Record<string, unknown>),
   }))
   on('tool.describe', { tool: CLOSE_TOOL }, async ($, e, next) => ({ ...(await next(e)), isDeferred: false }))
-  on('tool.check', { tool: CLOSE_TOOL }, () => ({ decision: 'allow' }))
   on('tool.call', { tool: CLOSE_TOOL }, async ($, e) => ({
     result: await runTool($, recordClose, e as unknown as Record<string, unknown>),
   }))
@@ -2652,7 +2625,7 @@ export const register: Register = on => {
     }
 
     return next(e)
-  })
+  }).catch(($, e, next) => next(e))
 
   on('classic.StopFailure', async ($, e, next) => {
     const r = await next(e)
@@ -2973,10 +2946,7 @@ export const register: Register = on => {
     // The scroll waits a moment, so it measures the redraw at the new size.
     const size = isInline ? `${e.props.bodyColumns}x${e.props.scroll.bodyRows}` : null
     if (size !== null && inlineSize !== null && size !== inlineSize) {
-      void $.clock
-        .sleep(RESIZE_SCROLL_MS)
-        .then(() => scrollToOpenRow($, tab))
-        .catch(() => undefined)
+      later($, RESIZE_SCROLL_MS, () => scrollToOpenRow($, tab))
     }
     inlineSize = size
     const shownPrs = drawnPrs(prState, ledger.prs, lastActions, now)
@@ -5171,11 +5141,7 @@ export const register: Register = on => {
         focusedKey = next
         focusHint = null
         // After this hook returns, since a focus asked from inside a drawing's own hook cannot wait on it.
-        if (next)
-          void $.clock
-            .sleep(0)
-            .then(() => $.ui.focus({ requestId: PANE, key: next }))
-            .catch(() => undefined)
+        if (next) later($, 0, () => $.ui.focus({ requestId: PANE, key: next }))
       }
     }
 

@@ -121,6 +121,70 @@ the desktop app, with your Codex sign-in. It uses about 16,000 input tokens
 per reply, most of them the base instructions every `codex exec` call
 includes. It counts toward your plan's usage.
 
+## What it runs, sends and changes
+
+This covers the Claude Code mod. [codex/README.md](codex/README.md) covers
+the Codex plugin.
+
+**What leaves your machine.** Three things, and nothing else:
+
+- After each of Claude's replies, the inbox sends one Sonnet request to
+  Anthropic through Claude Code's own model connection. It holds your last
+  prompt, Claude's reply, the inbox's open items, and a line for each tool
+  Claude ran. A tool line reads like `ran: npm test` or
+  `edited src/app.ts`. [Cost](#cost) gives the request's size.
+- When the inbox may have missed a turn, it asks the same model to update it
+  from the whole conversation. It forks the conversation for this, or reads
+  the transcript after a resume.
+- To fill the PRs tab, it runs read-only `gh` queries: `gh pr view`, and
+  `gh api graphql` for review threads. They reach GitHub under your own `gh`
+  sign-in. The inbox never reads your GitHub token.
+
+**Programs it starts.**
+
+| Program | When |
+|---|---|
+| `gh` | To fill the PRs tab |
+| `open` | When you press a button that opens a link, file or folder |
+| `test -x` | Before opening a file. An executable file is shown in Finder, not run. |
+| `herdr pane report-metadata` | Only inside the Herdr terminal, to show the inbox's counts in its sidebar |
+
+**Messages it sends as you.** When you press an answer or action button, the
+inbox sends Claude a message in your name. The message is the answer you
+chose, or a request about the item, such as asking Claude to fix a finding.
+Resume, on a stopped turn, sends `Continue`. Every message it sends starts
+from a press. When you mark a task Done that Claude is waiting on, the inbox
+tells Claude a few seconds later, or once Claude's running turn ends.
+
+**What it adds to Claude's context.**
+
+- Its instructions, about 1,350 tokens, in every request.
+- A note beside your prompt when you answer one of Claude's numbered
+  questions, or when the inbox changed since Claude last saw it.
+- Its open items after the conversation is compacted, so Claude keeps them.
+
+**What its hooks see.**
+
+- Tool calls. The inbox reads each call to write the tool lines above, to
+  show a question while Claude's question dialog is open, and to find a PR
+  this session opens with `gh pr create`. It passes every call on unchanged,
+  except calls to its own two tools. `record_finding` saves a finding and
+  `close` closes an item. The inbox answers these itself, so they run
+  without a permission prompt.
+- Permission prompts. While Claude Code asks you to approve a tool call, the
+  inbox shows a row for it, then passes the request on unchanged. It never
+  approves or denies a permission prompt.
+- Tool descriptions. It lists its own two tools to Claude up front, instead
+  of behind tool search. It leaves other tools' descriptions alone.
+- Shell commands you run with `!`, and their output. A command that runs
+  with nothing on stderr closes a task that asked you to run it.
+- Session starts. After `/clear`, a resume or a fork, the inbox loads that
+  conversation's items. It passes the event on unchanged.
+- Your theme setting, to match its colors.
+
+It also adds the `/inbox` command, and keeps its items in Claude Code's
+plugin storage on this machine.
+
 ## Developing
 
 Read [AGENTS.md](AGENTS.md) first. [docs/looks.md](docs/looks.md) says which
