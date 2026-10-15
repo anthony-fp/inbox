@@ -153,6 +153,7 @@ import {
   isGuarded,
   perTurnStatus,
   PRESS_GUARD_MS,
+  QUEUED_AFTER_MS,
   rowKeyPlan,
   rowsIn,
   SETTLED_MS,
@@ -1954,6 +1955,12 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
   if (result?.state === 'done')
     void $.clock
       .sleep(SETTLED_MS)
+      .then(() => update($, LAST_ACTIONS, a => ({ ...a })))
+      .catch(() => undefined)
+  // A message still on its way after QUEUED_AFTER_MS reads Queued from then. A fresh value is what redraws the pane.
+  if (pressed.effects.some(e => e.kind === 'send'))
+    void $.clock
+      .sleep(QUEUED_AFTER_MS)
       .then(() => update($, LAST_ACTIONS, a => ({ ...a })))
       .catch(() => undefined)
   const failed = await runSends(host, pressed.effects, rowId, rows, now)

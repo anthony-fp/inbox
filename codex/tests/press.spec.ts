@@ -10,6 +10,7 @@ import {
   firstWaiting,
   keptOpen,
   listWaits,
+  QUEUED_AFTER_MS,
   rowAfterClose,
   SETTLED_MS,
 } from '../../hooks/view'
@@ -126,7 +127,11 @@ test('a run step hands the task to Codex: it folds until the turn it started is 
   const s = after(withItems(), p)
   const folded = viewOf(s, 60)
   assert.deepEqual(folded.needsYou.tasks[0]?.state, { is: 'handedOff' })
-  assert.deepEqual(folded.needsYou.tasks[0]?.feedback, { is: 'queued', label: 'Run seed script', at: 50 })
+  assert.deepEqual(viewOf(s, 50 + QUEUED_AFTER_MS).needsYou.tasks[0]?.feedback, {
+    is: 'queued',
+    label: 'Run seed script',
+    at: 50,
+  })
   assert.equal(folded.needsYou.count, 1)
 
   const started = notePrompt(s, 'For "Sign in to npm", run this:', 70).state

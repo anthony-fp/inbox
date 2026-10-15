@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 
 import { demoView } from '../../hooks/demo'
+import { QUEUED_AFTER_MS } from '../../hooks/view'
 import type { Feedback } from '../../hooks/view'
 import { noteHook, notePrompt, viewOf } from '../src/core'
 import type { View } from '../src/core'
@@ -105,12 +106,12 @@ test('a press drawn in another thread, or on a row that changed, reads stale and
   assert.deepEqual(s.lastActions, before.lastActions)
 })
 
-test('a press reads Queued until Codex takes its message as a prompt, then Explaining… until the reply, then ✓', async () => {
+test('a press reads Explaining… at once, Queued once its message waits QUEUED_AFTER_MS for Codex to take it, then Explaining… until the reply, then ✓', async () => {
   const { dir, call } = await setup(0)
   const r = await call('inbox_press', { press: { action: 'explain', id: 'i1' }, thread: 's1' }, { thread_id: 's1' })
   assert.deepEqual(r.result.structuredContent.view.needsYou.questions[0]?.feedback, {
-    is: 'queued',
-    label: 'Explain',
+    is: 'working',
+    label: 'Explaining…',
     at: 100,
   })
   const s = await readState(dir, 's1')
@@ -118,6 +119,11 @@ test('a press reads Queued until Codex takes its message as a prompt, then Expla
     s.sent.map(x => [x.row, x.queuedId]),
     [['i1', 'q1']],
   )
+  assert.deepEqual(viewOf(s, 100 + QUEUED_AFTER_MS).needsYou.questions[0]?.feedback, {
+    is: 'queued',
+    label: 'Explain',
+    at: 100,
+  })
   const arrived = notePrompt(s, s.sent[0]!.text, 200).state
   assert.deepEqual(viewOf(arrived, 200).needsYou.questions[0]?.feedback, {
     is: 'working',

@@ -7,7 +7,7 @@ import type { LinksProps } from '../hooks/links-client'
 import type { RowProps } from '../hooks/row-client'
 import type { TabsProps } from '../hooks/tabs-client'
 import { demoView } from '../hooks/demo'
-import { PRESS_GUARD_MS, SETTLED_MS, inboxView, perTurnStatus, rowKeyPlan } from '../hooks/view'
+import { PRESS_GUARD_MS, QUEUED_AFTER_MS, SETTLED_MS, inboxView, perTurnStatus, rowKeyPlan } from '../hooks/view'
 
 const LEDGER_REPLY = `GOAL: Add a greeting CLI
 DONE: Plan written
@@ -1001,12 +1001,15 @@ test('a press during a turn reads Queued until its prompt enters, and one that w
   submitAnswer = 'hold'
   await pane.press({ key: 'explain-i1-key' })
   await clock.settle()
+  expect(await pane.find({ text: /Queued/ })).toBeUndefined()
+  await clock.advance(QUEUED_AFTER_MS)
   expect(await pane.find({ text: /^\u2007·\sQueued:\sExplain$/ })).toBeDefined()
   await pane.press({ key: 'select-i2' })
   await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'typekey-i2' })
   await pane.input({ key: 'type-i2', text: 'yes' })
   await clock.settle()
+  await clock.advance(QUEUED_AFTER_MS)
   expect(await pane.find({ text: /Queued:\sReply/ })).toBeDefined()
   await arrive($)
   await clock.settle()
@@ -1084,6 +1087,7 @@ test('Claude closes an item or finding that no longer applies, by the id it read
   submitAnswer = 'hold'
   await pane.press({ key: 'explain-i1-key' })
   await clock.settle()
+  await clock.advance(QUEUED_AFTER_MS)
   expect(await pane.find({ text: /^\u2007·\sQueued:\sExplain/ })).toBeDefined()
   expect((await close({ id: 'i1', answer: 'Deno' })).result).toBe(
     'Closed i1. The user sees it in the /inbox pane with its outcome.',
@@ -1367,6 +1371,7 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   submitAnswer = 'hold'
   await pane.press({ key: 'retry-T1' })
   await clock.settle()
+  await clock.advance(QUEUED_AFTER_MS)
   expect(await pane.find({ text: /^\u2007·\sQueued:\sAddress$/ })).toBeDefined()
   await arrive($)
   await clock.settle()

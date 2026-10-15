@@ -61,6 +61,16 @@ export const CLOSED_SHOWN = 3
 export const SETTLED_MS = 5120
 /** How long a row's buttons ignore clicks after it opens, so a double-click cannot land on one that just drew. */
 export const PRESS_GUARD_MS = 400
+/**
+ * How long a press's message waits on its way to the agent before its row reads "Queued". A message to an idle agent
+ * arrives within this, so its row goes straight to its outcome.
+ */
+export const QUEUED_AFTER_MS = 1000
+
+/** Whether a press's message has waited on its way to the agent for QUEUED_AFTER_MS or more. */
+export function isQueuedAt(last: LastAction | undefined, now: number): boolean {
+  return last?.delivery?.state === 'queued' && now - last.at >= QUEUED_AFTER_MS
+}
 
 /** Whether a row opened at `openedAt` still ignores clicks. 0 means no click opened it, so nothing is guarded. */
 export function isGuarded(openedAt: number, now: number): boolean {
@@ -89,7 +99,7 @@ export type ViewInput = {
  * A handed-off row stays in its place, folded, and leaves the count. A settled
  * row just closed: it stays in its place with its outcome, `label`, and leaves
  * the count. `canUndo` when the person's own Done or Dismiss closed it.
- * `isQueued` while the answer that closed it has not reached the agent yet.
+ * `isQueued` once the answer that closed it has waited QUEUED_AFTER_MS without reaching the agent.
  */
 export type RowState =
   | { is: 'open' }
@@ -97,8 +107,9 @@ export type RowState =
   | { is: 'settled'; label: string; at: number; canUndo: boolean; isQueued: boolean; isLapsed: boolean }
 
 /**
- * What a row says about its last press: "✓ Explained · 1m ago". Until its message arrives it reads "Queued: Explain
- * · 1m ago", and once it failed, "Not sent: <reason>" with the press [Try again] repeats, if any. A Talk press reads
+ * What a row says about its last press: "✓ Explained · 1m ago". While its message has waited QUEUED_AFTER_MS without
+ * arriving it reads "Queued: Explain · 1m ago", and once it failed, "Not sent: <reason>" with the press [Try again]
+ * repeats, if any. A Talk press reads
  * "Explaining…" until the agent's reply, so its ✓ claims only an explanation there is to read. A row a hand-off left
  * open after the agent's reply reads "Still open".
  * A Local press's result shows while pending, for SETTLED_MS once done,
@@ -247,7 +258,7 @@ export function feedbackOf(
   if (result && (result.state !== 'done' || now - result.at < SETTLED_MS)) return { is: 'local', result }
   if (!last || last.kind === 'local') return null
   const delivery = last.delivery
-  if (delivery?.state === 'queued') return { is: 'queued', label: last.text, at: last.at }
+  if (isQueuedAt(last, now)) return { is: 'queued', label: last.text, at: last.at }
   if (delivery?.state === 'failed') return { is: 'notSent', reason: delivery.reason, retry: retryOf(id, last) }
   const isAwaiting = isAwaitingReply(last, turns)
   const working = WORKING_LABELS[last.action]
@@ -679,8 +690,7 @@ export function inboxView({
         // Dismissed, expired or closed by the agent: drawn muted, as the Closed fold draws it.
         isLapsed: isLapsed(closed),
         // Queued only while the answer press that closed the row waits to reach Claude. Claude's own close sends nothing.
-        isQueued:
-          closed.how === 'answered' && last?.kind === 'mark' && last.at === at && last.delivery?.state === 'queued',
+        isQueued: closed.how === 'answered' && last?.kind === 'mark' && last.at === at && isQueuedAt(last, now),
       }
     }
 
@@ -693,7 +703,7 @@ export function inboxView({
         label: fixLabel(sent),
         at: last.at,
         canUndo: true,
-        isQueued: last.delivery?.state === 'queued',
+        isQueued: isQueuedAt(last, now),
         isLapsed: false,
       }
 
