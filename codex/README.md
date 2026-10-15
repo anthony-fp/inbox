@@ -1,10 +1,10 @@
 # Inbox for Codex
 
-The inbox as a plugin for the Codex desktop app. It keeps one list of what
-waits on you in a conversation: Codex's questions, the tasks only you can do,
-the findings Codex recorded, and the PRs of the conversation and your branch.
-The list shows in an Inbox tab beside the conversation, and its buttons send
-your answer to Codex as your own message.
+The inbox as a plugin for Codex in the ChatGPT desktop app. It keeps one list
+of what waits on you in a conversation: Codex's questions, the tasks only you
+can do, the findings Codex recorded, and the PRs of the conversation and your
+branch. The list shows in an Inbox tab beside the conversation, and its
+buttons send your answer to Codex as your own message.
 
 ## Install
 
@@ -41,7 +41,7 @@ them the base instructions every `codex exec` call includes.
 
 ## Needs
 
-- The Codex desktop app on macOS. The hooks and the plugin's server run on
+- The ChatGPT desktop app on macOS. The hooks and the plugin's server run on
   the Node.js the app ships with, or on `node` from your PATH outside the app.
 
 ## Working on it
@@ -74,8 +74,8 @@ build and a reinstall take effect without restarting Codex. Codex still asks
 for the page by the address it read when the process started, and it drops a
 tab whose page comes back under a different address. So the server answers
 under the address Codex asked for. Only a change to the loader itself needs
-Codex quit and reopened. The tab says when its page
-and the running handler come from different builds.
+Codex quit and reopened. The tab says when its page and the running handler
+come from different builds.
 
 `../scripts/check.sh` checks the bundles are current, the types and the
 tests. The design and what was measured are in

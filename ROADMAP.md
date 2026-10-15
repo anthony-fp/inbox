@@ -3,7 +3,8 @@
 Planned work, not built yet.
 
 - **Claude writes its own items.** One tool lets Claude record its
-  questions, its tasks and its calls, and close them. It replaces `record_finding`.
+  questions, its tasks and its calls, and close them. It replaces
+  `record_finding`.
   The per-turn Sonnet call stops creating items and writes only the card.
   At the end of a turn, a reply that asks you something no item records is
   sent back once, so Claude records it. The tool must stay loaded up front
@@ -26,5 +27,5 @@ Planned work, not built yet.
   each session's ledger under `s:<session id>`.
 - **More PR actions.** Flag a description that no longer matches the diff,
   and buttons for a self-review and screenshots.
-- **A choice of model.** The per-turn call always uses Sonnet. A
+- **A choice of model.** In Claude Code, the per-turn call always uses Sonnet. A
   `userConfig` option could make it switchable.

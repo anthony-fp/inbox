@@ -8,7 +8,8 @@ Codex. The inbox runs in three places:
 - **Claude Code in the terminal**, as a mod. Type `/inbox`.
 - **Code sessions in the Claude desktop app**, as the same mod, in a pane
   beside the conversation.
-- **The Codex desktop app**, as a plugin, in an Inbox tab in the side panel.
+- **Codex in the ChatGPT desktop app**, as a plugin, in an Inbox tab in the
+  side panel.
 
 Each place draws the inbox in its host app's own style. The rules are the
 same in all three.
@@ -46,7 +47,7 @@ claude plugin update inbox
 ```
 
 - It makes one Sonnet call after each of Claude's replies. See [Cost](#cost).
-- It was built and tested with Claude Code 2.1.296.
+- It was built and tested with Claude Code 2.1.300.
 
 ### Codex
 
@@ -55,7 +56,7 @@ codex plugin marketplace add petekp/inbox
 codex plugin add inbox@inbox
 ```
 
-Then, in the Codex desktop app, trust the plugin's hooks: click the hook icon
+Then, in the ChatGPT desktop app, trust the plugin's hooks: click the hook icon
 beside the prompt's approval setting, then Allow all. Codex runs a plugin's
 hooks only after you trust them. To open the inbox, press + at the top right
 of the window, then choose More tools, then Inbox.
@@ -69,8 +70,8 @@ The PRs tab needs the GitHub CLI, `gh`, signed in.
 
 ## Using it
 
-Type `/inbox` in Claude Code, or open the Inbox tab in Codex. The inbox has
-three tabs:
+Type `/inbox` in Claude Code, or open the Inbox tab in the ChatGPT app. The
+inbox has three tabs:
 
 - **Needs you**: questions the agent asked you, and tasks only you can do.
 - **Findings**: bugs, risks and ideas the agent noticed outside the task it's
@@ -93,11 +94,12 @@ inbox switches to it.
 - **Claude desktop app:** you click. `/inbox` sent as the first message of a
   new session is not recognized as a command. Send it after the first
   message.
-- **Codex:** you click, or use the terminal's keys. The tab shows no letters.
+- **ChatGPT app:** you click, or press the same keys as in the terminal. The
+  tab shows no letters.
 
 In Claude Code, a line above your prompt counts what needs you and the
 findings waiting, with a button that opens the panel. When Claude stops on an
-error, the stop shows on a second line. Codex has no such line.
+error, the stop shows on a second line. The ChatGPT app has no such line.
 
 To see every part with sample items in Claude Code, run `/inbox demo`. Presses
 on them change only the samples and send nothing. Press Hide demo, or run the
@@ -107,9 +109,7 @@ same samples without the notices that mark them, for recording a video. Run
 
 ## Cost
 
-You might be wondering how many extra tokens the inbox uses.
-
-In Claude Code, it adds two things:
+In Claude Code, the inbox adds two things:
 
 | What the inbox adds | Tokens | Cost at API prices |
 |---|---|---|
