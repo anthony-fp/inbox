@@ -603,6 +603,10 @@ function paletteFor(theme: string, look: ModLook): Palette {
 // The blank columns on each side of a docked tab's name, which a click there also selects. A pane too narrow
 // for the three tabs at this padding draws them with one column each side instead.
 const TAB_PAD = '  '
+// From this many columns, the inline terminal pane draws its tabs in a column at its left, apart from the rows.
+const INLINE_RAIL_AT = 80
+// The blank columns between the inline tab column and the rows beside it.
+const RAIL_GUTTER = 2
 // The Needs you tab lists questions first, because each takes one key.
 const NEEDS_YOU_GROUPS: { kind: Item['kind']; title: string; list: 'questions' | 'tasks' }[] = [
   { kind: 'question', title: 'Questions', list: 'questions' },
@@ -3353,8 +3357,10 @@ export const register: Register = on => {
     // On desktop a follow-up (`isFollowUp`) draws as plain text, so the row's answers and main action stand out.
     const keyedButton =
       (rowId: string, isFollowUp = false) =>
-      ({ hotkey, kind: _kind, isMain, icon, ...action }: KeyAction) =>
-        look === 'desktop' ? (
+      ({ hotkey, kind: _kind, isMain, icon, ...action }: KeyAction) => {
+        const { label: _label, ...unlabeled } = action
+
+        return look === 'desktop' ? (
           <Button
             {...action}
             {...(isFollowUp ? { plain: true } : isMain ? { variant: 'primary' as const } : {})}
@@ -3363,24 +3369,25 @@ export const register: Register = on => {
             onPress={press => unlessGuarded($, rowId, press, action.onPress)}
           />
         ) : (
+          // The key letter is inside the Button, so the focus and hover highlights take it with the label.
           <Box key={`keyed-${action.key}`} flexDirection="row">
-            {hotkey ? (
-              <Box flexShrink={0}>
+            <Button
+              plain
+              {...unlabeled}
+              {...(isOpenGuarded ? { dimColor: true } : {})}
+              hover={{ color: pal.muted, inverse: true }}
+              onPress={press => unlessGuarded($, rowId, press, action.onPress)}
+            >
+              {hotkey ? (
                 <Text color={pal.key} dimColor={isOpenGuarded} hover={{ color: pal.muted, inverse: true }}>
                   {hotkey}
                 </Text>
-              </Box>
-            ) : null}
-            <Button
-              plain
-              {...action}
-              {...(isOpenGuarded ? { dimColor: true } : {})}
-              label={hotkey ? `: ${shownLabel(action)}` : shownLabel(action)}
-              hover={{ color: pal.muted, inverse: true }}
-              onPress={press => unlessGuarded($, rowId, press, action.onPress)}
-            />
+              ) : null}
+              {hotkey ? `: ${shownLabel(action)}` : shownLabel(action)}
+            </Button>
           </Box>
         )
+      }
     // On desktop, the follow-ups as plain text in a Client, which posts the key clicked.
     // Emptied here, after the drawing's reads, so a click that lands while they run still finds the last presses.
     followUpPresses.clear()
@@ -4336,15 +4343,82 @@ export const register: Register = on => {
     // Desktop draws dimColor as plain text, so the status takes the ages' dimmer gray there.
     const statusText = look === 'desktop' ? <Text color={pal.age}>{status}</Text> : <Text dimColor>{status}</Text>
     // Each takes its own line under the tab row.
+    const hasRail = isInline && look === 'terminal' && e.props.bodyColumns >= INLINE_RAIL_AT
+    // Each tab is one line of the column, padded to the column's width. Every cell of it is a Button, so a click
+    // anywhere on the line shows the tab. The shown tab is filled and bold, as the docked tabs draw it.
+    const railWidth = Math.max(...TABS.map(t => tabText(t.id, t.label).length)) + 2 * TAB_PAD.length
+    const rail = (
+      <Box flexDirection="column" flexShrink={0} paddingLeft={1} marginRight={RAIL_GUTTER}>
+        {TABS.map(({ id, label }) => {
+          const count = tabCounts[id]
+          const fill = ' '.repeat(railWidth - tabText(id, label).length - TAB_PAD.length)
+          if (tab === id)
+            return (
+              <Text key={`rail-${id}`} backgroundColor={pal.raised}>
+                {TAB_PAD}
+                <Text bold color={pal.raisedText} backgroundColor={pal.raised}>
+                  {label}
+                </Text>
+                {count > 0 ? (
+                  <Text bold color={pal.tone[id] ?? pal.raisedText} backgroundColor={pal.raised}>
+                    {' '}
+                    {count}
+                  </Text>
+                ) : null}
+                {fill}
+              </Text>
+            )
+          const show = () => void showTab($, id)
+
+          return (
+            <Box key={`rail-${id}`} flexDirection="row">
+              <Button plain key={`tab-${id}-before`} label={TAB_PAD} hover={raise} onPress={show} />
+              <Button plain key={`tab-${id}`} label={label} hover={raise} onPress={show} />
+              {count > 0 ? (
+                <Button plain key={`tab-${id}-count`} hover={raise} onPress={show}>
+                  <Text color={pal.tone[id]}> {count}</Text>
+                </Button>
+              ) : null}
+              <Button plain key={`tab-${id}-after`} label={fill} hover={raise} onPress={show} />
+            </Box>
+          )
+        })}
+      </Box>
+    )
     const statusBlock = statusLines.some(Boolean) ? (
-      <Box flexDirection="column" paddingX={isInline ? 2 : 1} paddingTop={1}>
+      <Box flexDirection="column" paddingX={hasRail ? 1 : isInline ? 2 : 1} paddingTop={hasRail ? 0 : 1}>
         {statusLines}
       </Box>
     ) : null
     // The footer's one line shows the status at its right end, and, where keys work, opens the list
-    // of keys as a drawer above it. The drawer is absolute, so it covers the rows above instead of moving the line.
+    // of keys as a drawer above it. Docked, the drawer is absolute, so it covers the rows above instead of moving
+    // the line. Inline it takes its own lines: the pane is only as tall as its rows, and would cut off its top.
+    const keyDrawer = (isAbsolute: boolean) => (
+      <Box
+        {...(isAbsolute ? { position: 'absolute' as const, bottom: 1, left: -1, right: -1 } : {})}
+        flexDirection="column"
+        paddingX={2}
+        paddingY={1}
+        backgroundColor={pal.raised}
+      >
+        {keyList.map(k => (
+          <Box key={`key-list-${k.keys}`} flexDirection="row">
+            <Box width={keyColumn} flexShrink={0}>
+              <Text bold color={pal.raisedText}>
+                {k.keys}
+              </Text>
+            </Box>
+            <Text color={pal.raisedText ?? pal.muted} wrap="wrap">
+              {k.does}
+            </Text>
+          </Box>
+        ))}
+      </Box>
+    )
+    const isKeyDrawerShown = look !== 'desktop' && isKeyListShown
     const footer = (
       <Box flexDirection="column" paddingX={1} paddingTop={blankLine}>
+        {isKeyDrawerShown && isInline ? keyDrawer(false) : null}
         <Box flexDirection="row" paddingX={1} justifyContent="space-between" columnGap={3}>
           {look === 'desktop' ? (
             <Box />
@@ -4358,31 +4432,7 @@ export const register: Register = on => {
             />
           )}
           {statusText}
-          {look !== 'desktop' && isKeyListShown ? (
-            <Box
-              position="absolute"
-              bottom={1}
-              left={-1}
-              right={-1}
-              flexDirection="column"
-              paddingX={2}
-              paddingY={1}
-              backgroundColor={pal.raised}
-            >
-              {keyList.map(k => (
-                <Box key={`key-list-${k.keys}`} flexDirection="row">
-                  <Box width={keyColumn} flexShrink={0}>
-                    <Text bold color={pal.raisedText}>
-                      {k.keys}
-                    </Text>
-                  </Box>
-                  <Text color={pal.raisedText ?? pal.muted} wrap="wrap">
-                    {k.does}
-                  </Text>
-                </Box>
-              ))}
-            </Box>
-          ) : null}
+          {isKeyDrawerShown && !isInline ? keyDrawer(true) : null}
         </Box>
       </Box>
     )
@@ -5129,6 +5179,7 @@ export const register: Register = on => {
     // no fixed footer, so past that it follows the content. Inline, the frame fits
     // the tree. A pane takes a key only as a Button's hotkey, so the tab keys, j,
     // k and the selected row's keys are Buttons in a hidden Box.
+    const tabView = tab === 'findings' ? findingsView() : tab === 'prs' ? prsView() : needsYouView()
     const drawn = (
       <Box flexDirection="column" minHeight={isInline ? undefined : e.props.scroll.bodyRows} backgroundColor={pal.body}>
         {showsDemoNotices ? (
@@ -5148,11 +5199,25 @@ export const register: Register = on => {
             <Button key="hide-demo" label="Hide demo" onPress={() => void setDemo($, false)} />
           </Box>
         ) : null}
-        {tabs}
-        {statusBlock}
-        <Box flexDirection="column" paddingX={1} paddingTop={blankLine} flexGrow={1}>
-          {tab === 'findings' ? findingsView() : tab === 'prs' ? prsView() : needsYouView()}
-        </Box>
+        {hasRail ? (
+          <Box flexDirection="row" flexGrow={1}>
+            {rail}
+            <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+              {statusBlock}
+              <Box flexDirection="column" paddingRight={1} flexGrow={1}>
+                {tabView}
+              </Box>
+            </Box>
+          </Box>
+        ) : (
+          [
+            tabs,
+            statusBlock,
+            <Box flexDirection="column" paddingX={1} paddingTop={blankLine} flexGrow={1}>
+              {tabView}
+            </Box>,
+          ]
+        )}
         {/* Desktop takes no keys: a Button's hotkey does nothing there, so it gets neither the list of keys nor the hidden Buttons. */}
         {footer}
         {look === 'desktop' ? null : (

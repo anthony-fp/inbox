@@ -484,7 +484,7 @@ test('a question with 7 options shows 4 until [All 7 options], draws its steps a
     await hotkey('help-i1-0'),
     await hotkey('help-i1-2'),
   ]).toEqual(['a', 'f', 'g', 'i'])
-  expect((await pane.find({ key: 'answer-i1-3' }))?.props.label).toBe(': Green (recommended)')
+  expect(await pane.find({ key: 'answer-i1-3', text: ': Green (recommended)' })).toBeDefined()
 
   await pane.press({ key: 'all-options-i1' })
   expect(await pane.find({ key: 'answer-i1-6' })).toBeDefined()
@@ -2130,7 +2130,7 @@ test('every Needs you and Findings row in the demo, with its actions, is drawn i
       const controls = [
         ...(await pane.findAll({ type: 'Button' }))
           .filter(b => !(b.key ?? '').endsWith('-key'))
-          .map(b => String(b.props.label)),
+          .map(b => b.text.replace(/^\p{L}: /u, '')),
         ...links.map(l => l.label),
       ].map(label =>
         label
