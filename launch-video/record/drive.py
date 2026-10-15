@@ -62,7 +62,7 @@ def main():
     look = sys.argv[1]
     variant = sys.argv[2] if len(sys.argv) > 2 else 'draft'
     beat = beat_states(look, variant)
-    clicks = [s for s in beat['states'] if s.get('click')]
+    clicks = [s for s in beat['states'] if s.get('click') or s.get('move')]
 
     host = vm_host()
     app, bounds = front_window(host)
@@ -88,6 +88,11 @@ def main():
     try:
         start = time.monotonic() + LEAD
         for s in clicks:
+            if s.get('move'):
+                x, y = s['move']
+                time.sleep(max(0.0, start + s['at'] - time.monotonic()))
+                send(f'move {x} {y}')
+                continue
             x, y = s['click']
             # The click goes this much early, so its result shows at the state's time.
             due = start + s['at'] - s.get('lead', 0)

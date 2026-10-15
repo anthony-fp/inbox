@@ -11,6 +11,7 @@
 //   move <x> <y>        moves the pointer there
 //   type <text>         types the text
 //   scroll <x> <y> <n>  moves the pointer there and turns the wheel n lines, up when n is positive
+//   drag <x> <y> <x2> <y2>  presses at x y, moves to x2 y2 in steps and lets go there, as in resizing a pane
 ObjC.import('CoreGraphics')
 ObjC.import('Foundation')
 
@@ -117,6 +118,19 @@ function perform(line) {
   const [x, y, lines] = rest.map(Number)
   mouse($.kCGEventMouseMoved, x, y)
   if (verb === 'move') return
+  if (verb === 'drag') {
+    const [, , x2, y2] = rest.map(Number)
+    delay(0.08)
+    mouse($.kCGEventLeftMouseDown, x, y)
+    const steps = 20
+    for (let i = 1; i <= steps; i++) {
+      delay(0.02)
+      mouse($.kCGEventLeftMouseDragged, x + ((x2 - x) * i) / steps, y + ((y2 - y) * i) / steps)
+    }
+    delay(0.08)
+    mouse($.kCGEventLeftMouseUp, x2, y2)
+    return
+  }
   if (verb === 'scroll') {
     delay(0.05)
     $.CGEventPost($.kCGHIDEventTap, $.CGEventCreateScrollWheelEvent(null, $.kCGScrollEventUnitLine, 1, lines))

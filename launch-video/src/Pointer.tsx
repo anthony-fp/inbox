@@ -1,10 +1,14 @@
 import { Easing, interpolate } from 'remotion'
 
-/** A click, in screen pixels, and the second it happens. */
-export type ClickMark = { at: number; x: number; y: number }
+/**
+ * A click, in screen pixels, and the second it happens. A mark with `press: false` only moves the pointer there.
+ * `settle` is how long before `at` the pointer arrives: the take moves the VM's pointer onto its target this early, so
+ * the target lights as the drawn pointer reaches it.
+ */
+export type ClickMark = { at: number; x: number; y: number; press?: boolean; settle?: number }
 
-/** How long before a click the pointer arrives on its target, in seconds. */
-const SETTLE = 0.12
+/** How long before a click the pointer arrives on its target, in seconds, when the mark doesn't say. */
+const SETTLE = 0.3
 /** How long the click's ring takes to fade out, in seconds. */
 const RING = 0.4
 
@@ -15,7 +19,7 @@ export function pointerAt(from: { x: number; y: number }, clicks: ClickMark[], t
   for (const c of clicks) {
     const distance = Math.hypot(c.x - position.x, c.y - position.y)
     const travel = Math.min(0.75, Math.max(0.35, 0.3 + distance / 1800))
-    const arrive = c.at - SETTLE
+    const arrive = c.at - (c.settle ?? SETTLE)
     const leave = Math.max(arrive - travel, readyAt)
     if (t < leave) return position
     if (t < arrive) {
@@ -31,7 +35,7 @@ export function pointerAt(from: { x: number; y: number }, clicks: ClickMark[], t
 /** A macOS-style arrow at the pointer's place, which dips and leaves a ring on each click. */
 export function Pointer({ from, clicks, t }: { from: { x: number; y: number }; clicks: ClickMark[]; t: number }) {
   const { x, y } = pointerAt(from, clicks, t)
-  const last = clicks.filter(c => c.at <= t).pop()
+  const last = clicks.filter(c => c.press !== false && c.at <= t).pop()
   const age = last ? t - last.at : Infinity
   const dip = age < 0.16 ? interpolate(age, [0, 0.06, 0.16], [1, 0.82, 1]) : 1
   return (

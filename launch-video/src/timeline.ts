@@ -31,13 +31,30 @@ export type Rect = { x: number; y: number; w: number; h: number }
 export type Point = [number, number]
 
 /**
- * Each app's window still, in pixels, and where its inbox sits in it. Beat 11 pushes in from the whole window to
- * the inbox. The sizes are those of the stills in public/stills/, measured from their pixels.
+ * Each app's window still, in pixels, and where its inbox sits in it. `rows` runs from the left edge of the tabs to
+ * the right edge of an open row, and from the top of the tabs, measured from the side-by-side takes. Beat 11 pushes
+ * in from the whole window to the rows. The sizes are those of the takes' clips, and the stills in public/stills/ are
+ * frames from them.
  */
-export const WINDOWS: Record<Look, { width: number; height: number; inbox: Rect }> = {
-  terminal: { width: 2620, height: 1740, inbox: { x: 1440, y: 62, w: 1180, h: 1510 } },
-  desktop: { width: 2620, height: 1760, inbox: { x: 1747, y: 21, w: 853, h: 1718 } },
-  codex: { width: 2620, height: 1754, inbox: { x: 1688, y: 0, w: 932, h: 1754 } },
+export const WINDOWS: Record<Look, { width: number; height: number; inbox: Rect; rows: Rect }> = {
+  terminal: {
+    width: 2620,
+    height: 1760,
+    inbox: { x: 1458, y: 79, w: 1096, h: 1471 },
+    rows: { x: 1488, y: 165, w: 1042, h: 1385 },
+  },
+  desktop: {
+    width: 2620,
+    height: 1548,
+    inbox: { x: 1426, y: 21, w: 1172, h: 1504 },
+    rows: { x: 1476, y: 137, w: 1042, h: 1388 },
+  },
+  codex: {
+    width: 2620,
+    height: 1552,
+    inbox: { x: 1516, y: 17, w: 1092, h: 1524 },
+    rows: { x: 1548, y: 147, w: 1026, h: 1394 },
+  },
 }
 
 /** A still captured from the app's demo, in public/. */
@@ -52,6 +69,10 @@ export type State = {
   pane?: string
   /** Where the pointer clicks, in VM screen points. */
   click?: Point
+  /** How long before the click the take moved the VM's pointer onto its target, in seconds. */
+  settle?: number
+  /** Where the pointer moves at `at`, without clicking, in VM screen points. */
+  move?: Point
   /**
    * Seconds from the click until its result shows, measured from takes. The click happens this much before `at`,
    * so its result shows at `at`.
@@ -89,6 +110,30 @@ export type SoloBeat = {
   footage?: Segment[]
   /** Where the pointer rests before its first click, in VM screen points. */
   pointerFrom: Point
+  /** Camera moves on the footage. Before the first, and between moves, the camera holds on the last framing. */
+  camera?: CameraMove[]
+  /** Beat 7 only: how the inbox is shown the first time. */
+  introduction?: Introduction
+}
+
+/** A camera move from one framing of the take's clip to another. A framing left out is the whole window. */
+export type CameraMove = { at: number; length: number; from?: Rect; to?: Rect }
+
+/**
+ * The inbox's first appearance. The docked pane slides in and is named, the question is marked in the reply, then
+ * the mark moves to the row the question becomes, and the camera pushes in on the pane. Rects are in the take's clip
+ * pixels, read from its frames.
+ */
+export type Introduction = {
+  pane: Rect
+  /** When the pane slides in. */
+  paneAt: number
+  /** The question's paragraph in the reply, marked once it stops scrolling. */
+  asked: Rect
+  askedAt: number
+  /** The question's row in the inbox, and when it lands there, read frame by frame from the take. */
+  row: Rect
+  rowAt: number
 }
 
 /** Beat 11: the three apps side by side, each click on the same frame in all three. */
@@ -103,6 +148,11 @@ export type SideBySideBeat = {
   /** When the first column starts to push in from its whole window to its inbox. */
   pushInAt: number
   pushInLength: number
+  /**
+   * When each column has arrived in its place, in seconds into the beat. The terminal shrinks into its column from
+   * beat 10's full frame. The other two then slide in, landing on the music's beats before the groove returns at 2.7 s.
+   */
+  landAt: Record<Look, number>
   /** How far apart, left to right, the columns start to push in. */
   stagger: number
   states: Record<Look, State[]>
@@ -121,12 +171,19 @@ export type Placed = Beat & { start: number }
 
 export const END_CARD = { name: 'Inbox', repo: 'github.com/petekp/inbox' }
 
+/** How long the end card starts before its beat, over beat 11's last moments, as beat 11's rows turn into its streams. */
+export const END_CARD_LEAD = 0.8
+
 /**
- * The music, made in Suno, about 123 BPM. Started `trimBefore` seconds into the track, its full groove comes in at
- * 31 s, as the inbox first appears, and comes back from its breakdown at 62.2 s, as beat 11 pushes in. It fades out
- * over the video's last `fadeOut` seconds.
+ * The music, made in Suno, about 123 BPM. It starts `startsAt` seconds into the video, from `trimBefore` seconds into
+ * the track. Its strong hits then land at 0.6 s and at 4.45 s, as the agent replies. Its
+ * full groove comes in at 31 s, as the inbox first appears, and it comes back from its breakdown at 62.2 s, as beat 11 pushes in. It fades out over the
+ * video's last `fadeOut` seconds.
  */
-export const MUSIC = { src: 'music/focus-flow.mp3', trimBefore: 0.4, fadeOut: 4 }
+export const MUSIC = { src: 'music/focus-flow.mp3', startsAt: 0, trimBefore: 0.4, fadeOut: 4 }
+
+/** How long one stretch of footage takes to dissolve into the next, in seconds. */
+export const DISSOLVE = 0.25
 
 export const frames = (seconds: number) => Math.round(seconds * FPS)
 
@@ -159,22 +216,23 @@ const thread = (number: number, id: ThreadBeatId, length: number, caption: strin
 })
 
 /**
- * Beats 7 to 10 come from one take of a real Claude Code session in a sample checkout project. Each click's time and
- * point are the ones act.py logged as it clicked in the take. The recording leaves out the VM's pointer, so the video
- * draws one.
+ * Beats 7 to 10 come from one take of a real Claude Code session in a sample project, an agent you wear in AR glasses.
+ * Each click's time and point are the ones act.py logged as it clicked in the take, and `settle` is how long before the
+ * click it moved the VM's pointer onto the target. The recording leaves out the VM's pointer, so the video draws one.
  */
 function beats(): Beat[] {
   const session = (at: number, from: number): Segment => ({ at, take: 'session', from })
-  const asked = 'Keep the chargeCard alias for one release?'
-  const receipt = 'Should the receipt email show the tax line on its own?'
-  const conversation: Point = [400, 420]
+  const asked = 'Keep the onTap alias for one release, or remove it now?'
+  const pinned = 'Should glances follow your head, or stay pinned where you leave them?'
+  /** Where the pointer rests in beats 7 and 8: on the reply, inside the close-up on the inbox. */
+  const reply: Point = [560, 300]
   return [
-    thread(1, 'starts-simple', 4, 'A chat session starts simple enough.'),
-    thread(2, 'replies-pile-up', 7, 'Then things begin to pile up.'),
+    thread(1, 'starts-simple', 6.5, 'A chat session starts simple enough.'),
+    thread(2, 'replies-pile-up', 5.5, 'Then things begin to pile up.'),
     thread(3, 'buried', 5, 'Questions and ideas get buried.'),
     thread(4, 'never-said', 4, "Some aren't even surfaced."),
     thread(5, 'by-hand', 6, 'You diligently respond, point by point.'),
-    thread(6, 'again', 5, 'Then again, and again...'),
+    thread(6, 'again', 4, 'Again, and again...'),
     {
       kind: 'solo',
       id: 'question-arrives',
@@ -182,11 +240,20 @@ function beats(): Beat[] {
       look: 'terminal',
       length: 5.5,
       caption: 'Inbox gives the agent one place to ask you.',
-      footage: [session(0, 22.1)],
-      pointerFrom: conversation,
+      footage: [session(0, 21.99)],
+      pointerFrom: reply,
+      camera: [{ at: 3.6, length: 1, to: INBOX_CLOSE_UP }],
+      introduction: {
+        pane: { x: 1458, y: 79, w: 1096, h: 1471 },
+        paneAt: 0.6,
+        asked: { x: 30, y: 1100, w: 1410, h: 150 },
+        askedAt: 1.9,
+        row: { x: 1530, y: 378, w: 1000, h: 92 },
+        rowAt: 3.33,
+      },
       states: [
-        { at: 0, label: `The reply ends by asking "${asked}"`, pane: `Needs you: "${receipt}"` },
-        { at: 3, label: 'The line above the prompt reads "Needs you 2"', pane: `A new row arrives: "${asked}"` },
+        { at: 0, label: `The reply ends by asking "${asked}"`, pane: `Needs you: "${pinned}"` },
+        { at: 3.33, label: 'The line above the prompt reads "Needs you 2"', pane: `A new row arrives: "${asked}"` },
       ],
     },
     {
@@ -196,15 +263,17 @@ function beats(): Beat[] {
       look: 'terminal',
       length: 8,
       caption: 'The agent anticipates your answers, as it should.',
-      footage: [session(0, 148.51), session(4, 246.3)],
-      pointerFrom: conversation,
+      footage: [session(0, 41.09), session(4, 65.41)],
+      pointerFrom: reply,
+      camera: [{ at: 4.9, length: 0.8, from: INBOX_CLOSE_UP, to: TOP }],
       states: [
         { at: 0, label: 'Needs you, with two questions' },
-        { at: 2.9, click: [777, 183], label: `"${asked}" opens with its answers` },
+        { at: 2.9, click: [760, 190], settle: 0.93, label: `"${asked}" opens with its answers` },
         {
           at: 4.3,
-          click: [712, 251],
-          label: 'The row reads ✓ Keep alias, the receipt question opens, and Claude replies to the answer',
+          click: [718, 251],
+          settle: 0.93,
+          label: 'The row reads ✓ Remove now, and Claude removes the alias',
         },
       ],
     },
@@ -213,25 +282,27 @@ function beats(): Beat[] {
       id: 'findings',
       number: 9,
       look: 'terminal',
-      length: 9,
+      length: 8.5,
       caption: 'Your agent has somewhere it can surface issues and opportunities, with next steps.',
-      footage: [session(0, 341.61), session(3, 432.83), session(6.7, 516.06)],
-      pointerFrom: [712, 251],
+      footage: [session(0, 86.16), session(2.7, 112.57), session(6.6, 151.95)],
+      pointerFrom: [718, 251],
+      camera: [{ at: 0, length: 0.5, from: TOP, to: MIDDLE }],
       states: [
         { at: 0, label: 'Needs you, after the answer' },
         {
           at: 0.8,
-          click: [764, 97],
-          label:
-            'Findings: the issue "Order totals are float sums with no rounding to cents" is open, with an opportunity below it',
+          click: [764, 98],
+          settle: 0.92,
+          label: 'Findings: the issue "Dwell timer survives looking away, so re-looks select early" is open',
         },
         {
-          at: 4,
-          click: [680, 471],
+          at: 3.7,
+          click: [679, 421],
+          settle: 0.93,
           label:
-            'Fix hands the issue to Claude, and the opportunity "Subtotal is recomputed inline instead of using cart.js subtotalOf" opens',
+            'Fix hands the issue to Claude, and the opportunity "frame() re-sorts the glance list in place 90 times a second" opens',
         },
-        { at: 7.7, click: [640, 97], label: `Back on Needs you, with "${receipt}" open` },
+        { at: 7.4, click: [640, 98], settle: 0.91, label: `Back on Needs you, with "${pinned}" open` },
       ],
     },
     {
@@ -239,16 +310,21 @@ function beats(): Beat[] {
       id: 'answer-in-chat',
       number: 10,
       look: 'terminal',
-      length: 6,
+      length: 6.5,
       caption: "Your agent keeps track of what's been completed so it doesn't hang around.",
-      footage: [session(0, 598.38)],
-      pointerFrom: [640, 97],
+      footage: [session(0, 157.22), session(4.6, 165.7)],
+      pointerFrom: [640, 98],
+      camera: [
+        { at: 0.05, length: 0.55, from: MIDDLE, to: BOTTOM },
+        { at: 2.0, length: 0.8, from: BOTTOM, to: MIDDLE },
+        { at: 5.5, length: 1, from: MIDDLE },
+      ],
       states: [
-        { at: 0, label: 'The prompt', pane: `"${receipt}" open` },
-        { at: 0.6, click: [154, 659], label: 'A click in the prompt' },
-        { at: 1.53, label: 'You type your answer at the prompt instead' },
-        { at: 1.55, label: 'Your answer is sent' },
-        { at: 4.1, label: 'Claude closes the row with your answer', pane: '✓ and your answer' },
+        { at: 0, label: 'The prompt', pane: `"${pinned}" open` },
+        { at: 0.6, click: [154, 659], settle: 0.9, label: 'A click in the prompt' },
+        { at: 1.58, label: 'You type your answer at the prompt, and send it' },
+        { at: 3.8, label: 'Claude closes the row with your answer', pane: '✓ and your answer' },
+        { at: 5.2, label: 'The row leaves', pane: 'No open questions' },
       ],
     },
     sideBySide(),
@@ -256,12 +332,25 @@ function beats(): Beat[] {
   ]
 }
 
+/**
+ * Framings of the session take, in clip pixels, each as wide as the picture above the caption band. The close-up holds
+ * the inbox and the reply's right edge. TOP and MIDDLE hold the inbox's rows and the reply beside them, and BOTTOM the
+ * prompt and the end of the reply.
+ */
+const INBOX_CLOSE_UP: Rect = { x: 700, y: 40, w: 1920, h: 838 }
+const TOP: Rect = { x: 0, y: 40, w: 2620, h: 1144 }
+const MIDDLE: Rect = { x: 0, y: 110, w: 2620, h: 1144 }
+const BOTTOM: Rect = { x: 0, y: 616, w: 2620, h: 1144 }
+
 /** Where each app's click lands in beat 11, in VM screen points, by the still the click leads to. */
 const CLICKS: Record<Look, Record<string, Point>> = {
-  terminal: { answered: [683, 250], findings: [764, 97], back: [640, 97], 'task-open': [789, 523], done: [851, 488] },
-  desktop: { answered: [803, 226], findings: [842, 93], back: [751, 93], 'task-open': [800, 536], done: [749, 478] },
-  codex: { answered: [786, 228], findings: [825, 97], back: [725, 97], 'task-open': [809, 500], done: [894, 472] },
+  terminal: { answered: [726, 251], findings: [764, 98], back: [640, 98], 'task-open': [781, 574], done: [851, 541] },
+  desktop: { answered: [677, 207], findings: [758, 93], back: [636, 93], 'task-open': [734, 491], done: [622, 458] },
+  codex: { answered: [718, 227], findings: [757, 98], back: [656, 98], 'task-open': [734, 507], done: [818, 448] },
 }
+
+/** Where each app's pointer goes after Done, in VM screen points: the conversation, outside the pushed-in rows. */
+const AWAY: Record<Look, Point> = { terminal: [300, 500], desktop: [300, 480], codex: [400, 480] }
 
 /** Seconds from a click until each app shows its result in the VM, by the still it leads to, measured from takes. */
 const LEADS: Record<Look, Record<string, number>> = {
@@ -272,11 +361,12 @@ const LEADS: Record<Look, Record<string, number>> = {
 const DEFAULT_LEAD = 0.1
 
 /**
- * drive.py clicks each app at these times. Done comes a second after the task opens, because an open row ignores
- * presses for PRESS_GUARD_MS in hooks/view.ts.
+ * drive.py clicks each app at these times. Done comes 0.9 s after the task opens, because an open row ignores
+ * presses for PRESS_GUARD_MS in hooks/view.ts. It also comes before the answered row leaves, at answer + SETTLE, so
+ * the rows don't move under the click, and the finished task leaves before the end card starts.
  */
 function sideBySide(): SideBySideBeat {
-  const [answer, findings, back, task, done] = [4.5, 7.5, 9.2, 10, 11]
+  const [answer, findings, back, task, done] = [4.3, 5.8, 7.2, 8.0, 8.9]
   const leave = done + SETTLE
   const holdFrom = 13
   const drawn: Record<Look, { answered: string; undo: string; leaving: State[] }> = {
@@ -308,20 +398,26 @@ function sideBySide(): SideBySideBeat {
   const states = (look: Look): State[] => [
     {
       at: 0,
-      label: 'Needs you, with "Show Apple Pay above the card form, or beside it?" open',
+      label: 'Needs you, with "Dismiss a glance with a pinch, or a flick of the wrist?" open',
       still: still(look, 'question'),
     },
     { ...clicked(look, 'answered', answer), label: drawn[look].answered },
-    { ...clicked(look, 'findings', findings), label: 'Findings, which opens "Orders to Canada are taxed at US rates"' },
+    { ...clicked(look, 'findings', findings), label: 'Findings, which opens "Pinned glances drift in a dim room"' },
     {
       ...clicked(look, 'back', back),
       label: 'Back on Needs you, where the question opened after the answer is open again',
     },
-    { ...clicked(look, 'task-open', task), label: 'The task "Sign in to the Stripe CLI to forward webhooks" opens' },
+    { ...clicked(look, 'task-open', task), label: 'The task "Put on the glasses and pair them with this Mac" opens' },
     {
       ...clicked(look, 'done', done),
       label: `The task settles. ${drawn[look].undo}.`,
       drain: { label: 'Undo', seconds: SETTLE },
+    },
+    {
+      at: done + 0.6,
+      move: AWAY[look],
+      label: 'The pointer leaves the rows, so the next task does not light under it',
+      still: still(look, 'done'),
     },
     ...drawn[look].leaving,
   ]
@@ -332,6 +428,7 @@ function sideBySide(): SideBySideBeat {
     length: 16,
     caption: 'Same inbox. At home in each app.',
     captionFrom: holdFrom,
+    landAt: { terminal: 0.9, desktop: 1.23, codex: 1.72 },
     pushInAt: 2,
     pushInLength: 1.4,
     stagger: 0.3,
