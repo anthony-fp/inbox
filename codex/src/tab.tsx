@@ -2240,7 +2240,7 @@ document.addEventListener('keydown', e => {
 restoreState()
 request('ui/initialize', {
   protocolVersion: '2026-01-26',
-  appInfo: { name: 'inbox', version: '0.2.3' },
+  appInfo: { name: 'inbox', version: '0.2.4' },
   appCapabilities: { tools: {} },
 })
   .then(r => {
