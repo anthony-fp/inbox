@@ -20,7 +20,7 @@ The directory scans a submitted plugin and reports findings at four levels
 | Directory couldn't confirm the `PermissionRequest` hook leaves the decision with the user | Add `.catch(($, e, next) => next(e))`, so a throw in `openDialog` still passes the check on unchanged. Not confirmed to be what the scan needs. |
 | `$` or `on` used in a way the directory couldn't follow (3) | Prettier splits one `on(` call and 13 `$.noun⏎.method()` chains across lines. The 13 chains now read `$.noun.method(` on one line; ten of them were delayed redraws and go through a `later()` helper. The `on('session.append', …)` call stays split: on one line it is 3 characters over Prettier's width, and shortening its matcher would change what it matches. The scan didn't say which 3 findings it meant; the resubmit will. |
 | No `author` in plugin.json | Add `{ "name": "Pete Petrash" }`, plus `repository` and `license`. |
-| No `version` in plugin.json | Add `0.2.4`, matching the Codex plugin. Installs now update only when the version goes up, so each release raises it. |
+| No `version` in plugin.json | Add a version that matches the Codex plugin's, now `0.2.5`. Installs update only when the version goes up, so each release raises it in both manifests. |
 
 ## Disclose in the README
 
@@ -43,4 +43,4 @@ Each of these is a policy hold. The README's "What it runs, sends and changes" s
 
 1. **Which findings block?** Confirm in the portal which of the unlabeled findings are blocks, and where the 3 `$` findings and the 7 credential findings point.
 2. **Icon.** The portal hasn't saved the listing yet, so the icon is still open. The directory takes it only the first time the plugin is saved or submitted, so a square PNG, 512–2048 px, must be in place before that.
-3. **Name.** `inbox` may be confused with other listings (4 findings). Pete wants a new name. Changing `displayName` changes only what people see. Changing `name` also changes the install command, the tool names Claude calls, and the key the saved state is stored under.
+3. **Name.** `inbox` may be confused with other listings (4 findings). Pete chose to keep `inbox` for now. A later rename can change `displayName` alone, which changes only what people see. Changing `name` also changes the install command, the tool names Claude calls, and the key the saved state is stored under.
