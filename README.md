@@ -36,9 +36,9 @@ Answer `y` to add the marketplace, then choose a scope. It starts working in
 that session. A user-scope install also covers Code sessions in the Claude
 desktop app on this machine.
 
-To install from the desktop app instead, open a Code session and choose
-+ > Plugins > Add plugin, then Manage plugins. `/plugin` does not run there.
-The inbox does not reach the app's cloud sessions.
+To install from the desktop app instead, open a Code session, choose
+**+ > Plugins > Add plugin**, then Manage plugins. `/plugin` does not run
+there. The inbox does not reach the app's cloud sessions.
 
 To update, run these, then `/reload-plugins` in any session that's already
 open:
