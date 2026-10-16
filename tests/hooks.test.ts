@@ -2758,7 +2758,7 @@ test('every row in the demo, on every tab, draws its plan’s buttons in the pla
   })
   const TITLE_START = 20
   const expectedLabels = (row: (typeof view.findings.rows)[number], look: 'terminal' | 'desktop') => {
-    const { keys, more } = rowKeyPlan(row, true, look === 'terminal')
+    const { keys, more } = rowKeyPlan(row, true)
     return [...keys, ...more].flatMap(k => {
       if (k.slot === 'retry') return ['Try again']
       if (k.slot === 'allOptions') return []

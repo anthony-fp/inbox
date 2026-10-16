@@ -124,8 +124,6 @@ type Row = {
   keys: Key[]
   /** Actions that talk about the row or drop it, after `keys`. */
   more: Key[]
-  /** Actions with a key and no button, so a key press still reaches them. */
-  hidden: Key[]
   /** The row no longer waits on the person, so its group's count leaves it out. Selected, it also shows `note`. */
   fold?: { note?: string }
   typing?: { hint: string; send: (text: string) => void }
@@ -750,7 +748,7 @@ function startTyping(id: string) {
 }
 
 /** A row's keys, in the order `rowKeyPlan` sets, as the tab's buttons. */
-function rowKeys(r: RowView): { keys: Key[]; more: Key[]; hidden: Key[] } {
+function rowKeys(r: RowView): { keys: Key[]; more: Key[] } {
   const actions = ledgerActions(r, optionsShown.has(r.id), {
     press: p => {
       const step = p.action === 'step' ? r.steps[p.step] : undefined
@@ -898,7 +896,6 @@ function prThreadRow(v: View, pr: PrView, t: PrThread): Row {
       a.isFollowUp ? [] : [prKey(id, a, opening('the comment'))],
     ),
     more: threadActions(pr, t, v.lastActions).flatMap(a => (a.isFollowUp ? [prKey(id, a)] : [])),
-    hidden: [],
     feedback: feedbackOf(id, v.lastActions[id], undefined, v.turns, v.at),
   }
 }
@@ -922,7 +919,6 @@ function prCheckRow(v: View, pr: PrView, c: PrCheck): Row {
     body: <div class="muted">{ran}</div>,
     keys: checkActions(pr, c, v.lastActions).map(a => prKey(id, a, opening(target))),
     more: [],
-    hidden: [],
     feedback: feedbackOf(id, v.lastActions[id], undefined, v.turns, v.at),
   }
 }
@@ -1106,10 +1102,10 @@ function isOpenGuarded(): boolean {
 }
 
 /** The selected row's keys. */
-function rowActions(row: Row): { keys: Key[]; more: Key[]; hidden: Key[] } {
-  if (row.typing && typing === row.id) return { keys: [], more: [], hidden: [] }
+function rowActions(row: Row): { keys: Key[]; more: Key[] } {
+  if (row.typing && typing === row.id) return { keys: [], more: [] }
 
-  return { keys: row.keys, more: row.more, hidden: row.hidden }
+  return { keys: row.keys, more: row.more }
 }
 
 // ── Drawing ─────────────────────────────────────────────────────────────────
@@ -2274,8 +2270,8 @@ document.addEventListener(
     }
     const row = rows[at]
     if (!row) return
-    const { keys, more, hidden } = rowActions(row)
-    const k = [...keys, ...more, ...hidden].find(x => x.hotkey === e.key)
+    const { keys, more } = rowActions(row)
+    const k = [...keys, ...more].find(x => x.hotkey === e.key)
     if (k) {
       e.preventDefault()
       k.run()

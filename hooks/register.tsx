@@ -2602,12 +2602,7 @@ const PR_KEYS: Record<PrPress['action'], string> = {
 }
 
 /** A question, task or finding's keys, in the order `rowKeyPlan` sets, as the pane's actions. */
-function rowKeyActions(
-  $: EngineInterface,
-  look: ModLook,
-  r: RowView,
-  isAllShown: boolean,
-): { keys: KeyAction[]; more: KeyAction[]; hidden: KeyAction[] } {
+function rowKeyActions($: EngineInterface, r: RowView, isAllShown: boolean): { keys: KeyAction[]; more: KeyAction[] } {
   const { id, item, finding } = r
   const keyAction = (k: PlannedKey): KeyAction => {
     switch (k.slot) {
@@ -2672,9 +2667,9 @@ function rowKeyActions(
       }
     }
   }
-  const { keys, more, hidden } = rowKeyPlan(r, isAllShown, look !== 'desktop')
+  const { keys, more } = rowKeyPlan(r, isAllShown)
 
-  return { keys: keys.map(keyAction), more: more.map(keyAction), hidden: hidden.map(keyAction) }
+  return { keys: keys.map(keyAction), more: more.map(keyAction) }
 }
 
 /** A closed item, or a closed finding by its title, as its list's Closed fold draws it. */
@@ -3615,8 +3610,6 @@ export const register: Register = on => {
       keys: () => KeyAction[]
       /** Actions that talk about the row or drop it, after `keys`: past a muted dot in the terminal, on their own line on desktop. */
       moreKeys?: () => KeyAction[]
-      /** Keys the selected row takes without drawing them, as Explain's. */
-      hiddenKeys?: () => KeyAction[]
       /** For a row that takes the person's own words: what its field says while empty. */
       typeHint?: string
       /** What sending those words does: closes a question, or hands a task or finding off. */
@@ -3643,9 +3636,8 @@ export const register: Register = on => {
         ...(r.at === null ? {} : { at: r.at }),
         hasSecondLine: r.replyKind === 'answer',
         body: null,
-        keys: () => rowKeyActions($, look, r, optionsShown.includes(r.id)).keys,
-        moreKeys: () => rowKeyActions($, look, r, optionsShown.includes(r.id)).more,
-        hiddenKeys: () => rowKeyActions($, look, r, optionsShown.includes(r.id)).hidden,
+        keys: () => rowKeyActions($, r, optionsShown.includes(r.id)).keys,
+        moreKeys: () => rowKeyActions($, r, optionsShown.includes(r.id)).more,
         typeHint: replyHint(r, 'Claude'),
       }
     }
@@ -3684,9 +3676,8 @@ export const register: Register = on => {
               terminalTextLines(r.detail ?? '', width, Math.max(1, lines - (r.fileName && lines > 1 ? 1 : 0))),
             ),
       typeHint: replyHint(r, 'Claude'),
-      keys: () => rowKeyActions($, look, r, true).keys,
-      moreKeys: () => rowKeyActions($, look, r, true).more,
-      hiddenKeys: () => rowKeyActions($, look, r, true).hidden,
+      keys: () => rowKeyActions($, r, true).keys,
+      moreKeys: () => rowKeyActions($, r, true).more,
     })
     const isThreadSent = threadSentIn(lastActions)
     const threadShowsCheck = threadShowsCheckIn(lastActions)
@@ -3990,13 +3981,12 @@ export const register: Register = on => {
       ) : null
     }
     // The selected row's keys, for both the key row it draws and the hidden bindings.
-    const rowActions = (row: Row): { keys: KeyAction[]; more: KeyAction[]; hidden: KeyAction[] } => {
-      if (Input && row.typeHint && typing === row.id) return { keys: [], more: [], hidden: [] }
+    const rowActions = (row: Row): { keys: KeyAction[]; more: KeyAction[] } => {
+      if (Input && row.typeHint && typing === row.id) return { keys: [], more: [] }
 
       return {
         keys: pressable(row.keys()),
         more: pressable(row.moreKeys?.() ?? []),
-        hidden: row.hiddenKeys?.() ?? [],
       }
     }
     // Under the open field: Send sends the row's draft, and Cancel closes the field and keeps the draft.
@@ -5656,7 +5646,7 @@ export const register: Register = on => {
 
     const selectedRow = rows[tab][at]
     const selectedActions = selectedRow ? rowActions(selectedRow) : null
-    const rowKeys = selectedActions ? [...selectedActions.keys, ...selectedActions.more, ...selectedActions.hidden] : []
+    const rowKeys = selectedActions ? [...selectedActions.keys, ...selectedActions.more] : []
 
     // The pane takes at least the room the engine gives its body, so the footer
     // sits at its bottom edge until the content is taller. Inline, where the frame

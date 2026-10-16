@@ -685,20 +685,15 @@ export type PlannedKey =
 /**
  * A row's actions as keys. `keys` finish the row: [Try again] first when a send failed, then options and steps,
  * the first 9 shown on letters, then Done for a task and Address for a finding. `more` are the other ways to
- * respond: your own words, Explain, Discuss, and Dismiss. `hidden` is always empty. A question's folded options show
- * only with `isAllShown`, and until then [All N options] follows the last option shown.
+ * respond: your own words, Explain, Discuss, and Dismiss. A question's folded options show only with `isAllShown`,
+ * and until then [All N options] follows the last option shown.
  */
-export function rowKeyPlan(
-  r: RowView,
-  isAllShown: boolean,
-  hasKeys: boolean,
-): { keys: PlannedKey[]; more: ActionKey[]; hidden: ActionKey[] } {
+export function rowKeyPlan(r: RowView, isAllShown: boolean): { keys: PlannedKey[]; more: ActionKey[] } {
   const shown = r.actions.filter(a => isAllShown || !a.isFolded)
   const folded = r.actions.length - shown.length
   const lastOption = shown.map(a => a.press.action).lastIndexOf('answer')
   const keys: PlannedKey[] = []
   const more: ActionKey[] = []
-  const hidden: ActionKey[] = []
   const retry = r.feedback?.is === 'notSent' ? r.feedback.retry : null
   if (retry) {
     const kind = r.actions.find(a => actionId(a.press) === actionId(retry))?.kind ?? 'talk'
@@ -725,7 +720,7 @@ export function rowKeyPlan(
       })
   }
 
-  return { keys, more, hidden }
+  return { keys, more }
 }
 
 export function inboxView({

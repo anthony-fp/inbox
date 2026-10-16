@@ -56,8 +56,8 @@ export function ledgerActions(
     reply: () => void
     showOptions: () => void
   },
-): { keys: LedgerAction[]; more: LedgerAction[]; hidden: LedgerAction[] } {
-  const planned = rowKeyPlan(row, allOptions, true)
+): { keys: LedgerAction[]; more: LedgerAction[] } {
+  const planned = rowKeyPlan(row, allOptions)
   const draw = (k: (typeof planned.keys)[number]): LedgerAction => {
     if (k.slot === 'retry') return { label: k.label, emphasis: k.emphasis, icon: k.icon, run: () => on.press(k.press) }
     if (k.slot === 'allOptions') return { label: k.label, emphasis: k.emphasis, run: on.showOptions }
@@ -71,7 +71,7 @@ export function ledgerActions(
       run: a.press.action === 'type' ? on.reply : () => on.press(a.press),
     }
   }
-  return { keys: planned.keys.map(draw), more: planned.more.map(draw), hidden: planned.hidden.map(draw) }
+  return { keys: planned.keys.map(draw), more: planned.more.map(draw) }
 }
 
 export type Reply = {
