@@ -1,9 +1,12 @@
 # inbox
 
-The inbox gathers what waits on you in an agent session into one organized
-place beside the conversation: the agent's questions, tasks only you can do,
-issues and ideas it noticed, and your PRs. An agent here means Claude or
-Codex. The inbox runs in three places:
+Coding agents bury the things they need from you. A question sits at the end
+of a long reply. A bug Claude noticed along the way gets one line, then scrolls
+away. A review comment waits on your PR while you're busy with something else.
+
+The inbox pulls all of that out and keeps it beside the conversation, with
+buttons for what you'd likely do next. Press an answer and it goes to the agent
+as your message. It works with Claude and Codex, in three places:
 
 - **Claude Code in the terminal**, as a mod. Type `/inbox`.
 - **Code sessions in the Claude desktop app**, as the same mod, in a pane
