@@ -14,8 +14,7 @@ as your message. It works with Claude and Codex, in three places:
 - **Codex in the ChatGPT desktop app**, as a plugin, in an Inbox tab in the
   side panel.
 
-Each place draws the inbox in its host app's own style. The rules are the
-same in all three.
+Each one follows its app's own style and works the same way in all three.
 
 
 
@@ -74,20 +73,48 @@ The PRs tab needs the GitHub CLI, `gh`, signed in.
 ## Using it
 
 Type `/inbox` in Claude Code, or open the Inbox tab in the ChatGPT app. The
-inbox has three tabs:
+inbox has three tabs.
 
-- **Needs you**: questions the agent asked you, and tasks only you can do.
-- **Findings**: bugs, risks and ideas the agent noticed outside the task it's
-  working on.
-- **PRs**: pull requests from this session and your current branch, what's
-  blocking each one, and review comments waiting on you.
+### Needs you
 
-Each item shows what you can do with it. Press an answer's button and it goes
-to the agent as your message. You can also have the agent fix a finding, mark
-a task done, or dismiss anything you don't need.
+Questions the agent asked you, and tasks only you can do.
 
-When the tab you're on is empty and something new arrives on another tab, the
-inbox switches to it.
+The agent doesn't have to do anything special to put a question here. After
+each reply, a model reads what the agent wrote and records each question in
+it, with its possible answers. The agent's recommended answer comes first.
+Press an answer and it goes to the agent as your message. You can also type
+your own reply, or press Explain to have the agent say more before you decide.
+
+A task is something like signing in or adding an API key. It comes with
+buttons for its steps, such as copying a command or opening a file. In Claude
+Code, running the command with `!` closes the task once it succeeds.
+
+### Findings
+
+Bugs, risks and ideas the agent noticed outside the task it's working on. The
+agent records them and carries on with its task, and you decide later which
+ones to act on. Fix on an issue, or Do it on an idea, hands it to the agent.
+Discuss talks it through, and Dismiss drops it.
+
+### PRs
+
+Pull requests from this session and your current branch. Each one is marked
+Blocked, Ready or Waiting, and lists what blocks it: review comments waiting
+on you, failing checks and merge conflicts. Buttons hand the work to the
+agent: address one review comment or all of them, draft a reply, fix a
+failing check, resolve conflicts, or merge.
+
+### It keeps itself up to date
+
+When you answer a question in your own message, a task gets done, or the
+agent fixes a finding, the inbox closes the item. Closed items fold away under
+the open ones, each with how it ended.
+
+The agent reads the inbox too. Beside each of your prompts, it sees what's
+still open and what you answered, even after the conversation is compacted.
+
+Every press shows what it did right away. Discuss reads "Discussing…" until
+the agent replies, then "✓ Discussed".
 
 ### In each app
 
@@ -102,7 +129,9 @@ inbox switches to it.
 
 In Claude Code, a line above your prompt counts what needs you and the
 findings waiting, with a button that opens the panel. When Claude stops on an
-error, the stop shows on a second line. The ChatGPT app has no such line.
+error, a second line says why, with a Resume button after an API error. The
+ChatGPT app has no such line. Inside the Herdr terminal, the counts also show
+in its sidebar.
 
 To see every part with sample items in Claude Code, run `/inbox demo`. Presses
 on them change only the samples and send nothing. Press Hide demo, or run the
