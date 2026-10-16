@@ -97,7 +97,7 @@ test('the Codex renderer preserves retry, folded-option and finding action order
   await act(draw)
   assert.deepEqual(
     buttons(root).map(b => b.textContent),
-    ['Try again', 'Run tests', 'Done', 'Reply'],
+    ['Try again', 'Run tests', 'Done', 'Reply', 'Explain'],
   )
   assert.equal(named(root, 'Done').classList.contains('primary'), true)
   assert.equal(named(root, 'Run tests').classList.contains('primary'), false)
@@ -150,7 +150,7 @@ test('the Codex renderer preserves retry, folded-option and finding action order
   await act(drawQuestion)
   assert.deepEqual(
     buttons(root).map(b => b.textContent),
-    ['A (recommended)', 'B', 'C', 'D', 'All 6 options', 'Run tests', 'Reply', 'Dismiss'],
+    ['A (recommended)', 'B', 'C', 'D', 'All 6 options', 'Run tests', 'Reply', 'Explain', 'Dismiss'],
   )
   await act(() => named(root, 'All 6 options').click())
   assert.ok(named(root, 'F'))

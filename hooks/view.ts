@@ -685,9 +685,8 @@ export type PlannedKey =
 /**
  * A row's actions as keys. `keys` finish the row: [Try again] first when a send failed, then options and steps,
  * the first 9 shown on letters, then Done for a task and Address for a finding. `more` are the other ways to
- * respond: your own words, Discuss, and Dismiss. Where the look `hasKeys`, `hidden` keeps Explain's key without
- * drawing it, so it does not crowd the row's answers. Desktop takes no keys, so it draws Explain in `more`. A question's folded options show only with `isAllShown`, and until then [All N options] follows
- * the last option shown.
+ * respond: your own words, Explain, Discuss, and Dismiss. `hidden` is always empty. A question's folded options show
+ * only with `isAllShown`, and until then [All N options] follows the last option shown.
  */
 export function rowKeyPlan(
   r: RowView,
@@ -719,7 +718,7 @@ export function rowKeyPlan(
           emphasis: 'quiet',
         })
     } else if (a.hotkey)
-      (press.action === 'explain' && hasKeys ? hidden : a.isFollowUp ? more : keys).push({
+      (a.isFollowUp ? more : keys).push({
         slot: 'action',
         action: a,
         hotkey: a.hotkey,
