@@ -264,20 +264,20 @@ const UNDO_HEIGHT_PT = 23
  * without the pane redrawing. An image cannot read the app's theme, so it follows the color scheme instead.
  */
 function undoSvg(fraction: number, leftMs: number): string {
-  const w = UNDO_CELLS * DESKTOP_CELL_PT
-  const h = UNDO_HEIGHT_PT
-  const left = (w * fraction).toFixed(1)
+  const width = UNDO_CELLS * DESKTOP_CELL_PT
+  const height = UNDO_HEIGHT_PT
+  const left = (width * fraction).toFixed(1)
   return (
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
     `<style>.used{fill:rgba(255,255,255,0.6)}.left{fill:rgba(0,0,0,0.06)}.edge{fill:none;stroke:rgba(0,0,0,0.1)}` +
     `text{fill:#0b0b0b}@media (prefers-color-scheme: dark){.used{fill:rgba(255,255,255,0.05)}` +
     `.left{fill:rgba(255,255,255,0.1)}.edge{stroke:none}text{fill:#f0efec}}</style>` +
-    `<clipPath id="shape"><rect width="${w}" height="${h}" rx="6"/></clipPath>` +
-    `<g clip-path="url(#shape)"><rect class="used" width="${w}" height="${h}"/>` +
-    `<rect class="left" width="${left}" height="${h}">` +
+    `<clipPath id="shape"><rect width="${width}" height="${height}" rx="6"/></clipPath>` +
+    `<g clip-path="url(#shape)"><rect class="used" width="${width}" height="${height}"/>` +
+    `<rect class="left" width="${left}" height="${height}">` +
     `<animate attributeName="width" from="${left}" to="0" dur="${leftMs}ms" fill="freeze"/></rect></g>` +
-    `<rect class="edge" x="0.5" y="0.5" width="${w - 1}" height="${h - 1}" rx="5.5"/>` +
-    `<text x="${w / 2}" y="${h / 2}" dominant-baseline="central" text-anchor="middle" ` +
+    `<rect class="edge" x="0.5" y="0.5" width="${width - 1}" height="${height - 1}" rx="5.5"/>` +
+    `<text x="${width / 2}" y="${height / 2}" dominant-baseline="central" text-anchor="middle" ` +
     `font-family="-apple-system, system-ui, sans-serif" font-size="14">↺ Undo</text></svg>`
   )
 }
@@ -291,19 +291,19 @@ function toneSvg(tone: ToneName, mark: string, label: string, cells: number): st
   const { light, dark } = toneColors(tone)
   // A marker needs only 3:1, so an error mark takes a stronger red than text could.
   const [lightMark, darkMark] = tone === 'error' ? [LIGHT_TONES.errorMark, DARK_TONES.errorMark] : [light, dark]
-  const w = cells * DESKTOP_CELL_PT
-  const h = DESKTOP_LINE_PT
-  const shape = markShape(mark, h / 2)
+  const width = cells * DESKTOP_CELL_PT
+  const height = DESKTOP_LINE_PT
+  const shape = markShape(mark, height / 2)
   return (
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
     `<style>text{font-family:-apple-system,system-ui,sans-serif;font-size:14px;fill:currentColor}` +
     `.mark{color:${lightMark}}.label{color:${light}}` +
     `@media (prefers-color-scheme: dark){.mark{color:${darkMark}}.label{color:${dark}}}</style>` +
     (shape === null
-      ? `<text class="mark" x="0" y="${h / 2}" dominant-baseline="central">${escapeXml(mark)}</text>`
+      ? `<text class="mark" x="0" y="${height / 2}" dominant-baseline="central">${escapeXml(mark)}</text>`
       : `<g class="mark">${shape}</g>`) +
     (label
-      ? `<text class="label" x="${mark ? 2 * DESKTOP_CELL_PT : 0}" y="${h / 2}" dominant-baseline="central">` +
+      ? `<text class="label" x="${mark ? 2 * DESKTOP_CELL_PT : 0}" y="${height / 2}" dominant-baseline="central">` +
         `${escapeXml(label)}</text>`
       : '') +
     `</svg>`
@@ -346,16 +346,16 @@ function labelCells(text: string): number {
  * only icon the pane can draw, sized to the fold line, so it sits in the mark column at the line's middle.
  */
 function chevronSvg(isUnfolded: boolean, isHover: boolean): string {
-  const w = FRAME_INSET_PT + DESKTOP_MARK_CELLS * DESKTOP_CELL_PT
-  const h = 2 * ROW_PAD_PT + DESKTOP_LINE_PT
+  const width = FRAME_INSET_PT + DESKTOP_MARK_CELLS * DESKTOP_CELL_PT
+  const height = 2 * ROW_PAD_PT + DESKTOP_LINE_PT
   // At the column left of the mark column, where the rows' marks hang.
   const x = FRAME_INSET_PT - DESKTOP_CELL_PT + 0.5
-  const y = h / 2
+  const y = height / 2
   const points = isUnfolded
     ? `${x},${y - 2} ${x + 3.5},${y + 1.5} ${x + 7},${y - 2}`
     : `${x + 1.5},${y - 3.5} ${x + 5},${y} ${x + 1.5},${y + 3.5}`
   return (
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
     // At rest, the fold label's dim gray; under the pointer, the app's text color, as the label turns.
     (isHover
       ? `<style>polyline{stroke:#0b0b0b}@media (prefers-color-scheme: dark){polyline{stroke:#f0efec}}</style>`
@@ -1078,19 +1078,19 @@ async function catchUp($: EngineInterface, at: number): Promise<LedgerState> {
  * Queues the next update: a catch-up while the ledger may have missed a turn,
  * else this exchange alone.
  */
-function queueUpdate($: EngineInterface, next: { ex: Exchange; turnsStarted: number } | null) {
+function queueUpdate($: EngineInterface, pending: { ex: Exchange; turnsStarted: number } | null) {
   const at = conversation
   queue = queue.then(async () => {
     if (at !== conversation) return
     const { ledgerState, turnsStarted } = await update($, PRESENCE, p => ({ ...p, isUpdating: true }))
-    const state = await (ledgerState !== 'current' || next === null ? catchUp($, at) : runUpdate($, at, next.ex)).catch(
-      (): LedgerState => 'failed',
-    )
+    const state = await (
+      ledgerState !== 'current' || pending === null ? catchUp($, at) : runUpdate($, at, pending.ex)
+    ).catch((): LedgerState => 'failed')
     if (at !== conversation) return
     // An exchange covers the turns started by its end; a catch-up, those started before it ran. A failed update
     // counts too, as Codex's does: the reply has ended, so a row waiting on it stops reading "Explaining…". The
     // failed state still runs a catch-up.
-    const applied = next?.turnsStarted ?? turnsStarted
+    const applied = pending?.turnsStarted ?? turnsStarted
     await update($, PRESENCE, p => ({
       ...p,
       ledgerState: state,
@@ -1390,9 +1390,9 @@ function wrapped(text: string, width: number): string[] {
   const lines: string[] = []
   let line = ''
   for (const word of text.split(/\s+/).filter(Boolean)) {
-    const next = line ? `${line} ${word}` : word
-    if (next.length <= size) {
-      line = next
+    const longer = line ? `${line} ${word}` : word
+    if (longer.length <= size) {
+      line = longer
       continue
     }
     if (line) lines.push(line)
@@ -1492,7 +1492,7 @@ async function setFold($: EngineInterface, kind: string, isUnfolded: unknown) {
 async function setFoldHover($: EngineInterface, kind: string, isHover: boolean) {
   const fold = FOLD_KINDS.find(k => k === kind)
   if (fold === undefined) return
-  await update($, FOLD_HOVER, h => (isHover ? fold : h === fold ? null : h))
+  await update($, FOLD_HOVER, hovered => (isHover ? fold : hovered === fold ? null : hovered))
 }
 
 /**
@@ -1634,9 +1634,9 @@ async function followNewRows($: EngineInterface, isOpening = false) {
   })
   if (keeps.length > 0) {
     await update($, SELECTION, s => {
-      const next = { ...s }
-      for (const { t, cursor } of keeps) if (s[t].id === null && s[t].openedAt === 0) next[t] = cursor
-      return next
+      const kept = { ...s }
+      for (const { t, cursor } of keeps) if (s[t].id === null && s[t].openedAt === 0) kept[t] = cursor
+      return kept
     })
     // Rows that arrive above push the kept row down, so an inline pane scrolls it back to the window's top.
     if (isInlinePane && keeps.some(k => k.t === tab)) void scrollToOpenRow($, tab)
@@ -1819,13 +1819,15 @@ const COPY_FAILURES: Record<Extract<UiCopyResult, { isCopied: false }>['reason']
 /** Opens a path or URL, or copies text, for a Local press. Returns why it could not, or null. */
 async function perform(
   $: EngineInterface,
-  e: Exclude<Effect, { kind: 'send' }>,
+  effect: Exclude<Effect, { kind: 'send' }>,
   surface: UiPressArgument['surface'],
 ): Promise<string | null> {
   try {
-    if (e.kind === 'open')
-      return await (/^[a-z][a-z\d+.-]*:\/\//i.test(e.target) ? openUrl($, e.target) : openPath($, e.target))
-    const r = await $.ui.copy({ text: e.text, surface })
+    if (effect.kind === 'open')
+      return await (/^[a-z][a-z\d+.-]*:\/\//i.test(effect.target)
+        ? openUrl($, effect.target)
+        : openPath($, effect.target))
+    const r = await $.ui.copy({ text: effect.text, surface })
     return r.isCopied ? null : COPY_FAILURES[r.reason]
   } catch (err) {
     return err instanceof Error ? err.message : String(err)
@@ -1933,11 +1935,11 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
   const rows = Object.keys(pressed.lasts)
   const host: EffectHost = {
     now: () => $.clock.now(),
-    perform: e => perform($, e, surface),
-    send: async e => {
-      const sent = await send($, e.text, e.by)
+    perform: effect => perform($, effect, surface),
+    send: async effect => {
+      const sent = await send($, effect.text, effect.by)
       if (!('entered' in sent)) return sent.notSent
-      if (sent.entered !== e.text) await awaitRewritten($, rows, now, e.text, sent)
+      if (sent.entered !== effect.text) await awaitRewritten($, rows, now, effect.text, sent)
       return null
     },
     saveLasts: change => update($, LAST_ACTIONS, change),
@@ -1947,7 +1949,7 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
   // A success note clears after SETTLED_MS. A fresh value is what redraws the pane then.
   if (result?.state === 'done') later($, SETTLED_MS, () => update($, LAST_ACTIONS, a => ({ ...a })))
   // A message still on its way after QUEUED_AFTER_MS reads Queued from then. A fresh value is what redraws the pane.
-  if (pressed.effects.some(e => e.kind === 'send'))
+  if (pressed.effects.some(effect => effect.kind === 'send'))
     later($, QUEUED_AFTER_MS, () => update($, LAST_ACTIONS, a => ({ ...a })))
   const failed = await runSends(host, pressed.effects, rowId, rows, now)
   if (!failed) return
@@ -2019,9 +2021,9 @@ async function shownWaits($: EngineInterface) {
 async function openAfterClose($: EngineInterface, id: string, wasWaiting: boolean): Promise<boolean> {
   const [{ tab, rows, ids }, selection] = await Promise.all([shownWaits($), read($, SELECTION)])
   if (!wasWaiting || selection[tab].id !== id || rows.find(r => r.id === id)?.isWaiting) return false
-  const next = rowAfterClose(rows, id)
-  const index = next === null ? -1 : ids.indexOf(next)
-  if (next !== null && index >= 0) await select($, tab, next, index)
+  const following = rowAfterClose(rows, id)
+  const index = following === null ? -1 : ids.indexOf(following)
+  if (following !== null && index >= 0) await select($, tab, following, index)
   else await update($, SELECTION, s => ({ ...s, [tab]: { ...NO_CURSOR, index: s[tab].index } }))
 
   return true
@@ -2629,7 +2631,7 @@ export const register: Register = on => {
     }
 
     return next(e)
-  }).catch(($, e, next) => next(e))
+  })
 
   on('classic.StopFailure', async ($, e, next) => {
     const r = await next(e)
@@ -2697,28 +2699,25 @@ export const register: Register = on => {
 
   // A prompt this mod sent: its context goes in just before it, wherever the engine runs it.
   // Its row being stored is how the press that sent it learns it arrived.
-  on(
-    'session.append',
-    { door: ['prompt', 'delivery'], origin: { kind: 'plugin', name: 'inbox' } },
-    async ($, e, next) => {
-      if (!isOn || e.agentId) return next(e)
-      const text = messageText(e.message)
-      storedAt.set(text, ++storedCount)
-      const context = contextFor.get(text)
-      contextFor.delete(text)
-      if (context) await appendContext($, context)
-      const r = await next(e)
-      const isAwaited = Object.values(await read($, LAST_ACTIONS)).some(
-        a => a.delivery?.state === 'queued' && a.delivery.message === text,
-      )
-      if (isAwaited) {
-        await update($, LAST_ACTIONS, a => withArrival(a, text))
-        void publishStatus($)
-      }
+  // prettier-ignore
+  on('session.append', { door: ['prompt', 'delivery'], origin: { kind: 'plugin', name: 'inbox' } }, async ($, e, next) => {
+    if (!isOn || e.agentId) return next(e)
+    const text = messageText(e.message)
+    storedAt.set(text, ++storedCount)
+    const context = contextFor.get(text)
+    contextFor.delete(text)
+    if (context) await appendContext($, context)
+    const r = await next(e)
+    const isAwaited = Object.values(await read($, LAST_ACTIONS)).some(
+      a => a.delivery?.state === 'queued' && a.delivery.message === text,
+    )
+    if (isAwaited) {
+      await update($, LAST_ACTIONS, a => withArrival(a, text))
+      void publishStatus($)
+    }
 
-      return r
-    },
-  )
+    return r
+  })
 
   // The person's own `!` and slash commands reach no prompt.submit hook, only these rows.
   // The matcher keeps every other row from waking the hooks module.
@@ -3874,7 +3873,7 @@ export const register: Register = on => {
             submitLabel={look === 'desktop' ? 'Send' : 'send'}
             autoFocus
             onInput={(value: string) => void update($, DRAFTS, d => ({ ...d, [row.id]: value }))}
-            onSubmit={(value: string, e) => sendTyped($, row.id, value, e.surface)}
+            onSubmit={(value: string, submit) => sendTyped($, row.id, value, submit.surface)}
           />
         ) : null
       const f = feedbackLabel(row.id, row)
@@ -5202,11 +5201,11 @@ export const register: Register = on => {
       const keys = focusKeys(drawn)
       const opensField = focusHint?.startsWith('type-') && keys.has(focusHint)
       if (!keys.has(focusedKey) || opensField) {
-        const next = [focusHint, rowKeys[0]?.key, ...keys].find((k): k is string => !!k && keys.has(k)) ?? null
-        focusedKey = next
+        const focusKey = [focusHint, rowKeys[0]?.key, ...keys].find((k): k is string => !!k && keys.has(k)) ?? null
+        focusedKey = focusKey
         focusHint = null
         // After this hook returns, since a focus asked from inside a drawing's own hook cannot wait on it.
-        if (next) later($, 0, () => $.ui.focus({ requestId: PANE, key: next }))
+        if (focusKey) later($, 0, () => $.ui.focus({ requestId: PANE, key: focusKey }))
       }
     }
 

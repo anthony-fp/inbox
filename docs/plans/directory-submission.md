@@ -1,6 +1,6 @@
 # Submitting the inbox to the Claude Code plugin directory
 
-Status: building. The fixes and the README section are made. The open questions wait on Pete, and only a resubmit confirms the fixes.
+Status: building. The second validation left 4 blocks, both fixed below. Only a re-validate confirms them.
 
 The directory scans a submitted plugin and reports findings at four levels
 ([pre-submission checklist](https://claude.com/docs/plugins/pre-submission-checklist)):
@@ -17,8 +17,8 @@ The directory scans a submitted plugin and reports findings at four levels
 | Finding | Fix |
 |---|---|
 | Permission hook answers `allow` (`hooks/register.tsx`, the two `tool.check` hooks) | Delete both hooks. They never run: the mod answers `record_finding` and `close` in `tool.call`, which settles the call before the permission check. Checked on Claude Code 2.1.300 with a probe mod under `claude -p --permission-mode default`: a `tool.check` that denies changes nothing, and with no `tool.check` the tool runs with no prompt. That holds with a catch-all `tool.call` hook that passes calls on, registered before or after, as the mod has. Not checked in the desktop app, which answers permission prompts through the Agent SDK. |
-| Directory couldn't confirm the `PermissionRequest` hook leaves the decision with the user | Add `.catch(($, e, next) => next(e))`, so a throw in `openDialog` still passes the check on unchanged. Not confirmed to be what the scan needs. |
-| `$` or `on` used in a way the directory couldn't follow (3) | Prettier splits one `on(` call and 13 `$.noun⏎.method()` chains across lines. The 13 chains now read `$.noun.method(` on one line; ten of them were delayed redraws and go through a `later()` helper. The `on('session.append', …)` call stays split: on one line it is 3 characters over Prettier's width, and shortening its matcher would change what it matches. The scan didn't say which 3 findings it meant; the resubmit will. |
+| Directory couldn't confirm the `PermissionRequest` hook leaves the decision with the user (`MOD_PERMISSION_ANSWER_UNREAD`) | The scan needs the hook's parameter names, `$`, `e` and `next`, bound nowhere else in `hooks/register.tsx`. Rename the other bindings of `e` and `next` in the file, and drop the hook's `.catch`, which bound all three again. Without a `.catch`, a hook that throws before `next` is skipped, so the prompt still reaches the user. |
+| `$` or `on` used in a way the directory couldn't follow (`MOD_CAPABILITY_USE_NOT_PLAIN`, 10) | The scan forbids the name `h` in a `.tsx` file, since elements compile to calls of `h`. Rename the SVG builders' `w` and `h` to `width` and `height`, and the fold-hover updater's `h`. Also keep the `on('session.append', …)` registration on one line, under `// prettier-ignore`. |
 | No `author` in plugin.json | Add `{ "name": "Pete Petrash" }`, plus `repository` and `license`. |
 | No `version` in plugin.json | Add a version that matches the Codex plugin's, now `0.2.5`. Installs update only when the version goes up, so each release raises it in both manifests. |
 
@@ -42,5 +42,5 @@ Each of these is a policy hold. The README's "What it runs, sends and changes" s
 ## Open questions for Pete
 
 1. **Which findings block?** Confirm in the portal which of the unlabeled findings are blocks, and where the 3 `$` findings and the 7 credential findings point.
-2. **Icon.** The portal hasn't saved the listing yet, so the icon is still open. The directory takes it only the first time the plugin is saved or submitted, so a square PNG, 512–2048 px, must be in place before that.
+2. **Icon.** `.claude-plugin/icon.png`, 1024 px square: a white Geist Mono `i` and a block cursor as tall as the `i`, on a dark background with an indigo glow, after the launch video's end card. The directory takes the icon only the first time the plugin is saved or submitted, so it must be on main before the first portal save.
 3. **Name.** `inbox` may be confused with other listings (4 findings). Pete chose to keep `inbox` for now. A later rename can change `displayName` alone, which changes only what people see. Changing `name` also changes the install command, the tool names Claude calls, and the key the saved state is stored under.
