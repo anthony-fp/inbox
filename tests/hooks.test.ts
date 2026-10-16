@@ -888,7 +888,7 @@ test('a finding Claude records while the pane shows an empty tab brings the pane
     detail: 'The fetch retry spins with no delay and can hammer the API.',
     path: 'src/api.ts',
   })
-  expect(r.result).toBe('Recorded as f1. The user sees it in the Findings tab of the /inbox pane.')
+  expect(r.result).toBe('Recorded. The user sees it in the Findings tab of the /inbox pane.')
   await clock.settle()
   expect(await pane.find({ text: /Retry loop never backs off/ })).toBeDefined()
 
@@ -1328,15 +1328,15 @@ test('Claude closes an item or finding that no longer applies, by the id it read
   await clock.advance(QUEUED_AFTER_MS)
   expect(await pane.find({ text: /^\u2007·\sQueued:\sExplain/ })).toBeDefined()
   expect((await close({ id: 'i1', answer: 'Deno' })).result).toBe(
-    'Closed i1. The user sees it in the /inbox pane with its outcome.',
+    'Closed. The user sees it in the /inbox pane with its outcome.',
   )
   expect(await pane.find({ key: 'row-i1' })).toBeUndefined()
   expect(await pane.find({ key: 'settled-i1' })).toBeDefined()
   expect(await pane.find({ text: /^Deno$/ })).toBeDefined()
   expect((await close({ id: 'i2', reason: 'no longer applies' })).result).toBe(
-    'Closed i2. The user sees it in the /inbox pane with its outcome.',
+    'Closed. The user sees it in the /inbox pane with its outcome.',
   )
-  expect((await close({ id: 'f3', reason: 'fixed' })).result).toBe('Closed finding f3.')
+  expect((await close({ id: 'f3', reason: 'fixed' })).result).toBe('Closed the finding.')
   expect((await close({ id: 'i9', reason: 'done' })).result).toContain(
     'Not closed: no open item or finding has the id i9.',
   )
@@ -2724,7 +2724,7 @@ test('a tool call after a hot reload, before the load converts the ledger, still
   await $.tool.call({ tool: 'mcp__inbox__record_finding', kind: 'issue', title: 'Second', detail: 'Two.' })
   strip = false
   const r = await $.tool.call({ tool: 'mcp__inbox__close', id: 'f1', reason: 'fixed' } as never)
-  expect(r.result).toBe('Closed finding f1.')
+  expect(r.result).toBe('Closed the finding.')
 })
 
 test('every Needs you and Findings row in the demo, with its actions, is drawn in the terminal and desktop looks', async ($, on) => {

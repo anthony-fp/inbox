@@ -68,9 +68,9 @@ export function recordFinding(
   return {
     ledger: r.ledger,
     result: !r.isAdded
-      ? `Already recorded as ${r.id}.`
-      : `Recorded as ${r.id}. The user sees it in ${host.findingsIn}.` +
-        (r.expired ? ` The list was full, so the oldest finding, ${r.expired.id}, closed: ${r.expired.title}.` : ''),
+      ? 'Already recorded.'
+      : `Recorded. The user sees it in ${host.findingsIn}.` +
+        (r.expired ? ` The list was full, so the oldest finding closed: ${r.expired.title}.` : ''),
   }
 }
 
@@ -88,8 +88,8 @@ export function recordClose(
     return { ledger, result: "Not closed: give the id, and the user's answer or a reason." }
   const r = closeByAgent(host, ledger, id, answer ? { answer } : { reason }, now)
   if (r.closed === 'item')
-    return { ledger: r.ledger, result: `Closed ${id}. The user sees it in ${host.surface} with its outcome.` }
-  if (r.closed === 'finding') return { ledger: r.ledger, result: `Closed finding ${id}.` }
+    return { ledger: r.ledger, result: `Closed. The user sees it in ${host.surface} with its outcome.` }
+  if (r.closed === 'finding') return { ledger: r.ledger, result: 'Closed the finding.' }
 
   return {
     ledger,

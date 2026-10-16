@@ -431,7 +431,7 @@ test('Codex’s own tool calls reach their session through the turn metadata', a
     { kind: 'issue', title: 'No lint script', detail: 'Only tests run.' },
     { 'x-codex-turn-metadata': { session_id: 's1', thread_id: 's1' } },
   )
-  assert.match(r.result.content[0]?.text ?? '', /^Recorded as f2/)
+  assert.match(r.result.content[0]?.text ?? '', /^Recorded\. /)
   assert.equal((await readState(dir, 's1')).ledger.findings[0]?.title, 'No lint script')
 })
 
