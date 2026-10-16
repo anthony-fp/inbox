@@ -226,8 +226,13 @@ tells Claude a few seconds later, or once Claude's running turn ends.
   conversation's items. It passes the event on unchanged.
 - Your theme setting, to match its colors.
 
-It also adds the `/inbox` command, and keeps its items in Claude Code's
-plugin storage on this machine.
+**What it keeps.** The inbox saves each session's items, and the PRs it
+tracks, in Claude Code's plugin storage on this machine. It keeps the 40
+most recent sessions and deletes older ones. An item can summarize part of
+the conversation, so it may name the people in it. Nothing goes to the
+plugin's author.
+
+It also adds the `/inbox` command.
 
 ## Developing
 
