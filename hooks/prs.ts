@@ -1,7 +1,7 @@
 // Reading GitHub PR data into a `PrView`, and the PR status and wording rules. A shared module.
 
 import type { PrCheck, PrThread, PrView } from '../types'
-import { clip } from './ledger'
+import { clip } from './text'
 
 const NL = '\n'
 const PR_URL = /https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)/g

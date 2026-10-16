@@ -8,10 +8,6 @@ import type { InboxView } from '../../hooks/view'
 /** How often the tab asks the server for its view. */
 export const POLL_MS = 3000
 
-/**
- * How long a press may go unanswered before it reads as not sent and polls resume. It must exceed the
- * server's limits on a press's lock waits, `codex queue` and opens, or a press that went through reads as failed.
- */
 export const PRESS_TIMEOUT_MS = 60_000
 
 /** How long after a close the server lists its row as settled: SETTLED_MS and two polls, so a poll sees every close. */

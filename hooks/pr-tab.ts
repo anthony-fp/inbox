@@ -1,9 +1,9 @@
 // The PRs tab's rules both hosts share: fetching each tracked PR with gh, which PRs the tab draws, the ids of
 // their rows, and what each press on them does. Each host stores the PRs and runs gh its own way.
 
-import type { LastAction, Ledger, PressKind, PrCheck, PrThread, PrView, PrViews } from '../types'
-import { isFoldingPress, localLast, pendingResult, recordPress, withQueued } from './presses'
-import type { Effect, PrActionId } from './presses'
+import type { Item, LastAction, Ledger, PressKind, PrCheck, PrThread, PrView, PrViews } from '../types'
+import { isFoldingPress, localLast, pendingResult, prSteps, recordPress, withQueued } from './presses'
+import type { Effect, HelpStep, PrActionId } from './presses'
 import {
   failingChecks,
   inPrOrder,
@@ -31,6 +31,15 @@ export type GhRun = (args: string[]) => Promise<{ exitCode: number; stdout: stri
 /** The linked PRs after a reply or command links `refs`: each moves to the end. */
 export function linkedPrs(prs: string[], refs: string[]): string[] {
   return [...prs.filter(r => !refs.includes(r)), ...refs]
+}
+
+export function itemPrSteps(item: Item, prState: PrViews, linked: string[]): HelpStep[] {
+  const refs = prState.branchRef ? [...linked, prState.branchRef] : linked
+
+  return prSteps(
+    item,
+    refs.map(ref => ({ ref, url: prState.views[ref]?.url ?? null })),
+  )
 }
 
 /** The linked PRs the tab tracks, the newest MAX_PRS, and the older ones it leaves out, each newest last. */
@@ -169,6 +178,14 @@ export function threadSentIn(lastActions: Record<string, LastAction>): IsThreadS
   }
 }
 
+export function threadShowsCheckIn(lastActions: Record<string, LastAction>): IsThreadSent {
+  const isSent = threadSentIn(lastActions)
+  return (pr, t) => {
+    const delivery = lastActions[prThreadId(pr, t)]?.delivery
+    return isSent(pr, t) && delivery?.state !== 'unconfirmed'
+  }
+}
+
 /**
  * The rows of the PR blocks `prs` in drawn order, each block's review threads then its failing checks, and whether
  * each still waits on the person: a thread not sent to the agent, a check whose Fix was not handed off.
@@ -237,7 +254,8 @@ export type PrPress =
  * the effects to perform. `stale` when its row is gone or changed.
  */
 export type Applied =
-  { ledger: Ledger; lasts: Record<string, LastAction>; drop: string[]; effects: Effect[] } | { stale: true }
+  | { ledger: Ledger; lasts: Record<string, LastAction>; drop: string[]; effects: Effect[]; reopenedId?: string }
+  | { stale: true }
 
 /** The row a PR press was drawn on, which keys its last action and its note. */
 export function prRowId(p: PrPress): string {
@@ -279,7 +297,7 @@ export function applyPrPress(
   prState: PrViews,
   lastActions: Record<string, LastAction>,
   p: PrPress,
-  ctx: { now: number; turnsStarted: number },
+  ctx: { now: number; turnsStarted: number; localPressId?: string },
 ): Applied {
   const stale = { stale: true as const }
   const pr = prState.views[p.ref]
@@ -303,7 +321,7 @@ export function applyPrPress(
   // An open is Local: its row keeps its last action, with the open's result on it.
   const open = (rowId: string, text: string, url: string, name: string): Applied => {
     const effects: Effect[] = [{ kind: 'open', target: url, name }]
-    const result = pendingResult(effects, ctx.now)
+    const result = pendingResult(effects, ctx.now, ctx.localPressId)
 
     return applied({ lasts: { [rowId]: localLast(lastActions[rowId], { action: p.action, text }, result) }, effects })
   }
@@ -314,6 +332,7 @@ export function applyPrPress(
     case 'thread-open': {
       const t = pr.threads.find(x => x.id === p.thread)
       if (!t) return stale
+      if (p.action === 'thread-address' && !t.isWaiting) return stale
       const id = prThreadId(pr, t)
       if (p.action === 'thread-open') return open(id, 'Open', t.reply?.url || t.url || pr.url, 'the comment')
       if (p.action === 'thread-address')

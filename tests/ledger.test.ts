@@ -1,29 +1,21 @@
 import { describe, expect, test } from 'claude-code/testing'
 
+import { CLAUDE_CODE, answerNote, buildPrompt, carryText, latestBatch, questionNumbers } from '../hooks/model-text'
 import {
-  CLAUDE_CODE,
   EMPTY,
   addFinding,
-  answerNote,
   applyUpdate,
-  buildPrompt,
-  carryText,
   closeByAgent,
   closeFinding,
   closeItem,
   closedState,
-  latestBatch,
   parseReply,
-  questionNumbers,
-  readCommandRow,
   reopenFinding,
   reopenItem,
-  resetTime,
-  statusLine,
-  stopKindOf,
   tasksRunBy,
   upgradeLedger,
 } from '../hooks/ledger'
+import { readCommandRow, resetTime, statusLine, stopKindOf } from '../hooks/claude'
 import { parseInline } from '../hooks/inline'
 import type { Item } from '../types'
 

@@ -1246,10 +1246,22 @@ without the model calling it. The Inbox tab is a thread entrypoint.
   chat, and that chat's tab drew the old page. Under a new URI, a new chat's
   tab drew the test build. The inbox's URI now carries a hash of the page
   (`tabUri`, codex/src/server.ts).
-- **Live, a tab can replace its own document** [live 2026-10-10]. A tab that
+- **Historical document-replacement probe** [live 2026-10-10]. A tab that
   fetched a page through `tools/call` and ran `document.open`, `write` and
   `close` drew the new page. Its script sent `ui/initialize` again, Codex
-  answered, and the new page's polls worked.
+  answered, and the new page's polls worked. This probe did not check whether
+  host timers or event listeners survived.
+- **Current Inbox reload ownership** [source, browser and native checks 2026-10-16].
+  `codex/src/tab.tsx:swapPage` preserves the host document and replaces only
+  Inbox's root, style and script. It first initializes a candidate against a
+  detached root and waits for active presses. Failed startup keeps the working
+  page; disposal removes only the retired instance's timers, listeners and
+  animations. Browser checks
+  preserve host hooks and drafts while stopping old polls. Initialization uses
+  numeric request IDs, a timeout and a retry. The repaired native page retains
+  attachment, focus and the exact draft across two replacements in one tab.
+  Show demo, Hide demo and Dismiss/Undo also pass. See
+  [the implementation record](../plans/platform-architecture-audit.md).
 - "Bundle or inline the CSS in your app's HTML. The default iframe CSP can
   block external stylesheets." (TSR:L96)
 - The inbox resource sets no `_meta.ui` (codex/src/server.ts:214-215), so the

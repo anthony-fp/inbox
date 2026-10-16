@@ -1,66 +1,200 @@
-// Checks the boundaries that keep the three looks in step, which no type check or test reads:
-// - A shared module imports only other shared modules and `types/`, so both hosts can bundle it.
-// - The Codex plugin imports only shared modules from `hooks/`.
-// - Every plan says whether it is proposed, building, built or superseded.
-// - Every repo path and relative link in the docs names a file that exists.
-// - Every `file:symbol` in docs/looks.md names a file that has that symbol.
-//
-// Usage: node scripts/check-structure.mjs. Exits 1 on any failure.
-
 import { execFileSync } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { dirname, join, resolve, sep } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
-/** The shared modules: the files in hooks/ that both hosts import. GLOSSARY.md defines them. */
-const SHARED = ['arrivals', 'demo', 'inline', 'layout', 'ledger', 'pr-tab', 'presses', 'prs', 'tools', 'view']
-// hooks/ledger.ts imports a type from the engine. It is erased from the bundle, but the Codex type check then
-// needs the types only an interactive Claude session writes. Step 5 of docs/plans/three-looks.md moves it out.
-const ENGINE_TYPE_IMPORTS = ['ledger']
+const SHARED = [
+  'arrivals',
+  'demo',
+  'inline',
+  'layout',
+  'ledger',
+  'model-text',
+  'pr-tab',
+  'presses',
+  'prs',
+  'text',
+  'tones',
+  'tools',
+  'view',
+]
 const PLAN_STATUS = /^Status: (proposed|building|built|superseded by \S+)/m
 
 const errors = []
 const read = path => readFileSync(join(ROOT, path), 'utf8')
 const exists = path => existsSync(join(ROOT, path))
 
-/** Each import or re-export in a source file: where it is from, and whether it imports only types. */
+const require = createRequire(join(ROOT, 'codex/package.json'))
+const { API } = await import(pathToFileURL(require.resolve('typescript/unstable/sync')).href)
+const ts = await import(pathToFileURL(require.resolve('typescript/unstable/ast')).href)
+
 function importsOf(source) {
   const found = []
-  for (const m of source.matchAll(/\b(import|export)(\s+type)?\s[^;'"]*?\bfrom\s*['"]([^'"]+)['"]/g))
-    found.push({ from: m[3], isType: Boolean(m[2]) })
-  for (const m of source.matchAll(/^import\s+['"]([^'"]+)['"]/gm)) found.push({ from: m[1], isType: false })
+  const add = (node, dynamicFunction = null) => {
+    if (node)
+      found.push({
+        from: ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) ? node.text : null,
+        node,
+        dynamicFunction,
+      })
+  }
+  const visit = (node, functionName = null) => {
+    const isFunction =
+      ts.isFunctionDeclaration(node) ||
+      ts.isFunctionExpression(node) ||
+      ts.isArrowFunction(node) ||
+      ts.isMethodDeclaration(node) ||
+      ts.isConstructorDeclaration(node) ||
+      ts.isGetAccessorDeclaration(node) ||
+      ts.isSetAccessorDeclaration(node)
+    const enclosingFunction = isFunction
+      ? ts.isFunctionDeclaration(node) && node.parent === source && node.name?.text === 'load'
+        ? 'topLevelLoad'
+        : null
+      : functionName
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+      add(node.moduleSpecifier)
+    } else if (ts.isImportTypeNode(node)) {
+      add(node.argument.literal)
+    } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
+      add(node.moduleReference.expression)
+    } else if (
+      ts.isCallExpression(node) &&
+      (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        (ts.isIdentifier(node.expression) && node.expression.text === 'require'))
+    ) {
+      add(node.arguments[0], node.expression.kind === ts.SyntaxKind.ImportKeyword ? enclosingFunction : null)
+    }
+    node.forEachChild(child => visit(child, enclosingFunction))
+  }
+  visit(source)
 
   return found
 }
 
-function checkShared() {
-  for (const name of SHARED) {
-    const path = `hooks/${name}.ts`
-    for (const { from, isType } of importsOf(read(path))) {
-      const shared = from.match(/^\.\/([\w-]+)$/)?.[1]
-      if (shared && SHARED.includes(shared)) continue
-      if (from === '../types') continue
-      if (from === 'claude-code' && isType && ENGINE_TYPE_IMPORTS.includes(name)) continue
-      errors.push(`${path} imports '${from}'. A shared module imports only other shared modules and ../types.`)
-    }
-  }
+function sourceFiles(dir) {
+  return readdirSync(join(ROOT, dir), { withFileTypes: true }).flatMap(entry => {
+    const path = `${dir}/${entry.name}`
+    return entry.isDirectory() ? sourceFiles(path) : /\.(?:[cm]?ts|tsx|[cm]?js|jsx)$/.test(entry.name) ? [path] : []
+  })
 }
 
-function checkCodex() {
-  const dirs = ['codex/src', 'codex/tests']
-  for (const dir of dirs)
-    for (const file of readdirSync(join(ROOT, dir)).filter(f => /\.tsx?$/.test(f))) {
-      const path = `${dir}/${file}`
-      for (const { from } of importsOf(read(path))) {
-        const hook = from.match(/^\.\.\/\.\.\/hooks\/([\w-]+)$/)?.[1]
-        if (hook && !SHARED.includes(hook))
+function localTarget(path) {
+  if (existsSync(path) && statSync(path).isFile()) return realpathSync(path)
+  const extension = path.match(/\.(?:[cm]?js|jsx)$/)?.[0]
+  const base = extension ? path.slice(0, -extension.length) : path
+  const candidates = extension
+    ? [`${base}.ts`, `${base}.tsx`, `${base}.mts`, `${base}.cts`, path]
+    : [
+        path,
+        ...['.ts', '.tsx', '.mts', '.cts', '.d.ts', '.js', '.mjs', '.cjs'].map(ext => `${path}${ext}`),
+        join(path, 'index.ts'),
+        join(path, 'index.tsx'),
+        join(path, 'index.d.ts'),
+      ]
+  const target = candidates.find(candidate => existsSync(candidate) && statSync(candidate).isFile())
+  return target ? realpathSync(target) : null
+}
+
+function importTarget(project, path, dependency) {
+  if (dependency.from === null) return null
+  if (dependency.from.startsWith('.')) {
+    const target = localTarget(resolve(dirname(join(ROOT, path)), dependency.from))
+    if (target) return target
+  }
+  for (const [alias, targets] of Object.entries(project.compilerOptions.paths ?? {})) {
+    const [before, after = ''] = alias.split('*')
+    const matches = alias.includes('*')
+      ? dependency.from.startsWith(before) && dependency.from.endsWith(after)
+      : dependency.from === alias
+    if (!matches) continue
+    const part = dependency.from.slice(before.length, dependency.from.length - after.length)
+    for (const target of targets) {
+      const resolved = localTarget(resolve(dirname(project.configFileName), target.replace('*', part)))
+      if (resolved) return resolved
+    }
+  }
+  const symbol = project.checker.getSymbolAtLocation(dependency.node)
+  const declaration = symbol?.declarations.find(node => node.kind === ts.SyntaxKind.SourceFile)
+  return declaration
+    ? realpathSync(project.program.getSourceFile(declaration.path)?.fileName ?? declaration.path)
+    : null
+}
+
+// Hot reload selects installed or dev handler URLs at runtime; see docs/looks.md.
+function isHandlerReload(path, dependency) {
+  return (
+    path === 'codex/src/server-main.ts' &&
+    dependency.dynamicFunction === 'topLevelLoad' &&
+    ts.isIdentifier(dependency.node) &&
+    dependency.node.text === 'url'
+  )
+}
+
+function checkImports() {
+  const sharedFiles = SHARED.map(name => `hooks/${name}.ts`)
+  const sharedTargets = new Set(sharedFiles.map(path => realpathSync(join(ROOT, path))))
+  const hooks = `${realpathSync(join(ROOT, 'hooks'))}${sep}`
+  const types = `${realpathSync(join(ROOT, 'types'))}${sep}`
+  const files = [...sharedFiles, ...sourceFiles('codex/src'), ...sourceFiles('codex/tests')]
+  const api = new API({ cwd: ROOT })
+  try {
+    const snapshot = api.updateSnapshot({ openFiles: files.map(path => join(ROOT, path)) })
+    const rootDir = `${realpathSync(ROOT)}${sep}`
+    const sourceByPath = new Map()
+    const sourceFor = (project, path) => {
+      const canonical = realpathSync(path)
+      if (sourceByPath.has(canonical)) return sourceByPath.get(canonical)
+      const source = project?.program.getSourceFile(path) ?? project?.program.getSourceFile(canonical)
+      if (source) sourceByPath.set(canonical, source)
+      return source
+    }
+    const queue = files.map(path => ({ path, mode: sharedFiles.includes(path) ? 'shared' : 'codex' }))
+    const visited = new Set()
+    while (queue.length) {
+      const { path, mode } = queue.shift()
+      const absolute = join(ROOT, path)
+      const project = snapshot.getDefaultProjectForFile(absolute)
+      const source = sourceFor(project, absolute)
+      if (!source) throw new Error(`Cannot parse ${path}.`)
+      const canonical = realpathSync(source.fileName)
+      const relative = canonical.startsWith(rootDir) ? canonical.slice(rootDir.length) : path
+      const visitKey = `${mode}:${canonical}`
+      if (visited.has(visitKey)) continue
+      visited.add(visitKey)
+
+      for (const dependency of importsOf(source)) {
+        const { from } = dependency
+        if (from === null) {
+          if (!isHandlerReload(relative, dependency))
+            errors.push(`${relative} imports a computed module outside the runtime hot-reload loader.`)
+          continue
+        }
+        const target = importTarget(project, relative, dependency)
+        if (mode === 'shared') {
+          if (!sharedTargets.has(target) && !target?.startsWith(types))
+            errors.push(
+              `${relative} imports '${from}'. A shared dependency imports only other shared modules and types/.`,
+            )
+        } else if (target?.startsWith(hooks) && !sharedTargets.has(target)) {
           errors.push(
-            `${path} imports hooks/${hook}, which is not a shared module. Codex can only bundle shared modules.`,
+            `${relative} imports '${from}', which is not a shared module. Codex can only bundle shared modules.`,
           )
+        }
+
+        if (!target?.startsWith(rootDir) || target.split(sep).includes('node_modules')) continue
+        const targetSource = sourceFor(project, target)
+        if (!targetSource) continue
+        const targetPath = realpathSync(targetSource.fileName)
+        queue.push({ path: targetPath.slice(rootDir.length), mode })
       }
     }
+  } finally {
+    api.close()
+  }
 }
 
 /** The markdown files whose links and paths must resolve. */
@@ -125,8 +259,7 @@ function checkLookMap() {
   }
 }
 
-checkShared()
-checkCodex()
+checkImports()
 checkDocs()
 checkLookMap()
 

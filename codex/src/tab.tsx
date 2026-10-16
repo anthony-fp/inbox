@@ -3,21 +3,16 @@
 // Codex look draws a row; row rules come from hooks/view.ts. See docs/looks.md.
 
 import { render } from 'preact'
+import { ActionButton, RowActions, ledgerActions, Icon } from './row-actions'
 import type { ComponentChildren, JSX } from 'preact'
+import type { IconName } from './row-actions'
 
-import { ago, closedState } from '../../hooks/ledger'
+import { closedState } from '../../hooks/ledger'
+import { ago } from '../../hooks/text'
 import type { ClosedState } from '../../hooks/ledger'
 import { CLOSED_MARKS } from '../../hooks/view'
-import {
-  baseName,
-  capitalized,
-  clipLabel,
-  noteText,
-  pendingResult,
-  stepEffects,
-  stepIconKind,
-} from '../../hooks/presses'
-import type { HelpStep, RowPress } from '../../hooks/presses'
+import { baseName, capitalized, clipLabel, noteText, pendingResult, stepEffects } from '../../hooks/presses'
+import type { RowPress } from '../../hooks/presses'
 import {
   allRows,
   closedShown,
@@ -30,7 +25,6 @@ import {
   groupEmptyText,
   entryId,
   TABS,
-  FINDING_GROUPS,
   feedbackOf,
   feedbackText,
   foldLabel,
@@ -42,14 +36,27 @@ import {
   listWaits,
   PRESS_GUARD_MS,
   rowAfterClose,
-  rowKeyPlan,
+  replyHint,
+  rowMark,
+  rowFeedbackText,
+  settledLabel,
+  ROW_COPY,
   SETTLED_MS,
   settledIn,
   shortAgo,
 } from '../../hooks/view'
 import { ROW_PAD_PT } from '../../hooks/layout'
-import type { DrawnEntry, DrawnLists, Feedback, PlannedKey, RowView, RowWait } from '../../hooks/view'
-import { PR_TONES, prCheckId, prMarkId, prRetryOf, prRowWaits, prThreadId, threadSentIn } from '../../hooks/pr-tab'
+import type { ActionEmphasis, DrawnEntry, DrawnLists, Feedback, RowView, RowWait } from '../../hooks/view'
+import {
+  PR_TONES,
+  prCheckId,
+  prMarkId,
+  prRetryOf,
+  prRowWaits,
+  prThreadId,
+  threadShowsCheckIn,
+  threadSentIn,
+} from '../../hooks/pr-tab'
 import type { PrPress } from '../../hooks/pr-tab'
 import {
   commentLine,
@@ -74,7 +81,7 @@ import { ENTER_MS, EXIT_MS, isMoving, MOVE_MS, ROW_STATE_MS, stepRow } from './r
 import type { RowState, RowTarget, RowTrack } from './rows'
 import { drawnSettled, POLL_MS, PRESS_TIMEOUT_MS, settledIds, settledSeen } from './settle'
 
-type Tone = 'needsYou' | 'findings' | 'done' | 'error'
+type Tone = 'needsYou' | 'issue' | 'findings' | 'done' | 'error'
 
 /** The tabs: Needs you and Findings list the ledger's rows, PRs lists what the server fetched from GitHub. */
 type ShownTab = Tab | 'prs'
@@ -83,7 +90,7 @@ type ShownTab = Tab | 'prs'
  * How loudly an action draws: `primary` is a filled button, at most one per row; `normal` an outlined button; `quiet`
  * plain text.
  */
-type Emphasis = 'primary' | 'normal' | 'quiet'
+type Emphasis = ActionEmphasis
 
 /** One of a row's actions, with the key that presses it while the tab has focus, if it has one. */
 type Key = {
@@ -96,49 +103,10 @@ type Key = {
   run: () => void
 }
 
-/**
- * Outline icons in the style of Codex's own: a 24-unit box drawn at 14 px, stroked in the text color, so they
- * follow hover and the solid button. Each names what a press does; an answer's own words need none.
- */
-const ICONS = {
-  check: 'M20 6 9 17l-5-5',
-  play: 'M7 4.5v15l12-7.5z',
-  copy: 'M9 9h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1zM5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1',
-  open: 'M7 17 17 7M8 7h9v9',
-  retry: 'M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5',
-  undo: 'M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11',
-  right: 'm9 18 6-6-6-6',
-  down: 'm6 9 6 6 6-6',
-} as const
-type IconName = keyof typeof ICONS
-
-function Icon({ name }: { name: IconName }) {
-  return (
-    <svg
-      class="icon"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
-    >
-      <path d={ICONS[name]} />
-    </svg>
-  )
-}
-
-/** A step's icon: play when it asks Codex to run a command, else copy or open, by its first help. */
-function stepIcon(step: HelpStep | undefined): IconName | undefined {
-  const kind = stepIconKind(step)
-
-  return kind === 'run' ? 'play' : kind
-}
-
 /** A list row. Selected, it shows its title in full, its body and its keys; otherwise one line. */
 type Row = {
   id: string
+  view?: RowView
   handle: string
   /** `done` once the row is handed to Codex, which also sets how its feedback reads. */
   handleTone?: Tone
@@ -178,6 +146,12 @@ let readError: string | null = null
 let serverNote: { text: string; isReloadable: boolean } | null = null
 // Whether the first read has taken long enough to say "Loading…". A read that answers sooner shows nothing in between.
 let isLoadingShown = false
+let isConnected = false
+let initializing: Promise<boolean> | null = null
+let didStart = false
+type HostContext = Parameters<typeof applyHost>[0]
+let hostContext: HostContext = {}
+let stagedHostChanges: HostContext = {}
 // Polls that failed in a row while a view shows, and when the shown view was read.
 let pollFailures = 0
 let readAt = 0
@@ -194,12 +168,13 @@ const selection: Record<ShownTab, { id: string; openedAt: number; index?: number
 let typing: string | null = null
 let focusTyping = false
 // Typed text by row, kept until it is sent, so a redraw, a new selection or a closed field keeps it.
-const drafts = new Map<string, string>()
+const drafts = new Map<string, { text: string }>()
 // Questions whose every option shows. Until then, one with more than 5 options shows 4.
 const optionsShown = new Set<string>()
 const unfolded = new Set<FoldGroup>()
 // What a row shows while its press runs: "Sending…", or a Local press's pending note.
 const sending = new Map<string, string>()
+const latestPress = new Map<string, number>()
 const errors = new Map<string, string>()
 // A row's stale or sample note, shown for SETTLED_MS from `at`.
 const notes = new Map<string, { text: string; at: number }>()
@@ -228,14 +203,11 @@ let lastLists: Lists | null = null
 // Each view request takes the next number, and a reply older than the view shown is dropped.
 let requested = 0
 let shown = 0
-let isPressing = false
+let activePresses = 0
+let viewGeneration = 0
 
 // ── State kept across a page swap ───────────────────────────────────────────
 
-/**
- * What the person chose or typed in this tab, which the page a swap writes in reads back once. Notes and presses
- * still out are left behind, since the new page reads the view fresh. A new `version` makes an older record unread.
- */
 type Kept = {
   version: 1
   isDemo: boolean
@@ -247,11 +219,72 @@ type Kept = {
   /** An earlier page kept 'finding' for the one fold Findings had. */
   unfolded: (FoldGroup | 'finding')[]
 }
+type CandidatePage = {
+  initialize: () => Promise<boolean>
+  activate: (kept: Kept) => void
+  start: () => void
+  dispose: () => void
+}
+type PageHandoff = {
+  page: string
+  root: HTMLDivElement
+  aborted: boolean
+  dispose?: () => void
+  ready: (candidate: CandidatePage) => void
+}
 const KEPT_KEY = 'inbox-tab-kept'
+const inboxWindow = window as Window & {
+  __inboxPage?: string
+  __inboxKept?: Kept
+  __inboxRequestId?: number
+  __inboxHandoff?: PageHandoff
+}
+const handoff = inboxWindow.__inboxHandoff ?? null
+const root = handoff?.root ?? document.getElementById('app')!
+const instanceAbort = new AbortController()
+const timers = new Set<number>()
+const animations = new Set<Animation>()
+const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: unknown) => void; timer?: number }>()
+let isDisposed = false
+let isActive = handoff === null
+if (handoff) handoff.dispose = dispose
 
-// The host may block storage in the tab's frame. Then a swap starts the new page empty, as a reload does.
-function keepState() {
-  const kept: Kept = {
+function later(run: () => void, ms: number): number {
+  if (isDisposed) return 0
+  const id = window.setTimeout(() => {
+    timers.delete(id)
+    if (!isDisposed) run()
+  }, ms)
+  timers.add(id)
+  return id
+}
+
+function cancelTimer(id: number | undefined) {
+  if (id === undefined) return
+  window.clearTimeout(id)
+  timers.delete(id)
+}
+
+function dispose() {
+  if (isDisposed) return
+  isDisposed = true
+  instanceAbort.abort()
+  for (const timer of timers) window.clearTimeout(timer)
+  timers.clear()
+  for (const animation of animations) {
+    animation.onfinish = null
+    animation.oncancel = null
+    animation.cancel()
+  }
+  animations.clear()
+  for (const request of pending.values()) request.reject(new Error('Inbox page replaced'))
+  pending.clear()
+  render(null, root)
+  if (isActive) document.body.classList.remove('still')
+}
+
+function capturedState(): Kept {
+  return {
     version: 1,
     isDemo,
     tab,
@@ -261,22 +294,22 @@ function keepState() {
       prs: selection.prs?.id ?? null,
     },
     typing,
-    drafts: [...drafts],
+    drafts: [...drafts].map(([id, draft]) => [id, draft.text]),
     optionsShown: [...optionsShown],
     unfolded: [...unfolded],
   }
-  try {
-    sessionStorage.setItem(KEPT_KEY, JSON.stringify(kept))
-  } catch {}
 }
 
-function restoreState() {
-  let kept: Kept | null = null
-  try {
-    const raw = sessionStorage.getItem(KEPT_KEY)
-    sessionStorage.removeItem(KEPT_KEY)
-    kept = raw ? (JSON.parse(raw) as Kept) : null
-  } catch {}
+function restoreState(incoming?: Kept) {
+  let kept: Kept | null = incoming ?? inboxWindow.__inboxKept ?? null
+  if (!incoming) {
+    delete inboxWindow.__inboxKept
+    try {
+      const raw = sessionStorage.getItem(KEPT_KEY)
+      sessionStorage.removeItem(KEPT_KEY)
+      kept ??= raw ? (JSON.parse(raw) as Kept) : null
+    } catch {}
+  }
   if (kept?.version !== 1) return
   isDemo = kept.isDemo
   tab = kept.tab
@@ -287,7 +320,7 @@ function restoreState() {
   }
   typing = kept.typing
   focusTyping = typing !== null
-  for (const [id, text] of kept.drafts) drafts.set(id, text)
+  for (const [id, text] of kept.drafts) drafts.set(id, { text })
   for (const id of kept.optionsShown) optionsShown.add(id)
   for (const g of kept.unfolded)
     for (const fold of g === 'finding' ? (['issue', 'opportunity'] as const) : [g]) unfolded.add(fold)
@@ -295,17 +328,15 @@ function restoreState() {
 
 // ── The host ────────────────────────────────────────────────────────────────
 
-let nextId = 0
-const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: unknown) => void; timer?: number }>()
-
 /** Sends a request to the host. With `timeoutMs`, a request the host has not answered by then fails, and a later answer is dropped. */
 function request(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
+  if (isDisposed) return Promise.reject(new Error('Inbox page replaced'))
   return new Promise((resolve, reject) => {
-    const id = ++nextId
+    const id = (inboxWindow.__inboxRequestId = (inboxWindow.__inboxRequestId ?? Date.now()) + 1)
     const timer =
       timeoutMs === undefined
         ? undefined
-        : window.setTimeout(() => {
+        : later(() => {
             if (pending.delete(id)) reject(new Error(`The inbox did not answer in ${Math.round(timeoutMs / 1000)} s`))
           }, timeoutMs)
     pending.set(id, { resolve, reject, timer })
@@ -313,30 +344,53 @@ function request(method: string, params: unknown, timeoutMs?: number): Promise<u
   })
 }
 
-window.addEventListener('message', e => {
-  const m = e.data
-  if (!m || m.jsonrpc !== '2.0') return
-  if (m.id != null && !m.method && pending.has(m.id)) {
-    const p = pending.get(m.id)!
-    pending.delete(m.id)
-    clearTimeout(p.timer)
-    if (m.error) p.reject(m.error)
-    else p.resolve(m.result)
-    return
-  }
-  if (m.method === 'ui/notifications/host-context-changed') applyHost(m.params ?? {})
-  if (m.id != null && m.method) parent.postMessage({ jsonrpc: '2.0', id: m.id, result: {} }, '*')
-})
+window.addEventListener(
+  'message',
+  e => {
+    if (isDisposed) return
+    const m = e.data
+    if (!m || m.jsonrpc !== '2.0') return
+    if (m.id != null && !m.method && pending.has(m.id)) {
+      const p = pending.get(m.id)!
+      pending.delete(m.id)
+      cancelTimer(p.timer)
+      if (m.error) p.reject(m.error)
+      else p.resolve(m.result)
+      return
+    }
+    if (m.method === 'ui/notifications/host-context-changed') {
+      if (isActive) applyHost(m.params ?? {})
+      else stagedHostChanges = mergeHostContext(stagedHostChanges, m.params ?? {})
+    }
+    if (!isActive) return
+    if (m.id != null && m.method) parent.postMessage({ jsonrpc: '2.0', id: m.id, result: {} }, '*')
+  },
+  { signal: instanceAbort.signal },
+)
 
 function applyHost(ctx: { theme?: string; styles?: { variables?: Record<string, string> } }) {
+  if (isDisposed || !isActive) return
   if (ctx.theme) document.documentElement.dataset.theme = ctx.theme
   for (const [k, v] of Object.entries(ctx.styles?.variables ?? {})) document.documentElement.style.setProperty(k, v)
+}
+
+function mergeHostContext(current: HostContext, next: HostContext): HostContext {
+  return {
+    ...current,
+    ...next,
+    styles: {
+      ...current.styles,
+      ...next.styles,
+      variables: { ...current.styles?.variables, ...next.styles?.variables },
+    },
+  }
 }
 
 /** A tool's answer for the tab. A call the server could not answer throws, as a failed request does. */
 async function callTool<T>(name: string, args: unknown = {}, timeoutMs?: number): Promise<T> {
   const r = (await request('tools/call', { name, arguments: args }, timeoutMs)) as
     { structuredContent?: T; isError?: boolean; content?: { text?: string }[] } | undefined
+  if (isDisposed) throw new Error('Inbox page replaced')
   if (!r || r.isError || r.structuredContent === undefined)
     throw new Error((r?.isError && r.content?.[0]?.text) || 'The answer had nothing to show')
 
@@ -346,7 +400,7 @@ async function callTool<T>(name: string, args: unknown = {}, timeoutMs?: number)
 // ── The view ────────────────────────────────────────────────────────────────
 
 function applyView(next: View, seq: number) {
-  if (seq < shown) return
+  if (isDisposed || seq < shown) return
   shown = seq
   readError = null
   pollFailures = 0
@@ -388,17 +442,22 @@ function follow(v: View, added: Record<Tab, string[]>) {
 
 /** How long the first read may take before the tab says it is loading, so a fast one shows no flash. */
 const LOADING_DELAY_MS = 300
+const PAGE_START_MS = 2_000
 
 /** How long a view read may go unanswered before it counts as failed, so a lost answer cannot stop the polls. */
 const READ_TIMEOUT_MS = 3 * POLL_MS
 
 /** Reads the view once. A failed first read shows that the inbox could not be read; a failed poll after it counts toward "retrying". */
 async function read() {
+  const generation = viewGeneration
   const seq = ++requested
   try {
     const next = await callTool<View>('inbox_view', { demo: isDemo }, READ_TIMEOUT_MS)
-    const isPageOld = next.devPage !== PAGE
-    if (isPageOld) void swapPage()
+    if (generation !== viewGeneration || seq < shown) return
+    requestedPage = next.devPage
+    if (updateError?.page !== requestedPage) updateError = null
+    const isPageOld = requestedPage !== PAGE
+    if (isPageOld && !updateError) void swapPage(requestedPage)
     serverNote = next.serverLoadError
       ? {
           text: `The inbox server could not load its new build, so it still runs the last one. ${next.serverLoadError}`,
@@ -409,6 +468,7 @@ async function read() {
         : null
     applyView(next, seq)
   } catch (err) {
+    if (isDisposed || generation !== viewGeneration || seq < shown) return
     if (view) pollFailures++
     else readError = failureText(err)
     draw()
@@ -433,35 +493,128 @@ function failureText(err: unknown): string {
   return capitalized(/[.!?…]$/.test(reason) ? reason : `${reason}.`)
 }
 
-/** This page's address, which the server stamps into each page it serves. */
-const PAGE = (window as { __inboxPage?: string }).__inboxPage
+const PAGE = handoff?.page ?? inboxWindow.__inboxPage
 let isSwapping = false
+let requestedPage: string | null = null
+let updateError: { page: string; text: string } | null = null
 
-/** Replaces this page with the one the server serves now. The new page connects to Codex again. */
-async function swapPage() {
-  if (isSwapping) return
+async function swapPage(target: string) {
+  if (isSwapping || isDisposed || target === PAGE) return
   isSwapping = true
+  let staged: PageHandoff | null = null
+  let nextScript: HTMLScriptElement | null = null
+  let committed = false
   try {
     const { html } = await callTool<{ html: string }>('inbox_tab_page', {}, READ_TIMEOUT_MS)
-    // A page cut off mid-write would blank the tab for good, since it could never connect again. The next poll
-    // tries again.
+    if (isDisposed || requestedPage !== target) return
     if (!/<\/html>\s*$/i.test(html)) throw new Error('The new page is incomplete.')
-    // document.open keeps this window's timers, so the old page's polls and redraws would run beside the new
-    // page's. Timer ids count up from 1, so clearing every id up to a new one stops them all.
-    const last = window.setTimeout(() => undefined, 0)
-    for (let i = 1; i <= last; i++) clearTimeout(i)
-    keepState()
-    document.open()
-    document.write(html)
-    document.close()
+    const incoming = new DOMParser().parseFromString(html, 'text/html')
+    const pageRoot = incoming.getElementById('app')
+    const pageStyle = incoming.getElementById('inbox-style') ?? incoming.head.querySelector('style')
+    const pageScript = incoming.getElementById('inbox-script') ?? incoming.body.querySelector('script')
+    const stamp = [...incoming.head.querySelectorAll('script')]
+      .map(script => script.textContent?.match(/^\s*window\.__inboxPage\s*=\s*("[^"\n]+")\s*;?\s*$/)?.[1])
+      .find(value => value !== undefined)
+    const page = stamp ? (JSON.parse(stamp) as unknown) : null
+    const supportsHandoff = incoming.querySelector('meta[name="inbox-handoff"]')?.getAttribute('content') === '1'
+    const ownedStyle = document.getElementById('inbox-style')
+    const ownedScript = document.getElementById('inbox-script')
+    if (
+      !(pageRoot instanceof HTMLDivElement) ||
+      pageRoot.childNodes.length > 0 ||
+      !(pageStyle instanceof HTMLStyleElement) ||
+      !pageStyle.textContent ||
+      !(pageScript instanceof HTMLScriptElement) ||
+      pageScript.src ||
+      !pageScript.textContent ||
+      typeof page !== 'string' ||
+      page !== target ||
+      !/^ui:\/\/inbox\/tab-[a-f0-9]{12}$/.test(page) ||
+      !supportsHandoff ||
+      !(ownedStyle instanceof HTMLStyleElement) ||
+      !(ownedScript instanceof HTMLScriptElement)
+    )
+      throw new Error('The new page is incomplete.')
+    const nextRoot = document.createElement('div')
+    nextRoot.id = 'app'
+    const nextStyle = document.createElement('style')
+    nextStyle.id = 'inbox-style'
+    nextStyle.textContent = pageStyle.textContent
+    nextScript = document.createElement('script')
+    nextScript.id = 'inbox-script-candidate'
+    nextScript.textContent = pageScript.textContent
+    let ready!: (candidate: CandidatePage) => void
+    const candidateReady = new Promise<CandidatePage>(resolve => (ready = resolve))
+    staged = {
+      page,
+      root: nextRoot,
+      aborted: false,
+      ready: candidate => {
+        if (!staged?.aborted && inboxWindow.__inboxHandoff === staged) ready(candidate)
+      },
+    }
+    inboxWindow.__inboxHandoff = staged
+    document.body.append(nextScript)
+    const waitFor = <T,>(promise: Promise<T>, ms: number) =>
+      new Promise<T>((resolve, reject) => {
+        const timeout = later(() => reject(new Error('The new page did not start.')), ms)
+        void promise.then(
+          value => {
+            cancelTimer(timeout)
+            resolve(value)
+          },
+          error => {
+            cancelTimer(timeout)
+            reject(error)
+          },
+        )
+      })
+    const candidate = await waitFor(candidateReady, PAGE_START_MS)
+    if (!(await waitFor(candidate.initialize(), READ_TIMEOUT_MS))) throw new Error('The new page could not connect.')
+    const deadline = Date.now() + PRESS_TIMEOUT_MS
+    while (activePresses > 0 && Date.now() < deadline) await new Promise<void>(resolve => later(resolve, 30))
+    if (activePresses > 0) throw new Error('The current press is still running.')
+    if (isDisposed || requestedPage !== target || staged.aborted) return
+    const kept = capturedState()
+    root.replaceWith(nextRoot)
+    try {
+      ownedStyle.replaceWith(nextStyle)
+      candidate.activate(kept)
+      candidate.start()
+    } catch (err) {
+      if (nextRoot.isConnected) nextRoot.replaceWith(root)
+      if (nextStyle.isConnected) nextStyle.replaceWith(ownedStyle)
+      applyPageVariables()
+      throw err
+    }
+    dispose()
+    ownedScript.remove()
+    nextScript.id = 'inbox-script'
+    inboxWindow.__inboxPage = page
+    committed = true
   } catch {
+    if (!isDisposed && requestedPage === target) {
+      updateError = { page: target, text: 'Could not load the inbox update.' }
+      draw()
+    }
+  } finally {
+    if (staged) {
+      staged.aborted = true
+      if (inboxWindow.__inboxHandoff === staged) delete inboxWindow.__inboxHandoff
+      if (!committed) {
+        try {
+          staged.dispose?.()
+        } catch {}
+      }
+    }
+    if (!committed) nextScript?.remove()
     isSwapping = false
   }
 }
 
 async function poll() {
-  if (!isPressing) await read()
-  setTimeout(poll, POLL_MS)
+  if (activePresses === 0) await read()
+  later(poll, POLL_MS)
 }
 
 /** Whether the view lists an open row with this id, which can show a note. */
@@ -486,6 +639,11 @@ function isNotSent(v: View, id: string): boolean {
  * only once the press went through, so a stale or failed press keeps a typed draft.
  */
 async function act(rowId: string, press: RowPress | PrPress, onSent?: () => void, pending = 'Sending…') {
+  if (isDisposed) return
+  const generation = viewGeneration
+  const seq = ++requested
+  latestPress.set(rowId, seq)
+  const isLatest = () => latestPress.get(rowId) === seq
   // Undo is pressed on a row that just closed, and a PR block's actions on no row.
   if (press.action !== 'undo' && !rowId.startsWith('pr:')) keepPressedOpen(rowId)
   const wasWaiting = !!view && tabWaits(view, tab).some(r => r.id === rowId && r.isWaiting)
@@ -494,18 +652,20 @@ async function act(rowId: string, press: RowPress | PrPress, onSent?: () => void
   notes.delete(rowId)
   copies.delete(rowId)
   draw()
-  isPressing = true
-  const seq = ++requested
+  activePresses++
   try {
     const r = await callTool<PressReply>('inbox_press', { press, thread: view?.thread, demo: isDemo }, PRESS_TIMEOUT_MS)
-    if (r.copy) await copy(rowId, r.copy)
+    if (isDisposed || generation !== viewGeneration) return
+    if (r.copy) await copy(rowId, r.copy, isLatest)
+    if (isDisposed || generation !== viewGeneration || !isLatest()) return
     if (r.view) applyView(r.view, seq)
     // A message that did not send shows on its row, from the view, when the row is there to show it.
     if (r.error && !(view && isNotSent(view, rowId))) errors.set(rowId, r.error)
     // A sample press went through on the demo's copy, so its typed words go as a real press's do.
     // After the view, so `onSent` reads the rows as they are after the press.
-    if (!r.error && r.note !== 'stale') onSent?.()
-    if (!r.error && r.note !== 'stale' && r.view && wasWaiting) openAfterClose(r.view, rowId)
+    if (!r.error && r.note !== 'stale' && r.delivery !== 'unconfirmed') onSent?.()
+    if (!r.error && r.note !== 'stale' && r.delivery !== 'unconfirmed' && r.view && wasWaiting && typing !== rowId)
+      openAfterClose(r.view, rowId)
     // A recording build leaves out the note that marks a press as a sample's.
     const note = DEMO_RECORDING && r.note === 'sample' ? null : r.note
     if (note && view && isListed(view, rowId)) {
@@ -518,11 +678,15 @@ async function act(rowId: string, press: RowPress | PrPress, onSent?: () => void
       drawIn(SETTLED_MS)
     }
   } catch {
-    errors.set(rowId, 'Not sent: the inbox did not answer.')
+    if (isDisposed || generation !== viewGeneration || !isLatest()) return
+    errors.set(rowId, 'Action unconfirmed: the inbox did not answer.')
   } finally {
-    isPressing = false
-    sending.delete(rowId)
-    draw()
+    activePresses--
+    if (isLatest()) {
+      latestPress.delete(rowId)
+      sending.delete(rowId)
+      draw()
+    }
   }
 }
 
@@ -553,14 +717,15 @@ function openAfterClose(v: View, id: string) {
   }
   open(tab, next, index)
   // After the press's own draw, which draws the row open.
-  setTimeout(revealSelected, 0)
+  later(revealSelected, 0)
 }
 
 /** Copies a press's text. The row's result already reads "✓ Copied", so only a failure says more. */
-async function copy(rowId: string, c: { text: string; name: string }) {
+async function copy(rowId: string, c: { text: string; name: string }, isLatest: () => boolean) {
   try {
     await navigator.clipboard.writeText(c.text)
   } catch {
+    if (!isLatest()) return
     // The tab's frame may not get the clipboard, so the text shows for a manual copy.
     errors.set(rowId, `Could not copy ${c.name}: this tab has no clipboard access`)
     copies.set(rowId, c)
@@ -568,6 +733,13 @@ async function copy(rowId: string, c: { text: string; name: string }) {
 }
 
 // ── Rows ────────────────────────────────────────────────────────────────────
+
+function sendReply(id: string, text: string) {
+  const draft = drafts.get(id)
+  void act(id, { action: 'type', id, text }, () => {
+    if (drafts.get(id) === draft) drafts.delete(id)
+  })
+}
 
 function startTyping(id: string) {
   keepPressedOpen(id)
@@ -578,84 +750,43 @@ function startTyping(id: string) {
 
 /** A row's keys, in the order `rowKeyPlan` sets, as the tab's buttons. */
 function rowKeys(r: RowView): { keys: Key[]; more: Key[]; hidden: Key[] } {
-  const { id, item } = r
-  const key = (k: PlannedKey): Key => {
-    switch (k.slot) {
-      case 'retry':
-        return { label: 'Try again', emphasis: 'normal', icon: 'retry', run: () => void act(id, k.press) }
-      case 'allOptions':
-        return {
-          label: `All ${k.count} options`,
-          emphasis: 'quiet',
-          run: () => {
-            optionsShown.add(id)
-            draw()
-          },
-        }
-      case 'choice': {
-        const { action: a, hotkey } = k
-        const p = a.press
-        const lettered = hotkey ? { hotkey } : {}
-        if (p.action === 'answer')
-          return {
-            ...lettered,
-            label: a.isPrimary ? `${a.label} (recommended)` : a.label,
-            emphasis: a.isPrimary ? 'primary' : 'normal',
-            run: () => void act(id, p),
-          }
-        const step = r.steps[p.step]
-        // An open or copy shows its pending note, as the pane does, until the server answers.
-        const pending =
-          a.kind === 'local' && item && step
-            ? feedbackText({ is: 'local', result: pendingResult(stepEffects(item, step), Date.now()) }, 'codex')
-            : undefined
-        const icon = stepIcon(step)
-        return {
-          ...lettered,
-          label: a.label,
-          emphasis: 'normal',
-          ...(icon ? { icon } : {}),
-          run: () => void act(id, p, undefined, pending),
-        }
-      }
-      case 'action': {
-        const { action: a, hotkey } = k
-        const p = a.press
-        const run = p.action === 'type' ? () => startTyping(id) : () => void act(id, p)
-        const isHandOff = p.action === 'done' || p.action === 'address'
-        return {
-          hotkey,
-          label: a.label,
-          emphasis: isHandOff ? 'primary' : p.action === 'type' ? 'normal' : 'quiet',
-          ...(p.action === 'dismiss' ? { isDismiss: true } : {}),
-          ...(p.action === 'done' ? { icon: 'check' as const } : {}),
-          run,
-        }
-      }
-    }
-  }
-  const { keys, more, hidden } = rowKeyPlan(r, optionsShown.has(id), true)
-
-  return { keys: keys.map(key), more: more.map(key), hidden: hidden.map(key) }
+  const actions = ledgerActions(r, optionsShown.has(r.id), {
+    press: p => {
+      const step = p.action === 'step' ? r.steps[p.step] : undefined
+      const action = r.actions.find(a => a.press.action === 'step' && p.action === 'step' && a.press.step === p.step)
+      const pending =
+        action?.kind === 'local' && r.item && step
+          ? feedbackText({ is: 'local', result: pendingResult(stepEffects(r.item, step), Date.now()) }, 'codex')
+          : undefined
+      void act(r.id, p, undefined, pending)
+    },
+    reply: () => startTyping(r.id),
+    showOptions: () => {
+      optionsShown.add(r.id)
+      draw()
+    },
+  })
+  return actions
 }
 
-function itemRow(v: View, r: RowView, item: Item): Row {
-  const isQuestion = item.kind === 'question'
+function itemRow(v: View, r: RowView): Row {
+  const mark = rowMark(r, 'codex')
   const isHandedOff = r.state.is === 'handedOff'
-  const id = item.id
+  const id = r.id
 
   return {
     id,
+    view: r,
     // Only a handed-off item has a mark. Its options answer a question, and the group header says the kind.
-    handle: isHandedOff ? '✓' : '',
-    handleTone: isHandedOff ? 'done' : undefined,
+    handle: mark.text,
+    handleTone: mark.tone,
     ...(isHandedOff ? { fold: {} } : {}),
-    title: item.ask,
-    age: item.at === null ? undefined : shortAgo(v.at - item.at),
+    title: r.title,
+    age: r.at === null ? undefined : shortAgo(v.at - r.at),
     ...rowKeys(r),
     typing: {
-      hint: isQuestion ? 'Your answer' : 'Your reply to Codex',
-      send: text => void act(id, { action: 'type', id, text }, () => drafts.delete(id)),
+      hint: replyHint(r, 'Codex'),
+      send: text => sendReply(id, text),
     },
     feedback: r.feedback,
   }
@@ -664,31 +795,33 @@ function itemRow(v: View, r: RowView, item: Item): Row {
 function findingRow(v: View, r: RowView, f: Finding): Row {
   // A finding's group title says its kind. Handed to Codex, it folds, as a task does, until Codex's reply leaves it open.
   const isHandedOff = r.state.is === 'handedOff'
-  const id = f.id
+  const id = r.id
+  const mark = rowMark(r, 'codex')
 
   return {
     id,
-    handle: isHandedOff ? '✓' : FINDING_GROUPS[f.kind].mark,
-    handleTone: isHandedOff ? 'done' : undefined,
+    view: r,
+    handle: mark.text,
+    handleTone: mark.tone,
     kind: f.kind,
     ...(isHandedOff ? { fold: {} } : {}),
-    title: f.title,
-    age: shortAgo(v.at - f.at),
+    title: r.title,
+    age: r.at === null ? undefined : shortAgo(v.at - r.at),
     body: (
       <div>
-        <p>{inlineHtml(f.detail)}</p>
+        <p style={{ whiteSpace: 'pre-line' }}>{inlineHtml(r.detail ?? '')}</p>
         {f.path ? (
           <p>
-            <span class="muted">Relevant file: </span>
-            <code title={f.path}>{baseName(f.path)}</code>
+            <span class="muted">{ROW_COPY.relevantFile}</span>
+            <code title={f.path}>{r.fileName}</code>
           </p>
         ) : null}
       </div>
     ),
     ...rowKeys(r),
     typing: {
-      hint: 'Your reply to Codex',
-      send: text => void act(id, { action: 'type', id, text }, () => drafts.delete(id)),
+      hint: replyHint(r, 'Codex'),
+      send: text => sendReply(id, text),
     },
     feedback: r.feedback,
   }
@@ -713,6 +846,7 @@ function opening(name: string): string {
 function prThreadRow(v: View, pr: PrView, t: PrThread): Row {
   const id = prThreadId(pr, t)
   const isSent = threadSentIn(v.lastActions)(pr, t)
+  const showsCheck = threadShowsCheckIn(v.lastActions)(pr, t)
   const isChanged = !isSent && t.isLinesChanged
   const retry = prRetryOf(v.lastActions[id], pr.ref, t.id)
   const press =
@@ -723,8 +857,8 @@ function prThreadRow(v: View, pr: PrView, t: PrThread): Row {
 
   return {
     id,
-    handle: isSent ? '✓' : '◦',
-    handleTone: isSent ? 'done' : undefined,
+    handle: showsCheck ? '✓' : '◦',
+    handleTone: showsCheck ? 'done' : undefined,
     ...(isSent || isChanged
       ? { fold: t.isLinesChanged ? { note: `Lines changed since this comment${DOT}still open on GitHub` } : {} }
       : {}),
@@ -892,7 +1026,7 @@ function listsOf(v: View, drawn: ReadonlySet<string>): Lists {
   return drawnLists(
     v,
     id => drawn.has(id),
-    r => (r.item ? itemRow(v, r, r.item) : r.finding ? findingRow(v, r, r.finding) : null),
+    r => (r.item ? itemRow(v, r) : r.finding ? findingRow(v, r, r.finding) : null),
   )
 }
 
@@ -1040,57 +1174,7 @@ function rowActions(row: Row): { keys: Key[]; more: Key[]; hidden: Key[] } {
  * nothing; its key works at once. Keys are an extra, so no key text shows.
  */
 function KeyButton({ k, isGuarded = true }: { k: Key; isGuarded?: boolean }) {
-  const isBlocked = () => isGuarded && isOpenGuarded()
-
-  return (
-    <button
-      type="button"
-      class={`${k.emphasis === 'primary' ? 'key primary' : k.emphasis === 'quiet' ? 'key ghost' : 'key'}${k.isDismiss ? ' dismiss' : ''}`}
-      disabled={isBlocked()}
-      onClick={() => {
-        if (!isBlocked()) k.run()
-      }}
-    >
-      {k.icon ? <Icon name={k.icon} /> : null}
-      {k.label}
-    </button>
-  )
-}
-
-function TypeField({ row }: { row: Row }) {
-  const typed = row.typing!
-  const submit = (e: Event) => {
-    e.preventDefault()
-    const text = (drafts.get(row.id) ?? '').trim()
-    if (!text) return
-    typing = null
-    typed.send(text)
-  }
-
-  return (
-    <form onSubmit={submit}>
-      <input
-        id={`type-${row.id}`}
-        value={drafts.get(row.id) ?? ''}
-        placeholder={typed.hint}
-        aria-label={typed.hint}
-        onInput={e => drafts.set(row.id, e.currentTarget.value)}
-      />
-      <button type="submit" class="key primary">
-        Send
-      </button>
-      <button
-        type="button"
-        class="key ghost"
-        onClick={() => {
-          typing = null
-          draw()
-        }}
-      >
-        Cancel
-      </button>
-    </form>
-  )
+  return <ActionButton action={k} isBlocked={() => isGuarded && isOpenGuarded()} />
 }
 
 /** A row's last press, "✓ Explain" or "Queued: Explain". A row whose own mark is a ✓ leaves out the second one. */
@@ -1098,7 +1182,11 @@ function feedbackLabel(row: Row): string | null {
   const f = row.feedback
   if (!f) return null
 
-  return f.is === 'done' && row.handleTone === 'done' ? f.label : feedbackText(f, 'codex')
+  return row.view
+    ? rowFeedbackText(row.view, 'codex')
+    : f.is === 'done' && row.handleTone === 'done'
+      ? f.label
+      : feedbackText(f, 'codex')
 }
 
 /** A row's note while it shows. */
@@ -1127,7 +1215,7 @@ function ListRow({ row, track, onSelect, now }: { row: Row; track: RowTrack; onS
   const f = isFeedbackShown(row) ? row.feedback : null
   const label = pending ?? (f ? feedbackLabel(row) : null)
   const ageAt = !pending && f && hasAge(f) ? f.at : null
-  const isInSide = ageAt !== null && !isSelected && !isClosing
+  const isInSide = ageAt !== null && !isSelected && !isClosing && f?.is !== 'queued' && f?.is !== 'unconfirmed'
   const last = isInSide ? null : label
   const side = ageAt !== null ? shortAgo(now - ageAt) : last ? null : row.age
   const afterTone = !pending && isFailure(row.feedback) ? 'error' : undefined
@@ -1175,10 +1263,6 @@ function ListRow({ row, track, onSelect, now }: { row: Row; track: RowTrack; onS
 /** An open row's details under its line: its kind, body, notes, actions and copy box. */
 function Panel({ row, isClosing }: { row: Row; isClosing: boolean }) {
   const { keys, more } = rowActions(row)
-  // Filled and outlined buttons lead, then the plain-text actions, with Dismiss at the far right.
-  const actions = [...keys, ...more]
-  const buttons = actions.filter(k => k.emphasis !== 'quiet')
-  const quiet = actions.filter(k => k.emphasis === 'quiet')
   const copied = copies.get(row.id)
   const note = noteOf(row.id)
   const isTyping = !!row.typing && typing === row.id
@@ -1192,16 +1276,28 @@ function Panel({ row, isClosing }: { row: Row; isClosing: boolean }) {
     <div class={isClosing ? 'panel closing' : 'panel'} inert={isClosing}>
       {row.body ? <div class="body">{row.body}</div> : null}
       {notes.length > 0 ? <div class="tight">{notes}</div> : null}
-      <div class="actions">
-        {actions.length > 0 ? (
-          <div class="keys">
-            {[...buttons, ...quiet.filter(k => !k.isDismiss), ...quiet.filter(k => k.isDismiss)].map(k => (
-              <KeyButton k={k} />
-            ))}
-          </div>
-        ) : null}
-        {isTyping ? <TypeField row={row} /> : null}
-      </div>
+      <RowActions
+        actions={[...keys, ...more]}
+        reply={
+          isTyping
+            ? {
+                id: row.id,
+                hint: row.typing!.hint,
+                draft: () => drafts.get(row.id)?.text ?? '',
+                onDraft: text => drafts.set(row.id, { text }),
+                send: text => {
+                  typing = null
+                  row.typing!.send(text)
+                },
+                cancel: () => {
+                  typing = null
+                  draw()
+                },
+              }
+            : null
+        }
+        isBlocked={isOpenGuarded}
+      />
       {copied ? (
         <div>
           <div class="muted">Copy {copied.name} from here:</div>
@@ -1233,14 +1329,14 @@ function SettledView({ settled: r, panel }: { settled: RowView; panel: Row | und
   return (
     <div class={panel ? 'row settled was-open' : 'row settled'}>
       {/* The ✓ waits for an answer's message to reach Codex. */}
-      <span class="mark">{state.isQueued ? '' : '✓'}</span>
+      <span class="mark">{state.delivery !== null ? '' : '✓'}</span>
       <div class="content">
         <div class="settled-head">
           <div class="settled-line">
             <span class="what">{r.title}</span>
             <span class="outcome-label">
               {DOT}
-              {state.isQueued ? `Queued: ${state.label}` : state.label}
+              {settledLabel(state.label, state.delivery)}
             </span>
             {error ? (
               <span class="tone-error">
@@ -1326,6 +1422,7 @@ function itemsClosed(v: View, kind: 'question' | 'task', entries: Entry[]): Clos
     outcome: d.outcome,
     state: closedState(d),
     at: d.at,
+    delivery: d.delivery,
   }))
 }
 
@@ -1388,6 +1485,7 @@ type ClosedLine = {
   outcome: string
   state: ClosedState
   at: number
+  delivery: Parameters<typeof settledLabel>[1]
 }
 
 /** Text an agent wrote, with its inline markdown as elements. Preact escapes each span's text, so no HTML gets through. */
@@ -1454,10 +1552,19 @@ function GroupEnd({
           {closed.map(d => (
             <div class="entry" key={`closed-${d.id}`}>
               <div class="row">
-                <span class="mark">{CLOSED_MARKS[d.state]}</span>
+                <span class="mark">{d.delivery === null ? CLOSED_MARKS[d.state] : ''}</span>
                 <div class="content tight">
                   <div class="muted">{d.ask}</div>
-                  <div class="outcome">{capitalized(d.outcome)}</div>
+                  <div class="outcome">{settledLabel(capitalized(d.outcome), d.delivery)}</div>
+                  {d.delivery && typeof d.delivery === 'object' && d.delivery.canUndo ? (
+                    <button
+                      type="button"
+                      disabled={sending.has(d.id)}
+                      onClick={() => act(d.id, { id: d.id, action: 'undo' })}
+                    >
+                      Undo
+                    </button>
+                  ) : null}
                 </div>
                 <span class="side">{shortAgo(now - d.at)}</span>
               </div>
@@ -1532,6 +1639,7 @@ function Findings({ v, lists, now }: { v: View; lists: Lists; now: number }) {
       outcome: f.outcome,
       state: closedState(f),
       at: f.closedAt,
+      delivery: f.delivery,
     }))
   const isNothing = lists.findings.length === 0
   if (isNothing && closedTotal(v.findings.closed, settled) === 0)
@@ -1846,6 +1954,18 @@ function TabBar({ v }: { v: View }) {
           <div class="status-line tone-error">{serverNote.text}</div>
         )
       ) : null}
+      {updateError ? (
+        <ErrorStrip
+          text={updateError.text}
+          label="Retry"
+          reload={() => {
+            const page = updateError?.page
+            updateError = null
+            draw()
+            if (page) void swapPage(page)
+          }}
+        />
+      ) : null}
       {error ? <div class="status-line tone-error">{error}</div> : null}
       {lineNote && Date.now() - lineNote.at < SETTLED_MS ? (
         <div class={lineNote.isError ? 'status-line tone-error' : 'status-line muted'}>{lineNote.text}</div>
@@ -1856,7 +1976,10 @@ function TabBar({ v }: { v: View }) {
 
 /** Switches between the conversation's inbox and the demo. The new view starts fresh, so no row reads as just closed or new. */
 async function toggleDemo() {
+  viewGeneration++
   isDemo = !isDemo
+  readError = null
+  pollFailures = 0
   view = null
   seen = new Map()
   rowsSeen = {}
@@ -1872,12 +1995,12 @@ async function toggleDemo() {
 }
 
 /** An error with a Reload button, which runs `reload`. */
-function ErrorStrip({ text, reload }: { text: string; reload: () => void }) {
+function ErrorStrip({ text, reload, label = 'Reload' }: { text: string; reload: () => void; label?: string }) {
   return (
     <div class="error-strip">
       <span>{text}</span>
       <button type="button" class="key" onClick={reload}>
-        Reload
+        {label}
       </button>
     </div>
   )
@@ -1886,7 +2009,10 @@ function ErrorStrip({ text, reload }: { text: string; reload: () => void }) {
 function App({ lists }: { lists: Lists | null }): ComponentChildren {
   if (!view || !lists)
     return readError !== null ? (
-      <ErrorStrip text={`Could not read the inbox. ${readError}`} reload={() => void read()} />
+      <ErrorStrip
+        text={`Could not read the inbox. ${readError}`}
+        reload={() => void (isConnected ? read() : initialize())}
+      />
     ) : isLoadingShown ? (
       <div class="notice muted">Loading…</div>
     ) : null
@@ -1937,7 +2063,7 @@ type Heights = Map<string, { el: HTMLElement; height: number }>
 /** Each moving element's drawn height, by its `data-motion` key, mid-animation included. */
 function measure(): Heights {
   const heights: Heights = new Map()
-  for (const el of document.querySelectorAll<HTMLElement>('[data-motion]'))
+  for (const el of root.querySelectorAll<HTMLElement>('[data-motion]'))
     heights.set(el.dataset.motion!, { el, height: el.getBoundingClientRect().height })
 
   return heights
@@ -1951,7 +2077,10 @@ function run(el: HTMLElement, frames: Keyframe[], timing: KeyframeAnimationOptio
   el.style.overflow = 'hidden'
   el.dataset.to = String(to)
   const a = el.animate(frames, timing)
+  animations.add(a)
   const done = () => {
+    animations.delete(a)
+    if (isDisposed) return
     if (el.getAnimations().length === 0) unclip(el)
   }
   a.onfinish = done
@@ -2011,7 +2140,7 @@ function animateDraw(before: Heights, changed: ReadonlySet<string>) {
     : started.has('entering')
       ? ENTER
       : MOVE
-  for (const el of document.querySelectorAll<HTMLElement>('[data-motion]')) {
+  for (const el of root.querySelectorAll<HTMLElement>('[data-motion]')) {
     const key = el.dataset.motion!
     const was = before.get(key)
     // A fold closing runs its own exit.
@@ -2101,7 +2230,7 @@ function collapse(el: HTMLElement, from: Frame) {
  * and a second click reopens it, and keeps the list drawn in `closingFolds` while it collapses.
  */
 function toggleFold(group: FoldGroup) {
-  const el = document.querySelector<HTMLElement>(`[data-motion="closed-${group}"]`)
+  const el = root.querySelector<HTMLElement>(`[data-motion="closed-${group}"]`)
   if (!unfolded.has(group)) {
     unfolded.add(group)
     if (closingFolds.delete(group) && el) delete el.dataset.closing
@@ -2120,7 +2249,7 @@ function toggleFold(group: FoldGroup) {
   const height = el.getBoundingClientRect().height
   for (const a of el.getAnimations()) a.cancel()
   tween(el, { height, opacity: 1 }, { height: 0, opacity: 0 }, EXIT)
-  setTimeout(() => {
+  later(() => {
     if (unfolded.has(group) || !closingFolds.delete(group)) return
     draw()
   }, EXIT_MS)
@@ -2128,27 +2257,28 @@ function toggleFold(group: FoldGroup) {
 
 /** Brings the open row into view, and again once its height has moved, since a row still growing is clipped. */
 function revealSelected() {
-  document.querySelector('.row.selected')?.scrollIntoView({ block: 'nearest' })
+  if (isDisposed) return
+  root.querySelector('.row.selected')?.scrollIntoView({ block: 'nearest' })
   if (!reducedMotion.matches)
-    setTimeout(() => document.querySelector('.row.selected')?.scrollIntoView({ block: 'nearest' }), MOVE_MS + 20)
+    later(() => root.querySelector('.row.selected')?.scrollIntoView({ block: 'nearest' }), MOVE_MS + 20)
 }
 
-const root = document.getElementById('app')!
-// The row padding the Claude app pane shares, and the row states' move and enter, which tab.html reads.
-document.documentElement.style.setProperty('--row-pad', `${ROW_PAD_PT}px`)
-document.documentElement.style.setProperty('--move', `${MOVE_MS}ms ${MOVE.easing}`)
-document.documentElement.style.setProperty('--enter', `${ENTER_MS}ms ${ENTER.easing}`)
+function applyPageVariables() {
+  document.documentElement.style.setProperty('--row-pad', `${ROW_PAD_PT}px`)
+  document.documentElement.style.setProperty('--move', `${MOVE_MS}ms ${MOVE.easing}`)
+  document.documentElement.style.setProperty('--enter', `${ENTER_MS}ms ${ENTER.easing}`)
+}
 
 // Slack for a timer to land after the state it waits on ends.
 const TIMER_SLACK_MS = 50
 
 /** Draws again once `ms` has passed. */
 function drawIn(ms: number) {
-  setTimeout(draw, ms + TIMER_SLACK_MS)
+  later(draw, ms + TIMER_SLACK_MS)
 }
 
 // The draw due when the first moving row's move ends.
-let moveWake: { at: number; timer: ReturnType<typeof setTimeout> } | null = null
+let moveWake: { at: number; timer: ReturnType<typeof later> } | null = null
 
 /**
  * Draws again when the first moving row's move is due to end, which brings it to rest. Each draw arms it for the
@@ -2162,10 +2292,10 @@ function wakeForMoves() {
   if (ends.length === 0) return
   const at = Math.min(...ends) + TIMER_SLACK_MS
   if (moveWake && moveWake.at <= at) return
-  if (moveWake) clearTimeout(moveWake.timer)
+  if (moveWake) cancelTimer(moveWake.timer)
   moveWake = {
     at,
-    timer: setTimeout(() => {
+    timer: later(() => {
       moveWake = null
       draw()
     }, at - now),
@@ -2173,15 +2303,17 @@ function wakeForMoves() {
 }
 
 function draw() {
+  if (isDisposed || !isActive) return
   const before = measure()
   const step = view ? stepLists(view) : null
   lastLists = step?.lists ?? null
   wakeForMoves()
   render(<App lists={lastLists} />, root)
   animateDraw(before, step?.changed ?? new Set())
-  if (focusTyping && typing) {
+  const fieldToFocus = focusTyping && typing ? document.getElementById(`type-${typing}`) : null
+  if (fieldToFocus) {
     focusTyping = false
-    document.getElementById(`type-${typing}`)?.focus()
+    fieldToFocus.focus()
   }
 }
 
@@ -2191,69 +2323,131 @@ function draw() {
 // a held modifier leaves the key to the app.
 // A press in a list moves rows under the pointer, so hover fills stay off until the pointer itself moves.
 let pressedAt: { x: number; y: number } | null = null
-document.addEventListener('pointerdown', e => {
-  if (!(e.target instanceof Element) || !e.target.closest('.list, .fold')) return
-  pressedAt = { x: e.clientX, y: e.clientY }
-  document.body.classList.add('still')
-})
-document.addEventListener('pointermove', e => {
-  if (!pressedAt || Math.hypot(e.clientX - pressedAt.x, e.clientY - pressedAt.y) < 3) return
-  pressedAt = null
-  document.body.classList.remove('still')
-})
+document.addEventListener(
+  'pointerdown',
+  e => {
+    if (!isActive) return
+    if (!(e.target instanceof Element) || !root.contains(e.target) || !e.target.closest('.list, .fold')) return
+    pressedAt = { x: e.clientX, y: e.clientY }
+    document.body.classList.add('still')
+  },
+  { signal: instanceAbort.signal },
+)
+document.addEventListener(
+  'pointermove',
+  e => {
+    if (!isActive) return
+    if (!pressedAt || Math.hypot(e.clientX - pressedAt.x, e.clientY - pressedAt.y) < 3) return
+    pressedAt = null
+    document.body.classList.remove('still')
+  },
+  { signal: instanceAbort.signal },
+)
 
-document.addEventListener('keydown', e => {
-  if (e.metaKey || e.ctrlKey || e.altKey || !view) return
-  const target = e.target as HTMLElement | null
-  if (target?.closest('input, textarea')) {
-    if (e.key === 'Escape' && target.tagName === 'INPUT') {
-      typing = null
-      draw()
+document.addEventListener(
+  'keydown',
+  e => {
+    if (!isActive) return
+    if (e.metaKey || e.ctrlKey || e.altKey || !view) return
+    const target = e.target as HTMLElement | null
+    if (target?.closest('input, textarea')) {
+      if (e.key === 'Escape' && target.tagName === 'INPUT') {
+        typing = null
+        draw()
+      }
+      return
     }
-    return
-  }
-  const switched = TABS.find(t => t.hotkey === e.key)
-  if (switched) {
-    tab = switched.id
-    draw()
-    return
-  }
-  const rows = tabRows(view, tab)
-  const at = selectedIndex(rows, tab, view)
-  const move = e.key === 'j' || e.key === 'ArrowDown' ? 1 : e.key === 'k' || e.key === 'ArrowUp' ? -1 : 0
-  if (move !== 0) {
-    e.preventDefault()
-    select(tab, rows, Math.max(0, Math.min(rows.length - 1, at + move)))
-    revealSelected()
-    return
-  }
-  const row = rows[at]
-  if (!row) return
-  const { keys, more, hidden } = rowActions(row)
-  const k = [...keys, ...more, ...hidden].find(x => x.hotkey === e.key)
-  if (k) {
-    e.preventDefault()
-    k.run()
-  }
-})
+    const switched = TABS.find(t => t.hotkey === e.key)
+    if (switched) {
+      tab = switched.id
+      draw()
+      return
+    }
+    const rows = tabRows(view, tab)
+    const at = selectedIndex(rows, tab, view)
+    const move = e.key === 'j' || e.key === 'ArrowDown' ? 1 : e.key === 'k' || e.key === 'ArrowUp' ? -1 : 0
+    if (move !== 0) {
+      e.preventDefault()
+      select(tab, rows, Math.max(0, Math.min(rows.length - 1, at + move)))
+      revealSelected()
+      return
+    }
+    const row = rows[at]
+    if (!row) return
+    const { keys, more, hidden } = rowActions(row)
+    const k = [...keys, ...more, ...hidden].find(x => x.hotkey === e.key)
+    if (k) {
+      e.preventDefault()
+      k.run()
+    }
+  },
+  { signal: instanceAbort.signal },
+)
 
-restoreState()
-request('ui/initialize', {
-  protocolVersion: '2026-01-26',
-  appInfo: { name: 'inbox', version: '0.2.5' },
-  appCapabilities: { tools: {} },
-})
-  .then(r => {
-    applyHost((r as { hostContext?: Parameters<typeof applyHost>[0] } | undefined)?.hostContext ?? {})
-    parent.postMessage({ jsonrpc: '2.0', method: 'ui/notifications/initialized', params: {} }, '*')
-    void poll()
-  })
-  .catch(() => {
-    readError = 'The inbox could not connect to Codex.'
-    draw()
-  })
+function startConnected() {
+  if (isDisposed || !isActive || !isConnected || didStart) return
+  didStart = true
+  applyHost(hostContext)
+  applyHost(stagedHostChanges)
+  parent.postMessage({ jsonrpc: '2.0', method: 'ui/notifications/initialized', params: {} }, '*')
+  void poll()
+}
 
-setTimeout(() => {
-  isLoadingShown = true
-  if (!view && readError === null) draw()
-}, LOADING_DELAY_MS)
+function initialize(): Promise<boolean> {
+  if (isDisposed) return Promise.resolve(false)
+  if (isConnected) return Promise.resolve(true)
+  if (initializing) return initializing
+  readError = null
+  if (isActive) draw()
+  initializing = request(
+    'ui/initialize',
+    {
+      protocolVersion: '2026-01-26',
+      appInfo: { name: 'inbox', version: '0.2.5' },
+      appCapabilities: { tools: {} },
+    },
+    READ_TIMEOUT_MS,
+  )
+    .then(r => {
+      if (isDisposed) return false
+      hostContext = (r as { hostContext?: Parameters<typeof applyHost>[0] } | undefined)?.hostContext ?? {}
+      isConnected = true
+      startConnected()
+      return true
+    })
+    .catch(() => {
+      if (isActive && !isDisposed) {
+        readError = 'The inbox could not connect to Codex.'
+        draw()
+      }
+      return false
+    })
+    .finally(() => {
+      initializing = null
+    })
+  return initializing
+}
+
+function startPage() {
+  startConnected()
+  later(() => {
+    isLoadingShown = true
+    if (!view && readError === null) draw()
+  }, LOADING_DELAY_MS)
+}
+
+function activatePage(kept: Kept) {
+  if (isDisposed || !handoff || handoff.aborted) throw new Error('The new page stopped.')
+  restoreState(kept)
+  isActive = true
+  applyPageVariables()
+  draw()
+}
+
+if (handoff) handoff.ready({ initialize, activate: activatePage, start: startPage, dispose })
+else {
+  applyPageVariables()
+  restoreState()
+  void initialize()
+  startPage()
+}

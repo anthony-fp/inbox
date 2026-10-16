@@ -19,6 +19,7 @@ import type {
   UiCopyResult,
   RenderSurface,
   UiPressArgument,
+  UiScrollBlock,
   UiScrollResult,
 } from 'claude-code'
 
@@ -39,6 +40,7 @@ import type {
   LastAction,
   PressKind,
   RowNote,
+  SentPrompt,
   Stop,
   Tab,
 } from '../types'
@@ -48,6 +50,7 @@ import {
   applyPrPress,
   drawnPrs,
   fetchTracked,
+  itemPrSteps,
   isDismissing,
   isTracked,
   linkedPrs,
@@ -60,6 +63,7 @@ import {
   prRowWaits,
   prThreadId,
   threadSentIn,
+  threadShowsCheckIn,
 } from './pr-tab'
 import type { Applied, GhRun, PrPress } from './pr-tab'
 import {
@@ -78,37 +82,43 @@ import {
 } from './prs'
 import {
   EMPTY,
-  ago,
   applyUpdate,
+  applyExchangeUpdate,
+  closeItem,
+  parseReply,
+  closedState,
+  readKind,
+  tasksRunBy,
+  upgradeLedger,
+} from './ledger'
+import {
+  addActivity,
   buildPrompt,
   carryText,
-  closeItem,
-  commandRowLine,
-  dialogLine,
-  parseReply,
   catchUpPrompt,
   CLAUDE_CODE,
   guidanceText,
-  closedState,
   promptNotes,
-  resetTime,
-  readCommandRow,
-  readKind,
   screenText,
   START_TITLE,
+  systemText,
+  toolActivity,
+  transcriptCatchUpPrompt,
+  TOLD_NOTHING,
+  type Told,
+} from './model-text'
+import {
+  commandRowLine,
+  dialogLine,
+  resetTime,
+  readCommandRow,
   statusLine,
   stopFix,
   stopKindOf,
   stopText,
-  systemText,
-  tasksRunBy,
-  toolActivity,
-  transcriptCatchUpPrompt,
   transcriptText,
-  TOLD_NOTHING,
-  type Told,
-  upgradeLedger,
-} from './ledger'
+} from './claude'
+import { ago } from './text'
 import {
   applyPress,
   baseName,
@@ -119,17 +129,18 @@ import {
   doneWake,
   localPath,
   markSentToAgent,
+  refuseDoneNotification,
   openCommands,
-  prSteps,
   runLocalEffects,
   runSends,
-  stepIconKind,
   upgradeLastActions,
   withArrival,
+  withDeliveryId,
   withLasts,
   withRewrite,
+  withUnconfirmed,
 } from './presses'
-import type { Effect, EffectHost, HelpStep, PrActionId, RowPress } from './presses'
+import type { Effect, EffectHost, PrActionId, RowPress } from './presses'
 import {
   closedShown,
   DOT,
@@ -138,7 +149,6 @@ import {
   ROW_TABS,
   TABS,
   CLOSED_MARKS,
-  FINDING_GROUPS,
   DEMO_NOTICE,
   groupEmptyText,
   closedTotal,
@@ -155,6 +165,12 @@ import {
   PRESS_GUARD_MS,
   QUEUED_AFTER_MS,
   rowKeyPlan,
+  settledLabel,
+  actionLabel,
+  replyHint,
+  rowMark,
+  rowFeedbackText,
+  ROW_COPY,
   rowsIn,
   SETTLED_MS,
   settledIn,
@@ -166,7 +182,7 @@ import {
   rowAfterClose,
   shortAgo,
 } from './view'
-import type { DrawnEntry, InboxView, ModLook, PlannedKey, RowView, RowWait } from './view'
+import type { ActionEmphasis, ActionIcon, DrawnEntry, InboxView, ModLook, PlannedKey, RowView, RowWait } from './view'
 import {
   CLOSE_DESCRIPTION,
   CLOSE_SCHEMA,
@@ -176,8 +192,9 @@ import {
   recordFinding,
 } from './tools'
 import type { UndoProps } from './undo-client'
-import { followTo, recordRows } from './arrivals'
+import { followTo, recordRows, isTabEmpty } from './arrivals'
 import { parseInline } from './inline'
+import type { Span } from './inline'
 import type { RowRecord } from './arrivals'
 import { ROW_PAD_PT } from './layout'
 import { DARK_DALTONIZED_TONES, DARK_TONES, LIGHT_DALTONIZED_TONES, LIGHT_TONES, toneColors } from './tones'
@@ -216,6 +233,11 @@ const TYPING = atom({ plugin: 'inbox', key: 'typing' } as const, null as string 
 const DRAFTS = atom({ plugin: 'inbox', key: 'drafts' } as const, {} as Record<string, string>)
 const NOTES = atom({ plugin: 'inbox', key: 'notes' } as const, {} as Record<string, RowNote>)
 const LAST_ACTIONS = atom({ plugin: 'inbox', key: 'lastActions' } as const, {} as Record<string, LastAction>)
+const SENT = atom({ plugin: 'inbox', key: 'sent' } as const, [] as SentPrompt[])
+const UNTRACKED_SENT = atom(
+  { plugin: 'inbox', key: 'untrackedSent' } as const,
+  [] as { sessionId: string; text: string }[],
+)
 const UNFOLDED = atom({ plugin: 'inbox', key: 'unfolded' } as const, [] as FoldKind[])
 const FOLD_HOVER = atom({ plugin: 'inbox', key: 'foldHover' } as const, null as FoldKind | null)
 const OPTIONS_SHOWN = atom({ plugin: 'inbox', key: 'optionsShown' } as const, [] as string[])
@@ -626,6 +648,7 @@ let person: string | null = null
 let trigger: string | null = null
 let isTurnRunning = false
 let isOn = false
+let turningOn: Promise<void> | null = null
 // The press behind this turn's prompt.
 let press: Press | null = null
 // Replies a Stop hook sent Claude back from this turn, before the final one.
@@ -640,13 +663,47 @@ let nextFetchFindsBranchPr: boolean | null = null
 let recordedRows: { isDemo: boolean; ids: RowRecord<Tab> } | null = null
 /** Whether the pane last drew inline, where the open row scrolls to the window's top so its keys stay in view. */
 let isInlinePane = false
+let isInlineTerminalPane = false
+let terminalInlineSize: string | null = null
 /** The inline pane's size at its last draw, as columns by rows, or null when it last drew docked. */
 let inlineSize: string | null = null
-let isSaved = false
+type PendingUndoScroll = {
+  key: string
+  tab: Tab
+  cursor: Cursor
+  block: UiScrollBlock
+  expiresAt: number
+  sessionId: string
+  revealUndo: boolean
+}
+let pendingUndoScroll: PendingUndoScroll | null = null
+let undoScrollRevision = 0
+function cancelUndoScroll(): number {
+  pendingUndoScroll = null
+  return ++undoScrollRevision
+}
+function suspendUndoReveal(): number {
+  if (pendingUndoScroll) pendingUndoScroll.revealUndo = false
+  return ++undoScrollRevision
+}
+let saving: Promise<void> = Promise.resolve()
+const savesBySession = new Map<string, Promise<void>>()
+const prunedSaves = new Set<string>()
+const resolvedSaves = new Map<string, number>()
+const commitsBySession = new Map<string, Set<Promise<void>>>()
+let ledgerRevision = 0
+let loadRevision = 0
+let doneRefusalRevision = 0
+let applyingConversation: Promise<void> = Promise.resolve()
 let queue: Promise<void> = Promise.resolve()
 // Counts the conversations this process has run, and the saved ledgers [Try again] put in place,
 // so an update queued on one ledger never writes into the next.
 let conversation = 0
+type ConversationOwner = { id: string; generation: number }
+
+function ownsConversation(owner: ConversationOwner): boolean {
+  return owner.id === sessionId && owner.generation === conversation
+}
 // What Claude last read of the inbox beside a prompt, so it is sent again only when it changed.
 let told: Told = TOLD_NOTHING
 // The line last published to this pane's Herdr sidebar row, and the chain that publishes in order.
@@ -657,7 +714,9 @@ const contextFor = new Map<string, string[]>()
 // A count of this mod's prompt rows stored, and its value at each text's latest row, so a
 // send can tell whether its prompt entered while `$.prompt.submit` settled.
 const storedAt = new Map<string, number>()
+const storedBy = new Map<string, { count: number; receiptId: string | null }>()
 let storedCount = 0
+let pressOrder = 0
 // The `!` command whose output row comes next.
 let shellCommand: string | null = null
 // The engine refused a `$.tool.register` at turn-on, as an organization's settings can, so Claude cannot record or close items.
@@ -708,6 +767,7 @@ function focusKeys(node: unknown, keys = new Set<string>()): Set<string> {
 
 // What [Resume] on a stop did: sending its prompt, or why the prompt will not enter.
 let resuming: { is: 'sending' } | { is: 'refused'; why: string } | null = null
+let stopGeneration = 0
 // The draft a row's field opened with. The engine replaces the typed text whenever the drawn
 // `value` changes, so drawing each saved keystroke as `value` can drop keys typed before it lands.
 const fieldSeeds = new Map<string, string>()
@@ -727,7 +787,7 @@ function notePerson(line: string) {
 }
 
 function noteActivity(line: string) {
-  if (activity.length < 40 && !activity.includes(line)) activity.push(line)
+  activity = addActivity(activity, line)
 }
 
 /** A transcript row's text, its text blocks joined. */
@@ -746,26 +806,44 @@ async function syncTheme($: EngineInterface) {
   await update($, THEME, () => (typeof theme === 'string' ? theme : ''))
 }
 
-async function save($: EngineInterface, ledger: Ledger) {
-  // Until a read succeeds, the saved copy holds the conversation's rows, and this ledger lacks them.
-  if ((await read($, UNREADABLE)) === sessionId) return
-  const savedAt = await $.clock.now()
-  const key = `s:${sessionId}`
-  // The first save in a process deletes the key first, moving it to the end of
-  // the store's insertion order, which the pruning treats as most recent. Later
-  // saves only overwrite, so pruning runs once per process.
-  if (!isSaved) await $.store.delete(key)
-  await $.store.set(key, { savedAt, ledger })
-  if (isSaved) return
-  isSaved = true
-  const keys = await $.store.keys()
-  const sessions = keys.filter(k => k.startsWith('s:'))
-  // `p:` keys held the last-session offer, which earlier builds saved per folder.
-  const stale = [
-    ...sessions.slice(0, Math.max(0, sessions.length - KEPT_SESSIONS)),
-    ...keys.filter(k => k.startsWith('p:')),
-  ]
-  await Promise.all(stale.map(old => $.store.delete(old)))
+function save($: EngineInterface, ledger: Ledger, owner: ConversationOwner, revision: number): Promise<void> {
+  const key = `s:${owner.id}`
+  const generation = `${owner.id}:${owner.generation}`
+  const next = Promise.all([saving, $.clock.now()]).then(async ([, savedAt]) => {
+    if (revision < (resolvedSaves.get(generation) ?? 0)) return
+    await $.store.set(key, { savedAt, ledger })
+    if (prunedSaves.has(generation)) return
+    const keys = await $.store.keys()
+    const sessions = keys.filter(k => k.startsWith('s:'))
+    const ages = await Promise.all(
+      sessions.map(async candidate => {
+        try {
+          const saved = (await $.store.get(candidate)) as SavedSession | undefined
+          return saved && Number.isFinite(saved.savedAt) && saved.ledger && typeof saved.ledger === 'object'
+            ? { key: candidate, savedAt: saved.savedAt }
+            : null
+        } catch {
+          return null
+        }
+      }),
+    )
+    const stale = ages
+      .filter((entry): entry is { key: string; savedAt: number } => entry !== null && entry.key !== key)
+      .sort((a, b) => a.savedAt - b.savedAt || a.key.localeCompare(b.key))
+      .slice(0, Math.max(0, sessions.length - KEPT_SESSIONS))
+      .map(entry => entry.key)
+    // `p:` keys held the last-session offer, which earlier builds saved per folder.
+    await Promise.all([...stale, ...keys.filter(k => k.startsWith('p:'))].map(old => $.store.delete(old)))
+    prunedSaves.add(generation)
+  })
+  saving = next.catch(() => undefined)
+  savesBySession.set(owner.id, next)
+  void next
+    .finally(() => {
+      if (savesBySession.get(owner.id) === next) savesBySession.delete(owner.id)
+    })
+    .catch(() => undefined)
+  return next
 }
 
 /**
@@ -808,6 +886,7 @@ function publishStatus($: EngineInterface, isEnding = false): Promise<void> {
 
 async function setStop($: EngineInterface, stop: Stop | null) {
   if (stop === null && (await read($, STOP)) === null) return
+  stopGeneration++
   resuming = null
   await update($, STOP, () => stop)
   void publishStatus($)
@@ -817,12 +896,16 @@ async function setStop($: EngineInterface, stop: Stop | null) {
 async function resume($: EngineInterface) {
   // [Resume] keeps its key while it reads "Resuming…", so a second press lands here.
   if (resuming?.is === 'sending') return
+  const id = sessionId
+  const at = conversation
+  const generation = stopGeneration
   // The band and the pane both read the stop, so writing it again redraws both.
   const redraw = () => update($, STOP, s => (s ? { ...s } : s))
   resuming = { is: 'sending' }
   await redraw()
+  if (id !== sessionId || at !== conversation || generation !== stopGeneration) return
   const sent = await send($, 'Continue')
-  if ('notSent' in sent) {
+  if ('notSent' in sent && id === sessionId && at === conversation && generation === stopGeneration) {
     resuming = { is: 'refused', why: sent.notSent }
     await redraw()
   }
@@ -901,18 +984,53 @@ function permissionText(tool: string, input: Record<string, unknown>): string {
 }
 
 /** Changes the ledger and saves it, so a resumed session finds it. */
-async function commitLedger($: EngineInterface, change: (l: Ledger) => Ledger): Promise<void> {
-  let before: Ledger = EMPTY
-  const after = await update($, LEDGER, l => {
-    // A tool call can land after a hot reload and before turnOn converts the ledger an older build saved.
-    before = upgradeLedger(l)
-    return change(before)
-  })
-  await save($, after)
-  void publishStatus($)
-  // A row this change closed stays in place, with its leave bar, for SETTLED_MS.
-  if (hasNewClose(before, after)) redrawWhileLeaving($, SETTLED_MS)
-  void followNewRows($).catch(() => undefined)
+function commitLedger(
+  $: EngineInterface,
+  change: (l: Ledger) => Ledger,
+  owner: ConversationOwner = { id: sessionId, generation: conversation },
+): Promise<void> {
+  if (!ownsConversation(owner)) return Promise.resolve()
+  const task = (async () => {
+    // Until a read succeeds, the saved copy holds the conversation's rows, and this ledger lacks them.
+    const canSave = (await read($, UNREADABLE)) !== owner.id
+    if (!ownsConversation(owner)) return
+    let before: Ledger = EMPTY
+    let applied = false
+    let revision = 0
+    const after = await update($, LEDGER, l => {
+      if (!ownsConversation(owner)) {
+        applied = false
+        return l
+      }
+      // A tool call can land after a hot reload and before turnOn converts the ledger an older build saved.
+      before = upgradeLedger(l)
+      const changed = change(before)
+      revision = ++ledgerRevision
+      applied = true
+      return changed
+    })
+    if (!applied) return
+    const generation = `${owner.id}:${owner.generation}`
+    resolvedSaves.set(generation, Math.max(resolvedSaves.get(generation) ?? 0, revision))
+    if (canSave) await save($, after, owner, revision)
+    if (!ownsConversation(owner)) return
+    void publishStatus($)
+    if (hasNewClose(before, after)) {
+      const closedAt = Math.max(...after.closed.map(d => d.at), ...after.closedFindings.map(f => f.closedAt))
+      redrawWhileLeaving($, closedAt + SETTLED_MS)
+    }
+    void followNewRows($).catch(() => undefined)
+  })()
+  const pending = commitsBySession.get(owner.id) ?? new Set<Promise<void>>()
+  pending.add(task)
+  commitsBySession.set(owner.id, pending)
+  void task
+    .finally(() => {
+      pending.delete(task)
+      if (pending.size === 0) commitsBySession.delete(owner.id)
+    })
+    .catch(() => undefined)
+  return task
 }
 
 /** Whether `after` closed an item or finding that `before` had not. */
@@ -963,23 +1081,20 @@ function viewOf(
   })
 }
 
-/**
- * Redraws the pane at each step of a settled row's leave bar, for `waitMs`,
- * so the row leaves once SETTLED_MS after its close has passed. The view reads
- * the time, so a fresh value of what it draws from is what redraws it: the
- * session's last actions, or the demo's copy.
- */
-function redrawWhileLeaving($: EngineInterface, waitMs: number) {
-  // Whole milliseconds, so the last wait ends at `waitMs` and its redraw finds the row gone.
+function redrawWhileLeaving($: EngineInterface, expiresAt: number) {
   // Desktop draws no leave bar and redraws once, when the row leaves: while the bar redrew every
   // 213 ms there, clicks on the pane's Buttons, Undo among them, did nothing.
-  const step = paneLook === 'desktop' ? waitMs : Math.ceil(SETTLED_MS / LEAVE_BAR_STEPS)
   void (async () => {
-    for (let left = waitMs; left > 0; left -= step) {
-      await $.clock.sleep(Math.min(step, left))
+    const startedAt = await $.clock.now()
+    const remaining = Math.max(0, expiresAt - startedAt)
+    const steps =
+      paneLook === 'desktop' ? 1 : Math.max(1, Math.ceil(remaining / Math.ceil(SETTLED_MS / LEAVE_BAR_STEPS)))
+    for (let n = 1; n <= steps; n++) {
+      await $.clock.sleep(Math.max(0, Math.ceil(startedAt + (n * remaining) / steps - (await $.clock.now()))))
       await Promise.all([update($, LAST_ACTIONS, a => ({ ...a })), update($, DEMO, d => d && { ...d })])
     }
     await openLeftRows($)
+    await finishPendingUndoScroll($)
   })().catch(() => undefined)
 }
 
@@ -1008,8 +1123,8 @@ async function redrawAfterReload($: EngineInterface) {
     ]),
     ...Object.values(notes).map(n => n.at),
   ]
-  const waitMs = Math.max(0, ...times.map(t => t + SETTLED_MS - now))
-  if (waitMs > 0) redrawWhileLeaving($, waitMs)
+  const latest = Math.max(...times)
+  if (times.length > 0 && latest + SETTLED_MS > now) redrawWhileLeaving($, latest + SETTLED_MS)
 }
 
 type ModelResult = Awaited<ReturnType<EngineInterface['model']['fork']>>
@@ -1019,7 +1134,7 @@ type LedgerState = Presence['ledgerState']
 /** Applies the ledger model's reply. */
 async function applyLedgerReply(
   $: EngineInterface,
-  at: number,
+  owner: ConversationOwner,
   r: ModelResult,
   source: string | null,
   change: (l: Ledger, u: Update, now: number) => Ledger,
@@ -1030,11 +1145,11 @@ async function applyLedgerReply(
     return r.reason === 'nothing-to-fork' ? 'behind' : 'failed'
   }
   const parsed = parseReply(r.text, source)
-  if (!parsed || at !== conversation) return 'failed'
+  if (!parsed || !ownsConversation(owner)) return 'failed'
   const now = await $.clock.now()
-  await commitLedger($, l => change(l, parsed, now))
+  await commitLedger($, l => change(l, parsed, now), owner)
 
-  return 'current'
+  return ownsConversation(owner) ? 'current' : 'failed'
 }
 
 /** Asks the ledger model to update the ledger, with systemText as its instructions, cached for the next call within five minutes. */
@@ -1045,14 +1160,11 @@ function askLedgerModel($: EngineInterface, prompt: string, timeoutMs: number): 
 }
 
 /** Updates the ledger from one exchange. */
-async function runUpdate($: EngineInterface, at: number, ex: Exchange): Promise<LedgerState> {
+async function runUpdate($: EngineInterface, owner: ConversationOwner, ex: Exchange): Promise<LedgerState> {
   const promptAt = await $.clock.now()
   const r = await askLedgerModel($, buildPrompt(await read($, LEDGER), ex), 45_000)
-  // An Explain turn talks about its item without deciding it.
-  const explained = ex.press?.action === 'explain' ? ex.press.id : null
-
-  return applyLedgerReply($, at, r, [ex.reply, ...ex.activity].join('\n'), (l, u, now) =>
-    applyUpdate(l, { ...u, closed: u.closed.filter(c => c.id !== explained) }, now, ex.turn, promptAt),
+  return applyLedgerReply($, owner, r, [ex.reply, ...ex.activity].join('\n'), (l, u, now) =>
+    applyExchangeUpdate(l, u, ex, now, promptAt),
   )
 }
 
@@ -1060,18 +1172,18 @@ async function runUpdate($: EngineInterface, at: number, ex: Exchange): Promise<
  * Brings the ledger up to date over the whole conversation, for turns the
  * per-turn update missed: it closes what was handled and adds what still waits.
  */
-async function catchUp($: EngineInterface, at: number): Promise<LedgerState> {
+async function catchUp($: EngineInterface, owner: ConversationOwner): Promise<LedgerState> {
   const [ledger, shown] = await Promise.all([read($, LEDGER), screen($)])
   const change = (l: Ledger, u: Update, now: number) => applyUpdate(l, u, now, l.turn)
   const forked = await $.model.fork({ prompt: catchUpPrompt(CLAUDE_CODE, ledger, shown) })
-  if (forked.isAnswered || forked.reason !== 'nothing-to-fork') return applyLedgerReply($, at, forked, null, change)
+  if (forked.isAnswered || forked.reason !== 'nothing-to-fork') return applyLedgerReply($, owner, forked, null, change)
   // A resumed conversation has no request of this process's to fork until its
   // first reply, so the model reads the transcript instead, uncached.
   const transcript = transcriptText(await $.session.messages())
   if (!transcript) return 'behind'
   const r = await askLedgerModel($, transcriptCatchUpPrompt(ledger, shown, transcript), 90_000)
 
-  return applyLedgerReply($, at, r, transcript, change)
+  return applyLedgerReply($, owner, r, transcript, change)
 }
 
 /**
@@ -1079,24 +1191,32 @@ async function catchUp($: EngineInterface, at: number): Promise<LedgerState> {
  * else this exchange alone.
  */
 function queueUpdate($: EngineInterface, pending: { ex: Exchange; turnsStarted: number } | null) {
-  const at = conversation
+  const owner = { id: sessionId, generation: conversation }
   queue = queue.then(async () => {
-    if (at !== conversation) return
-    const { ledgerState, turnsStarted } = await update($, PRESENCE, p => ({ ...p, isUpdating: true }))
+    if (!ownsConversation(owner)) return
+    const { ledgerState, turnsStarted } = await update($, PRESENCE, p =>
+      ownsConversation(owner) ? { ...p, isUpdating: true } : p,
+    )
+    if (!ownsConversation(owner)) return
     const state = await (
-      ledgerState !== 'current' || pending === null ? catchUp($, at) : runUpdate($, at, pending.ex)
+      ledgerState !== 'current' || pending === null ? catchUp($, owner) : runUpdate($, owner, pending.ex)
     ).catch((): LedgerState => 'failed')
-    if (at !== conversation) return
+    if (!ownsConversation(owner)) return
     // An exchange covers the turns started by its end; a catch-up, those started before it ran. A failed update
     // counts too, as Codex's does: the reply has ended, so a row waiting on it stops reading "Explaining…". The
     // failed state still runs a catch-up.
     const applied = pending?.turnsStarted ?? turnsStarted
-    await update($, PRESENCE, p => ({
-      ...p,
-      ledgerState: state,
-      isUpdating: false,
-      turnsApplied: Math.max(p.turnsApplied, applied),
-    }))
+    await update($, PRESENCE, p =>
+      ownsConversation(owner)
+        ? {
+            ...p,
+            ledgerState: state,
+            isUpdating: false,
+            turnsApplied: Math.max(p.turnsApplied, applied),
+          }
+        : p,
+    )
+    if (!ownsConversation(owner)) return
     // A row waiting on Claude's reply counts again, or reads its ✓, once the update for its turn applies.
     void publishStatus($)
   })
@@ -1122,7 +1242,13 @@ async function tick($: EngineInterface) {
  * A prompt that will not enter is taken back out of what Claude and the per-turn
  * update read next; the prompt count stays.
  */
-async function send($: EngineInterface, text: string, sentBy: Press | null = null): Promise<Sent> {
+async function send(
+  $: EngineInterface,
+  text: string,
+  sentBy: Press | null = null,
+  pressedAt: number | null = null,
+  deliveryId = crypto.randomUUID(),
+): Promise<Sent> {
   const [toldBefore, pressBefore] = [told, press]
   const context = await notePrompt($, text, sentBy)
   const toldSent = told
@@ -1130,12 +1256,14 @@ async function send($: EngineInterface, text: string, sentBy: Press | null = nul
   // the context goes in when the prompt's own row is stored (session.append).
   if (context.length > 0) contextFor.set(text, context)
   const since = storedCount
+  const id = deliveryId
+  await update($, SENT, pending => [...pending, { id, sessionId, text, pressedAt }])
   const sent = await $.prompt.submit({ text, asUser: true }).then(
-    (r): Sent => (r.drop === undefined ? { entered: r.text, since } : { notSent: r.drop }),
+    (r): Sent => (r.drop === undefined ? { entered: r.text, since, id } : { notSent: r.drop }),
     // A rejection after the prompt's row was stored still reached Claude.
     (err: unknown): Sent =>
       isStoredSince(text, since)
-        ? { entered: text, since }
+        ? { entered: text, since, id }
         : { notSent: (err instanceof Error ? err.message : String(err)) || 'the session refused it' },
   )
   if ('entered' in sent) {
@@ -1144,9 +1272,12 @@ async function send($: EngineInterface, text: string, sentBy: Press | null = nul
       contextFor.delete(text)
       if (!isStoredSince(sent.entered, since)) contextFor.set(sent.entered, context)
     }
+    if (sent.entered !== text)
+      await update($, SENT, pending => pending.map(p => (p.id === id ? { ...p, text: sent.entered } : p)))
 
     return sent
   }
+  await update($, SENT, pending => pending.filter(p => p.id !== id))
   // Each part is put back only while nothing since has changed it.
   if (told === toldSent) told = toldBefore
   if (person === text) person = null
@@ -1161,7 +1292,7 @@ async function send($: EngineInterface, text: string, sentBy: Press | null = nul
  * How a send ended: the text that entered, which another plugin's prompt.submit
  * hook may have rewritten, with the stored-row count before the send; or why it will not enter.
  */
-type Sent = { entered: string; since: number } | { notSent: string }
+type Sent = { entered: string; since: number; id: string } | { notSent: string }
 
 /** Whether a row of this mod's with `text` was stored after the stored-row count was `since`. */
 function isStoredSince(text: string, since: number): boolean {
@@ -1218,6 +1349,7 @@ async function openPath($: EngineInterface, raw: string): Promise<string | null>
  * `isLinesChanged`, and last actions saved by button key without a kind.
  */
 async function upgradeState($: EngineInterface): Promise<Ledger> {
+  const upgradingSession = await $.session.id()
   const [ledger] = await Promise.all([
     update($, LEDGER, upgradeLedger),
     update($, TAB, t => ((t as string) === 'notes' ? 'findings' : (t as string) === 'waiting' ? 'needsYou' : t)),
@@ -1239,6 +1371,8 @@ async function upgradeState($: EngineInterface): Promise<Ledger> {
     // Last actions an earlier build saved by button key, without a kind. Those for Open, Open log,
     // a session check and a PR check's Fix record nothing now, so they go.
     update($, LAST_ACTIONS, upgradeLastActions),
+    update($, SENT, pending => pending ?? []),
+    update($, UNTRACKED_SENT, texts => texts ?? []),
     // Presence from before the turn counts existed cannot say whether the last
     // turn's update landed, so that load catches up once.
     update($, PRESENCE, p => ({ ...p, turnsStarted: p.turnsStarted ?? 1, turnsApplied: p.turnsApplied ?? 0 })),
@@ -1260,6 +1394,28 @@ async function upgradeState($: EngineInterface): Promise<Ledger> {
       ),
     })),
   ])
+
+  const [pending, actions] = await Promise.all([read($, SENT), read($, LAST_ACTIONS)])
+  pressOrder = Math.max(pressOrder, ...Object.values(actions).map(action => action.pressOrder ?? 0))
+  const untracked = Object.entries(actions).flatMap(([row, action]) => {
+    const delivery = action.delivery
+    return /^[if]\d+$/.test(row) &&
+      delivery?.state === 'queued' &&
+      !pending.some(p =>
+        delivery.id ? p.id === delivery.id : p.text === delivery.message && p.pressedAt === action.at,
+      )
+      ? [{ sessionId: upgradingSession, text: delivery.message }]
+      : []
+  })
+  if (untracked.length > 0) {
+    await update($, UNTRACKED_SENT, texts => [
+      ...texts,
+      ...untracked.filter(entry => !texts.some(t => t.sessionId === entry.sessionId && t.text === entry.text)),
+    ])
+    await update($, LAST_ACTIONS, current =>
+      untracked.reduce((next, entry) => withUnconfirmed(next, entry.text), current),
+    )
+  }
 
   return ledger
 }
@@ -1353,6 +1509,7 @@ async function focusField($: EngineInterface, id: string) {
 }
 
 async function showTab($: EngineInterface, tab: Tab) {
+  cancelUndoScroll()
   if (tab === 'prs') await findPrs($)
   await update($, TAB, () => tab)
   await scrollToOpenRow($, tab)
@@ -1374,17 +1531,81 @@ function lineCount(text: string, width: number): number {
   return wrapped(text, width).length
 }
 
-/** `text` cut to its first `lines` lines at `width` cells, ending in "…" when cut. */
-function clipToLines(text: string, width: number, lines: number): string {
-  const all = wrapped(text, width)
-  if (all.length <= lines) return text
-  const last = all[lines - 1]!
-  const kept = [...all.slice(0, lines - 1), last.length < width ? last : last.slice(0, width - 1)]
+type TerminalSpan = Span & { isLinkAddress?: true }
 
-  return `${kept.join(' ').replace(/[\s.,;:]+$/, '')}…`
+function terminalTextLines(text: string, width: number, limit = Infinity): TerminalSpan[][] {
+  if (!text || limit < 1) return []
+  const size = Math.max(1, width)
+  type Character = { text: string; span: TerminalSpan }
+  const lines: Character[][] = []
+  let line: Character[] = []
+  let used = 0
+  let word: Character[] = []
+  let spaces: Character[] = []
+  let endsWithNewline = false
+  const columns = (characters: Character[]) => characters.reduce((n, c) => n + c.text.length, 0)
+  const nextLine = () => {
+    lines.push(line)
+    line = []
+    used = 0
+  }
+  const append = (characters: Character[]) => {
+    for (const character of characters) {
+      if (line.length > 0 && used + character.text.length > size) nextLine()
+      line.push(character)
+      used += character.text.length
+    }
+  }
+  const appendWord = () => {
+    if (word.length === 0) return
+    if (line.length > 0 && used + columns(spaces) + columns(word) > size) {
+      nextLine()
+      spaces = []
+    }
+    append(spaces)
+    append(word)
+    spaces = []
+    word = []
+  }
+  const spans: TerminalSpan[] = parseInline(text).flatMap(span =>
+    span.link ? [span, { text: ` ${span.link}`, isLinkAddress: true as const }] : [span],
+  )
+  for (const span of spans) {
+    for (const character of span.text) {
+      endsWithNewline = character === '\n'
+      if (endsWithNewline) {
+        appendWord()
+        nextLine()
+        spaces = []
+      } else if (/\s/.test(character)) {
+        appendWord()
+        spaces.push({ text: character, span })
+      } else word.push({ text: character, span })
+    }
+  }
+  appendWord()
+  if (line.length > 0 || endsWithNewline) nextLine()
+  const kept = lines.slice(0, limit)
+  if (kept.length < lines.length) {
+    const last = kept.at(-1)!
+    while (last.length > 0 && columns(last) >= size) last.pop()
+    while (last.length > 0 && /[\s.,;:]/.test(last.at(-1)!.text)) last.pop()
+    last.push({ text: '…', span: { text: '…' } })
+  }
+  return kept.map(characters => {
+    const runs: TerminalSpan[] = []
+    let previous: TerminalSpan | undefined
+    for (const character of characters) {
+      if (previous === character.span) runs.at(-1)!.text += character.text
+      else {
+        runs.push({ ...character.span, text: character.text })
+        previous = character.span
+      }
+    }
+    return runs
+  })
 }
 
-/** `text` wrapped at word breaks to `width` cells, as the terminal wraps a Text; a longer word breaks anywhere. */
 function wrapped(text: string, width: number): string[] {
   const size = Math.max(1, width)
   const lines: string[] = []
@@ -1408,37 +1629,147 @@ function wrapped(text: string, width: number): string[] {
   return lines
 }
 
-/**
- * Selects a row and scrolls the pane the least that shows it whole. The row's
- * scroll target is drawn only once the row redraws expanded, and the engine
- * refuses a key it has not drawn, so the scroll retries for a few frames.
- * Measured before the redraw, the row's end would land out of view.
- */
-async function select($: EngineInterface, tab: Tab, id: string, index: number) {
+async function select($: EngineInterface, tab: Tab, id: string, index: number, scroll = true) {
+  if (scroll) {
+    if (pendingUndoScroll && pendingUndoScroll.tab === tab) suspendUndoReveal()
+    else cancelUndoScroll()
+  }
   const openedAt = await $.clock.now()
   await update($, SELECTION, s => ({ ...s, [tab]: { id, index, openedAt } }))
   await update($, TYPING, t => (t === id ? t : null))
   // The row's buttons draw dim while guarded. A render cannot write state, so a fresh value redraws them once the guard ends.
   later($, PRESS_GUARD_MS, () => update($, SELECTION, s => ({ ...s })))
-  await scrollToRow($, id)
+  if (scroll) await scrollToRow($, id)
 }
 
-/**
- * Scrolls the pane to row `id`: inline to the window's top, else the least that shows it whole. The row's scroll
- * target is drawn only once the row redraws expanded, and the engine refuses a key it has not drawn, so the scroll
- * retries for a few frames.
- */
-async function scrollToRow($: EngineInterface, id: string) {
-  for (let tries = 0; tries < 10; tries++) {
-    const block = isInlinePane ? 'start' : 'nearest'
-    const result = await $.ui.scroll({ in: PANE, to: { key: `view-${id}` }, block }).catch((): UiScrollResult => ({}))
-    if (result.deny === undefined) return
-    await $.clock.sleep(30)
+async function scrollToKey(
+  $: EngineInterface,
+  key: string,
+  block: UiScrollBlock,
+  stillCurrent: () => boolean = () => true,
+  retryMs = 30,
+): Promise<boolean> {
+  for (let tries = 0; tries < Math.ceil(300 / retryMs); tries++) {
+    if (!stillCurrent()) return false
+    const result = await $.ui.scroll({ in: PANE, to: { key }, block }).catch((): UiScrollResult => ({}))
+    if (!stillCurrent()) return false
+    if (result.deny === undefined) return true
+    await $.clock.sleep(retryMs)
   }
+  return false
+}
+
+async function scrollToRow($: EngineInterface, id: string) {
+  await scrollToKey($, `view-${id}`, isInlinePane ? 'start' : 'nearest')
+}
+
+function sameCursor(a: Cursor, b: Cursor): boolean {
+  return a.id === b.id && a.index === b.index && a.openedAt === b.openedAt
+}
+
+function settledLayoutId(
+  tab: Tab,
+  view: InboxView,
+  prs: { pr: PrView; isSettled: boolean }[],
+  lastActions: Record<string, LastAction>,
+  notes: Record<string, RowNote>,
+  now: number,
+  size: string | null,
+): string {
+  const rows =
+    tab === 'needsYou'
+      ? [...view.needsYou.questions, ...view.needsYou.tasks]
+      : tab === 'findings'
+        ? view.findings.rows
+        : []
+  return JSON.stringify([
+    size,
+    ...rows.map(r => r.id),
+    ...rows.flatMap(r => (r.state.is === 'settled' ? [[r.id, r.state.at]] : [])),
+    ...(tab === 'prs' ? prs.map(x => [x.pr.ref, x.isSettled ? (lastActions[prMarkId(x.pr.ref)]?.at ?? 0) : null]) : []),
+    ...Object.entries(lastActions).flatMap(([id, action]) =>
+      action.result ? [[id, action.result.at, now - action.result.at < SETTLED_MS]] : [],
+    ),
+    ...Object.entries(notes).map(([id, note]) => [id, note.at, now - note.at < SETTLED_MS]),
+  ])
+}
+
+function settledScrollKey(key: string, layout: string): string {
+  return `scroll-${key}-${layout}`
+}
+
+async function revealPendingUndo($: EngineInterface): Promise<boolean> {
+  const pending = pendingUndoScroll
+  if (!pending || !pending.revealUndo || !isInlineTerminalPane || pending.sessionId !== sessionId) return false
+  const [tab, selection, drawn] = await Promise.all([read($, TAB), read($, SELECTION), drawnState($)])
+  if (pendingUndoScroll !== pending) return false
+  if (tab !== pending.tab || !sameCursor(selection[tab], pending.cursor) || drawn.now >= pending.expiresAt) return false
+  const prs = drawnPrs(drawn.prViews, drawn.ledger.prs, drawn.lastActions, drawn.now)
+  const key = settledScrollKey(
+    pending.key,
+    settledLayoutId(tab, drawn.view, prs, drawn.lastActions, drawn.notes, drawn.now, terminalInlineSize),
+  )
+  return scrollToKey($, key, pending.block, () => pendingUndoScroll === pending && pending.revealUndo, 5)
+}
+
+async function keepUndoVisible($: EngineInterface, key: string, block: UiScrollBlock, at: number, revision: number) {
+  if (revision !== undoScrollRevision) return
+  const [tab, selection] = await Promise.all([read($, TAB), read($, SELECTION)])
+  if (revision !== undoScrollRevision) return
+  const pending: PendingUndoScroll = {
+    key,
+    tab,
+    cursor: selection[tab],
+    block,
+    expiresAt: at + SETTLED_MS,
+    sessionId,
+    revealUndo: true,
+  }
+  pendingUndoScroll = pending
+  await revealPendingUndo($)
+}
+
+async function finishPendingUndoScroll($: EngineInterface) {
+  const pending = pendingUndoScroll
+  if (!pending) return
+  const revision = undoScrollRevision
+  const [tab, selection, drawn] = await Promise.all([read($, TAB), read($, SELECTION), drawnState($)])
+  if (pendingUndoScroll !== pending || revision !== undoScrollRevision) return
+  const cursor = selection[tab]
+  if (tab === pending.tab && isInlineTerminalPane && sessionId === pending.sessionId) {
+    const prs = drawnPrs(drawn.prViews, drawn.ledger.prs, drawn.lastActions, drawn.now)
+    const openId =
+      cursor.id ??
+      (cursor.openedAt === 0
+        ? firstWaiting(
+            tabWaits(
+              tab,
+              drawn.view,
+              prs.filter(x => !x.isSettled).map(x => x.pr),
+              drawn.lastActions,
+            ),
+          )
+        : null)
+    const isSettling = drawn.now < pending.expiresAt
+    const baseKey = isSettling && pending.revealUndo ? pending.key : openId ? `view-${openId}` : null
+    const block = isSettling && pending.revealUndo ? pending.block : 'start'
+    if (baseKey) {
+      const key = settledScrollKey(
+        baseKey,
+        settledLayoutId(tab, drawn.view, prs, drawn.lastActions, drawn.notes, drawn.now, terminalInlineSize),
+      )
+      await scrollToKey($, key, block, () => pendingUndoScroll === pending && revision === undoScrollRevision, 5)
+    }
+  }
+  if (drawn.now >= pending.expiresAt && pendingUndoScroll === pending && revision === undoScrollRevision)
+    pendingUndoScroll = null
 }
 
 /** Scrolls the pane to the shown tab's open row when the pane is inline, else to its top. */
-async function scrollToOpenRow($: EngineInterface, tab: Tab) {
+async function scrollToOpenRow($: EngineInterface, tab: Tab, surface?: RenderSurface) {
+  const revision = undoScrollRevision
+  if (surface !== 'desktop' && (await revealPendingUndo($))) return
+  if (revision !== undoScrollRevision) return
   if (isInlinePane) {
     const [selection, { view, ledger, prViews: prState, lastActions, now }] = await Promise.all([
       read($, SELECTION),
@@ -1449,8 +1780,13 @@ async function scrollToOpenRow($: EngineInterface, tab: Tab) {
       .map(x => x.pr)
     const cursor = selection[tab]
     const id = cursor.id ?? (cursor.openedAt === 0 ? firstWaiting(tabWaits(tab, view, prViews, lastActions)) : null)
-    if (id !== null) return scrollToRow($, id)
+    if (revision !== undoScrollRevision) return
+    if (id !== null) {
+      await scrollToKey($, `view-${id}`, 'start', () => revision === undoScrollRevision)
+      return
+    }
   }
+  if (revision !== undoScrollRevision) return
   await $.ui.scroll({ in: PANE, to: 'start' }).catch(() => undefined)
 }
 
@@ -1581,6 +1917,7 @@ function newRows(isDemo: boolean, current: Record<Tab, string[] | null>): Record
 
 /** Moves the pane to a tab and opens a row there, or shows the tab's top when there is none. */
 async function jumpTo($: EngineInterface, tab: Tab) {
+  cancelUndoScroll()
   await update($, TAB, () => tab)
   // With no row chosen, the tab draws its top row open, so rows that arrive above later move the open row with them.
   await update($, SELECTION, s => ({ ...s, [tab]: NO_CURSOR }))
@@ -1642,17 +1979,25 @@ async function followNewRows($: EngineInterface, isOpening = false) {
     if (isInlinePane && keeps.some(k => k.t === tab)) void scrollToOpenRow($, tab)
   }
   // A tab is empty while it shows only its empty text.
-  const isEmpty = {
-    needsYou:
-      ids.needsYou.length === 0 &&
-      settledNeedsYou.length === 0 &&
-      !stop &&
-      !isUnread &&
-      !unfolded.some(kind => ledger.closed.some(d => d.kind === kind)),
-    findings:
-      view.findings.rows.length === 0 && !unfolded.some(kind => view.findings.closed.some(f => f.kind === kind)),
-    prs: prs.length === 0 && !prState.isFetching,
-  }[tab]
+  const settled = new Set(settledRowIds(allRows(view)))
+  const isEmpty =
+    tab === 'prs'
+      ? prs.length === 0 && !prState.isFetching
+      : isTabEmpty({
+          rows: tab === 'needsYou' ? [...view.needsYou.questions, ...view.needsYou.tasks] : view.findings.rows,
+          settled,
+          closed:
+            tab === 'needsYou'
+              ? (['question', 'task'] as const).map(kind => ({
+                  isUnfolded: unfolded.includes(kind),
+                  rows: ledger.closed.filter(d => d.kind === kind),
+                }))
+              : (['issue', 'opportunity'] as const).map(kind => ({
+                  isUnfolded: unfolded.includes(kind),
+                  rows: view.findings.closed.filter(f => f.kind === kind),
+                })),
+          hasBlocker: tab === 'needsYou' && (!!stop || isUnread),
+        })
   // Opening, the pane moves toward the rows each tab lists, as it later does toward rows that just appeared.
   const to = followTo(
     TABS.map(t => t.id),
@@ -1834,21 +2179,59 @@ async function perform(
   }
 }
 
-/**
- * Tells an idle agent the person did tasks it waits on, as `doneWake` decides. The closes are marked sent first, so
- * an Undo pressed during the send leaves them closed. A send that does not enter keeps the mark, and Claude reads
- * them beside the next prompt.
- */
+function recordDoneRefusal($: EngineInterface, id: string, notificationId: string, reason: string): Promise<void> {
+  const change = (ledger: Ledger) => refuseDoneNotification(ledger, notificationId, reason)
+  const recording = applyingConversation
+    .then(async () => {
+      const owner = { id, generation: conversation }
+      if (
+        ownsConversation(owner) &&
+        (await read($, LEDGER)).closed.some(c => c.doneNotification?.id === notificationId)
+      ) {
+        await commitLedger($, change, owner)
+        if (ownsConversation(owner)) return
+      }
+      await Promise.all([...(commitsBySession.get(id) ?? [])].map(commit => commit.catch(() => undefined)))
+      const next = saving.then(async () => {
+        const saved = (await $.store.get(`s:${id}`)) as SavedSession | undefined
+        if (saved?.ledger) await $.store.set(`s:${id}`, { ...saved, ledger: change(upgradeLedger(saved.ledger)) })
+      })
+      saving = next.catch(() => undefined)
+      savesBySession.set(id, next)
+      try {
+        await next
+      } finally {
+        if (savesBySession.get(id) === next) savesBySession.delete(id)
+      }
+    })
+    .finally(() => {
+      doneRefusalRevision++
+    })
+  applyingConversation = recording.catch(() => undefined)
+  return recording
+}
+
 async function wakeForDone($: EngineInterface) {
+  const owner = { id: sessionId, generation: conversation }
+  const notificationId = crypto.randomUUID()
   const now = await $.clock.now()
   let wake: ReturnType<typeof doneWake> = null
-  await commitLedger($, l => {
-    wake = doneWake(l, { now, windowMs: SETTLED_MS, isTurnRunning })
-    return wake ? markSentToAgent(l, wake.ids) : l
-  })
+  await commitLedger(
+    $,
+    l => {
+      wake = doneWake(l, { now, windowMs: SETTLED_MS, isTurnRunning })
+      return wake ? markSentToAgent(l, wake.ids, notificationId) : l
+    },
+    owner,
+  )
   const sending = wake as ReturnType<typeof doneWake>
   if (!sending) return
-  await send($, sending.text, { id: sending.ids[0] ?? '', action: 'done' })
+  if (!ownsConversation(owner)) {
+    await recordDoneRefusal($, owner.id, notificationId, 'Session changed before notification was sent')
+    return
+  }
+  const result = await send($, sending.text, { id: sending.ids[0] ?? '', action: 'done' })
+  if ('notSent' in result) await recordDoneRefusal($, owner.id, notificationId, result.notSent)
 }
 
 /**
@@ -1859,18 +2242,21 @@ async function wakeForDone($: EngineInterface) {
  * is gone or changed sends nothing: the row, or the pane's status line, says so.
  */
 async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPressArgument['surface']) {
+  const mayStayOnRow = 'ref' in p ? ['pr-open', 'thread-open', 'log'].includes(p.action) : p.action === 'step'
+  const undoRevision = mayStayOnRow ? suspendUndoReveal() : cancelUndoScroll()
+  const order = ++pressOrder
   // Undo is pressed on a row that just closed, and a PR block's actions on no row.
   const rowId = pressRowId(p)
   if (p.action !== 'undo' && !rowId.startsWith('pr:')) await keepPressedOpen($, rowId)
   const wasWaiting = (await shownWaits($)).rows.some(r => r.id === rowId && r.isWaiting)
-  if (await read($, DEMO)) return runDemoPress($, p, wasWaiting)
+  if (await read($, DEMO)) return runDemoPress($, p, wasWaiting, undoRevision, surface)
   const [now, presence, lastActions, prState] = await Promise.all([
     $.clock.now(),
     read($, PRESENCE),
     read($, LAST_ACTIONS),
     read($, PR_VIEWS),
   ])
-  const ctx = { now, turnsStarted: presence.turnsStarted }
+  const ctx = { now, turnsStarted: presence.turnsStarted, localPressId: crypto.randomUUID() }
   let applied = { stale: true } as Applied
   if ('ref' in p && p.action !== 'pr-dismiss' && p.action !== 'pr-undo') {
     applied = applyAnyPress(await read($, LEDGER), prState, lastActions, p, ctx)
@@ -1884,6 +2270,7 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
   }
 
   const pressed = applied
+  if (mayStayOnRow && !('stale' in pressed) && pressed.effects.some(e => e.kind === 'send')) cancelUndoScroll()
   if ('stale' in pressed) {
     await Promise.all([
       update($, NOTES, n => ({ ...n, [rowId]: { note: 'stale' as const, at: now } })),
@@ -1899,10 +2286,19 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
     )
     return
   }
-  const lasts = Object.values(pressed.lasts)
+  const firstSend = pressed.effects.find(e => e.kind === 'send')
+  const pressDeliveryId = firstSend ? crypto.randomUUID() : null
+  const deliveryLasts =
+    firstSend && pressDeliveryId
+      ? withDeliveryId(pressed.lasts, Object.keys(pressed.lasts), now, firstSend.text, pressDeliveryId)
+      : pressed.lasts
+  const pressLasts = Object.fromEntries(
+    Object.entries(deliveryLasts).map(([id, last]) => [id, { ...last, pressOrder: order }]),
+  )
+  const lasts = Object.values(pressLasts)
   await Promise.all([
     lasts.length > 0 || pressed.drop.length > 0
-      ? update($, LAST_ACTIONS, a => withLasts(a, pressed.lasts, pressed.drop))
+      ? update($, LAST_ACTIONS, a => withLasts(a, pressLasts, pressed.drop, order))
       : undefined,
     // A press that went through replaces the row's note, and a sent reply its draft.
     update($, NOTES, n => {
@@ -1919,28 +2315,29 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
   ])
   // The sidebar line stops counting a handed-off row at once.
   if (lasts.some(l => l.kind === 'handoff')) void publishStatus($)
-  const isMoved = await openAfterClose($, rowId, wasWaiting)
+  const undoKey = await undoKeyAfterPress($, p, surface)
+  const canRevealUndo = undoKey !== null && undoRevision === undoScrollRevision
+  const { isMoved, undoBlock } = await openAfterClose($, rowId, wasWaiting, canRevealUndo)
+  if (canRevealUndo) await keepUndoVisible($, undoKey, undoBlock, now, undoRevision)
   if (!('ref' in p) && p.action === 'done') later($, SETTLED_MS, () => wakeForDone($))
   // Fix settles its finding's row as a close does, so it leaves once SETTLED_MS ends.
-  if (!('ref' in p) && p.action === 'address') redrawWhileLeaving($, SETTLED_MS)
+  if (!('ref' in p) && p.action === 'address') redrawWhileLeaving($, now + SETTLED_MS)
   if ('ref' in p && p.action === 'pr-dismiss') {
-    redrawWhileLeaving($, SETTLED_MS)
+    redrawWhileLeaving($, now + SETTLED_MS)
     leavePr($, p.ref, now)
   }
-  if (!('ref' in p) && p.action === 'undo') {
-    // Claude was told of the close; with the id out of `told`, a second close of the row is reported too.
-    told = { ...told, closed: told.closed.filter(id => id !== p.id) }
-    await selectRestored($, p.id)
-  }
-  const rows = Object.keys(pressed.lasts)
+  if (pressed.reopenedId) told = { ...told, closed: told.closed.filter(id => id !== pressed.reopenedId) }
+  if (!('ref' in p) && p.action === 'undo') await selectRestored($, p.id)
+  const rows = Object.keys(pressLasts)
   const host: EffectHost = {
     now: () => $.clock.now(),
+    deliveryId: () => pressDeliveryId ?? crypto.randomUUID(),
     perform: effect => perform($, effect, surface),
-    send: async effect => {
-      const sent = await send($, effect.text, effect.by)
-      if (!('entered' in sent)) return sent.notSent
+    send: async (effect, deliveryId) => {
+      const sent = await send($, effect.text, effect.by, now, deliveryId)
+      if (!('entered' in sent)) return { state: 'rejected' as const, reason: sent.notSent }
       if (sent.entered !== effect.text) await awaitRewritten($, rows, now, effect.text, sent)
-      return null
+      return { state: 'accepted' as const }
     },
     saveLasts: change => update($, LAST_ACTIONS, change),
     saveLedger: change => commitLedger($, change),
@@ -1952,12 +2349,16 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
   if (pressed.effects.some(effect => effect.kind === 'send'))
     later($, QUEUED_AFTER_MS, () => update($, LAST_ACTIONS, a => ({ ...a })))
   const failed = await runSends(host, pressed.effects, rowId, rows, now)
-  if (!failed) return
+  if (!failed || failed.state === 'unconfirmed') return
   // A typed reply that did not send goes back into its draft.
   if (failed.isRowFailed && !('ref' in p) && p.action === 'type')
     await update($, DRAFTS, d => (d[p.id] ? d : { ...d, [p.id]: p.text }))
   // A press that did not send gave nothing away, so its row opens again to show why, with [Try again].
-  if (failed.isRowFailed && isMoved) await reopenPressed($, rowId)
+  if (failed.isRowFailed && isMoved) {
+    cancelUndoScroll()
+    await reopenPressed($, rowId)
+    if (undoKey) await scrollToRow($, rowId)
+  }
   void publishStatus($)
 }
 
@@ -1972,11 +2373,23 @@ async function awaitRewritten(
   message: string,
   sent: Extract<Sent, { entered: string }>,
 ) {
+  const stored = isStoredSince(sent.entered, sent.since)
+  const pending = await read($, SENT)
+  const matches = pending.filter(p => p.sessionId === sessionId && p.text === sent.entered)
+  const hasUniqueReceipt = matches.length === 1 && matches[0]?.id === sent.id
+  const hasUnmatchedAppend = storedBy.get(sent.entered)?.receiptId === null
+  const isUntracked = (await read($, UNTRACKED_SENT)).some(p => p.sessionId === sessionId && p.text === sent.entered)
+  const isConfirmed = stored && hasUniqueReceipt && hasUnmatchedAppend && !isUntracked
   await update($, LAST_ACTIONS, a => {
-    const moved = withRewrite(a, rows, at, message, sent.entered)
+    const moved = withRewrite(a, rows, at, message, sent.entered, sent.id)
 
-    return isStoredSince(sent.entered, sent.since) ? withArrival(moved, sent.entered) : moved
+    return isConfirmed
+      ? withArrival(moved, sent.entered, at, sent.id)
+      : stored
+        ? withUnconfirmed(moved, sent.entered, at, sent.id)
+        : moved
   })
+  if (isConfirmed || (stored && isUntracked)) await update($, SENT, pending => pending.filter(p => p.id !== sent.id))
   void publishStatus($)
 }
 
@@ -1986,7 +2399,7 @@ function applyAnyPress(
   prState: PrViews,
   lastActions: Record<string, LastAction>,
   p: RowPress | PrPress,
-  ctx: { now: number; turnsStarted: number },
+  ctx: { now: number; turnsStarted: number; localPressId?: string },
 ): Applied {
   if ('ref' in p) return applyPrPress(ledger, prState, lastActions, p, ctx)
   const item = ledger.items.find(i => i.id === p.id)
@@ -1996,7 +2409,32 @@ function applyAnyPress(
   })
   if ('stale' in r) return r
 
-  return { ledger: r.ledger, lasts: r.last ? { [p.id]: r.last } : {}, drop: [], effects: r.effects }
+  return {
+    ledger: r.ledger,
+    lasts: r.last ? { [p.id]: r.last } : {},
+    drop: [],
+    effects: r.effects,
+    ...(r.reopenedId ? { reopenedId: r.reopenedId } : {}),
+  }
+}
+
+async function undoKeyAfterPress(
+  $: EngineInterface,
+  p: RowPress | PrPress,
+  surface: UiPressArgument['surface'],
+): Promise<string | null> {
+  if (surface !== 'terminal' || !isInlineTerminalPane) return null
+  const { ledger, prViews, lastActions, view, now } = await drawnState($)
+  if ('ref' in p) {
+    if (p.action !== 'pr-dismiss') return null
+    return drawnPrs(prViews, ledger.prs, lastActions, now).some(x => x.pr.ref === p.ref && x.isSettled)
+      ? `undo-${pressRowId(p)}`
+      : null
+  }
+  const row = allRows(view).find(r => r.id === p.id)
+  return row?.state.is === 'settled' && row.actions.some(a => a.press.action === 'undo')
+    ? `undo-${pressRowId(p)}`
+    : null
 }
 
 /** The shown tab's rows in drawn order, whether each still waits on the person, and each one's place for the cursor. */
@@ -2018,15 +2456,29 @@ async function shownWaits($: EngineInterface) {
  * opens the next row that still waits. With none waiting, the tab goes back to opening its first waiting row, so a
  * row a later reply brings opens. Returns whether it moved the open row.
  */
-async function openAfterClose($: EngineInterface, id: string, wasWaiting: boolean): Promise<boolean> {
+async function openAfterClose(
+  $: EngineInterface,
+  id: string,
+  wasWaiting: boolean,
+  skipScroll = false,
+): Promise<{ isMoved: boolean; undoBlock: UiScrollBlock }> {
   const [{ tab, rows, ids }, selection] = await Promise.all([shownWaits($), read($, SELECTION)])
-  if (!wasWaiting || selection[tab].id !== id || rows.find(r => r.id === id)?.isWaiting) return false
+  if (!wasWaiting || selection[tab].id !== id || rows.find(r => r.id === id)?.isWaiting)
+    return { isMoved: false, undoBlock: 'nearest' }
   const following = rowAfterClose(rows, id)
   const index = following === null ? -1 : ids.indexOf(following)
-  if (following !== null && index >= 0) await select($, tab, following, index)
+  if (following !== null && index >= 0) await select($, tab, following, index, !skipScroll)
   else await update($, SELECTION, s => ({ ...s, [tab]: { ...NO_CURSOR, index: s[tab].index } }))
 
-  return true
+  return {
+    isMoved: true,
+    undoBlock:
+      following === null
+        ? 'nearest'
+        : rows.findIndex(r => r.id === following) > rows.findIndex(r => r.id === id)
+          ? 'start'
+          : 'end',
+  }
 }
 
 /**
@@ -2051,7 +2503,13 @@ async function selectRestored($: EngineInterface, id: string) {
  * nothing: each send, open or copy becomes its row's sample note instead, except in a recording.
  * Rows still settle, fold, undo and show their ✓ on the copy.
  */
-async function runDemoPress($: EngineInterface, p: RowPress | PrPress, wasWaiting: boolean) {
+async function runDemoPress(
+  $: EngineInterface,
+  p: RowPress | PrPress,
+  wasWaiting: boolean,
+  undoRevision: number,
+  surface: UiPressArgument['surface'],
+) {
   const now = await $.clock.now()
   const rowId = pressRowId(p)
   if (!('ref' in p) && p.action === 'type') await update($, TYPING, t => (t === p.id ? null : t))
@@ -2084,12 +2542,17 @@ async function runDemoPress($: EngineInterface, p: RowPress | PrPress, wasWaitin
       return rest
     })
   if (!('stale' in pressed) && !('ref' in p) && p.action === 'undo') await selectRestored($, p.id)
-  if (!('stale' in pressed)) await openAfterClose($, rowId, wasWaiting)
+  if (!('stale' in pressed)) {
+    const undoKey = await undoKeyAfterPress($, p, surface)
+    const canRevealUndo = undoKey !== null && undoRevision === undoScrollRevision
+    const { undoBlock } = await openAfterClose($, rowId, wasWaiting, canRevealUndo)
+    if (canRevealUndo) await keepUndoVisible($, undoKey, undoBlock, now, undoRevision)
+  }
   // A fresh copy redraws the pane: once a note's SETTLED_MS ends, with the sample reply to a sample message, and at
   // each step of a leave bar.
   if ('stale' in pressed || pressed.effects.length > 0)
     later($, SETTLED_MS, () => update($, DEMO, d => d && { ...d, turns: demoTurns(d.turns, [], true) }))
-  if (isClosing) redrawWhileLeaving($, SETTLED_MS)
+  if (isClosing) redrawWhileLeaving($, now + SETTLED_MS)
 }
 
 type Action = {
@@ -2099,6 +2562,7 @@ type Action = {
   variant?: 'primary'
   /** The press that finishes the row, as Done or Address. Desktop draws it as the primary button. */
   isMain?: boolean
+  emphasis?: ActionEmphasis
   /** A glyph desktop draws before the label, naming what the press does, as ⧉ for a copy. */
   icon?: string
   dimColor?: boolean
@@ -2116,27 +2580,10 @@ type Action = {
   onPress: (press: UiPressArgument) => void | Promise<void>
 }
 
-/** The steps that open the PRs the session tracks that an item's ask names. */
-function itemPrSteps(item: Item, prState: PrViews, linked: string[]): HelpStep[] {
-  const refs = prState.branchRef ? [...linked, prState.branchRef] : linked
-
-  return prSteps(
-    item,
-    refs.map(ref => ({ ref, url: prState.views[ref]?.url ?? null })),
-  )
-}
-
 /** A pane action with the key that presses it while the pane has focus, if it has one. */
 type KeyAction = Action & { hotkey?: string }
 
-const STEP_GLYPHS = { run: '▶', copy: '⧉', open: '↗' } as const
-
-/** A step's icon: ▶ when it asks Claude to run a command, else ⧉ for a copy and ↗ for an open. */
-function stepIcon(step: HelpStep | undefined): string | undefined {
-  const kind = stepIconKind(step)
-
-  return kind && STEP_GLYPHS[kind]
-}
+const ACTION_GLYPHS: Partial<Record<ActionIcon, string>> = { run: '▶', copy: '⧉', open: '↗', retry: '↻' }
 
 /** A question, task or finding's keys, in the order `rowKeyPlan` sets, as the pane's actions. */
 function rowKeyActions(
@@ -2151,15 +2598,17 @@ function rowKeyActions(
       case 'retry':
         return {
           key: `retry-${id}`,
-          label: 'Try again',
-          icon: '↻',
+          label: k.label,
+          icon: ACTION_GLYPHS[k.icon],
+          emphasis: k.emphasis,
           kind: k.kind,
           onPress: press => runPress($, k.press, press.surface),
         }
       case 'allOptions':
         return {
           key: `all-options-${id}`,
-          label: `All ${k.count} options`,
+          label: k.label,
+          emphasis: k.emphasis,
           kind: 'view',
           onPress: () => void update($, OPTIONS_SHOWN, s => (s.includes(id) ? s : [...s, id])),
         }
@@ -2169,6 +2618,7 @@ function rowKeyActions(
         const base = {
           label: a.label,
           kind: a.kind,
+          emphasis: a.emphasis,
           ...(hotkey ? { hotkey } : {}),
           onPress: (press: UiPressArgument) => runPress($, p, press.surface),
         }
@@ -2178,13 +2628,13 @@ function rowKeyActions(
             key: `answer-${id}-${(item?.options ?? []).indexOf(p.option)}`,
             ...(a.isPrimary ? { variant: 'primary' as const } : {}),
           }
-        const icon = stepIcon(r.steps[p.step])
+        const icon = a.icon && ACTION_GLYPHS[a.icon]
         return { ...base, ...(icon ? { icon } : {}), key: `help-${id}-${p.step}` }
       }
       case 'action': {
         const { action: a, hotkey } = k
         const p = a.press
-        const main = a.isFollowUp ? {} : { isMain: true }
+        const presentation = { emphasis: a.emphasis }
         // Type's press opens the field; sending from it is what records the reply.
         if (p.action === 'type')
           return {
@@ -2192,7 +2642,7 @@ function rowKeyActions(
             kind: 'view',
             key: `typekey-${id}`,
             hotkey,
-            ...main,
+            ...presentation,
             onPress: () => void startTyping($, id),
           }
         return {
@@ -2200,7 +2650,7 @@ function rowKeyActions(
           kind: a.kind,
           key: p.action === 'dismiss' && finding ? `drop-${id}` : `${p.action}-${id}`,
           hotkey,
-          ...main,
+          ...presentation,
           onPress: press => runPress($, p, press.surface),
         }
       }
@@ -2212,7 +2662,9 @@ function rowKeyActions(
 }
 
 /** A closed item, or a closed finding by its title, as its list's Closed fold draws it. */
-type ClosedLine = Pick<Closed, 'id' | 'ask' | 'at' | 'how' | 'outcome'>
+type ClosedLine = Pick<Closed, 'id' | 'ask' | 'at' | 'how' | 'outcome'> & {
+  delivery: Parameters<typeof settledLabel>[1]
+}
 
 /** The outcome as the pane shows it: "Dismissed", "Yes, renamed". */
 function outcomeText(d: Pick<Closed, 'outcome'>): string {
@@ -2289,6 +2741,7 @@ async function drawnState(
  * that mark its entries as samples, so a video can show them as a session's own.
  */
 async function setDemo($: EngineInterface, isShown: boolean, isRecording = false) {
+  cancelUndoScroll()
   const now = await $.clock.now()
   await Promise.all([
     update($, DEMO, () => (isShown ? demoView(now) : null)),
@@ -2297,14 +2750,33 @@ async function setDemo($: EngineInterface, isShown: boolean, isRecording = false
   // The open rows and the field name the other entries' ids, so each tab draws its top row open again.
   await Promise.all([update($, SELECTION, () => NO_SELECTION), update($, TYPING, () => null)])
   // The copy starts with a row that just closed, whose leave bar runs down.
-  if (isShown) redrawWhileLeaving($, SETTLED_MS)
+  if (isShown) redrawWhileLeaving($, now + SETTLED_MS)
   // findPrs does nothing during the demo, so the real PRs tab looks up the branch's PR once it ends.
   if ((await read($, TAB)) === 'prs') await findPrs($)
   await followNewRows($, true)
 }
 
-/** Turns the mod on for this session, once, from the start or the desktop app's attach. */
-async function turnOn($: EngineInterface) {
+function registerInboxCommand($: EngineInterface) {
+  return $.command
+    .register({
+      name: 'inbox',
+      description: 'Show where this session stands and what is waiting on you',
+      immediate: true,
+    })
+    .catch(() => undefined)
+}
+
+function ensureOn($: EngineInterface): Promise<void> {
+  return turningOn ?? (isOn ? Promise.resolve() : turnOn($))
+}
+
+function turnOn($: EngineInterface): Promise<void> {
+  return (turningOn ??= initializeInbox($).finally(() => {
+    turningOn = null
+  }))
+}
+
+async function initializeInbox($: EngineInterface) {
   // A hot reload keeps state an older build wrote. Draws start once isOn is set, and they read the current shape.
   await upgradeState($)
   isOn = true
@@ -2315,12 +2787,7 @@ async function turnOn($: EngineInterface) {
   }
   const findingText = findingDescription(CLAUDE_CODE)
   await Promise.all([
-    // /inbox only opens the pane, so it runs at once instead of waiting for the running turn to end.
-    $.command.register({
-      name: 'inbox',
-      description: 'Show where this session stands and what is waiting on you',
-      immediate: true,
-    }),
+    registerInboxCommand($),
     $.tool.register({ name: 'record_finding', description: findingText, inputSchema: FINDING_SCHEMA }).catch(refused),
     $.tool.register({ name: 'close', description: CLOSE_DESCRIPTION, inputSchema: CLOSE_SCHEMA }).catch(refused),
   ])
@@ -2342,27 +2809,65 @@ async function turnOn($: EngineInterface) {
  * /clear, /resume or /branch, which switch conversations under a new session
  * id without a session.start.
  */
-async function loadConversation($: EngineInterface, id: string) {
+function loadConversation($: EngineInterface, id: string): Promise<void> {
+  const revision = ++loadRevision
+  return prepareConversation($, id, revision)
+}
+
+async function prepareConversation($: EngineInterface, id: string, revision: number) {
+  const refusalRevision = doneRefusalRevision
+  const pendingSave = savesBySession.get(id)
+  const pendingCommits = [...(commitsBySession.get(id) ?? [])]
+  const savedRead = Promise.all([
+    pendingSave?.catch(() => undefined),
+    ...pendingCommits.map(commit => commit.catch(() => undefined)),
+  ]).then(() => readSaved($, id))
+  const [sessionRoot, saved] = await Promise.all([$.session.root(), savedRead])
+  if (revision !== loadRevision) return
+  const applying = applyingConversation.then(async () => {
+    if (revision !== loadRevision) return
+    const latest = refusalRevision === doneRefusalRevision ? saved : await readSaved($, id)
+    await applyConversation($, id, revision, sessionRoot, latest)
+  })
+  applyingConversation = applying.catch(() => undefined)
+  return applying
+}
+
+async function applyConversation(
+  $: EngineInterface,
+  id: string,
+  revision: number,
+  sessionRoot: string,
+  saved: { session: SavedSession | undefined } | null,
+) {
+  if (revision !== loadRevision) return
+  const isCurrent = () => revision === loadRevision && sessionId === id
+  cancelUndoScroll()
+  stopGeneration++
+  resuming = null
   sessionId = id
-  root = await $.session.root()
-  isSaved = false
+  root = sessionRoot
   recordedRows = null
   isReadingAgain = false
   // A reload stops any update the previous load had running, and state outlives
   // it, so an update in flight at load was cut off: record it as failed.
   // The theme read at the start is gone after /clear, so each conversation reads it.
-  const [presence, current, saved] = await Promise.all([
+  const [presence, current] = await Promise.all([
     update($, PRESENCE, p => (p.isUpdating ? { ...p, isUpdating: false, ledgerState: 'failed' as const } : p)),
     upgradeState($),
-    readSaved($, id),
     syncTheme($),
   ])
+  if (revision !== loadRevision) return
   // Only a conversation with no turns loaded yet needs its saved copy, so only that load's read decides
   // whether the copy is unreadable. Once turns ran, only [Try again] or another conversation clears UNREADABLE.
   const isFresh = current.turn === 0 && !current.card
   const isUnread =
-    (await update($, UNREADABLE, u => (isFresh ? (saved === null ? id : null) : u === id ? u : null))) === id
-  const loaded = saved === null ? current : await bringBack($, current, saved.session)
+    (await update($, UNREADABLE, u =>
+      isCurrent() ? (isFresh ? (saved === null ? id : null) : u === id ? u : null) : u,
+    )) === id
+  if (!isCurrent()) return
+  const loaded = saved === null ? current : await bringBack($, current, saved.session, isCurrent)
+  if (!isCurrent()) return
   // Catch up now after a failed update; after a turn whose reply never reached
   // the ledger, as when a reload cut off the end-of-turn hook before it queued the
   // update; or when the ledger is empty in a conversation that already has turns:
@@ -2370,12 +2875,12 @@ async function loadConversation($: EngineInterface, id: string) {
   // store could not read is not lost, so [Try again] can still bring it back.
   const isEmpty = !loaded.card && loaded.items.length === 0
   const { turnsStarted, turnsApplied } = await read($, PRESENCE)
-  if (
+  const needsCatchUp =
     presence.ledgerState !== 'current' ||
     turnsStarted > turnsApplied ||
     (!isUnread && isEmpty && (await $.session.turns().catch(() => 0)) > 0)
-  )
-    queueUpdate($, null)
+  if (!isCurrent()) return
+  if (needsCatchUp) queueUpdate($, null)
   void publishStatus($)
   // A resumed session's linked PRs; the branch's PR waits for the PRs tab.
   if (loaded.prs.length > 0) void fetchPrs($, false)
@@ -2396,13 +2901,19 @@ async function readSaved($: EngineInterface, id: string): Promise<{ session: Sav
  * Into a conversation with no turns yet, brings back its saved session, shown as
  * a return. Returns the ledger now in place.
  */
-async function bringBack($: EngineInterface, current: Ledger, session: SavedSession | undefined): Promise<Ledger> {
+async function bringBack(
+  $: EngineInterface,
+  current: Ledger,
+  session: SavedSession | undefined,
+  isCurrent: () => boolean = () => true,
+): Promise<Ledger> {
   if (current.turn !== 0 || current.card || !session) return current
   const loaded = upgradeLedger(session.ledger)
-  await update($, LEDGER, () => loaded)
-  await update($, PRESENCE, p => ({ ...p, lastActiveAt: session.savedAt, isAway: true }))
+  await update($, LEDGER, l => (isCurrent() ? loaded : l))
+  if (!isCurrent()) return current
+  await update($, PRESENCE, p => (isCurrent() ? { ...p, lastActiveAt: session.savedAt, isAway: true } : p))
 
-  return loaded
+  return isCurrent() ? loaded : current
 }
 
 /**
@@ -2483,6 +2994,7 @@ function redrawPane($: EngineInterface) {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    await registerInboxCommand($)
     const r = await next(e)
     // The desktop app runs its sessions headless and attaches to them, before
     // or after this start. -p, the SDK and VS Code draw nothing, so the mod stays off there.
@@ -2492,7 +3004,7 @@ export const register: Register = on => {
   })
 
   on('session.attach', { surface: 'desktop' }, async ($, e, next) => {
-    if (!isOn) await turnOn($)
+    await ensureOn($)
 
     return next(e)
   })
@@ -2508,6 +3020,9 @@ export const register: Register = on => {
   })
 
   on('session.end', async ($, e, next) => {
+    loadRevision++
+    stopGeneration++
+    resuming = null
     // The pane outlives the session, so its sidebar line goes with it.
     if (isOn) {
       await Promise.all([
@@ -2531,6 +3046,7 @@ export const register: Register = on => {
       told = TOLD_NOTHING
       contextFor.clear()
       storedAt.clear()
+      storedBy.clear()
     }
 
     return next(e)
@@ -2699,25 +3215,57 @@ export const register: Register = on => {
 
   // A prompt this mod sent: its context goes in just before it, wherever the engine runs it.
   // Its row being stored is how the press that sent it learns it arrived.
-  // prettier-ignore
-  on('session.append', { door: ['prompt', 'delivery'], origin: { kind: 'plugin', name: 'inbox' } }, async ($, e, next) => {
-    if (!isOn || e.agentId) return next(e)
-    const text = messageText(e.message)
-    storedAt.set(text, ++storedCount)
-    const context = contextFor.get(text)
-    contextFor.delete(text)
-    if (context) await appendContext($, context)
-    const r = await next(e)
-    const isAwaited = Object.values(await read($, LAST_ACTIONS)).some(
-      a => a.delivery?.state === 'queued' && a.delivery.message === text,
-    )
-    if (isAwaited) {
-      await update($, LAST_ACTIONS, a => withArrival(a, text))
-      void publishStatus($)
-    }
+  on(
+    'session.append',
+    { door: ['prompt', 'delivery'], origin: { kind: 'plugin', name: 'inbox' } },
+    async ($, e, next) => {
+      if (!isOn || e.agentId) return next(e)
+      const text = messageText(e.message)
+      const count = ++storedCount
+      storedAt.set(text, count)
+      storedBy.set(text, { count, receiptId: null })
+      const context = contextFor.get(text)
+      contextFor.delete(text)
+      if (context) await appendContext($, context)
+      const r = await next(e)
+      if ((await read($, UNTRACKED_SENT)).some(p => p.sessionId === sessionId && p.text === text)) {
+        await update($, SENT, pending => {
+          const index = pending.findIndex(p => p.sessionId === sessionId && p.text === text)
+          return index < 0 ? pending : pending.filter((_p, i) => i !== index)
+        })
+        await update($, LAST_ACTIONS, actions => withUnconfirmed(actions, text))
+        void publishStatus($)
+        return r
+      }
+      let matched: SentPrompt | undefined
+      let laterPrompts: SentPrompt[] = []
+      await update($, SENT, pending => {
+        const index = pending.findIndex(p => p.sessionId === sessionId && p.text === text)
+        if (index < 0) return pending
+        matched = pending[index]
+        laterPrompts = pending.slice(index + 1).filter(p => p.sessionId === sessionId && p.text === text)
+        return pending.filter((_p, i) => i !== index)
+      })
+      if (matched) {
+        if (storedBy.get(text)?.count === count) storedBy.set(text, { count, receiptId: matched.id })
+        const arrivedAt = matched.pressedAt
+        await update($, LAST_ACTIONS, actions => {
+          const arrived = arrivedAt === null ? actions : withArrival(actions, text, arrivedAt, matched?.id)
+          return laterPrompts.reduce(
+            (current, pending) =>
+              pending.pressedAt === null ? current : withUnconfirmed(current, text, pending.pressedAt, pending.id),
+            arrived,
+          )
+        })
+        void publishStatus($)
+      } else {
+        await update($, LAST_ACTIONS, actions => withUnconfirmed(actions, text))
+        void publishStatus($)
+      }
 
-    return r
-  })
+      return r
+    },
+  )
 
   // The person's own `!` and slash commands reach no prompt.submit hook, only these rows.
   // The matcher keeps every other row from waking the hooks module.
@@ -2743,6 +3291,8 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'inbox' }, async ($, e) => {
+    if (!isOn && !turningOn && e.origin.kind !== 'composer') return {}
+    await ensureOn($)
     const isShown = (await read($, DEMO)) !== null
     const args = e.args.trim().split(/\s+/).join(' ')
     if (args === 'demo' || args === 'demo recording') await setDemo($, !isShown, args === 'demo recording')
@@ -2761,10 +3311,19 @@ export const register: Register = on => {
 
   // A desktop press focuses its Button. One that closes a row leaves Undo in the Button's place, and Type opens a field.
   on('ui.press', async ($, e, next) => {
+    if (e.requestId === PANE && e.surface === 'terminal') {
+      if (e.element.startsWith('fold-') || e.element === 'hide-demo') cancelUndoScroll()
+      else suspendUndoReveal()
+    }
     if (e.requestId === PANE && e.surface === 'desktop') {
       focusedKey = e.element
       focusHint = focusHintFor(e.element)
     }
+    return next(e)
+  })
+
+  on('ui.scroll', { requestId: PANE }, async ($, e, next) => {
+    if (e.origin.kind === 'person') cancelUndoScroll()
     return next(e)
   })
 
@@ -2806,6 +3365,7 @@ export const register: Register = on => {
 
   // A field left open would take the keys again when the pane reopens, as Esc in it closes the pane.
   on('ui.close', { id: PANE }, async ($, e, next) => {
+    cancelUndoScroll()
     const r = await next(e)
     await update($, TYPING, () => null)
     await update($, FOLD_HOVER, () => null)
@@ -2912,6 +3472,10 @@ export const register: Register = on => {
     // it drops the section cards, the tab panels and the blank lines between parts.
     const isInline = e.props.placement === 'inline'
     isInlinePane = isInline
+    if (e.surface === 'terminal') {
+      isInlineTerminalPane = isInline
+      if (!isInline && pendingUndoScroll) cancelUndoScroll()
+    }
     const blankLine = isInline ? 0 : 1
     // Row spacing by look. A desktop row pads the same open, closed or just closed, so its title stays put when it
     // opens, and its rows sit flush with the Closed fold under them. Desktop's buttons draw their own padding, so a
@@ -2948,11 +3512,16 @@ export const register: Register = on => {
     // A resize rewraps the rows above the open one, which keeps its old offset and slides off the window's top.
     // The scroll waits a moment, so it measures the redraw at the new size.
     const size = isInline ? `${e.props.bodyColumns}x${e.props.scroll.bodyRows}` : null
+    if (e.surface === 'terminal') terminalInlineSize = size
     if (size !== null && inlineSize !== null && size !== inlineSize) {
-      later($, RESIZE_SCROLL_MS, () => scrollToOpenRow($, tab))
+      const revision = undoScrollRevision
+      later($, RESIZE_SCROLL_MS, () =>
+        revision === undoScrollRevision ? scrollToOpenRow($, tab, e.surface) : undefined,
+      )
     }
     inlineSize = size
     const shownPrs = drawnPrs(prState, ledger.prs, lastActions, now)
+    const settledLayout = settledLayoutId(tab, view, shownPrs, lastActions, notes, now, terminalInlineSize)
     const prViews = shownPrs.map(x => x.pr)
     const pal = paletteFor(theme, look)
     // Text an agent wrote, with its inline markdown drawn as styles. A link draws its label, then its URL, since
@@ -2973,6 +3542,22 @@ export const register: Register = on => {
           {s.link ? <Text color={pal.muted}>{` ${s.link}`}</Text> : null}
         </Text>
       ))
+    const terminalText = (lines: TerminalSpan[][]) =>
+      lines.flatMap((line, n) => [
+        ...(n > 0 ? ['\n'] : []),
+        ...line.map((span, i) => (
+          <Text
+            key={`${n}-${i}`}
+            bold={span.bold}
+            italic={span.italic}
+            strikethrough={span.strike}
+            underline={span.link ? true : undefined}
+            color={span.isLinkAddress ? pal.muted : span.code ? 'permission' : undefined}
+          >
+            {span.text}
+          </Text>
+        )),
+      ])
     // `inverse: false` keeps the engine from inverting the line under the pointer inside the panel.
     const raise = {
       dimColor: false,
@@ -2988,6 +3573,7 @@ export const register: Register = on => {
     // in full, its body and its keys; otherwise one line: `line`, or the title.
     type Row = {
       id: string
+      view?: RowView
       handle: string
       /** A status color for a marker handle, such as a failing check's ✗. A Button takes no color, so this handle is Text and only the row's text selects it. */
       handleTone?: Tone
@@ -3023,66 +3609,71 @@ export const register: Register = on => {
     }
     // An item's group header says whether it is a question or a task, so the row
     // needs no context line. The recommended answer is marked on its key.
-    const itemRow = (r: RowView, item: Item): Row => {
-      const asked = item.at === null ? undefined : `${DOT}${ago(now - item.at)}`
+    const itemRow = (r: RowView): Row => {
+      const asked = r.at === null ? undefined : `${DOT}${ago(now - r.at)}`
+      const mark = rowMark(r, look)
       // A task handed to Claude folds, as an answered question closes, until Claude's reply leaves it open.
       const isHandedOff = r.state.is === 'handedOff'
 
       return {
-        id: item.id,
+        id: r.id,
+        view: r,
         // Desktop marks only a handed-off item. Its options answer a question, and the group header says the kind.
-        handle: isHandedOff ? '✓' : look === 'desktop' ? '' : r.handle,
-        handleTone: isHandedOff ? 'done' : undefined,
+        handle: mark.text,
+        handleTone: mark.tone,
         ...(isHandedOff ? { fold: {} } : {}),
-        title: item.ask,
+        title: r.title,
         titleAfter: asked,
-        ...(item.at === null ? {} : { at: item.at }),
-        hasSecondLine: item.kind === 'question',
+        ...(r.at === null ? {} : { at: r.at }),
+        hasSecondLine: r.replyKind === 'answer',
         body: null,
         keys: () => rowKeyActions($, look, r, optionsShown.includes(r.id)).keys,
         moreKeys: () => rowKeyActions($, look, r, optionsShown.includes(r.id)).more,
         hiddenKeys: () => rowKeyActions($, look, r, optionsShown.includes(r.id)).hidden,
-        typeHint: item.kind === 'task' ? 'Your reply to Claude' : 'Your answer',
+        typeHint: replyHint(r, 'Claude'),
       }
     }
     // A finding's handle is its kind's mark, ▲ or ✦, and its group's title says the kind. Handed to Claude, it
     // folds, as a task does, until Claude's reply leaves it open.
-    const findingBody = (detail: string, path: string | null) => (
+    const findingBody = (detail: string, path: string | null, fitted?: TerminalSpan[][]) => (
       <Box flexDirection="column" rowGap={blankLine}>
-        <Text wrap="wrap">{inlineText(detail)}</Text>
+        <Text wrap="wrap">{fitted ? terminalText(fitted) : inlineText(detail)}</Text>
         {path ? (
           <Text wrap="wrap">
-            <Text color={pal.muted}>Relevant file: </Text>
+            <Text color={pal.muted}>{ROW_COPY.relevantFile}</Text>
             {/* Claude Code's own color for inline code. */}
-            <Text color="permission">{baseName(path)}</Text>
+            <Text color="permission">{path}</Text>
           </Text>
         ) : null}
       </Box>
     )
-    const findingRow = (r: RowView, finding: Finding): Row => ({
-      id: finding.id,
-      at: finding.at,
-      ...(r.state.is === 'handedOff'
-        ? { handle: '✓', handleTone: 'done' as const, fold: {} }
-        : { handle: FINDING_GROUPS[finding.kind].mark, handleTone: FINDING_GROUPS[finding.kind].tone }),
-      title: finding.title,
-      titleAfter: `${DOT}${ago(now - finding.at)}`,
-      line: { text: finding.title },
-      body: findingBody(finding.detail, finding.path),
+    const findingRow = (r: RowView): Row => ({
+      id: r.id,
+      view: r,
+      at: r.at ?? undefined,
+      handle: rowMark(r, look).text,
+      handleTone: rowMark(r, look).tone,
+      ...(r.state.is === 'handedOff' ? { fold: {} } : {}),
+      title: r.title,
+      titleAfter: `${DOT}${ago(now - (r.at ?? now))}`,
+      line: { text: r.title },
+      body: findingBody(r.detail ?? '', r.fileName),
       // The file's line goes first, then the detail, which keeps at least one line while it shows.
       clippedBody: (lines, width) =>
         lines < 1
           ? null
           : findingBody(
-              clipToLines(finding.detail, width, Math.max(1, lines - (finding.path && lines > 1 ? 1 : 0))),
-              lines > 1 ? finding.path : null,
+              r.detail ?? '',
+              lines > 1 ? r.fileName : null,
+              terminalTextLines(r.detail ?? '', width, Math.max(1, lines - (r.fileName && lines > 1 ? 1 : 0))),
             ),
-      typeHint: 'Your reply to Claude',
+      typeHint: replyHint(r, 'Claude'),
       keys: () => rowKeyActions($, look, r, true).keys,
       moreKeys: () => rowKeyActions($, look, r, true).more,
       hiddenKeys: () => rowKeyActions($, look, r, true).hidden,
     })
     const isThreadSent = threadSentIn(lastActions)
+    const threadShowsCheck = threadShowsCheckIn(lastActions)
     // A PR action labeled "… again" once it was its row's last action, unless its message failed to send.
     const again = (rowId: string, action: PrActionId, label: string) =>
       lastActions[rowId]?.action === action && lastActions[rowId]?.delivery?.state !== 'failed'
@@ -3165,21 +3756,24 @@ export const register: Register = on => {
         </Box>
       )
       const replyText = t.reply ? `@${t.reply.author}: ${readableComment(t.reply.body)}` : ''
-      // The where line stays, the comment takes the lines it can, and the reply the lines left. Clipped, both draw as
-      // plain text, since a cut can split their Markdown.
       const clippedComment = (lines: number, width: number) => {
         if (lines < 1) return null
-        const restLines = rest ? lineCount(rest, width) : 0
-        const replyLines = replyText ? lineCount(replyText, width) : 0
-        if (restLines + 1 + replyLines <= lines) return comment
+        const restLines = terminalTextLines(rest, width).length
+        const replyLines = terminalTextLines(replyText, width).length
+        const rawTextLines = lineCount(rest, width) + 1 + lineCount(replyText, width)
+        if (rawTextLines <= lines && restLines + 1 + replyLines <= lines) return comment
         const restShown = Math.min(restLines, lines - 1)
         const replyShown = Math.min(replyLines, lines - 1 - restShown)
 
         return (
           <Box flexDirection="column">
-            {rest && restShown > 0 ? <Text wrap="wrap">{inlineText(clipToLines(rest, width, restShown))}</Text> : null}
+            {rest && restShown > 0 ? (
+              <Text wrap="wrap">{terminalText(terminalTextLines(rest, width, restShown))}</Text>
+            ) : null}
             {where}
-            {replyShown > 0 ? <Text wrap="wrap">{inlineText(clipToLines(replyText, width, replyShown))}</Text> : null}
+            {replyShown > 0 ? (
+              <Text wrap="wrap">{terminalText(terminalTextLines(replyText, width, replyShown))}</Text>
+            ) : null}
           </Box>
         )
       }
@@ -3187,13 +3781,14 @@ export const register: Register = on => {
       // until a comment newer than the send arrives. So does one on lines a later
       // commit changed, but with no ✓: nothing says the change fixed it.
       const isSent = isThreadSent(pr, t)
+      const showsCheck = threadShowsCheck(pr, t)
       const isChanged = !isSent && t.isLinesChanged
       const retry = prRetryOf(lastActions[id], pr.ref, t.id)
 
       return {
         id,
-        handle: isSent ? '✓' : '◦',
-        handleTone: isSent ? 'done' : undefined,
+        handle: showsCheck ? '✓' : '◦',
+        handleTone: showsCheck ? 'done' : undefined,
         ...(isSent || isChanged
           ? { fold: t.isLinesChanged ? { note: `Lines changed since this comment${DOT}still open on GitHub` } : {} }
           : {}),
@@ -3268,7 +3863,7 @@ export const register: Register = on => {
     const lists = drawnLists(
       view,
       () => true,
-      r => (r.item ? itemRow(r, r.item) : r.finding ? findingRow(r, r.finding) : null),
+      r => (r.item ? itemRow(r) : r.finding ? findingRow(r) : null),
     )
     const needsYouGroups = NEEDS_YOU_GROUPS.map(g => ({ ...g, entries: lists[g.list], rows: rowsIn(lists[g.list]) }))
     const findingEntries = lists.findings
@@ -3292,6 +3887,10 @@ export const register: Register = on => {
       findings: view.findings.count,
       prs: prGroups.filter(g => !g.isSettled && prNeedsYou(g.pr, isThreadSent)).length,
     }
+    const tabText = (id: Tab, label: string) => `${label}${tabCounts[id] > 0 ? ` ${tabCounts[id]}` : ''}`
+    const hasRail = isInline && look === 'terminal' && e.props.bodyColumns >= INLINE_RAIL_AT
+    const railWidth = Math.max(...TABS.map(t => tabText(t.id, t.label).length)) + 2 * TAB_PAD.length
+    const listColumns = e.props.bodyColumns - 2 - (hasRail ? railWidth + RAIL_GUTTER : 0)
     const ids = rows[tab].map(r => r.id)
     const indexOf = new Map(ids.map((id, n) => [id, n]))
     const cursor = selection[tab]
@@ -3320,19 +3919,23 @@ export const register: Register = on => {
     // terminal and desktop looks. A plain terminal Button ignores `variant`, so there the words are the only mark.
     // Desktop also draws the option as its primary button.
     const shownLabel = (a: Pick<KeyAction, 'label' | 'variant'>) =>
-      a.variant === 'primary' ? `${a.label} (recommended)` : a.label
+      actionLabel({ label: a.label, isPrimary: a.variant === 'primary' })
     const desktopLabel = (a: Pick<KeyAction, 'label' | 'variant' | 'icon'>) =>
       a.icon ? `${a.icon} ${shownLabel(a)}` : shownLabel(a)
     // On desktop a follow-up (`isFollowUp`) draws as plain text, so the row's answers and main action stand out.
     const keyedButton =
       (rowId: string, isFollowUp = false) =>
-      ({ hotkey, kind: _kind, isMain, icon, ...action }: KeyAction) => {
+      ({ hotkey, kind: _kind, isMain, emphasis, icon, ...action }: KeyAction) => {
         const { label: _label, ...unlabeled } = action
 
         return look === 'desktop' ? (
           <Button
             {...action}
-            {...(isFollowUp ? { plain: true } : isMain ? { variant: 'primary' as const } : {})}
+            {...(isFollowUp
+              ? { plain: true }
+              : emphasis === 'primary' || isMain
+                ? { variant: 'primary' as const }
+                : {})}
             label={desktopLabel({ ...action, ...(icon ? { icon } : {}) })}
             {...(isOpenGuarded ? { dimColor: true } : {})}
             onPress={press => unlessGuarded($, rowId, press, action.onPress)}
@@ -3385,17 +3988,14 @@ export const register: Register = on => {
         columnGap={space.buttonGap}
         rowGap={look === 'desktop' ? 1 : 0}
       >
-        {/* Desktop leads with the main action, so a task's Done keeps its place whatever step button follows. */}
-        {(look === 'desktop' ? [...keys.filter(k => k.isMain), ...keys.filter(k => !k.isMain)] : keys).map(
-          keyedButton(rowId),
-        )}
+        {keys.map(keyedButton(rowId))}
         {look === 'terminal' && keys.length > 0 && more.length > 0 ? <Text color={pal.muted}>·</Text> : null}
         {more.length > 0 ? (followUpLinks(rowId, more) ?? more.map(keyedButton(rowId, true))) : null}
       </Box>
     )
     // The Buttons that take the pane's keys, drawn in a hidden Box.
     const keyBindings = (keys: KeyAction[], suffix = '') =>
-      keys.flatMap(({ key, hotkey, kind: _kind, isMain: _isMain, icon: _icon, ...k }) =>
+      keys.flatMap(({ key, hotkey, kind: _kind, isMain: _isMain, emphasis: _emphasis, icon: _icon, ...k }) =>
         hotkey ? [<Button key={`${key}${suffix}`} plain hotkey={hotkey} {...k} label={shownLabel(k)} />] : [],
       )
     // In the terminal, a selected row's secondary keys share its key row when they fit, and
@@ -3456,13 +4056,13 @@ export const register: Register = on => {
     const fieldActions = (row: Row): KeyAction[] => [
       {
         key: `send-${row.id}`,
-        label: 'Send',
+        label: ROW_COPY.send,
         kind: 'handoff',
         onPress: press => sendDraft($, row.id, press.surface),
       },
       {
         key: `cancel-${row.id}`,
-        label: 'Cancel',
+        label: ROW_COPY.cancel,
         kind: 'view',
         onPress: () => void update($, TYPING, t => (t === row.id ? null : t)),
       },
@@ -3470,12 +4070,16 @@ export const register: Register = on => {
     // A last action reads "✓ Discuss · 1m ago", or "Queued: Discuss · 1m ago". A row whose own mark is a ✓
     // leaves out the second one. A note and a Local result read alone, with no age. A failure is red.
     const feedbackLabel = (id: string, row?: Row) => {
-      const f = feedbackOf(id, lastActions[id], notes[id], turns, now)
+      const f = row?.view ? row.view.feedback : feedbackOf(id, lastActions[id], notes[id], turns, now)
       if (!f) return null
 
       return hasAge(f)
         ? {
-            text: f.is === 'done' && row?.handle === '✓' ? f.label : feedbackText(f, look),
+            text: row?.view
+              ? rowFeedbackText(row.view, look)!
+              : f.is === 'done' && row?.handle === '✓'
+                ? f.label
+                : feedbackText(f, look),
             age: ago(now - f.at),
             isFailure: false,
           }
@@ -3627,10 +4231,10 @@ export const register: Register = on => {
       const line = closedLine(row)
       const before = line.before?.length ?? 0
       const side = isAgeInSide ? TERMINAL_SIDE_CELLS : 0
-      const width = e.props.bodyColumns - 3 - inset - side - before
+      const width = listColumns - 1 - inset - side - before
       const perCell = look === 'desktop' ? DESKTOP_CHARS_PER_CELL : 1
       // `before` is text, so it counts in characters, as the title does.
-      const budget = Math.floor((e.props.bodyColumns - 3 - inset - side - buttonFrame) * perCell) - before
+      const budget = Math.floor((listColumns - 1 - inset - side - buttonFrame) * perCell) - before
       // In the terminal a row's own `after`, such as who asked, is its muted meta line. A press's, which starts with
       // the dot, stays on the title's line while the title fits beside it, and otherwise takes the meta line too.
       const isAfterCutting = line.after !== undefined && line.text.trim().length > budget - line.after.length
@@ -3711,7 +4315,7 @@ export const register: Register = on => {
       )
     }
     const sideAge = (row: Row) => {
-      const f = feedbackOf(row.id, lastActions[row.id], notes[row.id], turns, now)
+      const f = row.view ? row.view.feedback : feedbackOf(row.id, lastActions[row.id], notes[row.id], turns, now)
       const at = f && hasAge(f) ? f.at : row.at
       return at === undefined ? '' : shortAgo(now - at)
     }
@@ -3870,7 +4474,7 @@ export const register: Register = on => {
             key={`type-${row.id}`}
             placeholder={row.typeHint}
             {...(fieldSeeds.get(row.id) ? { value: fieldSeeds.get(row.id) } : {})}
-            submitLabel={look === 'desktop' ? 'Send' : 'send'}
+            submitLabel={look === 'desktop' ? ROW_COPY.send : 'send'}
             autoFocus
             onInput={(value: string) => void update($, DRAFTS, d => ({ ...d, [row.id]: value }))}
             onSubmit={(value: string, submit) => sendTyped($, row.id, value, submit.surface)}
@@ -3886,7 +4490,7 @@ export const register: Register = on => {
       // Inline, the pane's window can be shorter than the open row, which would hide its keys. The open row scrolls to
       // the window's top (scrollToRow), so the body gives up lines until the row's own lines fit the window.
       // The list's side padding and the row's right padding take 3 columns.
-      const textWidth = e.props.bodyColumns - 3 - columns.textAt
+      const textWidth = listColumns - 1 - columns.textAt
       const bodyLines =
         isSelected && isInline && look === 'terminal' && row.clippedBody
           ? e.props.scroll.bodyRows -
@@ -4039,6 +4643,16 @@ export const register: Register = on => {
               ? branch(tree, blankLine, TREE_LINE_AT, pal.selectionLine ?? pal.line)
               : branch(tree, 0)
             : null}
+          {isSelected && look === 'terminal' ? (
+            <Box
+              key={settledScrollKey(`view-${row.id}`, settledLayout)}
+              position="absolute"
+              top={0}
+              bottom={0}
+              left={0}
+              width={1}
+            />
+          ) : null}
           {/* What select() scrolls into view. Drawn on the selected row alone, so the key exists
           only once that row has redrawn expanded. */}
           {isSelected ? (
@@ -4072,7 +4686,7 @@ export const register: Register = on => {
 
         return lines
       }
-      const room = e.props.bodyColumns - 6
+      const room = listColumns - 4
       const most = Math.min(46, look === 'desktop' ? Math.floor(room * DESKTOP_CHARS_PER_CELL) : room)
       const count = wrap(most).length
       let width = Math.ceil(text.length / Math.max(count, 1))
@@ -4165,7 +4779,6 @@ export const register: Register = on => {
         </Text>
       ) : null,
     ]
-    const tabText = (id: Tab, label: string) => `${label}${tabCounts[id] > 0 ? ` ${tabCounts[id]}` : ''}`
     // The terminal tabs' width at full padding, with the 1-column gaps between them and the row's own padding.
     const terminalTabsWidth = TABS.reduce((sum, t) => sum + tabText(t.id, t.label).length + 2 * TAB_PAD.length + 1, 1)
     const pad = terminalTabsWidth <= e.props.bodyColumns ? TAB_PAD : ' '
@@ -4312,10 +4925,8 @@ export const register: Register = on => {
     // Desktop draws dimColor as plain text, so the status takes the ages' dimmer gray there.
     const statusText = look === 'desktop' ? <Text color={pal.age}>{status}</Text> : <Text dimColor>{status}</Text>
     // Each takes its own line under the tab row.
-    const hasRail = isInline && look === 'terminal' && e.props.bodyColumns >= INLINE_RAIL_AT
     // Each tab is one line of the column, padded to the column's width. Every cell of it is a Button, so a click
     // anywhere on the line shows the tab. The shown tab is filled and bold, as the docked tabs draw it.
-    const railWidth = Math.max(...TABS.map(t => tabText(t.id, t.label).length)) + 2 * TAB_PAD.length
     const rail = (
       <Box flexDirection="column" flexShrink={0} paddingLeft={1} marginRight={RAIL_GUTTER}>
         {TABS.map(({ id, label }) => {
@@ -4485,6 +5096,10 @@ export const register: Register = on => {
               </Box>,
             ]
     // A closed item or finding under the open ones: what was asked, then how it closed and when.
+    const refusedUndo = (d: ClosedLine) =>
+      d.delivery && typeof d.delivery === 'object' && d.delivery.canUndo
+        ? undoButton({ id: d.id, action: 'undo' }, null)
+        : null
     const closedRow = (d: ClosedLine, pos: TreePos) =>
       look === 'desktop'
         ? // Nested under its fold line, with its mark under the fold's label and half a row's padding, so the
@@ -4494,28 +5109,30 @@ export const register: Register = on => {
             indent: DESKTOP_MARK_CELLS,
             isMarkHung: false,
             padY: space.rowPad / 2,
-            mark: <Text color={pal.age}>{CLOSED_MARKS[closedState(d)]}</Text>,
+            mark: <Text color={pal.age}>{d.delivery === null ? CLOSED_MARKS[closedState(d)] : ' '}</Text>,
             side: <Text color={pal.age}>{shortAgo(now - d.at)}</Text>,
             children: [
               <Text wrap="wrap" color={pal.muted}>
                 {d.ask}
               </Text>,
               <Text wrap="wrap" color={pal.age}>
-                {outcomeText(d)}
+                {settledLabel(outcomeText(d), d.delivery)}
               </Text>,
+              refusedUndo(d),
             ],
           })
         : treeRow(
             pos,
-            <Text color={pal.muted}>{CLOSED_MARKS[closedState(d)]}</Text>,
+            <Text color={pal.muted}>{d.delivery === null ? CLOSED_MARKS[closedState(d)] : ' '}</Text>,
             <Box flexDirection="row">
               <Box flexDirection="column" flexGrow={1} flexShrink={1}>
                 <Text wrap="wrap" color={pal.muted}>
                   {d.ask}
                 </Text>
                 <Text wrap="wrap" color={pal.age}>
-                  {outcomeText(d)}
+                  {settledLabel(outcomeText(d), d.delivery)}
                 </Text>
+                {refusedUndo(d)}
               </Box>
               <Box width={TERMINAL_SIDE_CELLS} flexShrink={0} justifyContent="flex-end" paddingRight={1}>
                 <Text color={pal.age}>{shortAgo(now - d.at)}</Text>
@@ -4627,13 +5244,13 @@ export const register: Register = on => {
     // Undo on a row that just closed, with a fill that drains as its time runs out, as the Codex tab's does. The
     // terminal redraws it on the steps the leave bar already takes. Desktop's native button draws no fill, so there
     // it is an Svg pill whose fill animates on its own, under a Client that takes its clicks.
-    const undoButton = (undo: RowPress | PrPress, at: number) => {
+    const undoButton = (undo: RowPress | PrPress, at: number | null) => {
       const key = `undo-${pressRowId(undo)}`
       const label = ' ↺ Undo '
       const onPress = (press: { surface: UiPressArgument['surface'] }) => runPress($, undo, press.surface)
       if (hasClient && 'Svg' in elements) {
         followUpPresses.set(key, onPress)
-        const leftMs = Math.max(0, SETTLED_MS - (now - at))
+        const leftMs = at === null ? 0 : Math.max(0, SETTLED_MS - (now - at))
         return (
           <Box key={`${key}-${at}`} width={UNDO_CELLS} height={UNDO_HEIGHT_PT / DESKTOP_LINE_PT}>
             <elements.Svg
@@ -4654,7 +5271,7 @@ export const register: Register = on => {
           </Box>
         )
       }
-      if (look !== 'terminal') return <Button key={key} label="↺ Undo" onPress={onPress} />
+      if (look !== 'terminal' || at === null) return <Button key={key} label="↺ Undo" onPress={onPress} />
       const cells = [...label]
       const filled = Math.ceil((Math.max(0, SETTLED_MS - (now - at)) / SETTLED_MS) * cells.length)
 
@@ -4670,12 +5287,12 @@ export const register: Register = on => {
       outcome: string,
       at: number,
       undo: RowPress | PrPress | null,
-      isQueued = false,
+      delivery: Parameters<typeof settledLabel>[1] = null,
       isLapsed = false,
     ) => {
       if (look === 'desktop') {
         // As the Codex tab draws it: the ask, its outcome muted after it, wrapping together, and Undo at the right.
-        const after = `${DOT}${isQueued ? `Queued: ${outcome}` : outcome}`
+        const after = `${DOT}${settledLabel(outcome, delivery)}`
         return (
           <Box flexDirection="column">
             <Box flexDirection="row" alignItems="center">
@@ -4701,9 +5318,19 @@ export const register: Register = on => {
           <Text wrap="truncate-end" color={pal.muted}>
             {what}
           </Text>
-          <Box flexDirection="row" columnGap={2}>
-            <Text wrap="wrap" color={isQueued || isLapsed ? pal.muted : pal.tone.done}>
-              {isQueued ? `Queued: ${outcome}` : outcome}
+          <Box position="relative" flexDirection="row" columnGap={2}>
+            {undo ? (
+              <Box
+                key={settledScrollKey(`undo-${pressRowId(undo)}`, settledLayout)}
+                position="absolute"
+                top={0}
+                bottom={0}
+                left={0}
+                width={1}
+              />
+            ) : null}
+            <Text wrap="wrap" color={delivery !== null || isLapsed ? pal.muted : pal.tone.done}>
+              {settledLabel(outcome, delivery)}
             </Text>
             {undo ? undoButton(undo, at) : null}
           </Box>
@@ -4717,12 +5344,12 @@ export const register: Register = on => {
     const settledRow = ({ settled: r, state }: Extract<Entry, { settled: RowView }>, pos?: TreePos) => {
       const undo = r.actions.find(a => a.press.action === 'undo')?.press ?? null
       if (look === 'desktop') {
-        const after = `${DOT}${state.isQueued ? `Queued: ${state.label}` : state.label}`
+        const after = `${DOT}${settledLabel(state.label, state.delivery)}`
         return desktopFrame({
           key: `settled-${r.id}`,
           markCells: DESKTOP_MARK_CELLS + markExtra(r.id),
           // The ✓ waits for the answer to reach Claude.
-          mark: state.isQueued ? null : <Text color={pal.muted}>✓</Text>,
+          mark: state.delivery !== null ? null : <Text color={pal.muted}>✓</Text>,
           side: undo ? undoButton(undo, state.at) : null,
           padY: space.settledPad,
           isCentered: true,
@@ -4736,9 +5363,9 @@ export const register: Register = on => {
         })
       }
       const columns = columnsFor(pos, markExtra(r.id))
-      const content = settledContent(r.title, state.label, state.at, undo, state.isQueued, state.isLapsed)
+      const content = settledContent(r.title, state.label, state.at, undo, state.delivery, state.isLapsed)
       // The ✓ waits for the answer to reach Claude; the blank keeps the row's text in line.
-      const mark = state.isQueued ? <Text> </Text> : <Text color={pal.muted}>✓</Text>
+      const mark = state.delivery !== null ? <Text> </Text> : <Text color={pal.muted}>✓</Text>
       // In a group's tree, or flat as Findings lists its rows. On desktop it pads itself as a closed row does.
       return pos ? (
         <Box key={`settled-${r.id}`} flexDirection="column" paddingY={space.settledPad}>
@@ -4875,6 +5502,7 @@ export const register: Register = on => {
           at: f.closedAt,
           how: f.how,
           outcome: f.outcome,
+          delivery: f.delivery,
         }))
         return section([
           groupTitle(g.title, rowsIn(g.entries).filter(r => !r.fold).length),
@@ -4909,7 +5537,7 @@ export const register: Register = on => {
               action: 'pr-undo',
               ref: pr.ref,
             },
-            false,
+            null,
             true,
           ),
           `settled-pr:${pr.ref}`,

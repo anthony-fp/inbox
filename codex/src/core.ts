@@ -2,11 +2,21 @@
 // tells Codex, what the tab shows, and how a turn ends.
 // Hooks and the MCP server do the I/O around them.
 
-import { carryText, EMPTY, guidanceText, promptNotes, screenText, START_TITLE, toolActivity } from '../../hooks/ledger'
+import { EMPTY } from '../../hooks/ledger'
 import type { Exchange, Press } from '../../hooks/ledger'
+import {
+  addActivity,
+  carryText,
+  guidanceText,
+  promptNotes,
+  screenText,
+  START_TITLE,
+  toolActivity,
+} from '../../hooks/model-text'
 import { inboxView, perTurnStatus } from '../../hooks/view'
 import type { InboxView } from '../../hooks/view'
-import { drawnPrs, linkedPrs, olderPrsText, threadSentIn } from '../../hooks/pr-tab'
+import { drawnPrs, itemPrSteps, linkedPrs, olderPrsText, threadSentIn } from '../../hooks/pr-tab'
+import { withArrival, withUnconfirmed } from '../../hooks/presses'
 import { prNeedsYou, prRefs } from '../../hooks/prs'
 import type { LastAction, PrView, Turns } from '../../types'
 import { PRESS_TIMEOUT_MS, SETTLE_WINDOW_MS } from './settle'
@@ -15,7 +25,6 @@ import { CODEX } from './texts'
 
 /** The tab polls every few seconds; a poll this recent means it is open. */
 const TAB_OPEN_MS = 15_000
-const MAX_ACTIVITY = 40
 
 export function isTabOpen(s: SessionState, now: number): boolean {
   return now - s.tabSeenAt < TAB_OPEN_MS
@@ -48,18 +57,43 @@ export function cleared(s: SessionState): SessionState {
 /**
  * Records a prompt and returns what Codex reads beside it: the questions a
  * numbered answer refers to, and the inbox when it changed. A message the
- * tab sent is matched by its text, since UserPromptSubmit carries only that,
- * and the press that sent it arrived, unless its row was pressed again since.
+ * tab sent is matched by its text, since UserPromptSubmit carries only that.
+ * An uncertain earlier attempt blocks a same-text match with a later send.
  */
 export function notePrompt(s: SessionState, text: string, now: number): { state: SessionState; notes: string[] } {
-  const sentAt = s.sent.findIndex(x => x.text === text)
+  const matchingAt = s.sent.findIndex(x => x.text === text)
+  const matching = matchingAt >= 0 ? s.sent[matchingAt] : undefined
+  const sentAt = matching && (matching.phase === undefined || matching.phase === 'accepted') ? matchingAt : -1
   const sentBy: Press | null = sentAt >= 0 ? (s.sent[sentAt]?.press ?? null) : null
-  const row = sentAt >= 0 ? (s.sent[sentAt]?.row ?? null) : null
-  const last = row === null ? undefined : s.lastActions[row]
-  const lastActions =
-    row !== null && last?.delivery?.state === 'queued' && last.delivery.message === text
-      ? { ...s.lastActions, [row]: { ...last, delivery: { state: 'arrived' as const } } }
+  const sent = sentAt >= 0 ? s.sent[sentAt] : undefined
+  const eligible =
+    sent?.deliveryId === null
+      ? Object.fromEntries(
+          Object.entries(s.lastActions).filter(
+            ([_id, last]) =>
+              (last.delivery?.state === 'queued' || last.delivery?.state === 'unconfirmed') &&
+              last.delivery.id === undefined,
+          ),
+        )
       : s.lastActions
+  const arrived =
+    sent && sent.row !== null
+      ? {
+          ...s.lastActions,
+          ...(sent.deliveryId === null
+            ? withUnconfirmed(eligible, text)
+            : withArrival(eligible, text, sent.pressedAt ?? undefined, sent.deliveryId)),
+        }
+      : s.lastActions
+  const lastActions = s.sent
+    .slice(matchingAt + 1)
+    .reduce(
+      (actions, later) =>
+        later.text === text && later.row !== null
+          ? withUnconfirmed(actions, text, later.pressedAt ?? undefined, later.deliveryId)
+          : actions,
+      arrived,
+    )
   const ledger = { ...s.ledger, turn: s.ledger.turn + 1 }
   const r = promptNotes(CODEX, ledger, { text, isPress: sentAt >= 0, isOpen: isTabOpen(s, now) }, s.told)
   const person = s.turn.person === null ? text : `${s.turn.person}\n\n${text}`
@@ -79,10 +113,10 @@ export function notePrompt(s: SessionState, text: string, now: number): { state:
 }
 
 export function noteActivity(s: SessionState, line: string | null): SessionState {
-  const activity = s.turn.activity
-  if (!line || activity.length >= MAX_ACTIVITY || activity.includes(line)) return s
+  const activity = addActivity(s.turn.activity, line)
+  if (activity === s.turn.activity) return s
 
-  return { ...s, turn: { ...s.turn, activity: [...activity, line] } }
+  return { ...s, turn: { ...s.turn, activity } }
 }
 
 /** What the agent did with a tool, as an activity line: Codex's shell and MCP tools read as the mod's Bash and MCP tools. */
@@ -244,12 +278,11 @@ function withoutStalePending(lastActions: Record<string, LastAction>, now: numbe
 export function viewOf(s: SessionState, now: number): View {
   const l = s.ledger
   const lastActions = withoutStalePending(s.lastActions, now)
-  // Exchanges waiting for the inbox model will still change the list, so they read as updating.
+  const awaitsRetry = s.pending.length > 0 && (s.pending[0]?.failed === true || s.presence.ledgerState === 'failed')
   const update = {
-    isUpdating: s.presence.isUpdating || s.pending.length > 0,
+    isUpdating: s.presence.isUpdating,
     isFailed: s.presence.ledgerState === 'failed',
-    // applied() drops a failed exchange; nothing reruns it.
-    retries: false,
+    retries: awaitsRetry,
   }
 
   return {
@@ -259,7 +292,7 @@ export function viewOf(s: SessionState, now: number): View {
       // The tab keeps its own row notes.
       notes: {},
       turns: s.presence,
-      extraSteps: {},
+      extraSteps: Object.fromEntries(l.items.map(item => [item.id, itemPrSteps(item, s.prViews, l.prs)])),
       // The tab times each settled row from its first poll, so the server lists a close for longer.
       settleWindowMs: SETTLE_WINDOW_MS,
       status: perTurnStatus(update),

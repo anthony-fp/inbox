@@ -1,19 +1,20 @@
 import assert from 'node:assert/strict'
-import { writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
 import { demoView } from '../../hooks/demo'
-import { QUEUED_AFTER_MS } from '../../hooks/view'
+import { feedbackOf, QUEUED_AFTER_MS } from '../../hooks/view'
 import type { Feedback } from '../../hooks/view'
 import { noteHook, notePrompt, viewOf } from '../src/core'
 import type { View } from '../src/core'
 import { makeServer, tabUri } from '../src/server'
 import { PRESS_TIMEOUT_MS, SETTLE_WINDOW_MS } from '../src/settle'
-import { readState, updateState } from '../src/state'
+import { readState, statePath, updateState } from '../src/state'
 import { fakeRunner, tempDir } from './helpers'
 
-async function setup(queueCode: number) {
+async function setup(queueCode: number, now = () => 100, fallbackCli = async () => 'codex') {
   const dir = tempDir()
   await updateState(dir, 's1', s => ({
     ...s,
@@ -44,10 +45,10 @@ async function setup(queueCode: number) {
   )
   const handle = makeServer({
     dir,
-    now: () => 100,
+    now,
     exec: runner.exec,
     tabHtml: '<html></html>',
-    fallbackCli: async () => 'codex',
+    fallbackCli,
   })
   const call = (name: string, args: Record<string, unknown>, meta: Record<string, unknown>) =>
     handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args, _meta: meta } }) as Promise<{
@@ -134,20 +135,168 @@ test('a press reads Explaining… at once, Queued once its message waits QUEUED_
   assert.deepEqual(viewOf(replied, 300).needsYou.questions[0]?.feedback, { is: 'done', label: 'Explained', at: 100 })
 })
 
-test('a press whose message fails to send is undone, and its row says why with [Try again]', async () => {
-  const { dir, call } = await setup(1)
+test('a press rejected before queue starts reopens its question and offers Try again', async () => {
+  const { dir, call, calls } = await setup(
+    0,
+    () => 100,
+    async () => {
+      throw new Error('codex binary missing')
+    },
+  )
+  await updateState(dir, 's1', s => ({ ...s, cliPath: null }))
   const r = await call('inbox_press', ANSWER, { thread_id: 's1' })
-  assert.match(r.result.structuredContent.error ?? '', /Not sent: no such thread/)
+  assert.match(r.result.structuredContent.error ?? '', /Not sent: codex binary missing/)
   const question = r.result.structuredContent.view.needsYou.questions[0]
   assert.equal(question?.state.is, 'open')
   assert.deepEqual(question?.feedback, {
     is: 'notSent',
-    reason: 'no such thread',
+    reason: 'codex binary missing',
     retry: { action: 'answer', id: 'i1', option: 'Yes' },
   })
   const s = await readState(dir, 's1')
   assert.deepEqual(s.sent, [])
   assert.deepEqual(s.ledger.closed, [])
+  assert.deepEqual(calls, [])
+})
+
+test('a queue command failure leaves the accepted press unconfirmed without retrying it', async () => {
+  const { dir, call, calls } = await setup(1)
+  const r = await call('inbox_press', ANSWER, { thread_id: 's1' })
+  assert.equal(r.result.structuredContent.error, null)
+  assert.equal((r.result.structuredContent as unknown as { delivery: string }).delivery, 'unconfirmed')
+  const s = await readState(dir, 's1')
+  assert.equal(s.ledger.closed[0]?.id, 'i1')
+  assert.equal(s.lastActions.i1?.delivery?.state, 'unconfirmed')
+  assert.equal(s.sent[0]?.phase, 'uncertain')
+  assert.equal(calls.length, 1)
+  const observed = notePrompt(s, s.sent[0]!.text, 200).state
+  assert.equal(observed.sent.length, 1)
+  assert.equal(observed.lastActions.i1?.delivery?.state, 'unconfirmed')
+})
+
+test('an accepted queue survives a failed final state write as an unconfirmed press', async () => {
+  const { dir } = await setup(0)
+  let accepted = false
+  const handle = makeServer({
+    dir,
+    now: () => 100,
+    exec: async args => {
+      if (args[1] === 'queue') {
+        accepted = true
+        mkdirSync(`${statePath(dir, 's1')}.${process.pid}.tmp`)
+        return { code: 0, stdout: 'Queued message q1\n', stderr: '' }
+      }
+      return { code: 1, stdout: '', stderr: '' }
+    },
+    tabHtml: '<html></html>',
+    fallbackCli: async () => 'codex',
+  })
+  const reply = (await handle({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'tools/call',
+    params: { name: 'inbox_press', arguments: ANSWER, _meta: { thread_id: 's1' } },
+  })) as { result: { content: { text: string }[]; structuredContent: { error: string | null; delivery: string } } }
+  const s = await readState(dir, 's1')
+
+  assert.equal(accepted, true)
+  assert.equal(reply.result.structuredContent.error, null)
+  assert.equal(reply.result.structuredContent.delivery, 'unconfirmed')
+  assert.doesNotMatch(reply.result.content[0]!.text, /Not sent/)
+  assert.equal(s.ledger.closed[0]?.id, 'i1')
+  assert.equal(s.lastActions.i1?.delivery?.state, 'unconfirmed')
+  assert.equal(s.sent[0]?.phase, 'attempting')
+  assert.equal(s.sent[0]?.text, 'Re "Ship it?": Yes')
+})
+
+test('a local Open does not run when its press could not be saved', async () => {
+  const { dir } = await setup(0)
+  const root = tempDir()
+  writeFileSync(join(root, 'notes.md'), '# Notes')
+  await updateState(dir, 's1', s => ({
+    ...s,
+    root,
+    ledger: {
+      ...s.ledger,
+      items: [
+        {
+          ...s.ledger.items[0]!,
+          id: 'i2',
+          kind: 'task',
+          ask: 'Read notes',
+          options: [],
+          helps: [{ kind: 'open', path: 'notes.md' }],
+        },
+      ],
+    },
+  }))
+  mkdirSync(`${statePath(dir, 's1')}.${process.pid}.tmp`)
+  const calls: string[][] = []
+  const handle = makeServer({
+    dir,
+    now: () => 100,
+    exec: async args => {
+      calls.push(args)
+      return { code: 0, stdout: '', stderr: '' }
+    },
+    tabHtml: '<html></html>',
+    fallbackCli: async () => 'codex',
+  })
+  const reply = (await handle({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'tools/call',
+    params: {
+      name: 'inbox_press',
+      arguments: { press: { action: 'step', id: 'i2', step: 0, label: 'Open notes.md' }, thread: 's1' },
+      _meta: { thread_id: 's1' },
+    },
+  })) as { result: { structuredContent: { error: string | null } } }
+
+  assert.match(reply.result.structuredContent.error ?? '', /Not sent:/)
+  assert.deepEqual(calls, [])
+  assert.equal((await readState(dir, 's1')).lastActions.i2, undefined)
+})
+
+test('an unknown older send blocks identical later arrivals from certifying the newer press', async () => {
+  const { dir } = await setup(0)
+  let queues = 0
+  const handle = makeServer({
+    dir,
+    now: () => 100,
+    exec: async args =>
+      args[1] === 'queue' && queues++ === 0
+        ? { code: 1, stdout: '', stderr: 'outcome unknown' }
+        : { code: 0, stdout: 'Queued message q2\n', stderr: '' },
+    tabHtml: '<html></html>',
+    fallbackCli: async () => 'codex',
+  })
+  const explain = () =>
+    handle({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'inbox_press',
+        arguments: { press: { action: 'explain', id: 'i1' }, thread: 's1' },
+        _meta: { thread_id: 's1' },
+      },
+    })
+  await explain()
+  await explain()
+  const s = await readState(dir, 's1')
+  assert.deepEqual(
+    s.sent.map(x => x.phase),
+    ['uncertain', 'accepted'],
+  )
+  assert.equal(s.lastActions.i1?.delivery?.state, 'unconfirmed')
+
+  const afterFirst = notePrompt(s, s.sent[0]!.text, 200).state
+  const afterSecond = notePrompt(afterFirst, s.sent[0]!.text, 210).state
+  assert.equal(afterFirst.sent.length, 2)
+  assert.equal(afterSecond.sent.length, 2)
+  assert.equal(afterSecond.lastActions.i1?.delivery?.state, 'unconfirmed')
+  assert.equal(afterFirst.turn.press, null)
 })
 
 test('a close Codex read, then undone, is reported again when the row closes a second time', async () => {
@@ -377,20 +526,24 @@ test('an Open step shows a file macOS would run in Finder, opens any other file,
   }))
   const step = (step: number, label: string) =>
     call('inbox_press', { press: { action: 'step', id: 'i2', step, label }, thread: 's1' }, { thread_id: 's1' })
+  const visibleResult = async () => {
+    const result = (await readState(dir, 's1')).lastActions.i2?.result
+    return result && { state: result.state, parts: result.parts, at: result.at }
+  }
   await step(0, 'Open deploy.command')
   await step(1, 'Open notes.md')
   assert.deepEqual(calls, [
     ['open', '-R', join(root, 'deploy.command')],
     ['open', join(root, 'notes.md')],
   ])
-  assert.deepEqual((await readState(dir, 's1')).lastActions.i2?.result, {
+  assert.deepEqual(await visibleResult(), {
     state: 'done',
     parts: [{ kind: 'open', name: 'notes.md', isCommand: false, error: null }],
     at: 100,
   })
   const moved = await step(2, 'Open moved.md')
   assert.equal(moved.result.structuredContent.error, null)
-  assert.deepEqual((await readState(dir, 's1')).lastActions.i2?.result, {
+  assert.deepEqual(await visibleResult(), {
     state: 'failed',
     parts: [{ kind: 'open', name: 'moved.md', isCommand: false, error: 'it no longer exists' }],
     at: 100,
@@ -556,13 +709,13 @@ type PrView = {
 }
 type PrReply = { result: { structuredContent: PrView & { error: string | null; view: PrView } } }
 
-async function prServer(answer: (args: string[]) => { code: number; stdout: string; stderr: string }) {
+async function prServer(answer: (args: string[]) => { code: number; stdout: string; stderr: string }, now = () => 100) {
   const dir = tempDir()
   await updateState(dir, 's1', s => ({ ...s, root: '/repo', cliPath: '/apps/codex' }))
   const runner = fakeRunner(answer)
   const handle = makeServer({
     dir,
-    now: () => 100,
+    now,
     exec: runner.exec,
     tabHtml: '<html></html>',
     fallbackCli: async () => 'codex',
@@ -642,7 +795,188 @@ test('a PR press sends its prompt through codex queue and records the press on i
   assert.equal((await readState(dir, 's1')).sent[0]?.row, id)
 })
 
-test('a PR press with a failing queue says it was not sent and keeps the failure on its row', async () => {
+test('a bulk PR prompt arrives on every affected row without acknowledging a newer thread press', async () => {
+  let at = 100
+  const { dir, call } = await prServer(ghAnswer, () => at)
+  const d = demoView(100)
+  const pr = Object.values(d.prViews.views).find(
+    v => v.threads.filter(t => t.isWaiting && !t.isLinesChanged).length >= 2,
+  )!
+  assert.ok(pr)
+  const threads = pr.threads.filter(t => t.isWaiting && !t.isLinesChanged)
+  await updateState(dir, 's1', s => ({ ...s, ledger: { ...s.ledger, prs: d.ledger.prs }, prViews: d.prViews }))
+  await call('inbox_press', { press: { action: 'pr-address-all', ref: pr.ref }, thread: 's1' })
+  const queued = await readState(dir, 's1')
+  const text = queued.sent[0]!.text
+  const bulk = notePrompt(queued, text, 110).state
+  const rows = [`pr:${pr.ref}`, ...threads.map(t => `${pr.ref} thread ${t.id}`)]
+  for (const id of rows) {
+    assert.equal(bulk.lastActions[id]?.delivery?.state, 'arrived')
+    assert.equal(feedbackOf(id, bulk.lastActions[id], undefined, bulk.presence, 110)?.is, 'done')
+  }
+  at = 200
+  await call('inbox_press', { press: { action: 'thread-discuss', ref: pr.ref, thread: threads[0]!.id }, thread: 's1' })
+  const newer = await readState(dir, 's1')
+  const arrived = notePrompt(newer, text, 210).state
+  assert.equal(arrived.lastActions[rows[0]!]?.delivery?.state, 'arrived')
+  assert.equal(arrived.lastActions[rows[2]!]?.delivery?.state, 'arrived')
+  assert.deepEqual(arrived.lastActions[rows[1]!], newer.lastActions[rows[1]!])
+  const discussed = notePrompt(arrived, newer.sent[1]!.text, 220).state
+  assert.equal(discussed.lastActions[rows[1]!]?.delivery?.state, 'arrived')
+})
+
+test('same-millisecond identical prompt arrivals leave the newer press unconfirmed until its own arrival is observed', async () => {
+  const at = 100
+  const { dir, call } = await setup(0, () => at)
+  const explain = () =>
+    call('inbox_press', { press: { action: 'explain', id: 'i1' }, thread: 's1' }, { thread_id: 's1' })
+  await explain()
+  await explain()
+  const queued = await readState(dir, 's1')
+  assert.equal(queued.sent[0]!.text, queued.sent[1]!.text)
+  assert.notEqual(queued.sent[0]!.deliveryId, queued.sent[1]!.deliveryId)
+  const first = notePrompt(queued, queued.sent[0]!.text, 210).state
+  assert.equal(first.lastActions.i1?.delivery?.state, 'unconfirmed')
+  assert.equal(viewOf(first, 210).needsYou.questions[0]?.feedback?.is, 'unconfirmed')
+  const second = notePrompt(first, first.sent[0]!.text, 220).state
+  assert.equal(second.lastActions.i1?.delivery?.state, 'arrived')
+  assert.equal(viewOf(second, 220).needsYou.questions[0]?.feedback?.is, 'working')
+})
+
+test('same-millisecond identical sends on different rows acknowledge only their own delivery', async () => {
+  const { dir, call } = await setup(0, () => 100)
+  await updateState(dir, 's1', s => ({
+    ...s,
+    ledger: { ...s.ledger, items: [...s.ledger.items, { ...s.ledger.items[0]!, id: 'i2' }] },
+  }))
+  for (const id of ['i1', 'i2'])
+    await call('inbox_press', { press: { action: 'explain', id }, thread: 's1' }, { thread_id: 's1' })
+  const queued = await readState(dir, 's1')
+  assert.equal(queued.sent[0]!.text, queued.sent[1]!.text)
+  const first = notePrompt(queued, queued.sent[0]!.text, 110).state
+  assert.equal(first.lastActions.i1?.delivery?.state, 'arrived')
+  assert.equal(first.lastActions.i2?.delivery?.state, 'unconfirmed')
+  const second = notePrompt(first, first.sent[0]!.text, 120).state
+  assert.equal(second.lastActions.i2?.delivery?.state, 'arrived')
+})
+
+test('a missing older arrival leaves a later identical press visibly unconfirmed', async () => {
+  let at = 100
+  const { dir, call } = await setup(0, () => at)
+  const explain = () =>
+    call('inbox_press', { press: { action: 'explain', id: 'i1' }, thread: 's1' }, { thread_id: 's1' })
+  await explain()
+  const afterOtherPrompt = notePrompt(await readState(dir, 's1'), 'another request', 150).state
+  await updateState(dir, 's1', () => afterOtherPrompt)
+  at = 200
+  await explain()
+  const queued = await readState(dir, 's1')
+  const arrived = notePrompt(queued, queued.sent[1]!.text, 210).state
+  assert.equal(arrived.lastActions.i1?.delivery?.state, 'unconfirmed')
+  assert.equal(viewOf(arrived, 210).needsYou.questions[0]?.feedback?.is, 'unconfirmed')
+  assert.equal(arrived.sent.length, 1)
+})
+
+test('a settled Fix keeps its delivery unconfirmed after one indistinguishable arrival', async () => {
+  let at = 100
+  const { dir, call } = await setup(0, () => at)
+  await updateState(dir, 's1', s => ({
+    ...s,
+    ledger: {
+      ...s.ledger,
+      findings: [
+        { id: 'f1', kind: 'issue', title: 'Retry loop spins', detail: 'No delay.', path: null, at: 1 },
+        { id: 'f2', kind: 'issue', title: 'Retry loop spins', detail: 'No delay.', path: null, at: 2 },
+      ],
+    },
+  }))
+  await call('inbox_press', { press: { action: 'address', id: 'f1' }, thread: 's1' }, { thread_id: 's1' })
+  at = 200
+  await call('inbox_press', { press: { action: 'address', id: 'f2' }, thread: 's1' }, { thread_id: 's1' })
+  const queued = await readState(dir, 's1')
+  assert.equal(queued.sent[0]!.text, queued.sent[1]!.text)
+  const first = notePrompt(queued, queued.sent[0]!.text, 210).state
+  const row = viewOf(first, 210).findings.rows.find(r => r.id === 'f2')
+  assert.equal(row?.state.is, 'settled')
+  assert.equal(row?.state.is === 'settled' ? row.state.delivery : null, 'unconfirmed')
+  const later = viewOf(first, 210 + SETTLE_WINDOW_MS + 1)
+  assert.equal(later.findings.closed.find(f => f.id === 'f2')?.delivery, 'unconfirmed')
+})
+
+test('an answered question keeps unconfirmed delivery in Closed after its settle window', async () => {
+  const { dir, call } = await setup(0, () => 100)
+  await updateState(dir, 's1', s => ({
+    ...s,
+    ledger: { ...s.ledger, items: [...s.ledger.items, { ...s.ledger.items[0]!, id: 'i2' }] },
+  }))
+  for (const id of ['i1', 'i2'])
+    await call('inbox_press', { press: { action: 'answer', id, option: 'Yes' }, thread: 's1' }, { thread_id: 's1' })
+  const queued = await readState(dir, 's1')
+  const first = notePrompt(queued, queued.sent[0]!.text, 110).state
+  const later = viewOf(first, 110 + SETTLE_WINDOW_MS + 1)
+  assert.equal(later.needsYou.closed.questions.find(q => q.id === 'i2')?.delivery, 'unconfirmed')
+  assert.equal(
+    later.needsYou.questions.find(q => q.id === 'i2'),
+    undefined,
+  )
+})
+
+test('more than twenty unmatched identical sends retain the old receipt before the newest press', async () => {
+  let at = 100
+  const { dir, call } = await setup(0, () => at)
+  for (let i = 0; i < 21; i++) {
+    await call('inbox_press', { press: { action: 'explain', id: 'i1' }, thread: 's1' }, { thread_id: 's1' })
+    at += 100
+  }
+  const queued = await readState(dir, 's1')
+  assert.equal(queued.sent.length, 21)
+  const first = notePrompt(queued, queued.sent[0]!.text, at).state
+  assert.equal(first.lastActions.i1?.delivery?.state, 'unconfirmed')
+  assert.equal(first.sent.length, 20)
+})
+
+test('tracked PR steps are drawn and open the same linked and branch PRs without duplicate links', async () => {
+  const { dir, calls, call } = await prServer(ghAnswer)
+  const d = demoView(100)
+  assert.ok(d.prViews.branchRef)
+  const branch = d.prViews.views[d.prViews.branchRef]!
+  const linked = d.ledger.prs.map(ref => d.prViews.views[ref]).find(pr => pr && pr.ref !== branch.ref)!
+  assert.ok(linked)
+  await updateState(dir, 's1', s => ({
+    ...s,
+    ledger: {
+      ...s.ledger,
+      prs: [linked.ref],
+      items: [
+        {
+          id: 'i1',
+          kind: 'question',
+          ask: `Merge PR #${linked.number} and PR #${branch.number}?`,
+          label: null,
+          options: ['Yes', 'No'],
+          rec: null,
+          helps: [{ kind: 'link', url: linked.url, name: `PR #${linked.number}` }],
+          at: 1,
+          turn: 1,
+        },
+      ],
+    },
+    prViews: d.prViews,
+  }))
+  const row = viewOf(await readState(dir, 's1'), 100).needsYou.questions[0]!
+  assert.equal(row.steps.length, 2)
+  for (const action of row.actions) {
+    if (action.press.action !== 'step') continue
+    const reply = await call('inbox_press', { press: action.press, thread: 's1' })
+    assert.equal(reply.result.structuredContent.error, null)
+  }
+  assert.deepEqual(calls, [
+    ['open', linked.url],
+    ['open', branch.url],
+  ])
+})
+
+test('a PR press with an unknown queue outcome keeps its receipt and unconfirmed feedback', async () => {
   const { dir, call } = await prServer(args =>
     args[1] === 'queue' ? { code: 1, stdout: '', stderr: 'no such thread' } : ghAnswer(args),
   )
@@ -650,9 +984,11 @@ test('a PR press with a failing queue says it was not sent and keeps the failure
   await updateState(dir, 's1', s => ({ ...s, ledger: { ...s.ledger, prs: d.ledger.prs }, prViews: d.prViews }))
   const ref = Object.values(d.prViews.views).find(v => v.mergeable === 'CONFLICTING')!.ref
   const r = await call('inbox_press', { press: { action: 'pr-conflicts', ref }, thread: 's1' })
-  assert.match(r.result.structuredContent.error ?? '', /no such thread/)
-  const last = (await readState(dir, 's1')).lastActions[`pr:${ref}`]
-  assert.equal(last?.delivery?.state, 'failed')
+  assert.equal(r.result.structuredContent.error, null)
+  assert.equal((r.result.structuredContent as unknown as { delivery: string }).delivery, 'unconfirmed')
+  const s = await readState(dir, 's1')
+  assert.equal(s.lastActions[`pr:${ref}`]?.delivery?.state, 'unconfirmed')
+  assert.equal(s.sent[0]?.phase, 'uncertain')
 })
 
 test('dismissing a linked PR unlinks it, and its view leaves once its settled block has', async () => {
@@ -684,3 +1020,108 @@ test('dismissing a linked PR unlinks it, and its view leaves once its settled bl
   assert.equal(drawn(later.result.structuredContent).includes(ref), false)
   assert.equal(ref in (await readState(dir, 's1')).prViews.views, false)
 })
+
+for (const failure of ['none', 'checkpoint', 'completion', 'queue', 'lookup'] as const) {
+  test(`Done notification batches survive ${failure} and retain honest delivery and Undo state`, async t => {
+    const dir = tempDir()
+    t.after(() => rm(dir, { recursive: true, force: true }))
+    await updateState(dir, 's1', s => ({
+      ...s,
+      ledger: {
+        ...s.ledger,
+        turn: 1,
+        nextId: 3,
+        items: ['i1', 'i2'].map(id => ({
+          id,
+          kind: 'task' as const,
+          label: null,
+          ask: `Complete ${id}`,
+          options: [],
+          rec: null,
+          helps: [],
+          turn: 1,
+          at: 1,
+        })),
+      },
+    }))
+    let now = 100
+    let queues = 0
+    let atDispatch: Awaited<ReturnType<typeof readState>> | null = null
+    const temporary = `${statePath(dir, 's1')}.${process.pid}.tmp`
+    const server = () =>
+      makeServer({
+        dir,
+        now: () => now,
+        tabHtml: '<html></html>',
+        fallbackCli: async () => {
+          if (failure === 'lookup') throw new Error('No queue command')
+          return '/codex'
+        },
+        exec: async argv => {
+          if (!argv.includes('queue')) return { code: 1, stdout: '', stderr: 'No external commands' }
+          queues++
+          atDispatch = await readState(dir, 's1')
+          if (failure === 'completion') mkdirSync(temporary)
+          return failure === 'queue'
+            ? { code: 1, stdout: '', stderr: 'Lost queue outcome' }
+            : { code: 0, stdout: 'Queued message done-batch', stderr: '' }
+        },
+      })
+    let handle = server()
+    const call = (name: string, args: Record<string, unknown> = {}) =>
+      handle({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name, arguments: args, _meta: { thread_id: 's1' } },
+      })
+    for (const id of ['i1', 'i2']) {
+      await call('inbox_press', { press: { action: 'done', id }, thread: 's1' })
+      now++
+    }
+    now += SETTLE_WINDOW_MS
+    if (failure === 'checkpoint') mkdirSync(temporary)
+    await call('inbox_view')
+    await rm(temporary, { recursive: true, force: true })
+    let state = await readState(dir, 's1')
+    if (failure === 'checkpoint' || failure === 'lookup') {
+      assert.equal(queues, 0)
+      assert.deepEqual(state.sent, [])
+      assert.ok(state.ledger.closed.every(c => !c.isSentToAgent))
+      const undo = await call('inbox_press', { press: { action: 'undo', id: 'i1' }, thread: 's1' })
+      assert.equal((undo?.result as { structuredContent: { note: string | null } }).structuredContent.note, null)
+      assert.ok((await readState(dir, 's1')).ledger.items.some(i => i.id === 'i1'))
+      return
+    }
+    assert.equal(queues, 1)
+    const intent = atDispatch as Awaited<ReturnType<typeof readState>> | null
+    assert.ok(intent)
+    assert.equal(intent.sent[0]?.phase, 'attempting')
+    assert.ok(intent.ledger.closed.every(c => c.isSentToAgent))
+    assert.ok(['i1', 'i2'].every(id => intent.lastActions[id]?.delivery?.state === 'unconfirmed'))
+    assert.equal(state.sent.length, 1)
+    assert.equal(
+      state.sent[0]?.phase,
+      failure === 'none' ? 'accepted' : failure === 'queue' ? 'uncertain' : 'attempting',
+    )
+    assert.equal(new Set(['i1', 'i2'].map(id => state.lastActions[id]?.delivery?.state)).size, 1)
+    assert.ok(state.ledger.closed.every(c => c.isSentToAgent))
+    const expected = failure === 'none' ? 'queued' : 'unconfirmed'
+    assert.deepEqual(
+      viewOf(state, now).needsYou.closed.tasks.map(c => c.delivery),
+      [expected, expected],
+    )
+    handle = server()
+    await call('inbox_view')
+    await call('inbox_view')
+    assert.equal(queues, 1)
+    const undo = await call('inbox_press', { press: { action: 'undo', id: 'i1' }, thread: 's1' })
+    assert.equal((undo?.result as { structuredContent: { note: string | null } }).structuredContent.note, 'stale')
+    state = notePrompt(await readState(dir, 's1'), state.sent[0]!.text, now).state
+    assert.equal(state.sent.length, failure === 'none' ? 0 : 1)
+    assert.deepEqual(
+      viewOf(state, now).needsYou.closed.tasks.map(c => c.delivery),
+      failure === 'none' ? [null, null] : ['unconfirmed', 'unconfirmed'],
+    )
+  })
+}

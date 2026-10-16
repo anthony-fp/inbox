@@ -1,8 +1,19 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { applyPress, finishedResult } from '../../hooks/presses'
-import type { PressResult, RowPress } from '../../hooks/presses'
+import {
+  applyPress,
+  markSentToAgent,
+  refuseDoneNotification,
+  finishedResult,
+  pendingResult,
+  runLocalEffects,
+  runSends,
+  withLasts,
+} from '../../hooks/presses'
+import type { EffectHost, PressResult, RowPress } from '../../hooks/presses'
+import { applyPrPress } from '../../hooks/pr-tab'
+import { demoView } from '../../hooks/demo'
 import { recordClose, recordFinding } from '../../hooks/tools'
 import {
   closedShown,
@@ -12,10 +23,11 @@ import {
   listWaits,
   QUEUED_AFTER_MS,
   rowAfterClose,
+  rowMark,
   SETTLED_MS,
 } from '../../hooks/view'
 import type { RowView, RowWait } from '../../hooks/view'
-import type { Item, LocalResult } from '../../types'
+import type { Item, LastAction, LocalResult } from '../../types'
 import { followTo } from '../../hooks/arrivals'
 import { isShownEmpty, newRows, openRows, TAB_IDS } from '../src/arrivals'
 import { endTurn, noteHook, notePrompt, noteToolCall, viewOf } from '../src/core'
@@ -82,6 +94,120 @@ function after(s: SessionState, p: RowPress): SessionState {
   return { ...s, ledger: r.ledger, lastActions: r.last ? { ...s.lastActions, [p.id]: r.last } : s.lastActions }
 }
 
+test('an older same-time send failure does not claim a newer failed action', async () => {
+  let lasts: Record<string, LastAction> = {
+    i1: {
+      kind: 'talk' as const,
+      action: 'explain',
+      text: 'Explain',
+      at: 50,
+      delivery: { state: 'failed' as const, reason: 'new send failed', id: 'new' },
+    },
+  }
+  const host: EffectHost = {
+    now: () => 50,
+    deliveryId: () => 'old',
+    perform: async () => null,
+    send: async () => ({ state: 'rejected', reason: 'old send failed' }),
+    saveLasts: async change => (lasts = change(lasts)),
+    saveLedger: async () => {},
+  }
+  const result = await runSends(host, [{ kind: 'send', text: 'same text', by: null }], 'i1', ['i1'], 50)
+  assert.deepEqual(result, { state: 'rejected', reason: 'old send failed', isRowFailed: false })
+  const finalDelivery = lasts.i1?.delivery
+  assert.equal(finalDelivery?.state, 'failed')
+  assert.equal(finalDelivery?.state === 'failed' ? finalDelivery.id : null, 'new')
+})
+
+test('an older same-time local completion cannot replace the newer press of the same action', async () => {
+  const effect = { kind: 'open' as const, target: 'same', name: 'same' }
+  const older = pendingResult([effect], 50, 'older')
+  const newer = pendingResult([effect], 50, 'newer')
+  let lasts: Record<string, LastAction> = {
+    i1: { kind: 'local', action: 'step-0', text: 'Open same', at: 50, result: newer },
+  }
+  const host: EffectHost = {
+    now: () => 50,
+    deliveryId: () => '',
+    perform: async () => 'older failed',
+    send: async () => ({ state: 'accepted' }),
+    saveLasts: async change => (lasts = change(lasts)),
+    saveLedger: async () => {},
+  }
+
+  await runLocalEffects(host, [effect], 'i1', older)
+  assert.deepEqual(lasts.i1?.result, newer)
+
+  host.perform = async () => null
+  await runLocalEffects(host, [effect], 'i1', newer)
+  assert.deepEqual(lasts.i1?.result, {
+    state: 'done',
+    parts: [{ kind: 'open', name: 'same', isCommand: false, error: null }],
+    at: 50,
+    pressId: 'newer',
+  })
+})
+
+test('a rejected local effect records failure on the pressed row', async () => {
+  const effect = { kind: 'open' as const, target: 'file.command', name: 'file.command' }
+  const pending = pendingResult([effect], 50, 'press')
+  let lasts: Record<string, LastAction> = {
+    i1: { kind: 'local', action: 'step-0', text: 'Open file.command', at: 50, result: pending },
+  }
+  const host: EffectHost = {
+    now: () => 51,
+    deliveryId: () => '',
+    perform: async () => {
+      throw new Error('spawn failed')
+    },
+    send: async () => ({ state: 'accepted' }),
+    saveLasts: async change => (lasts = change(lasts)),
+    saveLedger: async () => {},
+  }
+
+  await runLocalEffects(host, [effect], 'i1', pending)
+  assert.deepEqual(lasts.i1?.result, {
+    state: 'failed',
+    parts: [{ kind: 'open', name: 'file.command', isCommand: false, error: 'spawn failed' }],
+    at: 51,
+    pressId: 'press',
+  })
+})
+
+test('a review thread that stopped waiting rejects a stale Address press', () => {
+  const d = demoView(100)
+  const pr = Object.values(d.prViews.views).find(v => v.threads.some(t => t.isWaiting))!
+  const thread = pr.threads.find(t => t.isWaiting)!
+  const resolved = { ...pr, threads: pr.threads.map(t => (t.id === thread.id ? { ...t, isWaiting: false } : t)) }
+  const prViews = { ...d.prViews, views: { ...d.prViews.views, [pr.ref]: resolved } }
+
+  assert.deepEqual(
+    applyPrPress(
+      d.ledger,
+      prViews,
+      {},
+      { action: 'thread-address', ref: pr.ref, thread: thread.id },
+      { now: 200, turnsStarted: 0 },
+    ),
+    { stale: true },
+  )
+})
+
+test('a delayed older press cannot replace a newer same-time last action', () => {
+  const action = (id: string, pressOrder: number): LastAction => ({
+    kind: 'talk',
+    action: 'explain',
+    text: 'Explain',
+    at: 50,
+    pressOrder,
+    delivery: { state: 'queued', message: 'same text', id },
+  })
+  const newer = withLasts({}, { i1: action('new', 2) }, [], 2)
+  const olderFinishesLast = withLasts(newer, { i1: action('old', 1) }, [], 1)
+  assert.equal(olderFinishesLast.i1?.delivery?.state, 'queued')
+  assert.equal(olderFinishesLast.i1?.delivery?.state === 'queued' ? olderFinishesLast.i1.delivery.id : null, 'new')
+})
+
 test('an answer names its option by text: it closes the question and sends the answer as a press', () => {
   const r = pressed(withItems(), { action: 'answer', id: 'i1', option: 'Fix add.js' })
   assert.ok(!('stale' in r))
@@ -132,7 +258,26 @@ test('a run step hands the task to Codex: it folds until the turn it started is 
     label: 'Run seed script',
     at: 50,
   })
+  assert.equal(rowMark(folded.needsYou.tasks[0]!, 'codex').text, '✓')
   assert.equal(folded.needsYou.count, 1)
+
+  const message = r.effects[0]
+  assert.equal(message?.kind, 'send')
+  const unconfirmed: SessionState = {
+    ...s,
+    lastActions: {
+      ...s.lastActions,
+      i2: {
+        ...s.lastActions.i2!,
+        delivery: { state: 'unconfirmed', message: message?.kind === 'send' ? message.text : '' },
+      },
+    },
+  }
+  const unknown = viewOf(unconfirmed, 60).needsYou.tasks[0]!
+  assert.equal(unknown.state.is, 'handedOff')
+  assert.equal(unknown.feedback?.is, 'unconfirmed')
+  assert.equal(rowMark(unknown, 'codex').text, '')
+  assert.equal(rowMark(unknown, 'terminal').text, '•')
 
   const started = notePrompt(s, 'For "Sign in to npm", run this:', 70).state
   const summarized = { ...started, presence: { ...started.presence, turnsApplied: started.presence.turnsStarted } }
@@ -338,14 +483,16 @@ test('a question lists every option, folds those past the fourth of 7, marks the
   )
 })
 
-test('the tab reads Updating… while exchanges wait for the inbox model, and shows a failed update only once none do', () => {
+test('the tab reports active work separately from pending exchanges and failed updates', () => {
   const s = { ...withItems(), presence: { ...withItems().presence, isUpdating: false, ledgerState: 'failed' as const } }
   const waiting = endTurn(s, 'Done.', 50)
   assert.equal(waiting.pending.length, 1)
-  assert.deepEqual(
-    { isUpdating: viewOf(waiting, 60).status.isUpdating, error: viewOf(waiting, 60).status.error },
-    { isUpdating: true, error: null },
-  )
+  assert.equal(viewOf(waiting, 60).status.isUpdating, false)
+  assert.match(viewOf(waiting, 60).status.error ?? '', /Last update failed.*retries after your next message/)
+  const running = { ...waiting, presence: { ...waiting.presence, isUpdating: true } }
+  assert.deepEqual(viewOf(running, 60).status, { isUpdating: true, error: null })
+  const scheduled = { ...waiting, presence: { ...waiting.presence, ledgerState: 'current' as const } }
+  assert.deepEqual(viewOf(scheduled, 60).status, { isUpdating: false, error: null })
   assert.equal(viewOf(s, 60).status.error, 'Last update failed. Items from that reply may be missing.')
 })
 
@@ -394,7 +541,7 @@ test('Fix hands a finding off: it settles as the choice made, then lists in the 
     [
       [
         'f3',
-        { is: 'settled', label: 'Closed by Codex: fixed', at: 90, canUndo: false, isQueued: false, isLapsed: false },
+        { is: 'settled', label: 'Closed by Codex: fixed', at: 90, canUndo: false, delivery: null, isLapsed: false },
         [],
       ],
     ],
@@ -423,7 +570,7 @@ test('Dismiss settles a row in place with Undo, and Undo puts it back open where
     [
       [
         'i1',
-        { is: 'settled', label: 'Dismissed', at: 50, canUndo: true, isQueued: false, isLapsed: true },
+        { is: 'settled', label: 'Dismissed', at: 50, canUndo: true, delivery: null, isLapsed: true },
         [{ action: 'undo', id: 'i1' }],
       ],
     ],
@@ -549,6 +696,14 @@ test('the tab moves from an empty Needs you to Findings when it opens on a findi
   assert.equal(followed({ ...withFinding, heard: NOTHING_HEARD }), null)
   assert.equal(followed({ ...withFinding, ledger: withItems().ledger }), null)
   assert.deepEqual(newRows(next.seen, viewOf(withFinding, 30)).added, { needsYou: [], findings: [] })
+  const closed = recordClose(CODEX, withFinding.ledger, { id: 'f1', reason: 'fixed' }, 30)
+  const afterClose = { ...withFinding, ledger: closed.ledger }
+  const settled = viewOf(afterClose, 31)
+  assert.equal(isShownEmpty(settled, 'findings', new Set(['f1']), new Set()), false)
+  assert.equal(isShownEmpty(settled, 'findings', new Set(), new Set()), true)
+  const history = viewOf(afterClose, 30_000)
+  assert.equal(isShownEmpty(history, 'findings', new Set(), new Set(['issue'])), false)
+  assert.equal(isShownEmpty(history, 'findings', new Set(), new Set()), true)
 })
 
 test('after a close the next waiting row opens, else the nearest one before it, and a row that arrives above leaves the open row open', () => {
@@ -621,4 +776,35 @@ test('a row turned around mid-move starts the new move at once, and with reduced
   assert.equal(stepRow(undefined, 'closed', 0, true)?.hasPanel, false)
   assert.equal(stepRow(undefined, 'closed', 0, true, true)?.state, 'closed')
   assert.equal(stepRow(undefined, 'open', 0)?.state, 'open')
+})
+
+test('a refused Done attempt cannot change a later close of the same task', () => {
+  const initial = withItems().ledger
+  const first = applyPress(
+    initial,
+    undefined,
+    { id: 'i2', action: 'done' },
+    { now: 20, turnsStarted: 1, extraSteps: [] },
+  )
+  assert.ok(!('stale' in first))
+  const sent = markSentToAgent(first.ledger, ['i2'], 'old-attempt')
+  const refused = refuseDoneNotification(sent, 'old-attempt', 'Refused')
+  const undo = applyPress(
+    refused,
+    undefined,
+    { id: 'i2', action: 'undo' },
+    { now: 20, turnsStarted: 1, extraSteps: [] },
+  )
+  assert.ok(!('stale' in undo))
+  const second = applyPress(
+    undo.ledger,
+    undefined,
+    { id: 'i2', action: 'done' },
+    { now: 20, turnsStarted: 1, extraSteps: [] },
+  )
+  assert.ok(!('stale' in second))
+  const newer = markSentToAgent(second.ledger, ['i2'], 'new-attempt')
+  const result = refuseDoneNotification(newer, 'old-attempt', 'Late refusal')
+  assert.deepEqual(result, newer)
+  assert.equal(result.closed[0]?.isSentToAgent, true)
 })

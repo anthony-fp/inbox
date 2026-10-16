@@ -47,7 +47,8 @@ the `inbox:` text beside each prompt. No look draws it.
 
 **New row**:
 A row a look lists for the first time since it last recorded its rows. A
-look showing an empty tab moves to the tab with the new row.
+look showing an empty tab can move to a tab where rows arrived. A row that
+arrives above the open row stays closed. Codex animates its entry.
 
 **Last action**:
 What an item or PR in the inbox says after the person presses one of its
@@ -70,8 +71,8 @@ the terminal and desktop looks. Codex runs the plugin, which draws the Codex
 tab.
 
 **Shared module**:
-A file in `hooks/` that both hosts import. It imports nothing from the engine
-or from either host.
+A file in `hooks/` that both hosts consume, directly or through the build.
+It imports only other shared modules and the shared types.
 
 **Adapter**:
 The code that draws the shared view in one look: `hooks/register.tsx` for the

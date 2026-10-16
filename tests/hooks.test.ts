@@ -33,7 +33,8 @@ let sent: string[] = []
 
 let ran: string[][] = []
 
-let submitAnswer: 'enter' | 'hold' | { drop: string } = 'enter'
+let submitAnswer:
+  'enter' | 'hold' | { drop: string; beforeDrop?: () => Promise<void> } | { rewrite: string; hold?: boolean } = 'enter'
 let held: { text: string; origin: PromptOrigin }[] = []
 let promptRows = 0
 
@@ -89,7 +90,10 @@ let beforeAct: (() => Promise<unknown>) | undefined
 let stored = new Map<string, string>()
 let storeRefusal: string | undefined
 let storeHold: (() => Promise<void>) | undefined
+let storeSetHold: ((key: string, value: unknown) => Promise<void>) | undefined
+let storeSetRefusal: string | undefined
 let toolRefusal: string | undefined
+let commandRefusal: string | undefined
 let panesOpened: string[] = []
 let panesClosed: string[] = []
 
@@ -132,7 +136,10 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   stored = new Map()
   storeRefusal = undefined
   storeHold = undefined
+  storeSetHold = undefined
+  storeSetRefusal = undefined
   toolRefusal = undefined
+  commandRefusal = undefined
   panesOpened = []
   panesClosed = []
   on('store.get', async ($, e) => {
@@ -141,7 +148,9 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
     const json = stored.get(e.key)
     return { value: json === undefined ? undefined : JSON.parse(json) }
   })
-  on('store.set', ($, e) => {
+  on('store.set', async ($, e) => {
+    await storeSetHold?.(e.key, e.value)
+    if (storeSetRefusal && e.key.startsWith('s:')) return { deny: storeSetRefusal }
     stored.set(e.key, JSON.stringify(e.value))
     return { value: undefined }
   })
@@ -170,7 +179,7 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   on('session.end', ($, e) => ({ sessionId: e.sessionId }))
   on('session.root', () => ({ value: '/tmp/project' }))
   on('env.get', ($, e) => ({ value: vars[e.name] }))
-  on('command.register', ($, e) => ({ value: { command: e.name } }))
+  on('command.register', ($, e) => (commandRefusal ? { deny: commandRefusal } : { value: { command: e.name } }))
   on('tool.register', ($, e) => (toolRefusal ? { deny: toolRefusal } : { value: { tool: `mcp__inbox__${e.name}` } }))
   on('ui.open', ($, e) => {
     panesOpened.push(e.id)
@@ -209,7 +218,16 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   on('prompt.submit', async (_$, e) => {
     if (e.origin.kind !== 'plugin') return { text: e.text, context: e.context }
     sent.push(e.text)
-    if (typeof submitAnswer === 'object') return { drop: submitAnswer.drop }
+    if (typeof submitAnswer === 'object') {
+      if ('drop' in submitAnswer) {
+        await submitAnswer.beforeDrop?.()
+        return { drop: submitAnswer.drop }
+      }
+      const rewritten = { text: submitAnswer.rewrite, origin: e.origin }
+      if (submitAnswer.hold) held.push(rewritten)
+      else await storePrompt($, rewritten)
+      return { text: rewritten.text, context: e.context }
+    }
     if (submitAnswer === 'hold') held.push({ text: e.text, origin: e.origin })
     else await storePrompt($, { text: e.text, origin: e.origin })
 
@@ -376,6 +394,74 @@ test('Done on a task Claude just left tells Claude once Undo ends, and a task fr
   await clock.advance(SETTLED_MS)
   expect(sent).toHaveLength(1)
 })
+
+for (const switchAt of [null, 'before-submit', 'during-submit'] as const)
+  test(`a refused Done batch stays recoverable after resume, with session switch during send: ${switchAt}`, async ($, on) => {
+    const clock = mock.clock(on, { now: 1_000_000 })
+    world($, on, [])
+    ledgerReply = ['NEW: do | - | Sign in to npm | - | -', 'NEW: do | - | Approve the deploy | - | -'].join('\n')
+    await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+    await $.prompt.submit({ text: 'publish it', wait: false, origin: { kind: 'composer' } })
+    await $.turn.start({ text: 'publish it', turnId: 't1' })
+    await $.turn.complete({
+      answer: 'Sign in and approve the deploy.',
+      durationMs: 5,
+      isAborted: false,
+      turnId: 't1',
+      reason: 'answer',
+    })
+    await clock.settle()
+    const pane = await $.ui.mount(PANE)
+    for (const id of ['i1', 'i2']) {
+      await pane.press({ key: `select-${id}` })
+      await clock.advance(PRESS_GUARD_MS)
+      await pane.press({ key: `done-${id}` })
+      await clock.settle()
+    }
+    const switchSession = async () => {
+      await $.session.end({ reason: 'clear', sessionId: 'session-1', resume: { id: 'session-1' } })
+      await $.classic.SessionStart({ source: 'clear', session_id: 'session-2' })
+    }
+    if (switchAt === 'before-submit')
+      storeSetHold = async (_key, value) => {
+        const saved = value as { ledger?: { closed: { doneNotification?: unknown }[] } }
+        if (!saved.ledger?.closed.some(c => c.doneNotification)) return
+        storeSetHold = undefined
+        await switchSession()
+      }
+    submitAnswer = {
+      drop: 'Notifications refused',
+      beforeDrop: async () => {
+        if (switchAt === 'during-submit') await switchSession()
+      },
+    }
+    await clock.advance(SETTLED_MS)
+    expect(sent).toHaveLength(switchAt === 'before-submit' ? 0 : 1)
+    if (switchAt) {
+      expect(await pane.find({ text: /Not sent:/ })).toBeUndefined()
+      await $.session.end({ reason: 'resume', sessionId: 'session-2', resume: { id: 'session-2' } })
+      await $.classic.SessionStart({ source: 'resume', session_id: 'session-1' })
+      await clock.settle()
+    }
+    await pane.press({ key: 'fold-task' })
+    expect({ refusalVisible: !!(await pane.find({ text: /Not sent:/ })) }).toEqual({ refusalVisible: true })
+    expect({ firstUndoVisible: !!(await pane.find({ key: 'undo-i1' })) }).toEqual({ firstUndoVisible: true })
+    expect({ secondUndoVisible: !!(await pane.find({ key: 'undo-i2' })) }).toEqual({ secondUndoVisible: true })
+    await clock.advance(SETTLED_MS * 2)
+    expect(sent).toHaveLength(switchAt === 'before-submit' ? 0 : 1)
+    await $.session.end({ reason: 'clear', sessionId: 'session-1', resume: { id: 'session-1' } })
+    await $.classic.SessionStart({ source: 'clear', session_id: 'session-2' })
+    await $.session.end({ reason: 'resume', sessionId: 'session-2', resume: { id: 'session-2' } })
+    await $.classic.SessionStart({ source: 'resume', session_id: 'session-1' })
+    await clock.settle()
+    await clock.advance(SETTLED_MS * 2)
+    expect(sent).toHaveLength(switchAt === 'before-submit' ? 0 : 1)
+    await pane.press({ key: 'fold-task' })
+    expect({ refusalVisible: !!(await pane.find({ text: /Not sent:/ })) }).toEqual({ refusalVisible: true })
+    await pane.press({ key: 'undo-i1' })
+    await clock.settle()
+    expect({ restoredTask: !!(await pane.find({ key: 'done-i1' })) }).toEqual({ restoredTask: true })
+  })
 
 test('a task handed to Claude folds and leaves the count until Claude’s reply leaves it open, whatever it opens or copies meanwhile', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
@@ -1048,6 +1134,158 @@ test('a press during a turn reads Queued until its prompt enters, and one that w
   expect(await pane.find({ key: 'row-i1' })).toBeUndefined()
 })
 
+test('an older identical Claude prompt leaves the newer press unconfirmed until its prompt enters', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'add a greeting cli', wait: false, origin: { kind: 'composer' } })
+  await $.turn.complete({
+    answer: 'Plan ready. 1. Node or Python? 2. Call it greet?',
+    durationMs: 5,
+    isAborted: false,
+    turnId: 't1',
+    reason: 'answer',
+  })
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  submitAnswer = 'hold'
+  await pane.press({ key: 'explain-i1-key' })
+  await clock.advance(PRESS_GUARD_MS)
+  await pane.press({ key: 'explain-i1-key' })
+  await clock.settle()
+  expect(held).toHaveLength(2)
+  expect(held[0]?.text).toBe(held[1]?.text)
+
+  await storePrompt($, held.shift()!)
+  await clock.settle()
+  expect(await pane.find({ text: /Delivery\s+unconfirmed:\s+Explain/ })).toBeDefined()
+  expect(await pane.find({ text: /✓\sExplained/ })).toBeUndefined()
+
+  await storePrompt($, held.shift()!)
+  await clock.settle()
+  expect(await pane.find({ text: /Explaining…/ })).toBeDefined()
+  expect(await pane.find({ text: /Delivery unconfirmed/ })).toBeUndefined()
+})
+
+test('a refused newer Claude send replaces ambiguity with Not sent after the older prompt enters', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'add a greeting cli', wait: false, origin: { kind: 'composer' } })
+  await $.turn.complete({
+    answer: 'Plan ready. 1. Node or Python? 2. Call it greet?',
+    durationMs: 5,
+    isAborted: false,
+    turnId: 't1',
+    reason: 'answer',
+  })
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  submitAnswer = 'hold'
+  await pane.press({ key: 'explain-i1-key' })
+  await clock.advance(PRESS_GUARD_MS)
+  submitAnswer = { drop: 'a hook refused it', beforeDrop: () => storePrompt($, held.shift()!) }
+  await pane.press({ key: 'explain-i1-key' })
+  await clock.settle()
+
+  expect(await pane.find({ text: /Not\s+sent:\s+a hook refused it/ })).toBeDefined()
+  expect(await pane.find({ text: /Delivery\s+unconfirmed/ })).toBeUndefined()
+})
+
+test('a uniquely rewritten Claude prompt is confirmed when its row enters before submit returns', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'add a greeting cli', wait: false, origin: { kind: 'composer' } })
+  await $.turn.complete({
+    answer: 'Plan ready. 1. Node or Python? 2. Call it greet?',
+    durationMs: 5,
+    isAborted: false,
+    turnId: 't1',
+    reason: 'answer',
+  })
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  submitAnswer = { rewrite: 'Rewritten prompt' }
+  await pane.press({ key: 'explain-i1-key' })
+  await clock.settle()
+
+  expect(await pane.find({ text: /Explaining…/ })).toBeDefined()
+  expect(await pane.find({ text: /Delivery\s+unconfirmed/ })).toBeUndefined()
+})
+
+test('two Claude sends rewritten to the same text keep the second unconfirmed after one arrival', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'add a greeting cli', wait: false, origin: { kind: 'composer' } })
+  await $.turn.complete({
+    answer: 'Plan ready. 1. Node or Python? 2. Call it greet?',
+    durationMs: 5,
+    isAborted: false,
+    turnId: 't1',
+    reason: 'answer',
+  })
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  submitAnswer = { rewrite: 'Same rewritten prompt', hold: true }
+  await pane.press({ key: 'explain-i1-key' })
+  await clock.advance(PRESS_GUARD_MS)
+  submitAnswer = { rewrite: 'Same rewritten prompt' }
+  await pane.press({ key: 'explain-i1-key' })
+  await clock.settle()
+
+  expect(await pane.find({ text: /Delivery\s+unconfirmed:\s+Explain/ })).toBeDefined()
+  await arrive($)
+  await clock.settle()
+  expect(await pane.find({ text: /Explaining…/ })).toBeDefined()
+})
+
+test('an older Claude send with no saved receipt cannot acknowledge a new identical press after reload', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  let clearSent = false
+  on('state.set', { plugin: 'inbox', key: 'sent' } as const, ($, e, next) => {
+    if (!clearSent) return next(e)
+    clearSent = false
+    return next({ ...e, value: [] })
+  })
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'add a greeting cli', wait: false, origin: { kind: 'composer' } })
+  await $.turn.complete({
+    answer: 'Plan ready. 1. Node or Python? 2. Call it greet?',
+    durationMs: 5,
+    isAborted: false,
+    turnId: 't1',
+    reason: 'answer',
+  })
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  submitAnswer = 'hold'
+  await pane.press({ key: 'explain-i1-key' })
+  await clock.settle()
+  clearSent = true
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await clock.advance(PRESS_GUARD_MS)
+  await pane.press({ key: 'explain-i1-key' })
+  await clock.settle()
+  expect(held).toHaveLength(2)
+
+  await storePrompt($, held.shift()!)
+  await clock.settle()
+  expect(await pane.find({ text: /Delivery\s+unconfirmed:\s+Explain/ })).toBeDefined()
+  expect(await pane.find({ text: /✓\sExplained/ })).toBeUndefined()
+
+  await storePrompt($, held.shift()!)
+  await clock.settle()
+  expect(await pane.find({ text: /Delivery\s+unconfirmed:\s+Explain/ })).toBeDefined()
+})
+
 test('Claude closes an item or finding that no longer applies, by the id it reads beside the prompt', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])
@@ -1373,12 +1611,21 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   await clock.settle()
   await clock.advance(QUEUED_AFTER_MS)
   expect(await pane.find({ text: /^\u2007·\sQueued:\sAddress$/ })).toBeDefined()
+  expect(await pane.find({ key: 'address-T1-key' })).toBeUndefined()
+  await pane.press({ key: 'title-acme/greet#12 thread T1' })
+  await clock.advance(PRESS_GUARD_MS)
+  await pane.press({ key: 'address-T1-key' })
+  await clock.settle()
+  await storePrompt($, held.shift()!)
+  await clock.settle()
+  expect(await pane.find({ text: /Delivery\s+unconfirmed:\s+Address/ })).toBeDefined()
+  expect((await pane.find({ key: 'select-acme/greet#12 thread T1' }))?.props.label).toBe('◦')
+  expect(await pane.find({ text: /✓\sAddress/ })).toBeUndefined()
   await arrive($)
   await clock.settle()
   expect(await pane.find({ text: /^\u2007·\sAddressed$/ })).toBeDefined()
 
-  expect(await pane.find({ key: 'address-T1-key' })).toBeUndefined()
-  await pane.press({ key: 'title-acme/greet#12 thread T1' })
+  expect(await pane.find({ key: 'address-T1-key' })).toBeDefined()
   await clock.advance(PRESS_GUARD_MS)
   expect((await pane.find({ key: 'address-T1-key' }))?.props.label).toBe('Address again')
   await pane.press({ key: 'open-T1' })
@@ -1622,6 +1869,46 @@ test('a stop and an open permission prompt lead the sidebar line until they clea
   expect(await pane.find({ text: /Stopped/ })).toBeUndefined()
 })
 
+test('a delayed Resume refusal belongs only to the stop and conversation that sent it', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  const band = await $.ui.mount({ plugin: 'inbox', surface: 'terminal', ...BAND })
+
+  const holdResume = async (reason: string) => {
+    let entered!: () => void
+    let release!: () => void
+    const inSubmit = new Promise<void>(resolve => (entered = resolve))
+    const held = new Promise<void>(resolve => (release = resolve))
+    submitAnswer = {
+      drop: reason,
+      beforeDrop: async () => {
+        entered()
+        await held
+      },
+    }
+    await band.press({ key: 'resume' })
+    await inSubmit
+    return release
+  }
+
+  await $.classic.StopFailure({ error: 'server_error' } as never)
+  const releaseFirst = await holdResume('first refusal')
+  await $.classic.StopFailure({ error: 'server_error' } as never)
+  releaseFirst()
+  await clock.settle()
+  expect(await band.find({ text: /first refusal/ })).toBeUndefined()
+
+  const releaseSecond = await holdResume('old session refusal')
+  await $.session.end({ reason: 'clear', sessionId: 'session-1', resume: { id: 'session-1' } })
+  await $.classic.SessionStart({ source: 'clear', session_id: 'session-2' })
+  await $.classic.StopFailure({ error: 'server_error' } as never)
+  releaseSecond()
+  await clock.settle()
+  expect(await band.find({ text: /old session refusal/ })).toBeUndefined()
+  expect(await band.find({ key: 'resume' })).toBeDefined()
+})
+
 test('a reply another Stop hook sends Claude back from reaches the per-turn call, and the inbox sends back none itself', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   const prompts: string[] = []
@@ -1845,6 +2132,38 @@ test('/clear and /resume switch the inbox to the other conversation, and each ke
   expect(await pane.find({ text: /Use Node or Python\?/ })).toBeUndefined()
 })
 
+test('a ledger update held during clear cannot write its old question into the new conversation', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  ledgerReply = 'GOAL: Old work\nNOW: Waiting\nNEW: decide | 1 | Old question? | Yes / No | Yes'
+  let entered!: () => void
+  let release!: () => void
+  const inWrite = new Promise<void>(resolve => (entered = resolve))
+  const held = new Promise<void>(resolve => (release = resolve))
+  let didHold = false
+  on('state.set', { plugin: 'inbox', key: 'ledger' } as const, async ($, e, next) => {
+    if (!didHold && e.value.card?.goal === 'Old work') {
+      didHold = true
+      entered()
+      await held
+    }
+    return next(e)
+  })
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'old request', wait: false, origin: { kind: 'composer' } })
+  await $.turn.complete({ answer: 'Old reply.', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+  await inWrite
+  await $.session.end({ reason: 'clear', sessionId: 'session-1', resume: { id: 'session-1' } })
+  await $.classic.SessionStart({ source: 'clear', session_id: 'session-2' })
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: /Old question/ })).toBeUndefined()
+  release()
+  await clock.settle()
+  expect(await pane.find({ text: /Old question/ })).toBeUndefined()
+  expect(stored.has('s:session-2')).toBe(false)
+})
+
 const SAVED_SESSION = {
   savedAt: 900_000,
   ledger: {
@@ -1871,6 +2190,229 @@ const SAVED_SESSION = {
     batchTurn: 1,
   },
 }
+
+test('a failed first save keeps the prior saved session intact', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const prior = JSON.stringify(SAVED_SESSION)
+  stored.set('s:session-1', prior)
+  storeSetRefusal = 'store unavailable'
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'new request', wait: false, origin: { kind: 'composer' } })
+  await $.turn.complete({ answer: 'New reply.', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.settle()
+  expect(stored.get('s:session-1')).toBe(prior)
+})
+
+test('resuming a session waits for its in-flight save before loading it', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'old request', wait: false, origin: { kind: 'composer' } })
+  await $.turn.complete({ answer: 'Old reply.', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.settle()
+
+  let entered!: () => void
+  let release!: () => void
+  const inSet = new Promise<void>(resolve => (entered = resolve))
+  const held = new Promise<void>(resolve => (release = resolve))
+  storeSetHold = async key => {
+    if (key !== 's:session-1') return
+    storeSetHold = undefined
+    entered()
+    await held
+  }
+  const adding = $.tool.call({
+    tool: 'mcp__inbox__record_finding',
+    kind: 'issue',
+    title: 'New finding',
+    detail: 'New detail.',
+  })
+  await inSet
+  await $.session.end({ reason: 'clear', sessionId: 'session-1', resume: { id: 'session-1' } })
+  await $.classic.SessionStart({ source: 'clear', session_id: 'session-2' })
+  await $.session.end({ reason: 'resume', sessionId: 'session-2', resume: { id: 'session-2' } })
+  let loaded = false
+  const loading = $.classic.SessionStart({ source: 'resume', session_id: 'session-1' }).then(() => {
+    loaded = true
+  })
+  await clock.settle()
+  expect(loaded).toBe(false)
+  release()
+  await Promise.all([loading, adding])
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  await pane.press({ key: 'tab-findings' })
+  expect(await pane.find({ text: /New finding/ })).toBeDefined()
+})
+
+test('session pruning uses saved time and retains records whose age cannot be read', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  stored.set('s:unknown', JSON.stringify({ savedAt: 'unknown', ledger: SAVED_SESSION.ledger }))
+  for (let n = 3; n <= 40; n++) stored.set(`s:prior-${n}`, JSON.stringify({ savedAt: n, ledger: SAVED_SESSION.ledger }))
+  stored.set('s:prior-1', JSON.stringify({ savedAt: 1, ledger: SAVED_SESSION.ledger }))
+  stored.set('s:prior-2', JSON.stringify({ savedAt: 2, ledger: SAVED_SESSION.ledger }))
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'new request', wait: false, origin: { kind: 'composer' } })
+  await $.turn.complete({ answer: 'New reply.', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.settle()
+  expect(stored.has('s:prior-1')).toBe(false)
+  expect(stored.has('s:prior-2')).toBe(false)
+  expect(stored.has('s:prior-3')).toBe(true)
+  expect(stored.has('s:unknown')).toBe(true)
+  expect(stored.has('s:session-1')).toBe(true)
+})
+
+test('a ledger write committed before clear still saves to its original session', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  let entered!: () => void
+  let release!: () => void
+  const afterWrite = new Promise<void>(resolve => (entered = resolve))
+  const held = new Promise<void>(resolve => (release = resolve))
+  on('state.set', { plugin: 'inbox', key: 'ledger' } as const, async ($, e, next) => {
+    const result = await next(e)
+    if (e.value.findings.some((f: { title: string }) => f.title === 'Late finding')) {
+      entered()
+      await held
+    }
+    return result
+  })
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'old request', wait: false, origin: { kind: 'composer' } })
+  await $.turn.complete({ answer: 'Old reply.', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.settle()
+  const adding = $.tool.call({
+    tool: 'mcp__inbox__record_finding',
+    kind: 'issue',
+    title: 'Late finding',
+    detail: 'Late detail.',
+  })
+  await afterWrite
+  await $.session.end({ reason: 'clear', sessionId: 'session-1', resume: { id: 'session-1' } })
+  await $.classic.SessionStart({ source: 'clear', session_id: 'session-2' })
+  release()
+  await adding
+  await clock.settle()
+  expect(
+    JSON.parse(stored.get('s:session-1') ?? '{}').ledger.findings.map((f: { title: string }) => f.title),
+  ).toContain('Late finding')
+})
+
+test('the latest committed ledger wins when an older write completes afterward', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  let entered!: () => void
+  let release!: () => void
+  const afterWrite = new Promise<void>(resolve => (entered = resolve))
+  const held = new Promise<void>(resolve => (release = resolve))
+  on('state.set', { plugin: 'inbox', key: 'ledger' } as const, async ($, e, next) => {
+    const result = await next(e)
+    const titles = e.value.findings.map((f: { title: string }) => f.title)
+    if (titles.includes('First finding') && !titles.includes('Second finding')) {
+      entered()
+      await held
+    }
+    return result
+  })
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  const first = $.tool.call({
+    tool: 'mcp__inbox__record_finding',
+    kind: 'issue',
+    title: 'First finding',
+    detail: 'First.',
+  })
+  await afterWrite
+  await $.tool.call({
+    tool: 'mcp__inbox__record_finding',
+    kind: 'issue',
+    title: 'Second finding',
+    detail: 'Second.',
+  })
+  release()
+  await first
+  await clock.settle()
+  expect(JSON.parse(stored.get('s:session-1') ?? '{}').ledger.findings.map((f: { title: string }) => f.title)).toEqual([
+    'First finding',
+    'Second finding',
+  ])
+})
+
+test('a delayed saved-session read cannot replace a newer conversation', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const savedFor = (ask: string) => ({
+    ...SAVED_SESSION,
+    ledger: { ...SAVED_SESSION.ledger, items: [{ ...SAVED_SESSION.ledger.items[0]!, ask }] },
+  })
+  stored.set('s:session-2', JSON.stringify(savedFor('Second session question?')))
+  stored.set('s:session-3', JSON.stringify(savedFor('Third session question?')))
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  let entered!: () => void
+  let release!: () => void
+  const inRead = new Promise<void>(resolve => (entered = resolve))
+  const held = new Promise<void>(resolve => (release = resolve))
+  let heldOnce = false
+  storeHold = async () => {
+    if (!heldOnce) {
+      heldOnce = true
+      entered()
+      await held
+    }
+  }
+  await $.session.end({ reason: 'clear', sessionId: 'session-1', resume: { id: 'session-1' } })
+  const loadingOld = $.classic.SessionStart({ source: 'clear', session_id: 'session-2' })
+  await inRead
+  await $.session.end({ reason: 'resume', sessionId: 'session-2', resume: { id: 'session-2' } })
+  await $.classic.SessionStart({ source: 'resume', session_id: 'session-3' })
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: /Third session question/ })).toBeDefined()
+  release()
+  await loadingOld
+  await clock.settle()
+  expect(await pane.find({ text: /Third session question/ })).toBeDefined()
+  expect(await pane.find({ text: /Second session question/ })).toBeUndefined()
+})
+
+test('a delayed saved-session application cannot poison the next load', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const savedFor = (ask: string) => ({
+    ...SAVED_SESSION,
+    ledger: { ...SAVED_SESSION.ledger, items: [{ ...SAVED_SESSION.ledger.items[0]!, ask }] },
+  })
+  stored.set('s:session-2', JSON.stringify(savedFor('Second session question?')))
+  stored.set('s:session-3', JSON.stringify(savedFor('Third session question?')))
+  let entered!: () => void
+  let release!: () => void
+  const afterWrite = new Promise<void>(resolve => (entered = resolve))
+  const held = new Promise<void>(resolve => (release = resolve))
+  let holdNext = false
+  on('state.set', { plugin: 'inbox', key: 'unreadable' } as const, async ($, e, next) => {
+    const result = await next(e)
+    if (holdNext) {
+      holdNext = false
+      entered()
+      await held
+    }
+    return result
+  })
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.session.end({ reason: 'clear', sessionId: 'session-1', resume: { id: 'session-1' } })
+  holdNext = true
+  const loadingOld = $.classic.SessionStart({ source: 'clear', session_id: 'session-2' })
+  await afterWrite
+  await $.session.end({ reason: 'resume', sessionId: 'session-2', resume: { id: 'session-2' } })
+  const loadingNew = $.classic.SessionStart({ source: 'resume', session_id: 'session-3' })
+  release()
+  await Promise.all([loadingOld, loadingNew])
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: /Third session question/ })).toBeDefined()
+  expect(await pane.find({ text: /Second session question/ })).toBeUndefined()
+})
 
 test('tools the engine refuses turn the status line red on every tab, and the mod still loads the conversation', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
@@ -1952,16 +2494,98 @@ test('a saved session the store cannot read shows as unreadable, not empty, unti
   expect(stored.get('s:session-1')).toContain('Use Node or Python?')
 })
 
-test('a headless run does nothing', async ($, on) => {
-  const prompts: string[] = []
-  mock.clock(on, { now: 1 })
-  world($, on, prompts)
+for (const origin of [{ kind: 'sdk' }, { kind: 'plugin', name: 'test-plugin' }] satisfies PromptOrigin[]) {
+  test(`a headless run stays inactive when ${origin.kind} invokes the inbox command`, async ($, on) => {
+    const prompts: string[] = []
+    mock.clock(on, { now: 1 })
+    world($, on, prompts)
+
+    await $.session.start({ cwd: '/tmp/project', surface: null, isInteractive: false })
+    await $.command.run({
+      command: 'inbox',
+      args: 'demo',
+      origin,
+      presentation: { isFullscreen: false, columns: 80 },
+    })
+    await $.prompt.submit({ text: 'hi', wait: false, origin: { kind: 'sdk' } })
+    await $.turn.complete({ answer: 'hello', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+
+    expect(panesOpened).toEqual([])
+    expect(stored.size).toBe(0)
+    expect(prompts).toEqual([])
+  })
+}
+
+test('the first inbox command loads saved rows before desktop attaches', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  stored.set('s:session-1', JSON.stringify(SAVED_SESSION))
 
   await $.session.start({ cwd: '/tmp/project', surface: null, isInteractive: false })
-  await $.prompt.submit({ text: 'hi', wait: false, origin: { kind: 'sdk' } })
-  await $.turn.complete({ answer: 'hello', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+  await $.command.run({
+    command: 'inbox',
+    args: '',
+    origin: { kind: 'composer' },
+    presentation: { isFullscreen: false, columns: 80 },
+  })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await pane.find({ text: /Use Node or Python\?/ })).toBeDefined()
+  await $.session.attach({ surface: 'desktop', clientId: 'desktop:default' })
+  await clock.settle()
+  expect(await pane.find({ text: /Use Node or Python\?/ })).toBeDefined()
+})
 
-  expect(prompts.length).toBe(0)
+for (const activatingEvent of ['start', 'attach'] as const) {
+  test(`an inbox command waits for the saved rows loading during desktop ${activatingEvent}`, async ($, on) => {
+    const clock = mock.clock(on, { now: 1_000_000 })
+    world($, on, [])
+    stored.set('s:session-1', JSON.stringify(SAVED_SESSION))
+    let release = () => {}
+    const reading = new Promise<void>(r => (release = r))
+    let didRead = () => {}
+    const readStarted = new Promise<void>(r => (didRead = r))
+    storeHold = () => {
+      didRead()
+      return reading
+    }
+
+    if (activatingEvent === 'attach')
+      await $.session.start({ cwd: '/tmp/project', surface: null, isInteractive: false })
+    else surfaces = ['desktop']
+    const activation =
+      activatingEvent === 'start'
+        ? $.session.start({ cwd: '/tmp/project', surface: null, isInteractive: false })
+        : $.session.attach({ surface: 'desktop', clientId: 'desktop:default' })
+    await readStarted
+    const command = $.command.run({ command: 'inbox', args: '' } as never)
+    const attach = $.session.attach({ surface: 'desktop', clientId: 'desktop:other' })
+    await clock.settle()
+    expect(panesOpened).toEqual([])
+    release()
+    await Promise.all([activation, command, attach])
+    const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+    expect(await pane.find({ text: /Use Node or Python\?/ })).toBeDefined()
+    expect(
+      (await $.prompt.submit({ text: 'continue', wait: false, origin: { kind: 'composer' } })).context?.join('\n'),
+    ).toContain('Use Node or Python?')
+  })
+}
+
+test('a refused inbox command registration leaves normal desktop startup and saved rows available', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  commandRefusal = 'blocked by managed settings'
+  surfaces = ['desktop']
+  stored.set('s:session-1', JSON.stringify(SAVED_SESSION))
+
+  expect(await $.session.start({ cwd: '/tmp/project', surface: null, isInteractive: false })).toEqual({
+    cwd: '/tmp/project',
+  })
+  const band = await $.ui.mount({ plugin: 'inbox', surface: 'desktop', ...BAND })
+  expect(await band.find({ text: /Needs you 1/ })).toBeDefined()
+  expect(
+    (await $.prompt.submit({ text: 'continue', wait: false, origin: { kind: 'composer' } })).context?.join('\n'),
+  ).toContain('Use Node or Python?')
 })
 
 for (const isAttachedFirst of [true, false]) {
@@ -1988,6 +2612,26 @@ for (const isAttachedFirst of [true, false]) {
     expect(await band.find({ text: /Needs you 2/ })).toBeDefined()
   })
 }
+
+test('the desktop task keeps help before Done and puts Try again first when its send fails', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  ledgerReply = ['NEW: do | - | Run the load script | - | -', 'HELP: new 1 | run | ./load.sh | load script'].join('\n')
+  surfaces = ['desktop']
+  await $.session.start({ cwd: '/tmp/project', surface: null, isInteractive: false })
+  await $.prompt.submit({ text: 'load the data', wait: false, origin: { kind: 'composer' } })
+  await $.turn.complete({ answer: 'Run ./load.sh.', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.settle()
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 69 } })
+  const actions = async () =>
+    (await pane.findAll({ type: 'Button' })).filter(b => /^(retry|help|done)-i1/.test(b.key ?? '')).map(b => b.key)
+  expect(await actions()).toEqual(['help-i1-0', 'done-i1'])
+  submitAnswer = { drop: 'blocked' }
+  await pane.press({ key: 'help-i1-0' })
+  await clock.settle()
+  expect(await actions()).toEqual(['retry-i1', 'help-i1-0', 'done-i1'])
+  expect(await pane.find({ text: /Not sent/ })).toBeDefined()
+})
 
 test('the desktop pane draws each action as one button and the tabs as one click region, with no keys and no close button of its own', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })

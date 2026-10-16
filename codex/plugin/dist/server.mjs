@@ -1,15 +1,27 @@
 // Built by codex/build.mjs from codex/src and hooks/. Do not edit.
 
 // src/server-main.ts
-import { stat as stat2 } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import { dirname as dirname2, join as join2 } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 // src/state.ts
-import { mkdir, readFile, rename, rmdir, stat, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  readlink,
+  realpath,
+  rename,
+  rmdir,
+  symlink,
+  unlink,
+  writeFile
+} from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 function dataDir(env, pluginRoot) {
   const fromEnv = env.INBOX_DATA || env.PLUGIN_DATA;
   if (fromEnv) return fromEnv;
@@ -33,7 +45,7 @@ var here = dirname2(fileURLToPath(import.meta.url));
 var dir = dataDir(process.env, dirname2(here));
 async function handlerPath() {
   const server = (await devBuild(dir))?.server;
-  const isBuilt = server ? await stat2(server).then(
+  const isBuilt = server ? await stat(server).then(
     () => true,
     () => false
   ) : false;
@@ -59,7 +71,7 @@ function load(url, path) {
 }
 async function currentHandler() {
   const path = await handlerPath();
-  const { mtimeMs } = await stat2(path).catch(() => ({ mtimeMs: -1 }));
+  const { mtimeMs } = await stat(path).catch(() => ({ mtimeMs: -1 }));
   const key = `${pathToFileURL(path).href}?v=${mtimeMs}`;
   if (current?.key !== key) current = { key, handle: load(key, path) };
   const { handle } = current;

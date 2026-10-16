@@ -10,10 +10,7 @@
     "jsx": "react-jsx",
     "jsxImportSource": "preact",
     "skipLibCheck": true,
-    "types": ["node"],
-    "paths": {
-      "claude-code": ["../.claude-plugin/types/claude-code"]
-    }
+    "types": ["node"]
   },
   "include": ["src", "tests", "../hooks/ledger.ts", "../evals"]
 }

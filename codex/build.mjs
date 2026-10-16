@@ -213,6 +213,7 @@ if (mode === '--dev') {
     ...common,
     absWorkingDir: here,
     entryPoints: tests.map(f => `tests/${f}`),
+    packages: 'external',
     outdir: 'test-dist',
     outExtension: { '.js': '.mjs' },
   })

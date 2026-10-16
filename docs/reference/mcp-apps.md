@@ -449,7 +449,21 @@ These are guidelines. Whether Claude enforces them is unknown.
 
 ## The inbox's Codex tab against the spec
 
-Code at `55ab122`.
+**Current reload behavior, checked on 2026-10-16.** The tab preserves the host
+Document and body when loading a new page. A candidate initializes against a
+detached root before it replaces the working UI. Failed startup keeps the old
+page and offers Retry. Active presses defer activation; disposal removes only
+that instance's timers, listeners and animations. Browser checks retain host hooks and the
+exact draft, initialize the new page once, and stop old polls. Numeric request
+IDs advance across replacements. Initialization has a nine-second timeout and
+a retry. The repaired native page retains its attachment, focus and exact draft
+across two page replacements in one tab. Show demo, Hide demo and Dismiss/Undo
+also pass. [The implementation record](../plans/platform-architecture-audit.md)
+separates this native sample check from controlled transport tests.
+
+The table below is the historical comparison at `55ab122`. Its polling and
+request-timeout descriptions do not describe the current tab. Current reads
+and presses have timeouts, and page replacement retires the old instance.
 
 | Area | What the code does | What the spec or SDK expects | Effect |
 | --- | --- | --- | --- |

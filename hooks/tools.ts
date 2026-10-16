@@ -2,7 +2,7 @@
 // except for where the texts say the person sees the result.
 
 import { addFinding, closeByAgent } from './ledger'
-import type { Host } from './ledger'
+import type { Host } from './model-text'
 import type { Ledger } from '../types'
 
 export const FINDING_SCHEMA = {

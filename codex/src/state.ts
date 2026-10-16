@@ -2,12 +2,28 @@
 // folder. Hooks and MCP server processes are short-lived and run at once, so
 // every change reads, changes and writes the file under a lock.
 
-import { mkdir, readFile, rename, rmdir, stat, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { createHash, randomUUID } from 'node:crypto'
+import {
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  readlink,
+  realpath,
+  rename,
+  rmdir,
+  symlink,
+  unlink,
+  writeFile,
+} from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 
-import { EMPTY, TOLD_NOTHING, upgradeLedger } from '../../hooks/ledger'
-import type { Exchange, Press, Told } from '../../hooks/ledger'
+import { EMPTY, upgradeLedger } from '../../hooks/ledger'
+import type { Exchange, Press } from '../../hooks/ledger'
+import { TOLD_NOTHING } from '../../hooks/model-text'
+import type { Told } from '../../hooks/model-text'
 import { upgradeLastActions } from '../../hooks/presses'
 import type { LastAction, Ledger, PrViews } from '../../types'
 
@@ -41,11 +57,21 @@ export type SessionState = {
    */
   pending: { ex: Exchange; turnsStarted: number; failed?: true }[]
   /**
-   * Messages the tab sent with `codex queue`, so UserPromptSubmit can tell them
-   * from the person's own words, and mark the press on `row` arrived. `queuedId`
-   * is the id `codex queue` gave the message. Both are null on one an earlier build saved.
+   * Queue attempts saved before dispatch. UserPromptSubmit can match an accepted
+   * record by text; an uncertain one stays to block false matches with later presses.
    */
-  sent: { text: string; press: Press | null; at: number; row: string | null; queuedId: string | null }[]
+  sent: {
+    text: string
+    press: Press | null
+    at: number
+    row: string | null
+    queuedId: string | null
+    /** The row press's time in milliseconds; null for older records or messages without a row. */
+    pressedAt: number | null
+    /** The local press identity; null for older records or messages without a row. */
+    deliveryId: string | null
+    phase?: 'attempting' | 'accepted' | 'uncertain'
+  }[]
   lastActions: Record<string, LastAction>
   /** The PRs tab's data: each PR's latest view and the current branch's PR. `isFetching` is always false here; the server knows what runs. */
   prViews: PrViews
@@ -153,7 +179,8 @@ export function statePath(dir: string, sessionId: string): string {
 
 /** State an earlier build saved, with the keys it kept for session checks and the claim send-back. */
 type Saved = Omit<Partial<SessionState>, 'turn' | 'pending' | 'sent'> & {
-  sent?: (Omit<SessionState['sent'][number], 'row' | 'queuedId'> & Partial<SessionState['sent'][number]>)[]
+  sent?: (Omit<SessionState['sent'][number], 'row' | 'queuedId' | 'pressedAt' | 'deliveryId'> &
+    Partial<SessionState['sent'][number]>)[]
   checks?: unknown
   snapshots?: unknown
   recordedRuns?: unknown
@@ -164,6 +191,8 @@ type Saved = Omit<Partial<SessionState>, 'turn' | 'pending' | 'sent'> & {
 
 /** State saved by an earlier build, with any field it lacks, and without the keys it no longer has. */
 function upgraded(saved: Saved, sessionId: string): SessionState {
+  if (saved.version !== undefined && saved.version !== 1)
+    throw new Error(`Unsupported inbox state version: ${saved.version}`)
   const base = emptyState(sessionId)
   const { checks: _checks, snapshots: _snapshots, recordedRuns: _runs, top: _top, ...kept } = saved
   const { sentBack: _sentBack, ...turn } = saved.turn ?? {}
@@ -181,7 +210,14 @@ function upgraded(saved: Saved, sessionId: string): SessionState {
     presence: { ...base.presence, ...saved.presence },
     pending: (saved.pending ?? []).map(({ ex: { checks: _exChecks, ...ex }, ...p }) => ({ ...p, ex })),
     // A message sent before the server kept its row changes no row when it arrives.
-    sent: (saved.sent ?? []).map(x => ({ ...x, row: x.row ?? null, queuedId: x.queuedId ?? null })),
+    sent: (saved.sent ?? []).map(x => ({
+      ...x,
+      row: x.row ?? null,
+      queuedId: x.queuedId ?? null,
+      pressedAt: x.pressedAt ?? null,
+      deliveryId: x.deliveryId ?? null,
+      phase: x.phase ?? 'accepted',
+    })),
     lastActions: upgradeLastActions(saved.lastActions ?? {}),
     prViews: { ...NO_PRS, ...saved.prViews, isFetching: false },
     // A file saved before the hooks kept this record came from hooks that ran, so it reads as heard.
@@ -209,56 +245,179 @@ export async function readState(dir: string, sessionId: string): Promise<Session
 }
 
 const LOCK_WAIT_MS = 10_000
-/** A lock older than this was left by a process that died holding it. */
-const LOCK_STALE_MS = 15_000
-
+const LOCK_CHILD = 'held'
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+class LockBusyError extends Error {}
 
-/** Runs `fn` holding the lock folder at `path`, which mkdir creates atomically. */
-export async function withLock<T>(path: string, fn: () => Promise<T>, waitMs = LOCK_WAIT_MS): Promise<T> {
-  await mkdir(dirname(path), { recursive: true })
-  const until = Date.now() + waitMs
-  for (;;) {
-    try {
-      await mkdir(path)
-      break
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
-      const age = await stat(path).then(
-        s => Date.now() - s.mtimeMs,
-        () => 0,
-      )
-      if (age > LOCK_STALE_MS) await rmdir(path).catch(() => undefined)
-      else if (Date.now() > until) throw new Error(`Timed out waiting for ${path}`)
-      else await sleep(15)
-    }
-  }
+type LockOwner = { pid: number; identity: string | null }
+let bootSession: string | null = null
+let ownIdentity: string | null = null
+
+function lockOwner(suffix: string): LockOwner | null {
+  const match = /^(\d+)-[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}(?:-([a-f\d]{32}))?$/.exec(suffix)
+  const pid = Number(match?.[1])
+
+  return Number.isSafeInteger(pid) && pid > 0 ? { pid, identity: match?.[2] ?? null } : null
+}
+
+function processIdentity(pid: number): string | null {
+  if (pid === process.pid && ownIdentity) return ownIdentity
   try {
-    return await fn()
-  } finally {
-    await rmdir(path).catch(() => undefined)
+    const options = {
+      encoding: 'utf8' as const,
+      env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' },
+      stdio: 'pipe' as const,
+      timeout: 1_000,
+    }
+    const boot = bootSession ?? execFileSync('/usr/sbin/sysctl', ['-n', 'kern.bootsessionuuid'], options).trim()
+    const started = execFileSync('/bin/ps', ['-p', String(pid), '-o', 'lstart='], options).trim()
+    if (!boot || !started) return null
+    bootSession = boot
+    const identity = createHash('sha256').update(boot).update('\0').update(started).digest('hex').slice(0, 32)
+    if (pid === process.pid) ownIdentity = identity
+    return identity
+  } catch {
+    return null
   }
 }
 
-/** Changes a session's state under its lock, and returns the state written. */
+function isLive(owner: LockOwner, generation: string, observedLiveAt: Map<string, number>): boolean {
+  try {
+    process.kill(owner.pid, 0)
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code !== 'ESRCH'
+  }
+  if (owner.identity === null) return true
+  const checkedAt = observedLiveAt.get(generation)
+  if (checkedAt !== undefined && Date.now() - checkedAt < 250) return true
+  const identity = processIdentity(owner.pid)
+  if (identity !== null && identity !== owner.identity) return false
+  observedLiveAt.set(generation, Date.now())
+  return true
+}
+
+async function lockTarget(path: string): Promise<string | null> {
+  return readlink(path).catch((err: NodeJS.ErrnoException) => {
+    if (err.code === 'ENOENT' || err.code === 'EINVAL') return null
+    throw err
+  })
+}
+
+async function removeOwnedLock(path: string, target: string, owner: string, source: string): Promise<boolean> {
+  const identity = processIdentity(process.pid)
+  const claimed = `${owner}.recover-${process.pid}-${randomUUID()}${identity ? `-${identity}` : ''}`
+  const isDirectory = await lstat(source).then(
+    s => s.isDirectory(),
+    (err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') return false
+      throw err
+    },
+  )
+  if (!isDirectory) return false
+  try {
+    await rename(source, claimed)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw err
+  }
+  if ((await lockTarget(path)) === target) await unlink(path)
+  await rmdir(claimed)
+
+  return true
+}
+
+async function recoverLock(path: string, observedLiveAt: Map<string, number>): Promise<boolean> {
+  const target = await lockTarget(path)
+  if (!target || !isAbsolute(target)) return false
+  const owner = basename(target) === LOCK_CHILD ? dirname(target) : target
+  if (target !== owner && target !== join(owner, LOCK_CHILD)) return false
+  const prefix = `${basename(path)}.owner-`
+  if (!basename(owner).startsWith(prefix)) return false
+  if ((await realpath(dirname(owner)).catch(() => null)) !== dirname(path)) return false
+  const holder = lockOwner(basename(owner).slice(prefix.length))
+  if (!holder || isLive(holder, owner, observedLiveAt)) return false
+  if (await removeOwnedLock(path, target, owner, owner)) return true
+  const recoverPrefix = `${basename(owner)}.recover-`
+  const entries = await readdir(dirname(path))
+  for (const entry of entries) {
+    if (!entry.startsWith(recoverPrefix)) continue
+    const recovering = lockOwner(entry.slice(recoverPrefix.length))
+    if (!recovering || isLive(recovering, entry, observedLiveAt)) continue
+    if (await removeOwnedLock(path, target, owner, join(dirname(path), entry))) return true
+  }
+
+  return false
+}
+
+/** Runs `fn` under an owned lock; ownerless locks from older builds time out rather than risk a live writer. */
+export async function withLock<T>(path: string, fn: () => Promise<T>, waitMs = LOCK_WAIT_MS): Promise<T> {
+  path = resolve(path)
+  await mkdir(dirname(path), { recursive: true })
+  path = join(await realpath(dirname(path)), basename(path))
+  const identity = processIdentity(process.pid)
+  const owner = `${path}.owner-${process.pid}-${randomUUID()}${identity ? `-${identity}` : ''}`
+  const target = join(owner, LOCK_CHILD)
+  await mkdir(owner)
+  const until = Date.now() + waitMs
+  const observedLiveAt = new Map<string, number>()
+  try {
+    for (;;) {
+      try {
+        await symlink(target, path)
+        break
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
+        if (await recoverLock(path, observedLiveAt)) continue
+        if (Date.now() > until) throw new LockBusyError(`Timed out waiting for ${path}`)
+        await sleep(15)
+      }
+    }
+    return await fn()
+  } finally {
+    await removeOwnedLock(path, target, owner, owner)
+  }
+}
+
+export async function tryWithLock<T>(
+  path: string,
+  fn: () => Promise<T>,
+): Promise<{ acquired: true; value: T } | { acquired: false }> {
+  let acquired = false
+  try {
+    return {
+      acquired: true,
+      value: await withLock(
+        path,
+        () => {
+          acquired = true
+          return fn()
+        },
+        0,
+      ),
+    }
+  } catch (err) {
+    if (!acquired && err instanceof LockBusyError) return { acquired: false }
+    throw err
+  }
+}
+
+/** Changes a session under its lock. `checkpoint` can save an intermediate state before an external effect. */
 export async function updateState(
   dir: string,
   sessionId: string,
-  change: (s: SessionState) => SessionState | Promise<SessionState>,
+  change: (s: SessionState, checkpoint: (state: SessionState) => Promise<void>) => SessionState | Promise<SessionState>,
 ): Promise<SessionState> {
   const path = statePath(dir, sessionId)
 
   return withLock(`${path}.lock`, async () => {
-    // A file this build cannot read, as one a newer build wrote, is kept beside
-    // it for recovery, and the session starts over instead of failing every write.
-    const current = await readState(dir, sessionId).catch(async () => {
-      await rename(path, `${path}.unreadable-${Date.now()}`)
-      return emptyState(sessionId)
-    })
-    const next = await change(current)
-    const tmp = `${path}.${process.pid}.tmp`
-    await writeFile(tmp, JSON.stringify(next))
-    await rename(tmp, path)
+    const current = await readState(dir, sessionId)
+    const checkpoint = async (state: SessionState) => {
+      const tmp = `${path}.${process.pid}.tmp`
+      await writeFile(tmp, JSON.stringify(state))
+      await rename(tmp, path)
+    }
+    const next = await change(current, checkpoint)
+    await checkpoint(next)
 
     return next
   })

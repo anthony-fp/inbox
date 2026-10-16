@@ -1,12 +1,17 @@
 // Built by codex/build.mjs from codex/src and hooks/. Do not edit.
 
 // src/server-handler.ts
-import { readFile as readFile2, stat as stat3 } from "node:fs/promises";
+import { readFile as readFile2, stat as stat2 } from "node:fs/promises";
 
 // src/server.ts
-import { createHash } from "node:crypto";
+import { createHash as createHash2, randomUUID as randomUUID2 } from "node:crypto";
 import { constants } from "node:fs";
-import { access, stat as stat2 } from "node:fs/promises";
+import { access, stat } from "node:fs/promises";
+
+// ../hooks/text.ts
+function clip(text2, max) {
+  return text2.length <= max ? text2 : text2.slice(0, max) + " \u2026[cut]";
+}
 
 // ../hooks/ledger.ts
 var EMPTY = {
@@ -66,9 +71,6 @@ function howFromOutcome(outcome) {
   if (outcome === "done" || outcome === "you ran it") return "done";
   if (outcome.startsWith(CLOSED_BY_CLAUDE)) return "claude";
   return "update";
-}
-function clip(text2, max) {
-  return text2.length <= max ? text2 : text2.slice(0, max) + " \u2026[cut]";
 }
 var FILLER = /* @__PURE__ */ new Set([
   "the",
@@ -158,31 +160,6 @@ function reopenFinding(ledger, id) {
     closedFindings: ledger.closedFindings.filter((f) => f.id !== id)
   };
 }
-function latestBatch(ledger) {
-  return ledger.batchTurn === 0 ? [] : ledger.items.filter((i) => i.turn === ledger.batchTurn);
-}
-function numberOf(label) {
-  const m = label?.match(/(?:^|[^A-Za-z\d])(?:[QqDd#]\s?)?(\d{1,2})(?!\d)/);
-  return m ? Number(m[1]) : null;
-}
-function answerableBatch(ledger, promptTurn) {
-  return ledger.batchTurn === promptTurn - 1 ? latestBatch(ledger) : [];
-}
-function batchNumbers(batch) {
-  const hasLabels = batch.some((i) => numberOf(i.label) !== null);
-  const byNumber = /* @__PURE__ */ new Map();
-  batch.forEach((item, at) => {
-    const n = hasLabels ? numberOf(item.label) : at + 1;
-    if (n !== null && !byNumber.has(n)) byNumber.set(n, item);
-  });
-  return byNumber;
-}
-function questionNumbers(ledger, promptTurn) {
-  const numbers = /* @__PURE__ */ new Map();
-  for (const [n, item] of batchNumbers(answerableBatch(ledger, promptTurn)))
-    if (item.kind === "question") numbers.set(item.id, n);
-  return numbers;
-}
 function addFinding(ledger, finding) {
   const same = ledger.findings.find((f) => sameAsk(f.title, finding.title)) ?? ledger.items.find((i) => restates(i.ask, finding.title));
   if (same) return { ledger, id: same.id, isAdded: false, expired: null };
@@ -205,13 +182,20 @@ function closedState(d) {
 function isLapsed(d) {
   return closedState(d) !== "handled";
 }
-var TOLD_NOTHING = { inbox: null, closed: [] };
 
 // ../hooks/prs.ts
 var NL = "\n";
 var PR_URL = /https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)/g;
 function prRefs(text2) {
   return [...new Set([...text2.matchAll(PR_URL)].map((m) => `${m[1]}#${m[2]}`))];
+}
+function namedPrs(text2, refs) {
+  const numbers = new Set([...text2.matchAll(/#(\d+)\b/g)].map((m) => m[1]));
+  const known = [...new Set(refs)];
+  return [...numbers].flatMap((n) => {
+    const named = known.filter((ref) => parseRef(ref).number === n);
+    return named.length === 1 ? named : [];
+  });
 }
 function parseRef(ref) {
   const [repo = "", number = ""] = ref.split("#");
@@ -451,6 +435,15 @@ function steps(helps) {
     (h) => h === open ? { label: clipLabel(`Copy ${copy.name ?? "snippet"} and open ${baseName(open.path)}`, 48), step: [copy, open] } : { label: helpLabel(h), step: [h] }
   );
 }
+function prSteps(item, tracked) {
+  const urls = new Map(tracked.map((pr) => [pr.ref, pr.url]));
+  const links = namedPrs(item.ask, [...urls.keys()]).map((ref) => {
+    const { repo, number } = parseRef(ref);
+    const url = urls.get(ref) ?? `https://github.com/${repo}/pull/${number}`;
+    return { kind: "link", url, name: `PR #${number}` };
+  }).filter((l) => !item.helps.some((h) => h.kind === "link" && h.url === l.url));
+  return links.length === 0 ? [] : [{ label: links.length === 1 ? helpLabel(links[0]) : `Open ${links.length} PRs`, step: links }];
+}
 function stepsOf(item, extraSteps) {
   return [...steps(item.helps), ...extraSteps];
 }
@@ -487,6 +480,12 @@ function pressText(p) {
 }
 function capitalized(text2) {
   return text2.charAt(0).toUpperCase() + text2.slice(1);
+}
+function stepIconKind(step) {
+  if (!step) return void 0;
+  if (step.step.some((h) => h.kind === "run")) return "run";
+  const first = step.step[0]?.kind;
+  return first === "copy" || first === "terminal" ? "copy" : first === "open" || first === "link" ? "open" : void 0;
 }
 var HANDOFF_IDS = /^(address|type|step-\d+|thread-address|pr-conflicts|pr-address-all)$/;
 var PR_RENAMES = [
@@ -541,13 +540,18 @@ function isUndoable(c) {
 function doneWake(ledger, ctx) {
   if (ctx.isTurnRunning) return null;
   const waited = ledger.closed.filter(
-    (c) => c.how === "done" && c.outcome === "done" && !c.isSentToAgent && c.item?.turn === ledger.turn
+    (c) => c.how === "done" && c.outcome === "done" && !c.isSentToAgent && !c.doneNotification && c.item?.turn === ledger.turn
   );
   if (waited.length === 0 || waited.some((c) => ctx.now - c.at < ctx.windowMs)) return null;
   return { text: messages.done(waited.map((c) => c.ask)), ids: waited.map((c) => c.id) };
 }
-function markSentToAgent(ledger, ids) {
-  return { ...ledger, closed: ledger.closed.map((c) => ids.includes(c.id) ? { ...c, isSentToAgent: true } : c) };
+function markSentToAgent(ledger, ids, notificationId) {
+  return {
+    ...ledger,
+    closed: ledger.closed.map(
+      (c) => ids.includes(c.id) ? { ...c, isSentToAgent: true, ...notificationId ? { doneNotification: { id: notificationId } } : {} } : c
+    )
+  };
 }
 var STALE_TEXT = "This changed before your press. Nothing was sent.";
 function noteText(note) {
@@ -570,25 +574,32 @@ function helpEffect(item, help) {
 function stepEffects(item, step) {
   return step.step.map((h) => helpEffect(item, h));
 }
-function pendingResult(effects, at) {
+function pendingResult(effects, at, pressId) {
   return {
     state: "pending",
     parts: effects.flatMap(
       (e) => e.kind === "send" ? [] : [{ kind: e.kind, name: e.name, isCommand: e.kind === "copy" && e.isCommand, error: null }]
     ),
-    at
+    at,
+    ...pressId ? { pressId } : {}
   };
 }
 function finishedResult(pending, errors, at) {
   const parts = pending.parts.map((part, n) => ({ ...part, error: errors[n] ?? null }));
-  return { state: parts.some((part) => part.error !== null) ? "failed" : "done", parts, at };
+  return {
+    state: parts.some((part) => part.error !== null) ? "failed" : "done",
+    parts,
+    at,
+    ...pending.pressId ? { pressId: pending.pressId } : {}
+  };
 }
 function localLast(last, pressed2, result) {
   return last && last.kind !== "local" ? { ...last, result } : { kind: "local", ...pressed2, at: result.at, result };
 }
 function withResult(lastActions, rowId, pendingAt, result) {
   const last = lastActions[rowId];
-  if (last?.result?.state !== "pending" || last.result.at !== pendingAt) return lastActions;
+  if (last?.result?.state !== "pending" || last.result.at !== pendingAt || last.result.pressId !== result.pressId)
+    return lastActions;
   return { ...lastActions, [rowId]: { ...last, result } };
 }
 function applyPress(ledger, last, p, ctx) {
@@ -599,15 +610,48 @@ function withQueued(last, effects) {
   const send = effects.find((e) => e.kind === "send");
   return send ? { ...last, delivery: { state: "queued", message: send.text } } : last;
 }
-function withQueuedDelivery(lastActions, rows, at, matches, delivery) {
+function withDeliveryId(lastActions, rows, at, message, id) {
+  return Object.fromEntries(
+    Object.entries(lastActions).map(([row, action]) => [
+      row,
+      rows.includes(row) && action.at === at && action.delivery?.state === "queued" && action.delivery.id === void 0 && action.delivery.message === message ? { ...action, delivery: { ...action.delivery, id } } : action
+    ])
+  );
+}
+function withUnconfirmed(lastActions, message, pressedAt, deliveryId) {
+  return Object.fromEntries(
+    Object.entries(lastActions).map(([id, action]) => [
+      id,
+      action.delivery?.state === "queued" && action.delivery.message === message && (deliveryId ? action.delivery.id === deliveryId : pressedAt === void 0 || action.delivery.id === void 0 && action.at === pressedAt) ? { ...action, delivery: { ...action.delivery, state: "unconfirmed" } } : action
+    ])
+  );
+}
+function withAcceptedSend(lastActions, rows, at, message, deliveryId) {
+  return withQueuedDelivery(
+    lastActions,
+    rows,
+    at,
+    (text2) => text2 === message,
+    { state: "queued", message, id: deliveryId },
+    deliveryId
+  );
+}
+function withQueuedDelivery(lastActions, rows, at, matches, delivery, deliveryId) {
   const changed = rows.flatMap((id) => {
     const a = lastActions[id];
-    return a?.at === at && a.delivery?.state === "queued" && matches(a.delivery.message) ? [[id, { ...a, delivery }]] : [];
+    return a?.at === at && (a.delivery?.state === "queued" || a.delivery?.state === "unconfirmed") && (deliveryId ? a.delivery.id === deliveryId : a.delivery.id === void 0) && matches(a.delivery.message) ? [[id, { ...a, delivery }]] : [];
   });
   return changed.length === 0 ? lastActions : { ...lastActions, ...Object.fromEntries(changed) };
 }
-function withFailure(lastActions, rows, at, reason) {
-  return withQueuedDelivery(lastActions, rows, at, () => true, { state: "failed", reason });
+function withFailure(lastActions, rows, at, reason, deliveryId) {
+  return withQueuedDelivery(
+    lastActions,
+    rows,
+    at,
+    () => true,
+    { state: "failed", reason, ...deliveryId ? { id: deliveryId } : {} },
+    deliveryId
+  );
 }
 function reopenOnFailure(ledger, id, at) {
   if (ledger.items.some((i) => i.id === id)) return ledger;
@@ -628,7 +672,14 @@ function demoTurns(turns, effects, isReplied = false) {
 }
 async function runLocalEffects(host, effects, rowId, pending) {
   const errors = [];
-  for (const e of effects) if (e.kind !== "send") errors.push(await host.perform(e));
+  for (const e of effects)
+    if (e.kind !== "send") {
+      try {
+        errors.push(await host.perform(e));
+      } catch (err) {
+        errors.push(err instanceof Error ? err.message : String(err));
+      }
+    }
   if (pending?.state !== "pending") return null;
   const result = finishedResult(pending, errors, await host.now());
   await host.saveLasts((a) => withResult(a, rowId, pending.at, result));
@@ -637,12 +688,18 @@ async function runLocalEffects(host, effects, rowId, pending) {
 async function runSends(host, effects, rowId, rows, at) {
   for (const e of effects) {
     if (e.kind !== "send") continue;
-    const reason = await host.send(e);
-    if (reason === null) continue;
-    const last = (await host.saveLasts((a) => withFailure(a, rows, at, reason)))[rowId];
-    const isRowFailed = last?.at === at && last.delivery?.state === "failed";
+    const deliveryId = host.deliveryId();
+    const outcome = await host.send(e, deliveryId);
+    if (outcome.state === "accepted") continue;
+    if (outcome.state === "unconfirmed") {
+      await host.saveLasts((a) => withUnconfirmed(a, e.text, at, deliveryId));
+      return outcome;
+    }
+    const reason = outcome.reason;
+    const last = (await host.saveLasts((a) => withFailure(a, rows, at, reason, deliveryId)))[rowId];
+    const isRowFailed = last?.at === at && last.delivery?.state === "failed" && last.delivery.id === deliveryId;
     if (isRowFailed && last.kind === "mark") await host.saveLedger((l) => reopenOnFailure(l, rowId, at));
-    return { reason, isRowFailed };
+    return { state: "rejected", reason, isRowFailed };
   }
   return null;
 }
@@ -661,8 +718,19 @@ function retryOf(id, last) {
       return null;
   }
 }
-function withLasts(lastActions, lasts, drop) {
-  return Object.fromEntries(Object.entries({ ...lastActions, ...lasts }).filter(([id]) => !drop.includes(id)));
+function withLasts(lastActions, lasts, drop, pressOrder) {
+  const merged = { ...lastActions };
+  for (const [id, last] of Object.entries(lasts)) {
+    const current = merged[id];
+    if (pressOrder !== void 0 && current?.pressOrder !== void 0 && current.pressOrder > pressOrder) continue;
+    merged[id] = last;
+  }
+  for (const id of drop) {
+    const current = merged[id];
+    if (pressOrder !== void 0 && current?.pressOrder !== void 0 && current.pressOrder > pressOrder) continue;
+    delete merged[id];
+  }
+  return merged;
 }
 function recordPress(kind, action, text2, ctx) {
   return { kind, action, text: text2, at: ctx.now, turnsStarted: ctx.turnsStarted };
@@ -676,9 +744,10 @@ function pressed(ledger, last, p, ctx) {
       return { ...unchanged, last: { ...last, isKept: true } };
     if (ledger.items.some((i) => i.id === p.id) || ledger.findings.some((f) => f.id === p.id)) return stale;
     const closed = ledger.closed.findLast((c) => c.id === p.id);
-    if (closed?.item && isUndoable(closed)) return { ...unchanged, ledger: reopenItem(ledger, p.id) };
+    if (closed?.item && isUndoable(closed)) return { ...unchanged, ledger: reopenItem(ledger, p.id), reopenedId: p.id };
     const closedFinding = ledger.closedFindings.findLast((f) => f.id === p.id);
-    if (closedFinding && isUndoable(closedFinding)) return { ...unchanged, ledger: reopenFinding(ledger, p.id) };
+    if (closedFinding && isUndoable(closedFinding))
+      return { ...unchanged, ledger: reopenFinding(ledger, p.id), reopenedId: p.id };
     return stale;
   }
   const finding = ledger.findings.find((f) => f.id === p.id);
@@ -744,7 +813,11 @@ function pressed(ledger, last, p, ctx) {
       if (effects.some((e) => e.kind === "send")) return { ledger, last: record("handoff"), effects };
       return {
         ledger,
-        last: localLast(last, { action: actionId(p), text: pressText(p) }, pendingResult(effects, ctx.now)),
+        last: localLast(
+          last,
+          { action: actionId(p), text: pressText(p) },
+          pendingResult(effects, ctx.now, ctx.localPressId)
+        ),
         effects
       };
     }
@@ -785,6 +858,34 @@ ${asks.map((a) => `- ${a}`).join("\n")}`,
   }
 };
 
+// ../hooks/model-text.ts
+function latestBatch(ledger) {
+  return ledger.batchTurn === 0 ? [] : ledger.items.filter((i) => i.turn === ledger.batchTurn);
+}
+function numberOf(label) {
+  const m = label?.match(/(?:^|[^A-Za-z\d])(?:[QqDd#]\s?)?(\d{1,2})(?!\d)/);
+  return m ? Number(m[1]) : null;
+}
+function answerableBatch(ledger, promptTurn) {
+  return ledger.batchTurn === promptTurn - 1 ? latestBatch(ledger) : [];
+}
+function batchNumbers(batch) {
+  const hasLabels = batch.some((i) => numberOf(i.label) !== null);
+  const byNumber = /* @__PURE__ */ new Map();
+  batch.forEach((item, at) => {
+    const n = hasLabels ? numberOf(item.label) : at + 1;
+    if (n !== null && !byNumber.has(n)) byNumber.set(n, item);
+  });
+  return byNumber;
+}
+function questionNumbers(ledger, promptTurn) {
+  const numbers = /* @__PURE__ */ new Map();
+  for (const [n, item] of batchNumbers(answerableBatch(ledger, promptTurn)))
+    if (item.kind === "question") numbers.set(item.id, n);
+  return numbers;
+}
+var TOLD_NOTHING = { inbox: null, closed: [] };
+
 // ../hooks/view.ts
 var OPTIONS_FOLD_AT = 5;
 var CHOICE_KEYS = [..."abcfghilm"];
@@ -796,6 +897,10 @@ var SETTLED_MS = 5120;
 var QUEUED_AFTER_MS = 1e3;
 function isQueuedAt(last, now) {
   return last?.delivery?.state === "queued" && now - last.at >= QUEUED_AFTER_MS;
+}
+function pendingDeliveryAt(last, now) {
+  if (last?.delivery?.state === "unconfirmed") return "unconfirmed";
+  return isQueuedAt(last, now) ? "queued" : null;
 }
 var UPDATE_FAILED = "Last update failed. Items from that reply may be missing.";
 var UPDATE_RETRIES = " It retries after your next message.";
@@ -810,7 +915,8 @@ function feedbackOf(id, last, note, turns, now) {
   if (result && (result.state !== "done" || now - result.at < SETTLED_MS)) return { is: "local", result };
   if (!last || last.kind === "local") return null;
   const delivery = last.delivery;
-  if (isQueuedAt(last, now)) return { is: "queued", label: last.text, at: last.at };
+  const pending = pendingDeliveryAt(last, now);
+  if (pending) return { is: pending, label: last.text, at: last.at };
   if (delivery?.state === "failed") return { is: "notSent", reason: delivery.reason, retry: retryOf(id, last) };
   const isAwaiting = isAwaitingReply(last, turns);
   const working = WORKING_LABELS[last.action];
@@ -871,6 +977,8 @@ function actionsOf(row, last, state) {
     // only shows its result, and a press whose message failed did nothing, so none reads "again".
     label: press.action !== "type" && last?.kind !== "local" && last?.delivery?.state !== "failed" && last?.action === actionId(press) ? `${label} again` : label,
     kind,
+    emphasis: flags.isPrimary || press.action === "done" || press.action === "address" ? "primary" : press.action === "discuss" || press.action === "explain" || press.action === "dismiss" ? "quiet" : "normal",
+    ...press.action === "done" ? { icon: "done" } : press.action === "step" && stepIconKind(steps2[press.step]) ? { icon: stepIconKind(steps2[press.step]) } : {},
     isPrimary: flags.isPrimary ?? false,
     isFolded: flags.isFolded ?? false,
     isFollowUp: FOLLOW_UPS.has(press.action),
@@ -945,8 +1053,7 @@ function inboxView({
         canUndo: isUndoable(closed2),
         // Dismissed, expired or closed by the agent: drawn muted, as the Closed fold draws it.
         isLapsed: isLapsed(closed2),
-        // Queued only while the answer press that closed the row waits to reach Claude. Claude's own close sends nothing.
-        isQueued: closed2.how === "answered" && last2?.kind === "mark" && last2.at === at && isQueuedAt(last2, now)
+        delivery: "doneNotification" in closed2 && closed2.doneNotification?.error !== void 0 ? { error: closed2.doneNotification.error, canUndo: isUndoable(closed2) } : (closed2.how === "answered" || closed2.how === "done") && last2?.kind === "mark" && last2.at === at ? pendingDeliveryAt(last2, now) : null
       };
     }
     const last = lastActions[id];
@@ -957,7 +1064,7 @@ function inboxView({
         label: fixLabel(sent),
         at: last.at,
         canUndo: true,
-        isQueued: isQueuedAt(last, now),
+        delivery: pendingDeliveryAt(last, now),
         isLapsed: false
       };
     return isHandedOff(last, turns) ? { is: "handedOff" } : { is: "open" };
@@ -980,6 +1087,9 @@ function inboxView({
       handle: n === void 0 ? "\u2022" : `${n})`,
       title: item.ask,
       at: item.at,
+      detail: null,
+      fileName: null,
+      replyKind: item.kind === "question" ? "answer" : "reply",
       item,
       finding: null,
       steps: stepsOf(item, extraSteps[item.id] ?? [])
@@ -997,13 +1107,25 @@ function inboxView({
       handle: "\u2022",
       title: finding.title,
       at: finding.at,
+      detail: finding.detail,
+      fileName: finding.path ? baseName(finding.path) : null,
+      replyKind: "reply",
       item: null,
       finding,
       steps: []
     })
   );
-  const closed = [...ledger.closed].reverse();
-  const fixesSent = ledger.findings.filter((f) => isFixSent(lastActions[f.id])).map((f) => ({ ...f, how: "answered", outcome: fixLabel(f), closedAt: lastActions[f.id].at }));
+  const closed = [...ledger.closed].reverse().map((d) => ({
+    ...d,
+    delivery: d.doneNotification?.error !== void 0 ? { error: d.doneNotification.error, canUndo: isUndoable(d) } : (d.how === "answered" || d.how === "done") && lastActions[d.id]?.kind === "mark" && lastActions[d.id]?.at === d.at ? pendingDeliveryAt(lastActions[d.id], now) : null
+  }));
+  const fixesSent = ledger.findings.filter((f) => isFixSent(lastActions[f.id])).map((f) => ({
+    ...f,
+    how: "answered",
+    outcome: fixLabel(f),
+    closedAt: lastActions[f.id].at,
+    delivery: pendingDeliveryAt(lastActions[f.id], now)
+  }));
   return {
     needsYou: {
       count: counted.length,
@@ -1014,7 +1136,9 @@ function inboxView({
     findings: {
       count: findingRows.filter((r) => r.state.is === "open").length,
       rows: findingRows,
-      closed: [...ledger.closedFindings, ...fixesSent].sort((a, b) => b.closedAt - a.closedAt)
+      closed: [...ledger.closedFindings.map((f) => ({ ...f, delivery: null })), ...fixesSent].sort(
+        (a, b) => b.closedAt - a.closedAt
+      )
     },
     status
   };
@@ -1028,6 +1152,13 @@ function perTurnStatus(update) {
 
 // ../hooks/pr-tab.ts
 var MAX_PRS = 12;
+function itemPrSteps(item, prState, linked) {
+  const refs = prState.branchRef ? [...linked, prState.branchRef] : linked;
+  return prSteps(
+    item,
+    refs.map((ref) => ({ ref, url: prState.views[ref]?.url ?? null }))
+  );
+}
 function splitLinked(linked) {
   return { tracked: linked.slice(-MAX_PRS), older: linked.slice(0, Math.max(0, linked.length - MAX_PRS)) };
 }
@@ -1148,7 +1279,7 @@ function applyPrPress(ledger, prState, lastActions, p, ctx) {
   const send = (text2) => ({ kind: "send", text: text2, by: null });
   const open = (rowId, text2, url, name) => {
     const effects = [{ kind: "open", target: url, name }];
-    const result = pendingResult(effects, ctx.now);
+    const result = pendingResult(effects, ctx.now, ctx.localPressId);
     return applied({ lasts: { [rowId]: localLast(lastActions[rowId], { action: p.action, text: text2 }, result) }, effects });
   };
   switch (p.action) {
@@ -1158,6 +1289,7 @@ function applyPrPress(ledger, prState, lastActions, p, ctx) {
     case "thread-open": {
       const t = pr.threads.find((x) => x.id === p.thread);
       if (!t) return stale;
+      if (p.action === "thread-address" && !t.isWaiting) return stale;
       const id = prThreadId(pr, t);
       if (p.action === "thread-open") return open(id, "Open", t.reply?.url || t.url || pr.url, "the comment");
       if (p.action === "thread-address")
@@ -1360,11 +1492,11 @@ function withoutStalePending(lastActions, now) {
 function viewOf(s, now) {
   const l = s.ledger;
   const lastActions = withoutStalePending(s.lastActions, now);
+  const awaitsRetry = s.pending.length > 0 && (s.pending[0]?.failed === true || s.presence.ledgerState === "failed");
   const update = {
-    isUpdating: s.presence.isUpdating || s.pending.length > 0,
+    isUpdating: s.presence.isUpdating,
     isFailed: s.presence.ledgerState === "failed",
-    // applied() drops a failed exchange; nothing reruns it.
-    retries: false
+    retries: awaitsRetry
   };
   return {
     ...inboxView({
@@ -1373,7 +1505,7 @@ function viewOf(s, now) {
       // The tab keeps its own row notes.
       notes: {},
       turns: s.presence,
-      extraSteps: {},
+      extraSteps: Object.fromEntries(l.items.map((item) => [item.id, itemPrSteps(item, s.prViews, l.prs)])),
       // The tab times each settled row from its first poll, so the server lists a close for longer.
       settleWindowMs: SETTLE_WINDOW_MS,
       status: perTurnStatus(update),
@@ -1784,9 +1916,23 @@ function demoView(now) {
 }
 
 // src/state.ts
-import { mkdir, readFile, rename, rmdir, stat, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  readlink,
+  realpath,
+  rename,
+  rmdir,
+  symlink,
+  unlink,
+  writeFile
+} from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 var NOTHING_HEARD = {
   startAt: null,
   promptAt: null,
@@ -1834,6 +1980,8 @@ function statePath(dir, sessionId) {
   return join(dir, "sessions", `${fileName(sessionId)}.json`);
 }
 function upgraded(saved, sessionId) {
+  if (saved.version !== void 0 && saved.version !== 1)
+    throw new Error(`Unsupported inbox state version: ${saved.version}`);
   const base = emptyState(sessionId);
   const { checks: _checks, snapshots: _snapshots, recordedRuns: _runs, top: _top, ...kept } = saved;
   const { sentBack: _sentBack, ...turn } = saved.turn ?? {};
@@ -1848,7 +1996,14 @@ function upgraded(saved, sessionId) {
     presence: { ...base.presence, ...saved.presence },
     pending: (saved.pending ?? []).map(({ ex: { checks: _exChecks, ...ex }, ...p }) => ({ ...p, ex })),
     // A message sent before the server kept its row changes no row when it arrives.
-    sent: (saved.sent ?? []).map((x) => ({ ...x, row: x.row ?? null, queuedId: x.queuedId ?? null })),
+    sent: (saved.sent ?? []).map((x) => ({
+      ...x,
+      row: x.row ?? null,
+      queuedId: x.queuedId ?? null,
+      pressedAt: x.pressedAt ?? null,
+      deliveryId: x.deliveryId ?? null,
+      phase: x.phase ?? "accepted"
+    })),
     lastActions: upgradeLastActions(saved.lastActions ?? {}),
     prViews: { ...NO_PRS, ...saved.prViews, isFetching: false },
     // A file saved before the hooks kept this record came from hooks that ran, so it reads as heard.
@@ -1870,43 +2025,156 @@ async function readState(dir, sessionId) {
   return saved === null ? emptyState(sessionId) : upgraded(JSON.parse(saved), sessionId);
 }
 var LOCK_WAIT_MS = 1e4;
-var LOCK_STALE_MS = 15e3;
-var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-async function withLock(path, fn, waitMs = LOCK_WAIT_MS) {
-  await mkdir(dirname(path), { recursive: true });
-  const until = Date.now() + waitMs;
-  for (; ; ) {
-    try {
-      await mkdir(path);
-      break;
-    } catch (err) {
-      if (err.code !== "EEXIST") throw err;
-      const age = await stat(path).then(
-        (s) => Date.now() - s.mtimeMs,
-        () => 0
-      );
-      if (age > LOCK_STALE_MS) await rmdir(path).catch(() => void 0);
-      else if (Date.now() > until) throw new Error(`Timed out waiting for ${path}`);
-      else await sleep(15);
-    }
-  }
+var LOCK_CHILD = "held";
+var sleep = (ms) => new Promise((resolve2) => setTimeout(resolve2, ms));
+var LockBusyError = class extends Error {
+};
+var bootSession = null;
+var ownIdentity = null;
+function lockOwner(suffix) {
+  const match = /^(\d+)-[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}(?:-([a-f\d]{32}))?$/.exec(suffix);
+  const pid = Number(match?.[1]);
+  return Number.isSafeInteger(pid) && pid > 0 ? { pid, identity: match?.[2] ?? null } : null;
+}
+function processIdentity(pid) {
+  if (pid === process.pid && ownIdentity) return ownIdentity;
   try {
+    const options = {
+      encoding: "utf8",
+      env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
+      stdio: "pipe",
+      timeout: 1e3
+    };
+    const boot = bootSession ?? execFileSync("/usr/sbin/sysctl", ["-n", "kern.bootsessionuuid"], options).trim();
+    const started = execFileSync("/bin/ps", ["-p", String(pid), "-o", "lstart="], options).trim();
+    if (!boot || !started) return null;
+    bootSession = boot;
+    const identity = createHash("sha256").update(boot).update("\0").update(started).digest("hex").slice(0, 32);
+    if (pid === process.pid) ownIdentity = identity;
+    return identity;
+  } catch {
+    return null;
+  }
+}
+function isLive(owner, generation, observedLiveAt) {
+  try {
+    process.kill(owner.pid, 0);
+  } catch (err) {
+    return err.code !== "ESRCH";
+  }
+  if (owner.identity === null) return true;
+  const checkedAt = observedLiveAt.get(generation);
+  if (checkedAt !== void 0 && Date.now() - checkedAt < 250) return true;
+  const identity = processIdentity(owner.pid);
+  if (identity !== null && identity !== owner.identity) return false;
+  observedLiveAt.set(generation, Date.now());
+  return true;
+}
+async function lockTarget(path) {
+  return readlink(path).catch((err) => {
+    if (err.code === "ENOENT" || err.code === "EINVAL") return null;
+    throw err;
+  });
+}
+async function removeOwnedLock(path, target, owner, source) {
+  const identity = processIdentity(process.pid);
+  const claimed = `${owner}.recover-${process.pid}-${randomUUID()}${identity ? `-${identity}` : ""}`;
+  const isDirectory = await lstat(source).then(
+    (s) => s.isDirectory(),
+    (err) => {
+      if (err.code === "ENOENT") return false;
+      throw err;
+    }
+  );
+  if (!isDirectory) return false;
+  try {
+    await rename(source, claimed);
+  } catch (err) {
+    if (err.code === "ENOENT") return false;
+    throw err;
+  }
+  if (await lockTarget(path) === target) await unlink(path);
+  await rmdir(claimed);
+  return true;
+}
+async function recoverLock(path, observedLiveAt) {
+  const target = await lockTarget(path);
+  if (!target || !isAbsolute(target)) return false;
+  const owner = basename(target) === LOCK_CHILD ? dirname(target) : target;
+  if (target !== owner && target !== join(owner, LOCK_CHILD)) return false;
+  const prefix = `${basename(path)}.owner-`;
+  if (!basename(owner).startsWith(prefix)) return false;
+  if (await realpath(dirname(owner)).catch(() => null) !== dirname(path)) return false;
+  const holder = lockOwner(basename(owner).slice(prefix.length));
+  if (!holder || isLive(holder, owner, observedLiveAt)) return false;
+  if (await removeOwnedLock(path, target, owner, owner)) return true;
+  const recoverPrefix = `${basename(owner)}.recover-`;
+  const entries = await readdir(dirname(path));
+  for (const entry of entries) {
+    if (!entry.startsWith(recoverPrefix)) continue;
+    const recovering = lockOwner(entry.slice(recoverPrefix.length));
+    if (!recovering || isLive(recovering, entry, observedLiveAt)) continue;
+    if (await removeOwnedLock(path, target, owner, join(dirname(path), entry))) return true;
+  }
+  return false;
+}
+async function withLock(path, fn, waitMs = LOCK_WAIT_MS) {
+  path = resolve(path);
+  await mkdir(dirname(path), { recursive: true });
+  path = join(await realpath(dirname(path)), basename(path));
+  const identity = processIdentity(process.pid);
+  const owner = `${path}.owner-${process.pid}-${randomUUID()}${identity ? `-${identity}` : ""}`;
+  const target = join(owner, LOCK_CHILD);
+  await mkdir(owner);
+  const until = Date.now() + waitMs;
+  const observedLiveAt = /* @__PURE__ */ new Map();
+  try {
+    for (; ; ) {
+      try {
+        await symlink(target, path);
+        break;
+      } catch (err) {
+        if (err.code !== "EEXIST") throw err;
+        if (await recoverLock(path, observedLiveAt)) continue;
+        if (Date.now() > until) throw new LockBusyError(`Timed out waiting for ${path}`);
+        await sleep(15);
+      }
+    }
     return await fn();
   } finally {
-    await rmdir(path).catch(() => void 0);
+    await removeOwnedLock(path, target, owner, owner);
+  }
+}
+async function tryWithLock(path, fn) {
+  let acquired = false;
+  try {
+    return {
+      acquired: true,
+      value: await withLock(
+        path,
+        () => {
+          acquired = true;
+          return fn();
+        },
+        0
+      )
+    };
+  } catch (err) {
+    if (!acquired && err instanceof LockBusyError) return { acquired: false };
+    throw err;
   }
 }
 async function updateState(dir, sessionId, change) {
   const path = statePath(dir, sessionId);
   return withLock(`${path}.lock`, async () => {
-    const current = await readState(dir, sessionId).catch(async () => {
-      await rename(path, `${path}.unreadable-${Date.now()}`);
-      return emptyState(sessionId);
-    });
-    const next = await change(current);
-    const tmp = `${path}.${process.pid}.tmp`;
-    await writeFile(tmp, JSON.stringify(next));
-    await rename(tmp, path);
+    const current = await readState(dir, sessionId);
+    const checkpoint = async (state) => {
+      const tmp = `${path}.${process.pid}.tmp`;
+      await writeFile(tmp, JSON.stringify(state));
+      await rename(tmp, path);
+    };
+    const next = await change(current, checkpoint);
+    await checkpoint(next);
     return next;
   });
 }
@@ -1951,13 +2219,34 @@ function ghIn(exec, bin, cwd) {
   };
 }
 
+// src/update.ts
+async function reconcileUpdateStatus(dir, sessionId) {
+  const state = await readState(dir, sessionId);
+  if (!state.presence.isUpdating) return state;
+  const checked = await tryWithLock(
+    `${statePath(dir, sessionId)}.updating`,
+    () => updateState(
+      dir,
+      sessionId,
+      (current) => current.presence.isUpdating ? {
+        ...current,
+        presence: {
+          ...current.presence,
+          isUpdating: false,
+          ledgerState: current.pending.length > 0 ? "failed" : current.presence.ledgerState
+        }
+      } : current
+    )
+  );
+  return checked.acquired ? checked.value : state;
+}
+
 // src/server.ts
 function tabUri(tabHtml) {
-  return `ui://inbox/tab-${createHash("sha256").update(tabHtml).digest("hex").slice(0, 12)}`;
+  return `ui://inbox/tab-${createHash2("sha256").update(tabHtml).digest("hex").slice(0, 12)}`;
 }
 var TAB_MIME = "text/html;profile=mcp-app";
 var APP_ONLY = { ui: { visibility: ["app"] } };
-var MAX_SENT = 20;
 var PRS_REFRESH_MS = 12e4;
 var NEW_PR_FETCH_MS = 15e3;
 function viewsStillShown(prs, linked, lastActions, at) {
@@ -2028,41 +2317,103 @@ function makeServer(deps) {
   const fetchingPrs = /* @__PURE__ */ new Set();
   const prsFetchedAt = /* @__PURE__ */ new Map();
   let isGhMissing = false;
-  async function queue(s, message) {
-    const cli = s.cliPath ?? await deps.fallbackCli();
-    const r = await deps.exec([cli, "queue", "--thread", s.sessionId, "--message", message], {
-      cwd: s.root || "/",
-      timeoutMs: 15e3
-    });
-    if (r.code !== 0) throw new Error(r.stderr.trim() || `codex queue exited ${r.code}`);
-    return /Queued message (\S+)/.exec(r.stdout)?.[1] ?? null;
+  async function queueMessage(s, message, resolvedCli) {
+    let cli;
+    try {
+      cli = resolvedCli ?? s.cliPath ?? await deps.fallbackCli();
+    } catch (err) {
+      return { state: "rejected", reason: err instanceof Error ? err.message : String(err) };
+    }
+    try {
+      const r = await deps.exec([cli, "queue", "--thread", s.sessionId, "--message", message], {
+        cwd: s.root || "/",
+        timeoutMs: 15e3
+      });
+      if (r.code !== 0) return { state: "unconfirmed", reason: r.stderr.trim() || `codex queue exited ${r.code}` };
+      return { state: "accepted", queuedId: /Queued message (\S+)/.exec(r.stdout)?.[1] ?? null };
+    } catch (err) {
+      return { state: "unconfirmed", reason: err instanceof Error ? err.message : String(err) };
+    }
+  }
+  function completedAttempt(state, deliveryId, outcome) {
+    if (outcome.state === "rejected") return { ...state, sent: state.sent.filter((s) => s.deliveryId !== deliveryId) };
+    const index = state.sent.findIndex((s) => s.deliveryId === deliveryId);
+    const attempt = state.sent[index];
+    if (!attempt) return state;
+    const earlierUnknown = state.sent.slice(0, index).some((s) => s.text === attempt.text && (s.phase === "attempting" || s.phase === "uncertain"));
+    let lastActions = state.lastActions;
+    if (outcome.state === "accepted" && !earlierUnknown) {
+      for (const [id, action] of Object.entries(lastActions)) {
+        if (action.delivery && "id" in action.delivery && action.delivery.id === deliveryId)
+          lastActions = withAcceptedSend(lastActions, [id], action.at, attempt.text, deliveryId);
+      }
+    }
+    return {
+      ...state,
+      lastActions,
+      sent: state.sent.map(
+        (s) => s.deliveryId === deliveryId ? {
+          ...s,
+          phase: outcome.state === "accepted" ? "accepted" : "uncertain",
+          queuedId: outcome.state === "accepted" ? outcome.queuedId : null
+        } : s
+      )
+    };
   }
   async function wakeForDone(id) {
     const check = (s) => doneWake(s.ledger, { now: now(), windowMs: SETTLE_WINDOW_MS, isTurnRunning: s.turn.person !== null });
     if (!check(await readState(dir, id))) return;
-    await updateState(dir, id, async (s) => {
+    await updateState(dir, id, async (s, checkpoint) => {
       const wake = check(s);
       if (!wake) return s;
-      const ledger = markSentToAgent(s.ledger, wake.ids);
-      const queuedId = await queue(s, wake.text).catch(() => void 0);
-      if (queuedId === void 0) return { ...s, ledger };
-      const sent = {
-        text: wake.text,
-        press: { id: wake.ids[0] ?? "", action: "done" },
-        at: now(),
-        row: null,
-        queuedId
+      const cli = s.cliPath ?? await deps.fallbackCli();
+      const deliveryId = randomUUID2();
+      const lastActions = { ...s.lastActions };
+      for (const closed of s.ledger.closed) {
+        if (!wake.ids.includes(closed.id)) continue;
+        const previous = lastActions[closed.id];
+        const last = previous?.kind === "mark" && previous.action === "done" && previous.at === closed.at ? previous : recordPress("mark", "done", "Done", { now: closed.at, turnsStarted: s.presence.turnsStarted });
+        lastActions[closed.id] = { ...last, delivery: { state: "unconfirmed", message: wake.text, id: deliveryId } };
+      }
+      const next = {
+        ...s,
+        ledger: markSentToAgent(s.ledger, wake.ids),
+        lastActions,
+        sent: [
+          ...s.sent,
+          {
+            text: wake.text,
+            press: { id: wake.ids[0], action: "done" },
+            at: now(),
+            row: wake.ids[0],
+            queuedId: null,
+            pressedAt: null,
+            deliveryId,
+            phase: "attempting"
+          }
+        ]
       };
-      return { ...s, ledger, sent: [...s.sent, sent].slice(-MAX_SENT) };
+      await checkpoint(next);
+      return completedAttempt(next, deliveryId, await queueMessage(next, wake.text, cli));
     });
   }
   const currentPage = async () => await deps.devPage?.() ?? deps.tabHtml;
-  const pressOn = (s, p, at = now()) => {
-    const ctx = { now: at, turnsStarted: s.presence.turnsStarted };
+  const pressOn = (s, p, at = now(), localPressId) => {
+    const ctx = { now: at, turnsStarted: s.presence.turnsStarted, localPressId };
     if ("ref" in p) return applyPrPress(s.ledger, s.prViews, s.lastActions, p, ctx);
-    const r = applyPress(s.ledger, s.lastActions[p.id], p, { ...ctx, extraSteps: [] });
+    const item = s.ledger.items.find((i) => i.id === p.id);
+    const r = applyPress(s.ledger, s.lastActions[p.id], p, {
+      ...ctx,
+      extraSteps: item ? itemPrSteps(item, s.prViews, s.ledger.prs) : []
+    });
     if ("stale" in r) return r;
-    return { ledger: r.ledger, lasts: r.last ? { [p.id]: r.last } : {}, drop: [], effects: r.effects };
+    return {
+      ledger: r.ledger,
+      lasts: r.last ? { [p.id]: r.last } : {},
+      drop: [],
+      effects: r.effects,
+      ...r.reopenedId ? { reopenedId: r.reopenedId } : {}
+    };
   };
   async function fetchPrs(id) {
     const s = await readState(dir, id);
@@ -2101,8 +2452,9 @@ function makeServer(deps) {
   }
   const served = async (s, id, isDemo = false) => {
     const loadError = deps.loadError?.();
+    const current = !isDemo && s.presence.isUpdating ? await reconcileUpdateStatus(dir, id) : s;
     return {
-      ...viewOf(s, now()),
+      ...viewOf(current, now()),
       thread: id,
       isFetchingPrs: !isDemo && fetchingPrs.has(id),
       isGhMissing: !isDemo && isGhMissing,
@@ -2113,12 +2465,17 @@ function makeServer(deps) {
   };
   async function onPress(id, p, thread) {
     const rowId = "ref" in p ? prRowId(p) : p.id;
+    const localPressId = randomUUID2();
+    let checkpointSaved = false;
+    let appliedSaved = false;
+    let isUnconfirmed = false;
     let copy = null;
     let error = null;
     let note = thread === id ? null : "stale";
     const pressed2 = {};
     const hostFor = (change) => ({
       now,
+      deliveryId: () => pressed2.deliveryId ?? randomUUID2(),
       // The tab copies, and shows the text to copy by hand when its frame has no clipboard.
       perform: async (e) => {
         if (e.kind === "copy") {
@@ -2127,52 +2484,91 @@ function makeServer(deps) {
         }
         return open(await readState(dir, id), e.target);
       },
-      send: (e) => change(async (s) => {
-        const queuedId = await queue(s, e.text);
-        const sent = { text: e.text, press: e.by, at: now(), row: rowId, queuedId };
-        return { ...s, sent: [...s.sent, sent].slice(-MAX_SENT) };
-      }).then(
-        () => null,
-        (err) => err instanceof Error ? err.message : String(err)
-      ),
+      send: async (e, deliveryId) => {
+        let sentOutcome = null;
+        return change(async (s) => {
+          const outcome = await queueMessage(s, e.text);
+          sentOutcome = outcome;
+          if (outcome.state === "unconfirmed") isUnconfirmed = true;
+          return completedAttempt(s, deliveryId, outcome);
+        }).then(
+          () => sentOutcome?.state === "accepted" ? { state: "accepted" } : sentOutcome?.state === "rejected" ? { state: "rejected", reason: sentOutcome.reason } : { state: "unconfirmed", reason: sentOutcome?.reason ?? "Queue outcome unknown" },
+          (err) => ({
+            state: "unconfirmed",
+            reason: err instanceof Error ? err.message : String(err)
+          })
+        );
+      },
       saveLasts: async (f) => (await change((s) => ({ ...s, lastActions: f(s.lastActions) }))).lastActions,
       saveLedger: async (f) => {
         await change((s) => ({ ...s, ledger: f(s.ledger) }));
       }
     });
-    await updateState(dir, id, async (s) => {
+    await updateState(dir, id, async (s, checkpoint) => {
       if (note) return s;
       const at = now();
-      const r = pressOn(s, p, at);
+      const r = pressOn(s, p, at, localPressId);
       if ("stale" in r) {
         note = "stale";
         return s;
       }
       pressed2.r = r;
+      const firstSend = r.effects.find((e) => e.kind === "send");
+      pressed2.deliveryId = firstSend ? randomUUID2() : void 0;
+      const pressLasts = firstSend && pressed2.deliveryId ? withDeliveryId(r.lasts, Object.keys(r.lasts), at, firstSend.text, pressed2.deliveryId) : r.lasts;
       let next = {
         ...s,
         ledger: r.ledger,
-        lastActions: withLasts(s.lastActions, r.lasts, r.drop),
-        // Codex was told of the close; with the id out of `told`, a second close of the row is reported too.
-        told: !("ref" in p) && p.action === "undo" ? { ...s.told, closed: s.told.closed.filter((id2) => id2 !== p.id) } : s.told
+        lastActions: withLasts(s.lastActions, pressLasts, r.drop),
+        told: r.reopenedId ? { ...s.told, closed: s.told.closed.filter((id2) => id2 !== r.reopenedId) } : s.told
       };
+      if (firstSend && pressed2.deliveryId) {
+        next = {
+          ...next,
+          lastActions: withUnconfirmed(next.lastActions, firstSend.text, at, pressed2.deliveryId),
+          sent: [
+            ...next.sent,
+            {
+              text: firstSend.text,
+              press: firstSend.by,
+              at: now(),
+              row: rowId,
+              queuedId: null,
+              pressedAt: at,
+              deliveryId: pressed2.deliveryId,
+              phase: "attempting"
+            }
+          ]
+        };
+        await checkpoint(next);
+        checkpointSaved = true;
+      }
       const held = hostFor(async (f) => next = await f(next));
       const failed = await runSends(held, r.effects, rowId, Object.keys(r.lasts), at);
-      if (failed) error = `Not sent: ${failed.reason}`;
+      if (failed?.state === "rejected") error = `Not sent: ${failed.reason}`;
       return next;
+    }).then(() => {
+      appliedSaved = true;
     }).catch((err) => {
-      error = `Not sent: ${err instanceof Error ? err.message : String(err)}`;
+      if (checkpointSaved) isUnconfirmed = true;
+      error = checkpointSaved ? null : `Not sent: ${err instanceof Error ? err.message : String(err)}`;
     });
     if (pressed2.r && !("ref" in p) && p.action === "done")
       setTimeout(() => void wakeForDone(id).catch(() => void 0), SETTLE_WINDOW_MS).unref();
-    if (pressed2.r)
+    if (pressed2.r && (appliedSaved || checkpointSaved))
       await runLocalEffects(
         hostFor((f) => updateState(dir, id, f)),
         pressed2.r.effects,
         rowId,
         pressed2.r.lasts[rowId]?.result
       );
-    return { view: await served(await readState(dir, id), id), copy, error, note };
+    return {
+      view: await served(await readState(dir, id), id),
+      copy,
+      error,
+      note,
+      ...isUnconfirmed ? { delivery: "unconfirmed" } : {}
+    };
   }
   async function open(s, target) {
     const run2 = (argv2) => deps.exec(argv2, { cwd: "/", timeoutMs: 1e4 });
@@ -2182,7 +2578,7 @@ function makeServer(deps) {
       return r2.code === 0 ? null : failure(r2);
     }
     const path = localPath(target, s.root || "/", s.home);
-    const info = await stat2(path).catch(() => null);
+    const info = await stat(path).catch(() => null);
     if (!info) return "it no longer exists";
     const isExecutable = info.isFile() && await access(path, constants.X_OK).then(
       () => true,
@@ -2299,11 +2695,11 @@ function makeServer(deps) {
 }
 
 // src/tab.html
-var tab_default = '<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="utf-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1" />\n    <title>Inbox</title>\n    <style>\n      /* The host\'s variables when Codex passes them; otherwise the pane\'s own colors. */\n      :root {\n        color-scheme: light;\n        --bg: var(--color-background-primary, #ffffff);\n        --text: var(--color-text-primary, #1f1f1f);\n        --muted: var(--color-text-secondary, #595959);\n        /* The status colors, which build.mjs writes from hooks/tones.ts. */\n        --key: #243bf5; --amber: #745417; --findings: #7b00e8; --prs: #006363; --done: #25652f; --error: #a5293d; --error-mark: #a5293d;\n        --needs-you: var(--amber);\n        --issue: var(--amber);\n        --sans: var(--font-sans, -apple-system, system-ui, sans-serif);\n        --mono: var(--font-mono, ui-monospace, \'SF Mono\', Menlo, monospace);\n        /* Surfaces are mixed from the host\'s colors, so they follow its theme. */\n        --raised: color-mix(in srgb, var(--text) 9%, var(--bg));\n        /* The open row: a neutral surface one step above the page, in the family of the hover fill. */\n        --selected: color-mix(in srgb, var(--text) 6%, var(--bg));\n        /* A closed row\'s age, dimmer than --muted and still 4.5:1 on the page. */\n        --age: color-mix(in srgb, var(--muted) 90%, var(--bg));\n        --hover: color-mix(in srgb, var(--key) 14%, transparent);\n        --soft: color-mix(in oklab, var(--text) 8%, transparent);\n        --soft-hover: color-mix(in oklab, var(--text) 10%, transparent);\n        /* A closed row under the pointer: half --soft, so a list swept by the pointer stays quiet. */\n        --row-hover: color-mix(in oklab, var(--soft) 50%, transparent);\n        /* The Codex app\'s --transition-duration-basic with ease. The tab\'s script sets --move and --enter. */\n        --quick: 150ms ease;\n        /* Where a row\'s mark sits, and where its text starts. */\n        --mark-x: 18px;\n        --text-x: 44px;\n      }\n      @media (prefers-color-scheme: dark) {\n        :root:not([data-theme=\'light\']) {\n          color-scheme: dark;\n          --bg: var(--color-background-primary, #171717);\n          --text: var(--color-text-primary, #ececec);\n          --muted: var(--color-text-secondary, #a8a8a8);\n          --key: #b1b9f9; --amber: #ffc107; --findings: #cab0ff; --prs: #8cc8c0; --done: #7ecd8f; --error: #ffa3b0; --error-mark: #ff6b80;\n          --raised: color-mix(in srgb, var(--text) 11%, var(--bg));\n          --selected: color-mix(in srgb, var(--text) 8%, var(--bg));\n          --age: color-mix(in srgb, var(--muted) 85%, var(--bg));\n          --soft: color-mix(in oklab, var(--text) 12%, transparent);\n          --soft-hover: color-mix(in oklab, var(--text) 14%, transparent);\n        }\n      }\n      :root[data-theme=\'dark\'] {\n        color-scheme: dark;\n        --key: #b1b9f9; --amber: #ffc107; --findings: #cab0ff; --prs: #8cc8c0; --done: #7ecd8f; --error: #ffa3b0; --error-mark: #ff6b80;\n        --raised: color-mix(in srgb, var(--text) 11%, var(--bg));\n        --selected: color-mix(in srgb, var(--text) 8%, var(--bg));\n        --age: color-mix(in srgb, var(--muted) 85%, var(--bg));\n        --soft: color-mix(in oklab, var(--text) 12%, transparent);\n        --soft-hover: color-mix(in oklab, var(--text) 14%, transparent);\n      }\n      * {\n        box-sizing: border-box;\n      }\n      body {\n        margin: 0;\n        background: var(--bg);\n        color: var(--text);\n        font: 13px/20px var(--sans);\n        -webkit-font-smoothing: antialiased;\n      }\n      button {\n        font: inherit;\n        color: inherit;\n        background: none;\n        border: none;\n        padding: 0;\n        text-align: left;\n      }\n      :focus-visible {\n        outline: 1.5px solid var(--key);\n        outline-offset: 1px;\n        border-radius: 4px;\n      }\n      .muted {\n        color: var(--muted);\n      }\n      .tone-needsYou {\n        color: var(--needs-you);\n      }\n      .tone-findings {\n        color: var(--findings);\n      }\n      .tone-prs {\n        color: var(--prs);\n      }\n      .tone-done {\n        color: var(--done);\n      }\n      .tone-error {\n        color: var(--error);\n      }\n      .notice {\n        padding: 10px 16px;\n        overflow-wrap: anywhere;\n      }\n      .error-strip {\n        display: flex;\n        align-items: center;\n        justify-content: space-between;\n        gap: 12px;\n        flex-basis: 100%;\n        margin: 4px 0 0;\n        padding: 8px 12px;\n        border-radius: 6px;\n        background: color-mix(in srgb, var(--error) 12%, var(--bg));\n        color: var(--error);\n        overflow-wrap: anywhere;\n      }\n      #app > .error-strip {\n        margin: 12px 12px 0;\n      }\n      .error-strip .key {\n        flex: none;\n        color: var(--text);\n      }\n\n      /* Tabs: the shown one a raised panel, the others text on the background. */\n      nav {\n        display: flex;\n        flex-wrap: wrap;\n        align-items: center;\n        gap: 4px 16px;\n        padding: 12px 12px 0;\n      }\n      .tabs {\n        display: flex;\n        gap: 4px;\n      }\n      .tab {\n        padding: 6px 12px;\n        border-radius: 6px;\n        color: var(--muted);\n      }\n      .tab:hover {\n        color: var(--text);\n      }\n      .tab.shown {\n        background: var(--raised);\n        color: var(--text);\n        font-weight: 600;\n      }\n      .tab .count {\n        font-weight: 600;\n        margin-left: 6px;\n      }\n      .status {\n        margin-left: auto;\n        color: var(--muted);\n        font-size: 12px;\n      }\n      .status-line {\n        flex-basis: 100%;\n        padding: 0 4px;\n        font-size: 12px;\n        overflow-wrap: anywhere;\n      }\n\n      main {\n        display: flex;\n        flex-direction: column;\n        padding: 8px 0 4px;\n      }\n      /* Sections sit on the page. A hairline separates them, starting at the text column. */\n      section {\n        position: relative;\n        padding: 10px 0;\n      }\n      section + section::before {\n        content: \'\';\n        position: absolute;\n        top: 0;\n        left: var(--text-x);\n        right: 0;\n        height: 1px;\n        background: var(--soft);\n      }\n      .group-title {\n        padding: 0 14px 6px var(--text-x);\n      }\n      .group-title b {\n        font-weight: 600;\n      }\n      .group-title .count {\n        color: var(--muted);\n        white-space: pre;\n      }\n\n      /* A PR\'s block: its number, title and verdict, its actions, then its threads and checks. */\n      .pr-head,\n      .pr-status,\n      .pr-actions,\n      .pr-last {\n        padding: 0 14px 0 var(--text-x);\n        overflow-wrap: anywhere;\n      }\n      .pr-head {\n        font-weight: 600;\n      }\n      .pr-head .num,\n      .pr-head .pr-verdict {\n        font-weight: 400;\n      }\n      .pr-actions {\n        margin-top: 8px;\n      }\n      .pr-last {\n        margin-top: 6px;\n      }\n      .pr-groups {\n        margin-top: 12px;\n      }\n      /* A PR\'s rows sit a step in from their group\'s title, as the PR\'s sections sit under its title. */\n      .pr-groups .list {\n        --mark-x: 41px;\n        --text-x: 67px;\n      }\n      .pr-groups .group-title + .list {\n        margin-bottom: 6px;\n      }\n      .link {\n        padding: 0;\n        text-align: left;\n        text-decoration: underline;\n        text-decoration-color: color-mix(in oklab, var(--text) 30%, transparent);\n        text-underline-offset: 2px;\n      }\n      .link:hover {\n        text-decoration-color: currentColor;\n      }\n\n      /* Rows. */\n      /* Three columns: the mark, the text, and the age. */\n      .row {\n        display: grid;\n        grid-template-columns: calc(var(--text-x) - var(--mark-x)) minmax(0, 1fr) auto;\n        padding: var(--row-pad) 14px var(--row-pad) var(--mark-x);\n      }\n      /* An open row keeps a closed row\'s padding, so its line does not move as it opens. */\n      .row.selected {\n        background-color: var(--selected);\n      }\n      /* Marks center in a badge\'s width, so a ?, a \u2022 and a number line up. */\n      .mark {\n        align-self: start;\n        padding-right: 8px;\n        text-align: center;\n        color: var(--muted);\n      }\n      .mark.done {\n        color: var(--done);\n      }\n      .mark.issue {\n        color: var(--issue);\n      }\n      .mark.opportunity {\n        color: var(--done);\n      }\n      .mark.error {\n        color: var(--error-mark);\n      }\n      .side {\n        align-self: start;\n        margin-left: 12px;\n        color: var(--age);\n        font-variant-numeric: tabular-nums;\n        white-space: nowrap;\n      }\n      /* A closed row\'s last press reads before its age, cut short so a long step label cannot squeeze the title. */\n      .side-label {\n        display: inline-block;\n        max-width: 11em;\n        overflow: hidden;\n        text-overflow: ellipsis;\n        vertical-align: bottom;\n        margin-right: 4px;\n      }\n      .row.collapsed:hover .side {\n        color: var(--muted);\n      }\n      .content {\n        min-width: 0;\n        display: flex;\n        flex-direction: column;\n      }\n      /* Its space above is padding, not a gap, so the row\'s height grows smoothly when the panel mounts. Its 2px below,\n         with the row\'s padding, matches the space from the row\'s top edge to its title\'s text. */\n      .panel {\n        display: flex;\n        flex-direction: column;\n        gap: 8px;\n        padding: 8px 0 2px;\n      }\n      .content > .tight,\n      .content.tight {\n        display: flex;\n        flex-direction: column;\n        gap: 0;\n      }\n      /* A closed row\'s last action reads under its title, so it never squeezes the title. */\n      .line {\n        display: flex;\n        flex-direction: column;\n        width: 100%;\n        min-width: 0;\n      }\n      /* A closed row\'s title wraps to two lines, then clips. */\n      .line .text {\n        min-width: 0;\n        overflow: hidden;\n        text-overflow: ellipsis;\n        display: -webkit-box;\n        -webkit-line-clamp: 2;\n        -webkit-box-orient: vertical;\n      }\n      .line .after {\n        color: var(--muted);\n      }\n      .row.collapsed .line .after:not(.tone-error) {\n        color: var(--age);\n      }\n      .row.collapsed:hover .line .after:not(.tone-error) {\n        color: var(--muted);\n      }\n      .line .after.tone-error {\n        color: var(--error);\n      }\n      /* Open, and while closing, the title shows in full where it stood, with the age following its last word. */\n      .row.selected .line,\n      .row.closing .line {\n        display: block;\n      }\n      .row.selected .line .text,\n      .row.closing .line .text {\n        display: inline;\n        font-weight: 600;\n      }\n      .row.selected .line .after,\n      .row.closing .line .after {\n        white-space: normal;\n        font-weight: 400;\n      }\n      /* A PR thread or check: where it is or which workflow ran it leads the title, muted. */\n      .line .lead {\n        color: var(--muted);\n        font-weight: 400;\n      }\n      .line .meta {\n        display: block;\n        color: var(--muted);\n        overflow: hidden;\n        text-overflow: ellipsis;\n        white-space: nowrap;\n      }\n      .row.collapsed:not(:hover) .line .meta {\n        color: var(--age);\n      }\n      .row.selected .line .meta {\n        display: none;\n      }\n      .quote {\n        white-space: pre-line;\n      }\n      .row.collapsed:hover {\n        background-color: var(--row-hover);\n      }\n      /* After a click, rows slide under a pointer that has not moved, so nothing they bring under it lights up. */\n      .still .row.collapsed:not(:active):hover {\n        background-color: transparent;\n      }\n      .still .fold:not(:active):hover {\n        color: var(--muted);\n      }\n      .title {\n        font-weight: 600;\n      }\n      .title .after {\n        font-weight: 400;\n        color: var(--muted);\n      }\n      .body {\n        overflow-wrap: anywhere;\n      }\n      .body p {\n        margin: 0;\n      }\n      .body p + p {\n        margin-top: 4px;\n      }\n      code {\n        padding: 1px 4px;\n        border-radius: 4px;\n        background: var(--soft);\n        font-family: var(--mono);\n      }\n      /*\n       * Actions are Codex\'s own pill buttons, size sm, in three levels: the one primary action is filled, the\n       * others are outlined, and the follow-ups are plain text, with Dismiss last. Keys are an\n       * extra, so no key text shows.\n       */\n      .keys {\n        display: flex;\n        flex-wrap: wrap;\n        align-items: center;\n        gap: 6px;\n      }\n      .key {\n        display: inline-flex;\n        align-items: center;\n        justify-content: center;\n        gap: 5px;\n        min-height: 26px;\n        padding: 3px 11px;\n        border: 1px solid color-mix(in oklab, var(--text) 28%, transparent);\n        border-radius: 999px;\n        background: transparent;\n        font-weight: 400;\n        text-align: center;\n        white-space: nowrap;\n      }\n      .key:not(:disabled):hover {\n        background: var(--soft);\n      }\n      .key:focus-visible {\n        outline-width: 2px;\n        outline-offset: 2px;\n        border-radius: 999px;\n      }\n      .key.primary {\n        border-color: transparent;\n        background: var(--text);\n        color: var(--bg);\n      }\n      .key.primary:not(:disabled):hover {\n        background: color-mix(in srgb, var(--text) 82%, var(--bg));\n      }\n      .key .icon {\n        flex: none;\n        width: 14px;\n        height: 14px;\n      }\n      /* A follow-up is plain text: muted, the text color under the pointer, with no fill, border or padding. */\n      .key.ghost {\n        padding: 0 4px;\n        border-color: transparent;\n        background: none;\n        color: var(--muted);\n      }\n      .key.ghost:not(:disabled):hover {\n        background: none;\n        color: var(--text);\n      }\n      .actions {\n        display: flex;\n        flex-direction: column;\n        gap: 4px;\n      }\n      form {\n        display: flex;\n        align-items: center;\n        gap: 6px;\n      }\n      /* Codex\'s own fields: its border color, a 10px radius, and a heavier gray border on focus, not a colored ring. */\n      input {\n        flex: 1;\n        min-width: 0;\n        min-height: 28px;\n        font: inherit;\n        color: inherit;\n        background: transparent;\n        border: 1px solid color-mix(in oklab, var(--text) 15%, transparent);\n        border-radius: 10px;\n        padding: 4px 10px;\n      }\n      input::placeholder {\n        color: var(--muted);\n      }\n      /* The radius again, since :focus-visible sets 4px. */\n      input:focus,\n      textarea:focus {\n        outline: none;\n        border-color: color-mix(in oklab, var(--text) 32%, transparent);\n        border-radius: 10px;\n      }\n      textarea {\n        width: 100%;\n        font: 12px var(--mono);\n        color: inherit;\n        background: transparent;\n        border: 1px solid color-mix(in oklab, var(--text) 15%, transparent);\n        border-radius: 10px;\n      }\n\n      /*\n       * Holds a group\'s empty line and fold, so its height can move as one. Its content sits at its bottom, so while it\n       * grows, a fold already shown stays in view and the empty line slides in above it.\n       */\n      .group-end {\n        display: flex;\n        flex-direction: column;\n        justify-content: flex-end;\n      }\n      /* Keeps the fold\'s margin inside, so its height is the whole end\'s content height. */\n      .group-end-content {\n        display: flow-root;\n        position: relative;\n      }\n      /* A group\'s line in place of its rows while it has none open, where a row\'s text would start. */\n      .group-empty {\n        padding: var(--row-pad) 14px var(--row-pad) var(--text-x);\n        color: var(--muted);\n      }\n      /*\n       * A leaving empty line takes no height and stays where it was, above the fold, while the group\'s end shrinks\n       * and clips it from the top as rows grow in over it.\n       */\n      .group-empty.leaving {\n        position: absolute;\n        inset: auto 0 100% 0;\n        pointer-events: none;\n        animation: fade-out var(--enter) forwards;\n      }\n      @keyframes fade-out {\n        to {\n          opacity: 0;\n        }\n      }\n      /* The chevron centers in the mark column and the label starts at the rows\' text, as a group\'s rows do. */\n      .fold {\n        display: block;\n        margin: 8px 0 0 calc(var(--mark-x) - 1px);\n        padding: 1px 4px;\n        border-radius: 5px;\n        color: var(--muted);\n      }\n      .fold:hover {\n        color: var(--text);\n      }\n      .fold .icon {\n        width: 12px;\n        height: 12px;\n        margin-right: calc(var(--text-x) - var(--mark-x) - 15px);\n        vertical-align: -1px;\n      }\n      /* The closed items\' marks sit under the fold\'s label. */\n      .closed-list {\n        --mark-x: 41px;\n        --text-x: 67px;\n      }\n      /* The gap above a Closed list\'s rows is content, not padding, so the list opens from and closes to 0. */\n      .closed-list::before {\n        content: \'\';\n        display: block;\n        height: 4px;\n      }\n      .closed-list .row {\n        padding-top: calc(var(--row-pad) / 2);\n        padding-bottom: calc(var(--row-pad) / 2);\n      }\n      /* A closed item\'s outcome stays quieter than any open row. */\n      .outcome {\n        color: var(--age);\n      }\n      .settled-head {\n        display: flex;\n        align-items: center;\n        min-width: 0;\n      }\n      /* A row that settles while open fades its fill out as its height shrinks over the panel. */\n      .row.settled.was-open {\n        transition: background-color var(--move);\n        @starting-style {\n          background-color: var(--selected);\n        }\n      }\n      /* The title and its outcome wrap, so neither is cut in the middle. */\n      .settled-line {\n        flex: 1;\n        min-width: 0;\n        overflow-wrap: anywhere;\n      }\n      .settled .outcome-label {\n        color: var(--muted);\n      }\n      /* Undo\'s fill is the time it has left. The pill keeps the line\'s height, so the row does not grow. */\n      .key.undo {\n        flex: none;\n        border-color: transparent;\n        position: relative;\n        isolation: isolate;\n        overflow: hidden;\n        margin: -3px 0 -3px 12px;\n        background: color-mix(in oklab, var(--soft) 45%, transparent);\n      }\n      /* While an Undo press is out, its label and arrow dim and the arrow turns. The label stays, so the pill keeps its width and the line its wrap. */\n      .key.undo.undoing {\n        color: var(--muted);\n      }\n      .key.undo.undoing .icon {\n        animation: undo-turn 900ms linear infinite;\n      }\n      @keyframes undo-turn {\n        to {\n          transform: rotate(-360deg);\n        }\n      }\n      .time-left {\n        position: absolute;\n        inset: 0;\n        z-index: -1;\n        background: var(--soft);\n        transform-origin: left;\n        animation-name: empty;\n        animation-timing-function: linear;\n        animation-fill-mode: forwards;\n      }\n      .key.undo:not(:disabled):hover .time-left {\n        background: var(--soft-hover);\n      }\n      .time-left.paused {\n        animation-play-state: paused;\n      }\n      @keyframes empty {\n        from {\n          transform: scaleX(1);\n        }\n        to {\n          transform: scaleX(0);\n        }\n      }\n      /* The page is at least the pane\'s height. The footer sits at its bottom, and an empty tab\'s text fills the space above it. */\n      #app {\n        display: flex;\n        flex-direction: column;\n        min-height: 100vh;\n      }\n      .empty {\n        flex: 1;\n        display: flex;\n        flex-direction: column;\n        justify-content: center;\n        padding: 32px;\n        text-align: center;\n      }\n      .empty .title {\n        margin-bottom: 4px;\n      }\n      footer {\n        margin-top: auto;\n        display: flex;\n        flex-wrap: wrap;\n        justify-content: space-between;\n        gap: 4px 16px;\n        padding: 8px 16px 16px;\n        color: var(--muted);\n        font-size: 12px;\n      }\n      .demo-toggle {\n        padding: 0 6px;\n        border-radius: 5px;\n        color: var(--muted);\n      }\n      .demo-toggle:hover {\n        color: var(--text);\n        background: var(--hover);\n      }\n      /* One line: the notice, with Hide demo at the right. */\n      .demo-note {\n        display: flex;\n        align-items: center;\n        justify-content: space-between;\n        gap: 6px;\n        padding: 8px 12px 0;\n        font-size: 11px;\n        color: var(--muted);\n        white-space: nowrap;\n      }\n      .demo-note .key {\n        flex: none;\n        padding: 0;\n      }\n      .demo-note span {\n        min-width: 0;\n        overflow: hidden;\n        text-overflow: ellipsis;\n      }\n      .earlier {\n        padding: 2px 14px 2px var(--text-x);\n      }\n      /*\n       * Motion, with the Codex app\'s own timing, only for what enters or leaves. Hover, press and\n       * selection fills change at once. What a draw mounts fades in from @starting-style, and heights\n       * move in the script, around each draw. A row\'s own parts do not fade: a row that settles or is\n       * undone swaps them in place, where a fade from nothing reads as a flicker.\n       */\n      /* The new-row bar fades out. */\n      .row {\n        transition: box-shadow var(--enter);\n      }\n      /* A panel does not fade: it stays opaque, clipped by its row\'s height, so a row closing and the row\n         opening in its place move as one. */\n      .status-line,\n      .demo-note,\n      .empty,\n      main,\n      form {\n        transition: opacity var(--quick);\n        @starting-style {\n          opacity: 0;\n        }\n      }\n      @media (prefers-reduced-motion: reduce) {\n        *,\n        *::before,\n        *::after {\n          transition-duration: 0s !important;\n        }\n        /* With no motion, Undo stays full and does not count down, and its arrow does not turn. */\n        .time-left,\n        .key.undo.undoing .icon {\n          animation: none;\n        }\n      }\n    </style>\n  </head>\n  <body>\n    <div id="app"></div>\n    <script>\n      "use strict";(()=>{var Se,b,Zt,vs,V,Xt,en,tn,ot,be,se,nn,lt,rt,at,Ss,xe={},Re=[],Ts=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine[ch]|zoo|^ord|itera/i,Te=Array.isArray;function M(e,t){for(var n in t)e[n]=t[n];return e}function dt(e){e&&e.parentNode&&e.parentNode.removeChild(e)}function $s(e,t,n){var s,i,o,r={};for(o in t)o=="key"?s=t[o]:o=="ref"?i=t[o]:r[o]=t[o];if(arguments.length>2&&(r.children=arguments.length>3?Se.call(arguments,2):n),typeof e=="function"&&e.defaultProps!=null)for(o in e.defaultProps)r[o]===void 0&&(r[o]=e.defaultProps[o]);return ke(e,r,s,i,null)}function ke(e,t,n,s,i){var o={type:e,props:t,key:n,ref:s,__k:null,__:null,__b:0,__e:null,__c:null,constructor:void 0,__v:i??++Zt,__i:-1,__u:0};return i==null&&b.vnode!=null&&b.vnode(o),o}function A(e){return e.children}function _e(e,t){this.props=e,this.context=t}function q(e,t){if(t==null)return e.__?q(e.__,e.__i+1):null;for(var n;t<e.__k.length;t++)if((n=e.__k[t])!=null&&n.__e!=null)return n.__e;return typeof e.type=="function"?q(e):null}function Es(e){if(e.__P&&e.__d){var t=e.__v,n=t.__e,s=[],i=[],o=M({},t);o.__v=t.__v+1,b.vnode&&b.vnode(o),ct(e.__P,o,t,e.__n,e.__P.namespaceURI,32&t.__u?[n]:null,s,n??q(t),!!(32&t.__u),i),o.__v=t.__v,o.__.__k[o.__i]=o,ln(s,o,i),t.__e=t.__=null,o.__e!=n&&sn(o)}}function sn(e){if((e=e.__)!=null&&e.__c!=null)return e.__e=e.__c.base=null,e.__k.some(function(t){if(t!=null&&t.__e!=null)return e.__e=e.__c.base=t.__e}),sn(e)}function Qt(e){(!e.__d&&(e.__d=!0)&&V.push(e)&&!ve.__r++||Xt!=b.debounceRendering)&&((Xt=b.debounceRendering)||en)(ve)}function ve(){try{for(var e,t=1;V.length;)V.length>t&&V.sort(tn),e=V.shift(),t=V.length,Es(e)}finally{V.length=ve.__r=0}}function on(e,t,n,s,i,o,r,l,u,c,p){var m,d,f,h,g,y,_=s&&s.__k||Re,w=t.length;for(u=Ps(n,t,_,u,w),m=0;m<w;m++)(f=n.__k[m])!=null&&(d=f.__i!=-1&&_[f.__i]||xe,f.__i=m,y=ct(e,f,d,i,o,r,l,u,c,p),h=f.__e,f.ref&&d.ref!=f.ref&&(d.ref&&ut(d.ref,null,f),p.push(f.ref,f.__c||h,f)),g==null&&h!=null&&(g=h),4&f.__u?(u=rn(f,u,e),d.__e&&(d.__e=null)):typeof f.type=="function"&&y!==void 0?u=y:h&&(u=h.nextSibling),f.__u&=-7);return n.__e=g,u}function Ps(e,t,n,s,i){var o,r,l,u,c,p=n.length,m=p,d=0;for(e.__k=new Array(i),o=0;o<i;o++)(r=t[o])!=null&&typeof r!="boolean"&&typeof r!="function"?(typeof r=="string"||typeof r=="number"||typeof r=="bigint"||r.constructor==String?r=e.__k[o]=ke(null,r,null,null,null):Te(r)?r=e.__k[o]=ke(A,{children:r},null,null,null):r.constructor===void 0&&r.__b>0?r=e.__k[o]=ke(r.type,r.props,r.key,r.ref?r.ref:null,r.__v):e.__k[o]=r,u=o+d,r.__=e,r.__b=e.__b+1,l=null,(c=r.__i=Ls(r,n,u,m))!=-1&&(m--,(l=n[c])&&(l.__u|=2)),l==null||l.__v==null?(c==-1&&(i>p?d--:i<p&&d++),typeof r.type!="function"&&(r.__u|=4)):c!=u&&(c==u-1?d--:c==u+1?d++:(c>u?d--:d++,r.__u|=4))):e.__k[o]=null;if(m)for(o=0;o<p;o++)(l=n[o])!=null&&(2&l.__u)==0&&(l.__e==s&&(s=q(l)),cn(l,l));return s}function rn(e,t,n){var s,i;if(typeof e.type=="function"){for(s=e.__k,i=0;s&&i<s.length;i++)s[i]&&(s[i].__=e,t=rn(s[i],t,n));return t}e.__e!=t&&(t&&e.type&&!t.parentNode&&(t=q(e)),t=n.insertBefore(e.__e,t||null));do t=t&&t.nextSibling;while(t!=null&&t.nodeType==8);return t}function Ls(e,t,n,s){var i,o,r,l=e.key,u=e.type,c=t[n],p=c!=null&&(2&c.__u)==0;if(c===null&&l==null||p&&l==c.key&&u==c.type)return n;if(s>(p?1:0)){for(i=n-1,o=n+1;i>=0||o<t.length;)if((c=t[r=i>=0?i--:o++])!=null&&(2&c.__u)==0&&l==c.key&&u==c.type)return r}return-1}function zt(e,t,n){t[0]=="-"?e.setProperty(t,n??""):e[t]=n==null?"":typeof n!="number"||Ts.test(t)?n:n+"px"}function ye(e,t,n,s,i){var o,r;e:if(t=="style")if(typeof n=="string")e.style.cssText=n;else{if(typeof s=="string"&&(e.style.cssText=s=""),s)for(t in s)n&&t in n||zt(e.style,t,"");if(n)for(t in n)s&&n[t]==s[t]||zt(e.style,t,n[t])}else if(t[0]=="o"&&t[1]=="n")o=t!=(t=t.replace(nn,"$1")),r=t.toLowerCase(),t=r in e||t=="onFocusOut"||t=="onFocusIn"?r.slice(2):t.slice(2),e.l||(e.l={}),e.l[t+o]=n,n?s?n[se]=s[se]:(n[se]=lt,e.addEventListener(t,o?at:rt,o)):e.removeEventListener(t,o?at:rt,o);else{if(i=="http://www.w3.org/2000/svg")t=t.replace(/xlink(H|:h)/,"h").replace(/sName$/,"s");else if(t!="width"&&t!="height"&&t!="href"&&t!="list"&&t!="form"&&t!="tabIndex"&&t!="download"&&t!="rowSpan"&&t!="colSpan"&&t!="role"&&t!="popover"&&t in e)try{e[t]=n??"";break e}catch{}typeof n=="function"||(n==null||n===!1&&t[4]!="-"?e.removeAttribute(t):e.setAttribute(t,t=="popover"&&n==1?"":n))}}function Jt(e){return function(t){if(this.l){var n=this.l[t.type+e];if(t[be]==null)t[be]=lt++;else if(t[be]<n[se])return;return n(b.event?b.event(t):t)}}}function ct(e,t,n,s,i,o,r,l,u,c){var p,m,d,f,h,g,y,_,w,R,C,N,ne,Bt,we,it,D=t.type;if(t.constructor!==void 0)return null;128&n.__u&&(u=!!(32&n.__u),o=[l=t.__e=n.__e]),(p=b.__b)&&p(t);e:if(typeof D=="function"){m=r.length;try{if(w=t.props,R=D.prototype&&D.prototype.render,C=(p=D.contextType)&&s[p.__c],N=p?C?C.props.value:p.__:s,n.__c?_=(d=t.__c=n.__c).__=d.__E:(R?t.__c=d=new D(w,N):(t.__c=d=new _e(w,N),d.constructor=D,d.render=Cs),C&&C.sub(d),d.state||(d.state={}),d.__n=s,f=d.__d=!0,d.__h=[],d._sb=[]),R&&d.__s==null&&(d.__s=d.state),R&&D.getDerivedStateFromProps!=null&&(d.__s==d.state&&(d.__s=M({},d.__s)),M(d.__s,D.getDerivedStateFromProps(w,d.__s))),h=d.props,g=d.state,d.__v=t,f)R&&D.getDerivedStateFromProps==null&&d.componentWillMount!=null&&d.componentWillMount(),R&&d.componentDidMount!=null&&d.__h.push(d.componentDidMount);else{if(R&&D.getDerivedStateFromProps==null&&w!==h&&d.componentWillReceiveProps!=null&&d.componentWillReceiveProps(w,N),t.__v==n.__v||!d.__e&&d.shouldComponentUpdate!=null&&d.shouldComponentUpdate(w,d.__s,N)===!1){t.__v!=n.__v&&(d.props=w,d.state=d.__s,d.__d=!1),t.__e=n.__e,t.__k=n.__k,t.__k.some(function(X){X&&(X.__=t)}),Re.push.apply(d.__h,d._sb),d._sb=[],d.__h.length&&r.push(d),l=q(n);break e}d.componentWillUpdate!=null&&d.componentWillUpdate(w,d.__s,N),R&&d.componentDidUpdate!=null&&d.__h.push(function(){d.componentDidUpdate(h,g,y)})}if(d.context=N,d.props=w,d.__P=e,d.__e=!1,ne=b.__r,Bt=0,R)d.state=d.__s,d.__d=!1,ne&&ne(t),p=d.render(d.props,d.state,d.context),Re.push.apply(d.__h,d._sb),d._sb=[];else do d.__d=!1,ne&&ne(t),p=d.render(d.props,d.state,d.context),d.state=d.__s;while(d.__d&&++Bt<25);d.state=d.__s,d.getChildContext!=null&&(s=M(M({},s),d.getChildContext())),R&&!f&&d.getSnapshotBeforeUpdate!=null&&(y=d.getSnapshotBeforeUpdate(h,g)),we=p!=null&&p.type===A&&p.key==null?dn(p.props.children):p,l=on(e,Te(we)?we:[we],t,n,s,i,o,r,l,u,c),d.base=t.__e,t.__u&=-161,d.__h.length&&r.push(d),_&&(d.__E=d.__=null)}catch(X){if(r.length=m,t.__v=null,u||o!=null){if(X.then){for(t.__u|=u?160:128;l&&l.nodeType==8&&l.nextSibling;)l=l.nextSibling;o!=null&&(o[o.indexOf(l)]=null),t.__e=l}else if(o!=null)for(it=o.length;it--;)dt(o[it])}else t.__e=n.__e;t.__k==null&&(t.__k=n.__k||[]),X.then||an(t),b.__e(X,t,n)}}else o==null&&t.__v==n.__v?(t.__k=n.__k,t.__e=n.__e):l=t.__e=As(n.__e,t,n,s,i,o,r,u,c);return(p=b.diffed)&&p(t),128&t.__u?void 0:l}function an(e){e&&(e.__c&&(e.__c.__e=!0),e.__k&&e.__k.some(an))}function ln(e,t,n){for(var s=0;s<n.length;s++)ut(n[s],n[++s],n[++s]);b.__c&&b.__c(t,e),e.some(function(i){try{e=i.__h,i.__h=[],e.some(function(o){o.call(i)})}catch(o){b.__e(o,i.__v)}})}function dn(e){return typeof e!="object"||e==null||e.__b>0?e:Te(e)?e.map(dn):e.constructor!==void 0?null:M({},e)}function As(e,t,n,s,i,o,r,l,u){var c,p,m,d,f,h,g,y=n.props||xe,_=t.props,w=t.type;if(w=="svg"?i="http://www.w3.org/2000/svg":w=="math"?i="http://www.w3.org/1998/Math/MathML":i||(i="http://www.w3.org/1999/xhtml"),o!=null){for(c=0;c<o.length;c++)if((f=o[c])&&"setAttribute"in f==!!w&&(w?f.localName==w:f.nodeType==3)){e=f,o[c]=null;break}}if(e==null){if(w==null)return document.createTextNode(_);e=document.createElementNS(i,w,_.is&&_),l&&(b.__m&&b.__m(t,o),l=!1),o=null}if(w==null)y===_||l&&e.data==_||(e.data=_);else{if(o=w=="textarea"&&_.defaultValue!=null?null:o&&Se.call(e.childNodes),!l&&o!=null)for(y={},c=0;c<e.attributes.length;c++)y[(f=e.attributes[c]).name]=f.value;for(c in y)f=y[c],c=="dangerouslySetInnerHTML"?m=f:c=="children"||c in _||c=="value"&&"defaultValue"in _||c=="checked"&&"defaultChecked"in _||ye(e,c,null,f,i);for(c in _)f=_[c],c=="children"?d=f:c=="dangerouslySetInnerHTML"?p=f:c=="value"?h=f:c=="checked"?g=f:l&&typeof f!="function"||y[c]===f||ye(e,c,f,y[c],i);if(p)l||m&&(p.__html==m.__html||p.__html==e.innerHTML)||(e.innerHTML=p.__html),t.__k=[];else if(m&&(e.innerHTML=""),on(t.type=="template"?e.content:e,Te(d)?d:[d],t,n,s,w=="foreignObject"?"http://www.w3.org/1999/xhtml":i,o,r,o?o[0]:n.__k&&q(n,0),l,u),o!=null)for(c=o.length;c--;)dt(o[c]);l&&w!="textarea"||(c="value",w=="progress"&&h==null?e.removeAttribute("value"):h!=null&&(h!==e[c]||w=="progress"&&!h||w=="option"&&h!=y[c])&&ye(e,c,h,y[c],i),c="checked",g!=null&&g!=e[c]&&ye(e,c,g,y[c],i))}return e}function ut(e,t,n){try{if(typeof e=="function"){var s=typeof e.__u=="function";s&&e.__u(),s&&t==null||(e.__u=e(t))}else e.current=t}catch(i){b.__e(i,n)}}function cn(e,t,n){var s,i;if(b.unmount&&b.unmount(e),(s=e.ref)&&(s.current&&s.current!=e.__e||ut(s,null,t)),(s=e.__c)!=null){if(s.componentWillUnmount)try{s.componentWillUnmount()}catch(o){b.__e(o,t)}s.base=s.__P=s.__n=null}if(s=e.__k)for(i=0;i<s.length;i++)s[i]&&cn(s[i],t,n||typeof e.type!="function");n||dt(e.__e),e.__c=e.__=e.__e=void 0}function Cs(e,t,n){return this.constructor(e,n)}function un(e,t,n){var s,i,o,r;t==document&&(t=document.documentElement),b.__&&b.__(e,t),i=(s=typeof n=="function")?null:n&&n.__k||t.__k,o=[],r=[],ct(t,e=(!s&&n||t).__k=$s(A,null,[e]),i||xe,xe,t.namespaceURI,!s&&n?[n]:i?null:t.firstChild?Se.call(t.childNodes):null,o,!s&&n?n:i?i.__e:t.firstChild,s,r),ln(o,e,r),e.props.children=null}Se=Re.slice,b={__e:function(e,t,n,s){for(var i,o,r;t=t.__;)if((i=t.__c)&&!i.__)try{if((o=i.constructor)&&o.getDerivedStateFromError!=null&&(i.setState(o.getDerivedStateFromError(e)),r=i.__d),i.componentDidCatch!=null&&(i.componentDidCatch(e,s||{}),r=i.__d),r)return i.__E=i}catch(l){e=l}throw e}},Zt=0,vs=function(e){return e!=null&&e.constructor===void 0},_e.prototype.setState=function(e,t){var n;n=this.__s!=null&&this.__s!=this.state?this.__s:this.__s=M({},this.state),typeof e=="function"&&(e=e(M({},n),this.props)),e&&M(n,e),e!=null&&this.__v&&(t&&this._sb.push(t),Qt(this))},_e.prototype.forceUpdate=function(e){this.__v&&(this.__e=!0,e&&this.__h.push(e),Qt(this))},_e.prototype.render=A,V=[],en=typeof Promise=="function"?Promise.prototype.then.bind(Promise.resolve()):setTimeout,tn=function(e,t){return e.__v.__b-t.__v.__b},ve.__r=0,ot=Math.random().toString(8),be="__d"+ot,se="__a"+ot,nn=/(PointerCapture)$|Capture$/i,lt=0,rt=Jt(!1),at=Jt(!0),Ss=0;function pt(e){if(e.how==="dismissed")return"dismissed";if(e.how==="expired")return"lapsed";let t=/^(?:closed by \\w+: )?(?:no longer applies|replaced|superseded|moot)/i.test(e.outcome);return(e.how==="claude"||e.how==="update")&&t?"lapsed":"handled"}function ie(e){let t=Math.round(e/6e4);if(t<1)return"just now";if(t<60)return`${t}m ago`;let n=Math.round(t/60);return n<48?`${n}h ago`:`${Math.round(n/24)}d ago`}function Q(e){return e.threads.filter(t=>t.isWaiting)}function $e(e,t){return Q(e).filter(n=>!n.isLinesChanged&&!t(e,n))}function Os(e){let t={pass:0,fail:0,pending:0,skip:0};for(let n of e.checks)t[n.bucket]+=1;return t}function Is(e){return`${e} ${e===1?"thread":"threads"} waiting on you`}function ft(e,t,n){return`${e} ${e===1?t:n}`}function mt(e,t=()=>!1){let n=(g,y,_=[],w=": ")=>{let R=_.join(", "),C=g==="ready"?[]:_.filter(N=>!s.includes(N));return{status:g,text:R?`${y}${w}${R}`:y,head:y,reasons:R,reasonList:_,unlisted:C}},s=[];if(e.state==="MERGED")return n("merged","Merged");if(e.state!=="OPEN")return n("closed","Closed");let{fail:i,pending:o}=Os(e),r=Q(e),l=$e(e,t).length,u=r.filter(g=>t(e,g)).length,c=r.filter(g=>g.isLinesChanged&&!t(e,g)).length,p=g=>g!==null,m=g=>(g===null||s.push(g),g),d=[e.mergeable==="CONFLICTING"?`conflicts with ${e.base}`:null,m(i>0?ft(i,"failing check","failing checks"):null),e.reviewDecision==="CHANGES_REQUESTED"?"changes requested":null,m(l>0?Is(l):null)].filter(p),f=[m(u>0?`${ft(u,"thread","threads")} sent to Claude`:null),m(c>0?`${ft(c,"thread","threads")} on changed lines`:null),e.reviewDecision==="REVIEW_REQUIRED"?"needs approval":null,o>0?`${o} ${o===1?"check":"checks"} running`:null].filter(p);if(e.isDraft)return n("draft","Draft",[...d,...f]);if(d.length>0)return n("blocked","Blocked",d);if(f.length>0)return n("waiting","Waiting",f);let h=e.reviewDecision==="APPROVED";return n("ready","Ready to merge",[...h?["approved"]:[],"checks pass","no threads waiting on you"],h?": ":", ")}var Ds=/<\\/?(?:a|b|br|code|details|div|em|h[1-6]|hr|i|img|kbd|li|ol|p|pre|span|strong|sub|summary|sup|table|tbody|td|th|thead|tr|ul)\\b[^>]*>/g;function Ee(e){return e.replace(/<!--[\\s\\S]*?-->/g,"").replace(Ds,"").replace(/^[^\\S\\n]*Useful\\?[^\\S\\n]+React[^\\S\\n]+with[^\\S\\n]+\u{1F44D}[^\\S\\n]*\\/[^\\S\\n]*\u{1F44E}\\.?[^\\S\\n]*$/gmu,"").replace(/!\\[([^\\]]*)\\]\\([^)]*\\)/g,(t,n)=>n.replace(/\\s*badge$/i,"")).trim()}function ht(e){return Ee(e).replace(/\\[([^\\]]*)\\]\\([^)]*\\)/g,"$1").replace(/^\\s*(?:#{1,6}|>)\\s*/gm,"").replace(/\\*\\*|__|`/g,"").replace(/\\s+/g," ")}var gt=120;function pn(e){let t=Ee(e),[n="",...s]=t.split(`\n`),i=ht(n).trim();return{head:i,rest:i.length>gt?t:s.join(`\n`).trim()}}function wt(e,t=e.path){return`${t}${e.line?`:${e.line}`:""}`}function fn(e){let t=Math.max(0,Math.round(e/1e3));return t<60?`${t}s`:`${Math.floor(t/60)}m ${t%60}s`}function Pe(e){return e.checks.filter(t=>t.bucket==="fail")}function W(e,t){return e.length>t?`${e.slice(0,t-1)}\\u2026`:e}function Le(e){return e.replace(/\\/+$/,"").split("/").pop()??e}function mn(e,t){let n=e?.delivery?.state!=="failed"?e?.turnsStarted:void 0;return n!==void 0&&n<=t.turnsStarted&&t.turnsApplied<=n}function hn(e){return e.startsWith("pr:")||e.includes(" ")}function Ae(e,t){return!e.startsWith("pr:")&&t?.kind==="handoff"&&t.action!=="address"}function yt(e){return e.action==="step"?`step-${e.step}`:e.action}function Ce(e){return e.charAt(0).toUpperCase()+e.slice(1)}function gn(e){if(!e)return;if(e.step.some(n=>n.kind==="run"))return"run";let t=e.step[0]?.kind;return t==="copy"||t==="terminal"?"copy":t==="open"||t==="link"?"open":void 0}var Vs="This changed before your press. Nothing was sent.";function oe(e){return e==="sample"?"Sample entry: nothing was sent.":Vs}function Hs(e,t){switch(t.kind){case"run":return{kind:"send",text:qs.run(e,t.command),by:{id:e.id,action:"run"}};case"open":return{kind:"open",target:t.path,name:Le(t.path)};case"link":return{kind:"open",target:t.url,name:t.name??t.url};case"copy":return{kind:"copy",text:t.text,name:t.name??"snippet",isCommand:!1};case"terminal":return{kind:"copy",text:t.command,name:t.name??W(t.command,32),isCommand:!0}}}function wn(e,t){return t.step.map(n=>Hs(e,n))}function Oe(e,t){return{state:"pending",parts:e.flatMap(n=>n.kind==="send"?[]:[{kind:n.kind,name:n.name,isCommand:n.kind==="copy"&&n.isCommand,error:null}]),at:t}}function yn(e,t){if(!/^[if]\\d+$/.test(e))return null;let n=/^step-(\\d+)$/.exec(t.action);if(n)return{action:"step",id:e,step:Number(n[1]),label:t.text};switch(t.action){case"answer":return{action:"answer",id:e,option:t.text};case"explain":case"address":case"discuss":return{action:t.action,id:e};default:return null}}function Us(e){return[`${e.kind==="issue"?"Issue":"Opportunity"}: ${e.title}`,e.detail,...e.path?[`File: ${e.path}`]:[]]}var qs={answer:(e,t)=>`Re "${e.ask}": ${t}`,explain:e=>{let t=e.kind==="task"?"this task you left for me is about: why it came up, and what each choice would mean":"this question you asked me is about: why it came up, what each choice would mean, and which you would pick",n=e.options.length>0?`\nOptions: ${e.options.join(" / ")}`:"";return`Remind me what ${t}. Don\'t act on it yet.\n"${e.ask}"${n}`},run:(e,t)=>`For "${e.ask}", run this:\n\\`\\`\\`\n${t}\n\\`\\`\\``,taskReply:(e,t)=>`Re the task you left for me, "${e.ask}": ${t}`,done:e=>e.length===1?`Done: ${e[0]}`:`Done:\n${e.map(t=>`- ${t}`).join(`\n`)}`,finding:(e,t,n="")=>[t==="address"?"Please address this finding you recorded:":t==="discuss"?"Let\'s talk through this finding you recorded before changing anything:":"About this finding you recorded:",...Us(e),...t==="typed"?["",n]:[]].join(`\n`)};var bn=[..."abcfghilm"],$="\\u2007\\xB7\\u2002",Ie={issue:{title:"Issues",mark:"\\u25B2",tone:"issue"},opportunity:{title:"Opportunities",mark:"\\u2726",tone:"done"}},kn={handled:"\\u2713",dismissed:"\\u2715",lapsed:"\\u2013"},Ws=3,v=5120,_t=400,js=1e3;function Ks(e,t){return e?.delivery?.state==="queued"&&t-e.at>=js}function _n(e,t){return e>0&&t-e<_t}function re(e){return[...e.needsYou.questions,...e.needsYou.tasks,...e.findings.rows]}function xn(e){return e.filter(t=>t.state.is==="settled").map(t=>t.id)}function ae(e,t){return e.filter(n=>!t.has(n.id)).slice(0,Ws)}function De(e,t){return e.filter(n=>!t.has(n.id)).length}function Rn(e){return`${e} closed`}function vn(e,t){return e>t?`${e-t} earlier`:null}function j(e){let t=ie(e);return t==="just now"?"now":t.replace(/ ago$/,"")}function Sn(e){return`No open ${e.toLowerCase()}`}var Tn="Sample entries. Presses send nothing.";function le(e,t,n,s,i){let o=t?.result;if(n&&i-n.at<v&&n.at>=Math.max(t?.at??0,o?.at??0))return{is:"note",note:n.note,at:n.at};if(o&&(o.state!=="done"||i-o.at<v))return{is:"local",result:o};if(!t||t.kind==="local")return null;let r=t.delivery;if(Ks(t,i))return{is:"queued",label:t.text,at:t.at};if(r?.state==="failed")return{is:"notSent",reason:r.reason,retry:yn(e,t)};let l=mn(t,s),u=Gs[t.action];if(t.kind==="talk"&&u&&l)return{is:"working",label:u,at:t.at};if(!l&&!hn(e)&&Ae(e,t))return{is:"stillOpen",at:t.at};let c=t.kind==="handoff"&&t.action.startsWith("step-");return{is:"done",label:Ys[t.action]?.(t.text)??t.text,at:t.at,...c?{isHandedStep:!0}:{}}}var Gs={explain:"Explaining\\u2026",discuss:"Discussing\\u2026","thread-discuss":"Discussing\\u2026","thread-draft":"Drafting a reply\\u2026"},Ys={address:()=>"Handed off",discuss:()=>"Discussed",explain:()=>"Explained",dismiss:()=>"Dismissed",type:()=>"Replied","thread-address":()=>"Addressed","thread-discuss":()=>"Discussed","thread-draft":()=>"Drafted a reply","pr-conflicts":()=>"Asked to resolve conflicts","pr-merge":()=>"Asked to merge","pr-address-all":e=>e.replace(/^Address\\b/,"Addressed")};function xt(e){return e?.is==="notSent"||e?.is==="local"&&e.result.state==="failed"}function Rt(e){return e.is==="done"||e.is==="working"||e.is==="stillOpen"||e.is==="queued"}var Bs=e=>e==="terminal"?"Run it in a terminal, or type ! and paste.":"Run it in Terminal.",bt={open:{pending:"Opening",done:"Opened",failed:"open"},copy:{pending:"Copying",done:"Copied",failed:"copy"}};function Xs(e,t){let s=e.parts.length>1&&e.parts.every(r=>r.kind==="open"&&r.error===null&&/^PR #\\d+$/.test(r.name))?[{...e.parts[0],name:`${e.parts.length} PRs`}]:e.parts;if(e.state==="pending")return`${s.map(r=>`${bt[r.kind].pending} ${r.name}`).join($)}\\u2026`;let i=s.map(r=>r.error===null?`${bt[r.kind].done} ${r.name}`:`Could not ${bt[r.kind].failed} ${r.name}: ${r.error}`).join($);if(e.state==="failed")return i;let o=s.some(r=>r.kind==="copy"&&r.isCommand);return`\\u2713 ${i}${o?`. ${Bs(t)}`:""}`}function de(e,t){switch(e.is){case"note":return oe(e.note);case"local":return Xs(e.result,t);case"queued":return`Queued: ${e.label}`;case"notSent":return`Not sent: ${e.reason}`;case"done":return e.isHandedStep?`\\u2713 Handed off: ${e.label}`:`\\u2713 ${e.label}`;case"working":return e.label;case"stillOpen":return"Still open"}}var Ne=[{id:"needsYou",label:"Needs you",hotkey:"1"},{id:"findings",label:"Findings",hotkey:"2"},{id:"prs",label:"PRs",hotkey:"3"}],yo=Ne.filter(e=>e.id!=="prs");function ce(e,t){return e==="needsYou"?{title:"Nothing needs you.",hint:`${t}\'s questions and the tasks only you can do show up here.`}:{title:"No findings yet",hint:`${t} flags issues and opportunities it spots beyond your task.`}}function vt(e,t,n){let s=u=>u.flatMap(c=>{if(c.state.is==="settled")return t(c.id)?[{settled:c,state:c.state}]:[];let p=n(c);return p===null?[]:[{row:p}]}),i=s(e.needsYou.questions),o=s(e.needsYou.tasks),r=Object.keys(Ie).map(u=>({kind:u,title:Ie[u].title,entries:s(e.findings.rows.filter(c=>c.finding?.kind===u))})),l=r.flatMap(u=>u.entries);return{questions:i,tasks:o,findings:l,findingGroups:r,byTab:{needsYou:[...kt(i),...kt(o)],findings:kt(l)}}}function K(e){return"row"in e?e.row.id:e.settled.id}function $n(e){let t=vt(e,()=>!0,s=>s),n=s=>s.map(i=>"row"in i?{id:i.row.id,isWaiting:i.row.state.is==="open"}:{id:i.settled.id,isWaiting:!1});return{needsYou:n([...t.questions,...t.tasks]),findings:n(t.findings)}}function St(e){return e.find(t=>t.isWaiting)?.id??null}function En(e,t){return St(e.filter(n=>!t.includes(n.id)))}function Pn(e,t){let n=e.findIndex(s=>s.id===t);return n<0?null:(e.slice(n+1).find(s=>s.isWaiting)??e.slice(0,n).reverse().find(s=>s.isWaiting))?.id??null}function kt(e){return e.flatMap(t=>"row"in t?[t.row]:[])}function Me(e){return new Set(e.flatMap(t=>"settled"in t?[t.settled.id]:[]))}function Ln(e,t,n){let s=e.actions.filter(m=>t||!m.isFolded),i=e.actions.length-s.length,o=s.map(m=>m.press.action).lastIndexOf("answer"),r=[],l=[],u=[],c=e.feedback?.is==="notSent"?e.feedback.retry:null;if(c){let m=e.actions.find(d=>yt(d.press)===yt(c))?.kind??"talk";r.push({slot:"retry",press:c,kind:m})}let p=0;for(let[m,d]of s.entries()){let{press:f}=d;if(f.action==="answer"||f.action==="step"){let h=p<bn.length?{hotkey:bn[p++]}:{};r.push({slot:"choice",action:{...d,press:f},...h}),m===o&&i>0&&r.push({slot:"allOptions",count:e.actions.filter(g=>g.press.action==="answer").length})}else d.hotkey&&(f.action==="explain"&&n?u:d.isFollowUp?l:r).push({slot:"action",action:d,hotkey:d.hotkey})}return{keys:r,more:l,hidden:u}}function Fe(e,t){return Qs(e.ref,t.id)}function Tt(e,t){return zs(e.ref,t.name)}function Qs(e,t){return`${e} thread ${t}`}function zs(e,t){return`${e} check ${t}`}function G(e){return`pr:${e}`}function Ve(e){return(t,n)=>{let s=e[Fe(t,n)];return s?.kind==="handoff"&&s.delivery?.state!=="failed"&&s.at>((n.reply??n).at??0)}}function An(e,t){let n=Ve(t);return e.flatMap(s=>[...Q(s).map(i=>({id:Fe(s,i),isWaiting:!n(s,i)})),...Pe(s).map(i=>{let o=Tt(s,i),r=t[o];return{id:o,isWaiting:!Ae(o,r)||r?.delivery?.state==="failed"}})])}var Cn={ready:"done",blocked:"needsYou",waiting:null,draft:null,merged:"findings",closed:"error"};function He(e,t,n,s=null){if(e?.delivery?.state!=="failed")return null;let i=e.action;return s!==null?i==="check-fix"?{press:{action:i,ref:t,check:s},kind:e.kind}:null:n!==null&&(i==="thread-address"||i==="thread-draft"||i==="thread-discuss")?{press:{action:i,ref:t,thread:n},kind:e.kind}:n===null&&(i==="pr-conflicts"||i==="pr-address-all"||i==="pr-merge")?{press:{action:i,ref:t},kind:e.kind}:null}function On(e,t){let n={...e},s={};for(let i of Object.keys(t)){let o=t[i],r=e[i];s[i]=o&&r?o.filter(l=>!r.has(l)):[],o&&(n[i]=new Set(o))}return{seen:n,added:s}}function In(e,t,n,s){return n?e.find(i=>i!==t&&s[i].length>0)??null:null}var Js=/`([^`\\n]+)`|\\*\\*(?=\\S)(.+?)(?<=\\S)\\*\\*(?!\\*)|~~(?=\\S)(.+?)(?<=\\S)~~|(?<![\\w*])\\*(?=\\S)([^*\\n]+?)(?<=\\S)\\*(?![\\w*])|(?<!\\w)_(?=\\S)([^_\\n]+?)(?<=\\S)_(?!\\w)|\\[([^\\]\\n]+)\\]\\((https:\\/\\/[^\\s)]+)\\)/g;function Ue(e,t={}){let n=[],s=0;for(let i of e.matchAll(Js)){i.index>s&&n.push({...t,text:e.slice(s,i.index)});let[,o,r,l,u,c,p,m]=i;o!==void 0?n.push({...t,text:o,code:!0}):r!==void 0?n.push(...Ue(r,{...t,bold:!0})):l!==void 0?n.push(...Ue(l,{...t,strike:!0})):u!==void 0||c!==void 0?n.push({...t,text:u??c??"",italic:!0}):n.push({...t,text:p??"",link:m}),s=i.index+i[0].length}return s<e.length&&n.push({...t,text:e.slice(s)}),n}var qe={question:"needsYou",task:"needsYou",finding:"findings"},ue=["needsYou","findings"];function Zs(e){return{needsYou:[...e.needsYou.questions,...e.needsYou.tasks].map(t=>t.id),findings:e.findings.rows.map(t=>t.id)}}function Dn(e){let t=n=>n.filter(s=>s.state.is!=="settled").map(s=>s.id);return{needsYou:t([...e.needsYou.questions,...e.needsYou.tasks]),findings:t(e.findings.rows)}}function Nn(e,t){return On(e,Zs(t))}function Mn(e,t,n,s){let i=r=>r.some(l=>l.state.is!=="settled"||n.has(l.id)),o=(r,l)=>s.has(r)&&ae(l,n).length>0;return t==="findings"?!i(e.findings.rows)&&!o("issue",e.findings.closed.filter(r=>r.kind==="issue"))&&!o("opportunity",e.findings.closed.filter(r=>r.kind==="opportunity")):e.heard==="heard"&&!i(e.needsYou.questions)&&!i(e.needsYou.tasks)&&!o("question",e.needsYou.closed.questions)&&!o("task",e.needsYou.closed.tasks)}var We={entering:300,opening:200,closing:200,settling:200,leaving:200,closed:0,open:0,settled:0,undoing:0};function $t(e){return We[e]>0}function Vn(e,t,n,s=!1,i=!1){let o=t==="undoing"?"settled":t;if(!e)return s&&!i&&(o==="closed"||o==="open")?{state:"entering",since:n,hasPanel:o==="open"}:Fn(void 0,o,t,n);let r=ei(e)===o?e:ti(e,o,n);return $t(r.state)&&!i&&n-r.since<We[r.state]?r:Fn(r,o,t,n)}function ei({state:e,hasPanel:t}){switch(e){case"entering":return t?"open":"closed";case"opening":case"open":return"open";case"closing":case"closed":return"closed";case"settling":case"settled":case"undoing":return"settled";case"leaving":return"gone"}}function ti(e,t,n){switch(t){case"open":return{state:"opening",since:n,hasPanel:!0};case"closed":return e.state==="leaving"?{state:"entering",since:n,hasPanel:!1}:{state:"closing",since:n,hasPanel:e.hasPanel};case"settled":return{state:"settling",since:n,hasPanel:e.hasPanel};case"gone":return{state:"leaving",since:n,hasPanel:e.hasPanel}}}function Fn(e,t,n,s){if(t==="gone")return null;let i=n==="undoing"?"undoing":t;return e?.state===i?e:{state:i,since:s,hasPanel:i==="open"}}var je=3e3,Hn=6e4,qo=v+2*je;function Un(e){return xn(re(e))}function qn(e,t,n){return new Map(t.map(s=>[s,e.get(s)??n]))}function Wn(e,t,n=new Set){return new Set([...e].filter(([s,i])=>n.has(s)||t-i<v).map(([s])=>s))}var ni=0;function a(e,t,n,s,i,o){t||(t={});var r,l,u=t;if("ref"in u)for(l in u={},t)l=="ref"?r=t[l]:u[l]=t[l];var c={type:e,props:u,key:n,ref:r,__k:null,__:null,__b:0,__e:null,__c:null,constructor:void 0,__v:--ni,__i:-1,__u:0,__source:i,__self:o};if(typeof e=="function"&&(r=e.defaultProps))for(l in r)u[l]===void 0&&(u[l]=r[l]);return b.vnode&&b.vnode(c),c}var ii={check:"M20 6 9 17l-5-5",play:"M7 4.5v15l12-7.5z",copy:"M9 9h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1zM5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1",open:"M7 17 17 7M8 7h9v9",retry:"M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5",undo:"M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11",right:"m9 18 6-6-6-6",down:"m6 9 6 6 6-6"};function et({name:e}){return a("svg",{class:"icon",viewBox:"0 0 24 24",fill:"none",stroke:"currentColor","stroke-width":"2","stroke-linecap":"round","stroke-linejoin":"round","aria-hidden":"true",children:a("path",{d:ii[e]})})}function oi(e){let t=gn(e);return t==="run"?"play":t}var S=null,U=!1,ee=null,pe=null,Jn=!1,Nt=0,Mt=0,k="needsYou",T={needsYou:null,findings:null,prs:null},L=null,Be=!1,Y=new Map,Xe=new Set,H=new Set,Qe=new Map,O=new Map,Pt=new Map,he=new Map,J=null,F=new Map,Ge={},Z=new Set,I=new Set,Ye=new Set,P=new Map,ze=null,Zn=0,jn=0,Lt=!1,At="inbox-tab-kept";function ri(){let e={version:1,isDemo:U,tab:k,selection:{needsYou:T.needsYou?.id??null,findings:T.findings?.id??null,prs:T.prs?.id??null},typing:L,drafts:[...Y],optionsShown:[...Xe],unfolded:[...H]};try{sessionStorage.setItem(At,JSON.stringify(e))}catch{}}function ai(){let e=null;try{let t=sessionStorage.getItem(At);sessionStorage.removeItem(At),e=t?JSON.parse(t):null}catch{}if(e?.version===1){U=e.isDemo,k=e.tab;for(let t of[...ue,"prs"]){let n=e.selection[t];T[t]=n?{id:n,openedAt:0}:null}L=e.typing,Be=L!==null;for(let[t,n]of e.drafts)Y.set(t,n);for(let t of e.optionsShown)Xe.add(t);for(let t of e.unfolded)for(let n of t==="finding"?["issue","opportunity"]:[t])H.add(n)}}var li=0,me=new Map;function es(e,t,n){return new Promise((s,i)=>{let o=++li,r=n===void 0?void 0:window.setTimeout(()=>{me.delete(o)&&i(new Error(`The inbox did not answer in ${Math.round(n/1e3)} s`))},n);me.set(o,{resolve:s,reject:i,timer:r}),parent.postMessage({jsonrpc:"2.0",id:o,method:e,params:t},"*")})}window.addEventListener("message",e=>{let t=e.data;if(!(!t||t.jsonrpc!=="2.0")){if(t.id!=null&&!t.method&&me.has(t.id)){let n=me.get(t.id);me.delete(t.id),clearTimeout(n.timer),t.error?n.reject(t.error):n.resolve(t.result);return}t.method==="ui/notifications/host-context-changed"&&ts(t.params??{}),t.id!=null&&t.method&&parent.postMessage({jsonrpc:"2.0",id:t.id,result:{}},"*")}});function ts(e){e.theme&&(document.documentElement.dataset.theme=e.theme);for(let[t,n]of Object.entries(e.styles?.variables??{}))document.documentElement.style.setProperty(t,n)}async function Ft(e,t={},n){let s=await es("tools/call",{name:e,arguments:t},n);if(!s||s.isError||s.structuredContent===void 0)throw new Error(s?.isError&&s.content?.[0]?.text||"The answer had nothing to show");return s.structuredContent}function ns(e,t){if(t<jn)return;jn=t,ee=null,Nt=0,Mt=Date.now();let n=F;F=qn(F,Un(e),Date.now()),[...F.keys()].some(r=>!n.has(r))&&te(v),S=e;for(let{pr:r,isSettled:l}of e.prs.drawn)l&&te(Math.max(0,v-(e.at-(e.lastActions[G(r.ref)]?.at??e.at))));let s=ue.every(r=>Ge[r]===void 0),i=Nn(Ge,e);Ge=i.seen;let o=[...i.added.needsYou,...i.added.findings];for(let r of o)Z.add(r);for(let r of ue){let l=!T[r]&&i.added[r].length>0?En(tt(e,r),i.added[r]):null;l&&(T[r]={id:l,openedAt:0})}di(e,s?Dn(e):i.added),x()}function di(e,t){if(k==="prs")return;let n=Ht(),s=In(ue,k,Mn(e,k,n,H),t);s&&(k=s,T[s]=null)}var ci=300,ss=3*je;async function Vt(){let e=++Zn;try{let t=await Ft("inbox_view",{demo:U},ss),n=t.devPage!==pi;n&&fi(),pe=t.serverLoadError?{text:`The inbox server could not load its new build, so it still runs the last one. ${t.serverLoadError}`,isReloadable:!1}:t.serverBuild!=="b0c2370670a4"&&!n?{text:"This tab and the inbox server are from different builds.",isReloadable:!0}:null,ns(t,e)}catch(t){S?Nt++:ee=ui(t),x()}}function ui(e){let t=typeof e=="object"&&e!==null&&typeof e.message=="string"?e.message:String(e),n=W(t.replace(/^(Failed|Not done): /,"").replace(/\\s+/g," ").trim(),120)||"No reason given";return Ce(/[.!?\u2026]$/.test(n)?n:`${n}.`)}var pi=window.__inboxPage,Et=!1;async function fi(){if(!Et){Et=!0;try{let{html:e}=await Ft("inbox_tab_page",{},ss);if(!/<\\/html>\\s*$/i.test(e))throw new Error("The new page is incomplete.");let t=window.setTimeout(()=>{},0);for(let n=1;n<=t;n++)clearTimeout(n);ri(),document.open(),document.write(e),document.close()}catch{Et=!1}}}async function is(){Lt||await Vt(),setTimeout(is,je)}function mi(e,t){return re(e).some(n=>n.id===t&&n.state.is!=="settled")||ls(e).some(n=>n.id===t)||e.prs.drawn.some(n=>G(n.pr.ref)===t)}function hi(e,t){return re(e).some(n=>n.id===t&&n.feedback?.is==="notSent")||le(t,e.lastActions[t],void 0,e.turns,e.at)?.is==="notSent"}async function E(e,t,n,s="Sending\\u2026"){t.action!=="undo"&&!e.startsWith("pr:")&&us(e);let i=!!S&&tt(S,k).some(r=>r.id===e&&r.isWaiting);Qe.set(e,s),O.delete(e),Pt.delete(e),he.delete(e),x(),Lt=!0;let o=++Zn;try{let r=await Ft("inbox_press",{press:t,thread:S?.thread,demo:U},Hn);r.copy&&await wi(e,r.copy),r.view&&ns(r.view,o),r.error&&!(S&&hi(S,e))&&O.set(e,r.error),!r.error&&r.note!=="stale"&&n?.(),!r.error&&r.note!=="stale"&&r.view&&i&&gi(r.view,e);let l=r.note;l&&S&&mi(S,e)?(Pt.set(e,{text:oe(l),at:Date.now()}),te(v),l==="stale"&&t.action==="type"&&(L=e)):l&&(J={text:oe(l),at:Date.now()},te(v))}catch{O.set(e,"Not sent: the inbox did not answer.")}finally{Lt=!1,Qe.delete(e),x()}}function tt(e,t){return t==="prs"?An(e.prs.drawn.filter(n=>!n.isSettled).map(n=>n.pr),e.lastActions):$n(e)[t]}function gi(e,t){if(T[k]?.id!==t)return;let n=tt(e,k);if(n.find(o=>o.id===t)?.isWaiting)return;let s=Pn(n,t),i=s===null?-1:ds(e,k).findIndex(o=>o.id===s);if(s===null||i<0){T[k]=null;return}nt(k,s,i),setTimeout(xs,0)}async function wi(e,t){try{await navigator.clipboard.writeText(t.text)}catch{O.set(e,`Could not copy ${t.name}: this tab has no clipboard access`),he.set(e,t)}}function yi(e){us(e),L=e,Be=!0,x()}function os(e){let{id:t,item:n}=e,s=l=>{switch(l.slot){case"retry":return{label:"Try again",emphasis:"normal",icon:"retry",run:()=>{E(t,l.press)}};case"allOptions":return{label:`All ${l.count} options`,emphasis:"quiet",run:()=>{Xe.add(t),x()}};case"choice":{let{action:u,hotkey:c}=l,p=u.press,m=c?{hotkey:c}:{};if(p.action==="answer")return{...m,label:u.isPrimary?`${u.label} (recommended)`:u.label,emphasis:u.isPrimary?"primary":"normal",run:()=>{E(t,p)}};let d=e.steps[p.step],f=u.kind==="local"&&n&&d?de({is:"local",result:Oe(wn(n,d),Date.now())},"codex"):void 0,h=oi(d);return{...m,label:u.label,emphasis:"normal",...h?{icon:h}:{},run:()=>{E(t,p,void 0,f)}}}case"action":{let{action:u,hotkey:c}=l,p=u.press,m=p.action==="type"?()=>yi(t):()=>{E(t,p)},d=p.action==="done"||p.action==="address";return{hotkey:c,label:u.label,emphasis:d?"primary":p.action==="type"?"normal":"quiet",...p.action==="dismiss"?{isDismiss:!0}:{},...p.action==="done"?{icon:"check"}:{},run:m}}}},{keys:i,more:o,hidden:r}=Ln(e,Xe.has(t),!0);return{keys:i.map(s),more:o.map(s),hidden:r.map(s)}}function bi(e,t,n){let s=n.kind==="question",i=t.state.is==="handedOff",o=n.id;return{id:o,handle:i?"\\u2713":"",handleTone:i?"done":void 0,...i?{fold:{}}:{},title:n.ask,age:n.at===null?void 0:j(e.at-n.at),...os(t),typing:{hint:s?"Your answer":"Your reply to Codex",send:r=>{E(o,{action:"type",id:o,text:r},()=>Y.delete(o))}},feedback:t.feedback}}function ki(e,t,n){let s=t.state.is==="handedOff",i=n.id;return{id:i,handle:s?"\\u2713":Ie[n.kind].mark,handleTone:s?"done":void 0,kind:n.kind,...s?{fold:{}}:{},title:n.title,age:j(e.at-n.at),body:a("div",{children:[a("p",{children:It(n.detail)}),n.path?a("p",{children:[a("span",{class:"muted",children:"Relevant file: "}),a("code",{title:n.path,children:Le(n.path)})]}):null]}),...os(t),typing:{hint:"Your reply to Codex",send:o=>{E(i,{action:"type",id:i,text:o},()=>Y.delete(i))}},feedback:t.feedback}}function B(e,t,n,s){let i=e.lastActions[t];return i?.action===n&&i.delivery?.state!=="failed"?`${s} again`:s}function Je(e){let t=Oe([{kind:"open",target:"",name:e}],Date.now());return de({is:"local",result:t},"codex")}function _i(e,t,n){let s=Fe(t,n),i=Ve(e.lastActions)(t,n),o=!i&&n.isLinesChanged,r=He(e.lastActions[s],t.ref,n.id),l=(m,d)=>()=>{E(s,{action:m,ref:t.ref,thread:n.id},void 0,d)},u=wt(n),{head:c,rest:p}=pn(n.body);return{id:s,handle:i?"\\u2713":"\\u25E6",handleTone:i?"done":void 0,...i||o?{fold:n.isLinesChanged?{note:`Lines changed since this comment${$}still open on GitHub`}:{}}:{},title:W(c,gt),meta:[wt(n,Le(n.path)),o?"Lines changed":"",n.reply?`@${n.reply.author}: ${ht(n.reply.body)}`:`@${n.author}`].filter(Boolean).join($),age:n.at===null?void 0:j(e.at-n.at),body:a("div",{children:[p?a("p",{class:"quote",children:It(W(p,1200))}):null,a("p",{class:"muted",children:[a("button",{type:"button",class:"link",onClick:l("thread-open",Je("the comment")),children:u}),`${$}@${n.author}`]}),n.reply?a("p",{class:"quote",children:[a("b",{children:["@",n.reply.author,":"]})," ",It(W(Ee(n.reply.body),1200))]}):null]}),keys:[...r?[{label:"Try again",emphasis:"normal",icon:"retry",run:()=>{E(s,r.press)}}]:[],{hotkey:"a",label:B(e,s,"thread-address","Address"),emphasis:"primary",run:l("thread-address")},{hotkey:"r",label:B(e,s,"thread-draft","Draft reply"),emphasis:"normal",run:l("thread-draft")},{hotkey:"o",label:"Open comment",emphasis:"normal",icon:"open",run:l("thread-open",Je("the comment"))}],more:[{hotkey:"e",label:B(e,s,"thread-discuss","Discuss"),emphasis:"quiet",run:l("thread-discuss")}],hidden:[],feedback:le(s,e.lastActions[s],void 0,e.turns,e.at)}}function xi(e,t,n){let s=Tt(t,n),i=n.startedAt!==void 0&&n.finishedAt!==void 0?`Failed after ${fn(n.finishedAt-n.startedAt)}`:"Failed",o=n.url?"the log":`PR #${t.number}`,r=He(e.lastActions[s],t.ref,null,n.name);return{id:s,handle:"\\u2717",handleTone:"error",...n.workflow?{lead:`${n.workflow} /`}:{},title:n.name,meta:i,age:n.finishedAt===void 0?void 0:j(e.at-n.finishedAt),body:a("div",{class:"muted",children:i}),keys:[...r?[{label:"Try again",emphasis:"normal",icon:"retry",run:()=>{E(s,r.press)}}]:[],{hotkey:"a",label:B(e,s,"check-fix","Fix"),emphasis:"primary",run:()=>{E(s,{action:"check-fix",ref:t.ref,check:n.name})}},{hotkey:"o",label:"Open log",emphasis:"normal",icon:"open",run:()=>{E(s,{action:"log",ref:t.ref,check:n.name},void 0,Je(o))}}],more:[],hidden:[],feedback:le(s,e.lastActions[s],void 0,e.turns,e.at)}}function rs(e,t){return Mt-(e.at-(e.lastActions[G(t.ref)]?.at??e.at))}function as(e){let t=[];for(let{pr:n,isSettled:s}of e.prs.drawn)if(s){let i=G(n.ref);(I.has(i)||Date.now()-rs(e,n)<v)&&t.push({pr:n,isSettled:s,threads:[],checks:[]})}else t.push({pr:n,isSettled:s,threads:Q(n).map(i=>_i(e,n,i)),checks:Pe(n).map(i=>xi(e,n,i))});return{blocks:t,rows:t.flatMap(n=>[...n.threads,...n.checks])}}function ls(e){return as(e).rows}function ds(e,t){return t==="prs"?ls(e):cs(e,Ht()).byTab[t]}function cs(e,t){return vt(e,n=>t.has(n),n=>n.item?bi(e,n,n.item):n.finding?ki(e,n,n.finding):null)}function Ht(){return Wn(F,Date.now(),I)}var Ke={question:"questions",task:"tasks",finding:"findings"};function Ri(e){let t=Date.now(),n=cs(e,Ht()),s=k==="prs"?[]:n.byTab[k],i=s[Ut(s,k,e)]?.id,o=new Set,r=new Set;for(let l of Object.keys(Ke).filter(u=>qe[u]===k)){let u=n[Ke[l]],c=new Set(u.map(K)),p=[...u];for(let[d,f]of(ze?.[Ke[l]]??[]).entries()){let h=K(f);!c.has(h)&&P.has(h)&&p.splice(Math.min(d,p.length),0,f)}let m=[];for(let d of p){let f=K(d),h=P.get(f),g=c.has(f)?"settled"in d?I.has(f)?"undoing":"settled":f===i?"open":"closed":"gone",y=Vn(h?.track,g,t,Z.has(f),st.matches);if(!y)continue;y!==h?.track&&o.add(f);let _=y.hasPanel?"row"in d&&c.has(f)?d.row:h?.openRow:void 0;P.set(f,{track:y,openRow:_}),r.add(f),m.push(d)}n[Ke[l]]=m}n.findingGroups=n.findingGroups.map(l=>({...l,entries:n.findings.filter(u=>("row"in u?u.row.kind:u.settled.finding?.kind)===l.kind)}));for(let l of[...P.keys()])r.has(l)||P.delete(l);return{lists:n,changed:o}}async function vi(e){if(I.has(e.id))return;let t=qe[e.type];I.add(e.id);try{await E(e.id,{action:"undo",id:e.id},()=>nt(t,e.id))}finally{I.delete(e.id);let n=F.get(e.id),s=n!==void 0&&Date.now()-n<v,i=O.get(e.id);i&&!s&&(J={text:i,at:Date.now(),isError:!0},te(v)),n!==void 0&&!s&&F.set(e.id,Date.now()-v),x()}}function Ut(e,t,n){let s=T[t];if(s){let o=e.findIndex(l=>l.id===s.id);if(o>=0||P.has(s.id)||e.length===0)return o;let r=Math.min(s.index??0,e.length-1);return nt(t,e[r].id,r),r}let i=St(tt(n,t));return i?e.findIndex(o=>o.id===i):-1}function nt(e,t,n){T[e]={id:t,openedAt:Date.now(),...n===void 0?{}:{index:n}},te(_t)}function qt(e,t,n){let s=t[n];s&&(nt(e,s.id,n),x())}function us(e){T[k]||(T[k]={id:e,openedAt:0})}function Si(){return _n(T[k]?.openedAt??0,Date.now())}function ps(e){return e.typing&&L===e.id?{keys:[],more:[],hidden:[]}:{keys:e.keys,more:e.more,hidden:e.hidden}}function fs({k:e,isGuarded:t=!0}){let n=()=>t&&Si();return a("button",{type:"button",class:`${e.emphasis==="primary"?"key primary":e.emphasis==="quiet"?"key ghost":"key"}${e.isDismiss?" dismiss":""}`,disabled:n(),onClick:()=>{n()||e.run()},children:[e.icon?a(et,{name:e.icon}):null,e.label]})}function Ti({row:e}){let t=e.typing;return a("form",{onSubmit:s=>{s.preventDefault();let i=(Y.get(e.id)??"").trim();i&&(L=null,t.send(i))},children:[a("input",{id:`type-${e.id}`,value:Y.get(e.id)??"",placeholder:t.hint,"aria-label":t.hint,onInput:s=>Y.set(e.id,s.currentTarget.value)}),a("button",{type:"submit",class:"key primary",children:"Send"}),a("button",{type:"button",class:"key ghost",onClick:()=>{L=null,x()},children:"Cancel"})]})}function $i(e){let t=e.feedback;return t?t.is==="done"&&e.handleTone==="done"?t.label:de(t,"codex"):null}function Wt(e){let t=Pt.get(e);return t&&Date.now()-t.at<v?t.text:null}function Ei(e){return!O.has(e.id)&&Wt(e.id)===null&&!he.has(e.id)}function ms({row:e,track:t,onSelect:n,now:s}){let i=t.hasPanel&&(t.state==="closing"||t.state==="leaving"),o=t.hasPanel&&!i,r=a("span",{class:`mark ${e.handleTone??e.kind??""}`,children:e.handle}),l=Qe.get(e.id),u=Ei(e)?e.feedback:null,c=l??(u?$i(e):null),p=!l&&u&&Rt(u)?u.at:null,m=p!==null&&!o&&!i,d=m?null:c,f=p!==null?j(s-p):d?null:e.age,h=!l&&xt(e.feedback)?"error":void 0;return a("div",{class:`row ${o?"selected":"collapsed"}${i?" closing":""}`,onClick:o?void 0:n,children:[r,a("div",{class:"content",children:[a("button",{type:"button",class:"line",...o?{tabIndex:-1,"aria-disabled":!0}:{"aria-expanded":!1},children:[a("span",{class:"text",children:[e.lead?a(A,{children:[a("span",{class:"lead",children:e.lead})," "]}):null,e.title]}),e.meta?a("span",{class:"meta",children:e.meta}):null,d?a("span",{class:`after ${h?`tone-${h}`:""}`,children:o||i?`${$}${d}`:d}):null]}),o||i?a(hs,{row:e,isClosing:i}):null]}),a("span",{class:"side",children:[m?a("span",{class:"side-label",children:c}):null,f]})]})}function hs({row:e,isClosing:t}){let{keys:n,more:s}=ps(e),i=[...n,...s],o=i.filter(m=>m.emphasis!=="quiet"),r=i.filter(m=>m.emphasis==="quiet"),l=he.get(e.id),u=Wt(e.id),c=!!e.typing&&L===e.id,p=[e.fold?.note?a("div",{class:"muted",children:e.fold.note}):null,u?a("div",{class:"muted",children:u}):null,O.has(e.id)?a("div",{class:"tone-error",children:O.get(e.id)}):null].filter(Boolean);return a("div",{class:t?"panel closing":"panel",inert:t,children:[e.body?a("div",{class:"body",children:e.body}):null,p.length>0?a("div",{class:"tight",children:p}):null,a("div",{class:"actions",children:[i.length>0?a("div",{class:"keys",children:[...o,...r.filter(m=>!m.isDismiss),...r.filter(m=>m.isDismiss)].map(m=>a(fs,{k:m}))}):null,c?a(Ti,{row:e}):null]}),l?a("div",{children:[a("div",{class:"muted",children:["Copy ",l.name," from here:"]}),a("textarea",{rows:3,readOnly:!0,value:l.text,onFocus:m=>m.currentTarget.select()}),a("button",{type:"button",class:"key",onClick:()=>{he.delete(e.id),x()},children:"Close"})]}):null]})}function Pi({settled:e,panel:t}){let{state:n}=e;if(n.is!=="settled")return null;let s=F.get(e.id)??Date.now(),i=I.has(e.id),o=O.get(e.id);return a("div",{class:t?"row settled was-open":"row settled",children:[a("span",{class:"mark",children:n.isQueued?"":"\\u2713"}),a("div",{class:"content",children:[a("div",{class:"settled-head",children:[a("div",{class:"settled-line",children:[a("span",{class:"what",children:e.title}),a("span",{class:"outcome-label",children:[$,n.isQueued?`Queued: ${n.label}`:n.label]}),o?a("span",{class:"tone-error",children:[$,o]}):null]}),n.canUndo?a("button",{type:"button",class:i?"key undo undoing":"key undo",disabled:i,onClick:()=>{vi(e)},children:[a("span",{class:i?"time-left paused":"time-left",style:{animationDuration:`${v}ms`},ref:r=>{r&&!r.style.animationDelay&&(r.style.animationDelay=`-${Math.max(0,Date.now()-s)}ms`)}},s),a(et,{name:"undo"}),"Undo"]}):null]}),t?a(hs,{row:t,isClosing:!0}):null]})]})}function gs({entries:e,group:t,all:n,now:s}){let i=qe[t];return e.length===0?null:a("div",{class:"list",children:e.map(o=>{let r=K(o),l=P.get(r);return a("div",{class:"entry","data-motion":r,children:"row"in o?a(ms,{row:o.row,track:l.track,now:s,onSelect:()=>qt(i,n,n.indexOf(o.row))}):a(Pi,{settled:o.settled,panel:l.openRow})},r)})})}function jt({title:e,count:t}){return a("div",{class:"group-title",children:[a("b",{children:e}),t>0?a("span",{class:"count",children:[$,t]}):null]})}function Ct(e,t,n){return ae(e.needsYou.closed[t==="question"?"questions":"tasks"],Me(n)).map(s=>({id:s.id,ask:s.ask,outcome:s.outcome,state:pt(s),at:s.at}))}function Kn({v:e,kind:t,entries:n,all:s,now:i}){let o=t==="question"?"Questions":"Tasks",r=Ot(n),l=Ct(e,t,r),u=r.flatMap(c=>"row"in c?[c.row]:[]);return a("section",{children:[a(jt,{title:o,count:u.filter(c=>!c.fold).length}),a(gs,{entries:n,group:t,all:s,now:i}),a(ys,{group:t,empty:ws(o,r),closed:l,total:De(e.needsYou.closed[t==="question"?"questions":"tasks"],Me(r)),now:i})]})}function Ot(e){return e.filter(t=>P.get(K(t))?.track.state!=="leaving")}function ws(e,t){let n=t.every(s=>P.get(K(s))?.track.state==="entering");return t.length===0||n?{text:Sn(e),isLeaving:t.length>0}:null}function It(e){return Ue(e).map(t=>{let n=t.code?a("code",{children:t.text}):t.text;return t.italic&&(n=a("i",{children:n})),t.bold&&(n=a("b",{children:n})),t.strike&&(n=a("s",{children:n})),t.link?a(A,{children:[a("u",{children:n}),a("span",{class:"muted",children:[" ",t.link]})]}):n})}function ys({group:e,empty:t,closed:n,total:s,now:i}){let o=vn(s,n.length),r=H.has(e),l=s>0&&(r||Ye.has(e));return a(A,{children:[a("div",{class:"group-end","data-motion":`end-${e}`,children:a("div",{class:"group-end-content",children:[t?a("div",{class:t.isLeaving?"group-empty leaving":"group-empty","aria-hidden":t.isLeaving,children:t.text}):null,s>0?a("button",{type:"button",class:"fold","data-fold":e,onClick:()=>Xi(e),children:[a(et,{name:r?"down":"right"}),Rn(s)]}):null]})}),l?a("div",{class:"list closed-list","data-motion":`closed-${e}`,children:[n.map(u=>a("div",{class:"entry",children:a("div",{class:"row",children:[a("span",{class:"mark",children:kn[u.state]}),a("div",{class:"content tight",children:[a("div",{class:"muted",children:u.ask}),a("div",{class:"outcome",children:Ce(u.outcome)})]}),a("span",{class:"side",children:j(i-u.at)})]})},`closed-${u.id}`)),o?a("div",{class:"earlier muted",children:o}):null]}):null]})}function Li(e){return e.heard==="heard"?null:["The inbox has not heard from this chat\\u2019s hooks.",e.heard==="none"?"Codex runs a plugin\\u2019s hooks only after you trust them.":"Items from Codex\\u2019s replies are missing."]}function Ai({v:e,lists:t,now:n}){let s=t.byTab.needsYou,i=t.questions.length===0&&t.tasks.length===0,o=Ct(e,"question",t.questions).length>0||Ct(e,"task",t.tasks).length>0,r=Li(e);return i&&!o?r?a("div",{class:"empty",children:[a("div",{class:"title",children:r[0]}),a("div",{class:"muted",children:r[1]})]}):a("div",{class:"empty",children:[a("div",{class:"title",children:ce("needsYou","Codex").title}),a("div",{class:"muted",children:ce("needsYou","Codex").hint})]}):a("main",{children:[r?a("section",{children:a("div",{class:"group-title",children:[r[0],a("div",{class:"muted",children:r[1]})]})}):null,a(Kn,{v:e,kind:"question",entries:t.questions,all:s,now:n}),a(Kn,{v:e,kind:"task",entries:t.tasks,all:s,now:n})]})}function Ci({v:e,lists:t,now:n}){let s=Me(Ot(t.findings)),i=l=>e.findings.closed.filter(u=>u.kind===l),o=l=>ae(i(l),s).map(u=>({id:u.id,ask:u.title,outcome:u.outcome,state:pt(u),at:u.closedAt}));return t.findings.length===0&&De(e.findings.closed,s)===0?a("div",{class:"empty",children:[a("div",{class:"title",children:ce("findings","Codex").title}),a("div",{class:"muted",children:ce("findings","Codex").hint})]}):a("main",{children:t.findingGroups.map(l=>{let u=Ot(l.entries),c=u.flatMap(p=>"row"in p?[p.row]:[]);return a("section",{children:[a(jt,{title:l.title,count:c.filter(p=>!p.fold).length}),a(gs,{entries:l.entries,group:"finding",all:t.byTab.findings,now:n}),a(ys,{group:l.kind,empty:ws(l.title,u),closed:o(l.kind),total:De(i(l.kind),s),now:n})]})})})}function Oi({v:e,pr:t}){let n=G(t.ref),s=rs(e,t),i=I.has(n),o=O.get(n);return a("div",{class:"row settled",children:[a("span",{class:"mark",children:"\\u2713"}),a("div",{class:"content",children:a("div",{class:"settled-head",children:[a("div",{class:"settled-line",children:[a("span",{class:"what",children:[a("span",{class:"tone-prs",children:["#",t.number]})," ",t.title]}),a("span",{class:"outcome-label",children:`${$}Dismissed`}),o?a("span",{class:"tone-error",children:`${$}${o}`}):null]}),a("button",{type:"button",class:i?"key undo undoing":"key undo",disabled:i,onClick:()=>{Ii(n,t.ref)},children:[a("span",{class:i?"time-left paused":"time-left",style:{animationDuration:`${v}ms`},ref:r=>{r&&!r.style.animationDelay&&(r.style.animationDelay=`-${Math.max(0,Date.now()-s)}ms`)}},s),a(et,{name:"undo"}),"Undo"]})]})})]})}async function Ii(e,t){if(!I.has(e)){I.add(e);try{await E(e,{action:"pr-undo",ref:t})}finally{I.delete(e),x()}}}function Di(e,t){let n=Qe.get(t);if(n)return{text:n,isError:!1};let s=O.get(t);if(s)return{text:s,isError:!0};let i=Wt(t);if(i)return{text:i,isError:!1};let o=e.lastActions[t]?.action==="pr-dismiss"?null:le(t,e.lastActions[t],void 0,e.turns,e.at);if(!o)return null;let r=de(o,"codex");return{text:Rt(o)?`${r}${$}${ie(e.at-o.at)}`:r,isError:xt(o)}}function Ni({v:e,pr:t,threads:n,checks:s,openId:i,all:o,now:r}){let l=Ve(e.lastActions),{status:u,head:c,unlisted:p}=mt(t,l),m=Cn[u],d=G(t.ref),f=$e(t,l),h=(R,C)=>()=>{E(d,R,void 0,C)},g=He(e.lastActions[d],t.ref,null),y=[...u==="ready"?[{label:B(e,d,"pr-merge","Merge"),run:h({action:"pr-merge",ref:t.ref})}]:[],...t.state==="OPEN"&&t.mergeable==="CONFLICTING"?[{label:B(e,d,"pr-conflicts","Resolve conflicts"),run:h({action:"pr-conflicts",ref:t.ref})}]:[],...f.length>1?[{label:B(e,d,"pr-address-all",`Address all ${f.length} threads`),run:h({action:"pr-address-all",ref:t.ref})}]:[]].map((R,C)=>({...R,emphasis:C===0?"primary":"normal"})),_=[...g?[{label:"Try again",emphasis:"normal",icon:"retry",run:h(g.press)}]:[],...y,{label:"Open PR",emphasis:"normal",icon:"open",run:h({action:"pr-open",ref:t.ref},Je(`PR #${t.number}`))},...t.ref===e.prs.branchRef?[]:[{label:"Dismiss",emphasis:"quiet",isDismiss:!0,run:h({action:"pr-dismiss",ref:t.ref})}]],w=Di(e,d);return a("section",{children:[a("div",{class:"pr-head",children:[a("span",{class:"tone-prs num",children:["#",t.number]})," ",t.title," ",a("span",{class:m?`pr-verdict tone-${m}`:"pr-verdict muted",children:c}),a("span",{class:"pr-verdict muted",children:p.map(R=>`${$}${R}`).join("")})]}),t.error?a("div",{class:"pr-status tone-error",children:["Last refresh failed: ",t.error]}):null,a("div",{class:"pr-actions keys",children:_.map(R=>a(fs,{k:R,isGuarded:!1}))}),w?a("div",{class:w.isError?"pr-last tone-error":"pr-last muted",children:w.text}):null,a("div",{class:"pr-groups",children:[a(Gn,{title:"Review threads",rows:n,all:o,openId:i,now:r}),a(Gn,{title:"Failing checks",rows:s,all:o,openId:i,now:r})]})]})}function Gn({title:e,rows:t,all:n,openId:s,now:i}){return t.length===0?null:a(A,{children:[a(jt,{title:e,count:t.length}),a("div",{class:"list",children:t.map(o=>{let r=o.id===s;return a("div",{class:"entry",children:a(ms,{row:o,track:{state:r?"open":"closed",since:0,hasPanel:r},now:i,onSelect:()=>qt("prs",n,n.indexOf(o))})},o.id)})})]})}var Mi="Your PRs show here when this conversation opens or links one, or when your branch has one.";function Fi({v:e,now:t}){let{blocks:n,rows:s}=as(e);if(n.length===0)return a("div",{class:"empty",children:[a("div",{class:"title",children:e.isFetchingPrs?"Checking for PRs\\u2026":"No PRs"}),a("div",{class:"muted",children:e.isGhMissing?Yn:Mi})]});let i=s[Ut(s,"prs",e)]?.id;return a("main",{children:[e.isGhMissing?a("section",{children:a("div",{class:"group-title muted",children:Yn})}):null,n.map(o=>o.isSettled?a("section",{children:a(Oi,{v:e,pr:o.pr})}):a(Ni,{...o,v:e,openId:i,all:s,now:t})),e.prs.olderText?a("section",{children:a("div",{class:"group-title muted",children:e.prs.olderText})}):null]})}var Yn="The inbox could not find gh, so it cannot read your PRs.",Vi=6e4;function Hi({v:e}){let t=Date.now()-Mt,n=Nt>=2?a("span",{class:t>Vi?"tone-error":void 0,children:["Last read ",ie(t),$,"retrying"]}):e.status.isUpdating?"Updating\\u2026":null;return a("div",{class:"status",children:n})}function Ui({v:e}){let t={needsYou:e.needsYou.count,findings:e.findings.count,prs:e.prs.count},{error:n}=e.status;return a("nav",{children:[a("div",{class:"tabs",children:Ne.map(s=>a("button",{type:"button",class:`tab ${k===s.id?"shown":""}`,onClick:()=>{k=s.id,x()},children:[s.label,t[s.id]>0?a("span",{class:`count tone-${s.id}`,children:t[s.id]}):null]}))}),pe?pe.isReloadable?a(bs,{text:pe.text,reload:()=>location.reload()}):a("div",{class:"status-line tone-error",children:pe.text}):null,n?a("div",{class:"status-line tone-error",children:n}):null,J&&Date.now()-J.at<v?a("div",{class:J.isError?"status-line tone-error":"status-line muted",children:J.text}):null]})}async function qi(){U=!U,S=null,F=new Map,Ge={},P.clear(),ze=null,T.needsYou=null,T.findings=null,T.prs=null,L=null,x(),await Vt()}function bs({text:e,reload:t}){return a("div",{class:"error-strip",children:[a("span",{children:e}),a("button",{type:"button",class:"key",onClick:t,children:"Reload"})]})}function Wi({lists:e}){if(!S||!e)return ee!==null?a(bs,{text:`Could not read the inbox. ${ee}`,reload:()=>{Vt()}}):Jn?a("div",{class:"notice muted",children:"Loading\\u2026"}):null;let t=S,n=t.at;return a(A,{children:[U?a("div",{class:"demo-note",children:[a("span",{children:Tn}),a("button",{type:"button",class:"key ghost",onClick:()=>{qi()},children:"Hide demo"})]}):null,a(Ui,{v:t}),k==="needsYou"?a(Ai,{v:t,lists:e,now:n}):k==="findings"?a(Ci,{v:t,lists:e,now:n}):a(Fi,{v:t,now:n}),a("footer",{children:[null,a(Hi,{v:t})]})]})}var Kt={duration:300,easing:"cubic-bezier(.19, 1, .22, 1)"},Ze={duration:200,easing:"cubic-bezier(.65, 0, .35, 1)"},Gt={duration:200,easing:"cubic-bezier(.8, 0, .4, 1)",fill:"forwards"},st=matchMedia("(prefers-reduced-motion: reduce)");function ji(){let e=new Map;for(let t of document.querySelectorAll("[data-motion]"))e.set(t.dataset.motion,{el:t,height:t.getBoundingClientRect().height});return e}function Ki(e,t,n,s){e.style.overflow="hidden",e.dataset.to=String(s);let i=e.animate(t,n),o=()=>{e.getAnimations().length===0&&ks(e)};i.onfinish=o,i.oncancel=o}function Bn(e){for(let t of e.getAnimations())t.cancel();ks(e)}function ks(e){e.style.overflow="",delete e.dataset.to}function Yt(e){return[...e.children].reduce((t,n)=>t+n.getBoundingClientRect().height,0)}function ge(e,t,n,s){let i=o=>({height:`${o.height}px`,opacity:o.opacity});Ki(e,[i(t),i(n)],s,n.height)}function _s(e,t){ge(e,{height:0,opacity:0},{height:t,opacity:1},Kt)}function Gi(e,t){if(st.matches){Z.clear();return}let n=new Set([...t].map(i=>P.get(i)?.track.state)),s=n.has("leaving")?{...Gt,fill:"none"}:n.has("entering")?Kt:Ze;for(let i of document.querySelectorAll("[data-motion]")){let o=i.dataset.motion,r=e.get(o);if(i.dataset.closing)continue;let l=P.get(o)?.track.state,u=!r||r.el!==i,c=()=>i.getAnimations().length>0||u?i.getBoundingClientRect().height:r.height;if(l&&t.has(o)&&Yi(i,l,c)||l==="closing"||l==="settling"||l==="leaving")continue;let p=l||i.classList.contains("group-end")?Yt(i):i.scrollHeight;if(u){!l&&Z.delete(o)&&_s(i,p);continue}let m=i.getAnimations();if(m.length>0&&Math.abs(Number(i.dataset.to)-p)<1)continue;let d=c(),f=m.length>0?Number(getComputedStyle(i).opacity):1;for(let h of m)h.cancel();Math.abs(d-p)<1&&f>.99||ge(i,{height:d,opacity:f},{height:p,opacity:1},l?Ze:s)}Z.clear()}function Yi(e,t,n){switch(t){case"opening":return!1;case"entering":return Bn(e),_s(e,Yt(e)),!0;case"closing":case"settling":return Bi(e,Xn(e,n)),!0;case"leaving":{let s=Xn(e,n);for(let i of e.getAnimations())i.cancel();return ge(e,s,{height:0,opacity:0},Gt),!0}default:return Bn(e),!0}}function Xn(e,t){return{height:t(),opacity:Number(getComputedStyle(e).opacity)}}function Bi(e,t){let n=e.querySelector(".panel.closing"),s=e.querySelector(".row.closing");s?.classList.remove("closing"),n&&(n.style.display="none");let i=Yt(e);n&&(n.style.display=""),s?.classList.add("closing");for(let o of e.getAnimations())o.cancel();ge(e,t,{height:i,opacity:1},{...Ze,fill:"forwards"})}function Xi(e){let t=document.querySelector(`[data-motion="closed-${e}"]`);if(!H.has(e)){H.add(e),Ye.delete(e)&&t?delete t.dataset.closing:Z.add(`closed-${e}`),x();return}if(H.delete(e),!t||st.matches){x();return}Ye.add(e),x(),t.dataset.closing="1";let n=t.getBoundingClientRect().height;for(let s of t.getAnimations())s.cancel();ge(t,{height:n,opacity:1},{height:0,opacity:0},Gt),setTimeout(()=>{H.has(e)||!Ye.delete(e)||x()},200)}function xs(){document.querySelector(".row.selected")?.scrollIntoView({block:"nearest"}),st.matches||setTimeout(()=>document.querySelector(".row.selected")?.scrollIntoView({block:"nearest"}),220)}var Qi=document.getElementById("app");document.documentElement.style.setProperty("--row-pad",`${8}px`);document.documentElement.style.setProperty("--move",`${200}ms ${Ze.easing}`);document.documentElement.style.setProperty("--enter",`${300}ms ${Kt.easing}`);var Rs=50;function te(e){setTimeout(x,e+Rs)}var z=null;function zi(){let e=Date.now(),t=[...P.values()].flatMap(({track:s})=>$t(s.state)?[s.since+We[s.state]]:[]);if(t.length===0)return;let n=Math.min(...t)+Rs;z&&z.at<=n||(z&&clearTimeout(z.timer),z={at:n,timer:setTimeout(()=>{z=null,x()},n-e)})}function x(){let e=ji(),t=S?Ri(S):null;ze=t?.lists??null,zi(),un(a(Wi,{lists:ze}),Qi),Gi(e,t?.changed??new Set),Be&&L&&(Be=!1,document.getElementById(`type-${L}`)?.focus())}var fe=null;document.addEventListener("pointerdown",e=>{!(e.target instanceof Element)||!e.target.closest(".list, .fold")||(fe={x:e.clientX,y:e.clientY},document.body.classList.add("still"))});document.addEventListener("pointermove",e=>{!fe||Math.hypot(e.clientX-fe.x,e.clientY-fe.y)<3||(fe=null,document.body.classList.remove("still"))});document.addEventListener("keydown",e=>{if(e.metaKey||e.ctrlKey||e.altKey||!S)return;let t=e.target;if(t?.closest("input, textarea")){e.key==="Escape"&&t.tagName==="INPUT"&&(L=null,x());return}let n=Ne.find(m=>m.hotkey===e.key);if(n){k=n.id,x();return}let s=ds(S,k),i=Ut(s,k,S),o=e.key==="j"||e.key==="ArrowDown"?1:e.key==="k"||e.key==="ArrowUp"?-1:0;if(o!==0){e.preventDefault(),qt(k,s,Math.max(0,Math.min(s.length-1,i+o))),xs();return}let r=s[i];if(!r)return;let{keys:l,more:u,hidden:c}=ps(r),p=[...l,...u,...c].find(m=>m.hotkey===e.key);p&&(e.preventDefault(),p.run())});ai();es("ui/initialize",{protocolVersion:"2026-01-26",appInfo:{name:"inbox",version:"0.2.5"},appCapabilities:{tools:{}}}).then(e=>{ts(e?.hostContext??{}),parent.postMessage({jsonrpc:"2.0",method:"ui/notifications/initialized",params:{}},"*"),is()}).catch(()=>{ee="The inbox could not connect to Codex.",x()});setTimeout(()=>{Jn=!0,!S&&ee===null&&x()},ci);})();\n\n    </script>\n  </body>\n</html>\n';
+var tab_default = '<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="utf-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1" />\n    <meta name="inbox-handoff" content="1" />\n    <title>Inbox</title>\n    <style id="inbox-style">\n      /* The host\'s variables when Codex passes them; otherwise the pane\'s own colors. */\n      :root {\n        color-scheme: light;\n        --bg: var(--color-background-primary, #ffffff);\n        --text: var(--color-text-primary, #1f1f1f);\n        --muted: var(--color-text-secondary, #595959);\n        /* The status colors, which build.mjs writes from hooks/tones.ts. */\n        --key: #243bf5; --amber: #745417; --findings: #7b00e8; --prs: #006363; --done: #25652f; --error: #a5293d; --error-mark: #a5293d;\n        --needs-you: var(--amber);\n        --issue: var(--amber);\n        --sans: var(--font-sans, -apple-system, system-ui, sans-serif);\n        --mono: var(--font-mono, ui-monospace, \'SF Mono\', Menlo, monospace);\n        /* Surfaces are mixed from the host\'s colors, so they follow its theme. */\n        --raised: color-mix(in srgb, var(--text) 9%, var(--bg));\n        /* The open row: a neutral surface one step above the page, in the family of the hover fill. */\n        --selected: color-mix(in srgb, var(--text) 6%, var(--bg));\n        /* A closed row\'s age, dimmer than --muted and still 4.5:1 on the page. */\n        --age: color-mix(in srgb, var(--muted) 90%, var(--bg));\n        --hover: color-mix(in srgb, var(--key) 14%, transparent);\n        --soft: color-mix(in oklab, var(--text) 8%, transparent);\n        --soft-hover: color-mix(in oklab, var(--text) 10%, transparent);\n        /* A closed row under the pointer: half --soft, so a list swept by the pointer stays quiet. */\n        --row-hover: color-mix(in oklab, var(--soft) 50%, transparent);\n        /* The Codex app\'s --transition-duration-basic with ease. The tab\'s script sets --move and --enter. */\n        --quick: 150ms ease;\n        /* Where a row\'s mark sits, and where its text starts. */\n        --mark-x: 18px;\n        --text-x: 44px;\n      }\n      @media (prefers-color-scheme: dark) {\n        :root:not([data-theme=\'light\']) {\n          color-scheme: dark;\n          --bg: var(--color-background-primary, #171717);\n          --text: var(--color-text-primary, #ececec);\n          --muted: var(--color-text-secondary, #a8a8a8);\n          --key: #b1b9f9; --amber: #ffc107; --findings: #cab0ff; --prs: #8cc8c0; --done: #7ecd8f; --error: #ffa3b0; --error-mark: #ff6b80;\n          --raised: color-mix(in srgb, var(--text) 11%, var(--bg));\n          --selected: color-mix(in srgb, var(--text) 8%, var(--bg));\n          --age: color-mix(in srgb, var(--muted) 85%, var(--bg));\n          --soft: color-mix(in oklab, var(--text) 12%, transparent);\n          --soft-hover: color-mix(in oklab, var(--text) 14%, transparent);\n        }\n      }\n      :root[data-theme=\'dark\'] {\n        color-scheme: dark;\n        --key: #b1b9f9; --amber: #ffc107; --findings: #cab0ff; --prs: #8cc8c0; --done: #7ecd8f; --error: #ffa3b0; --error-mark: #ff6b80;\n        --raised: color-mix(in srgb, var(--text) 11%, var(--bg));\n        --selected: color-mix(in srgb, var(--text) 8%, var(--bg));\n        --age: color-mix(in srgb, var(--muted) 85%, var(--bg));\n        --soft: color-mix(in oklab, var(--text) 12%, transparent);\n        --soft-hover: color-mix(in oklab, var(--text) 14%, transparent);\n      }\n      * {\n        box-sizing: border-box;\n      }\n      body {\n        margin: 0;\n        background: var(--bg);\n        color: var(--text);\n        font: 13px/20px var(--sans);\n        -webkit-font-smoothing: antialiased;\n      }\n      button {\n        font: inherit;\n        color: inherit;\n        background: none;\n        border: none;\n        padding: 0;\n        text-align: left;\n      }\n      :focus-visible {\n        outline: 1.5px solid var(--key);\n        outline-offset: 1px;\n        border-radius: 4px;\n      }\n      .muted {\n        color: var(--muted);\n      }\n      .tone-needsYou {\n        color: var(--needs-you);\n      }\n      .tone-findings {\n        color: var(--findings);\n      }\n      .tone-prs {\n        color: var(--prs);\n      }\n      .tone-done {\n        color: var(--done);\n      }\n      .tone-error {\n        color: var(--error);\n      }\n      .notice {\n        padding: 10px 16px;\n        overflow-wrap: anywhere;\n      }\n      .error-strip {\n        display: flex;\n        align-items: center;\n        justify-content: space-between;\n        gap: 12px;\n        flex-basis: 100%;\n        margin: 4px 0 0;\n        padding: 8px 12px;\n        border-radius: 6px;\n        background: color-mix(in srgb, var(--error) 12%, var(--bg));\n        color: var(--error);\n        overflow-wrap: anywhere;\n      }\n      #app > .error-strip {\n        margin: 12px 12px 0;\n      }\n      .error-strip .key {\n        flex: none;\n        color: var(--text);\n      }\n\n      /* Tabs: the shown one a raised panel, the others text on the background. */\n      nav {\n        display: flex;\n        flex-wrap: wrap;\n        align-items: center;\n        gap: 4px 16px;\n        padding: 12px 12px 0;\n      }\n      .tabs {\n        display: flex;\n        gap: 4px;\n      }\n      .tab {\n        padding: 6px 12px;\n        border-radius: 6px;\n        color: var(--muted);\n      }\n      .tab:hover {\n        color: var(--text);\n      }\n      .tab.shown {\n        background: var(--raised);\n        color: var(--text);\n        font-weight: 600;\n      }\n      .tab .count {\n        font-weight: 600;\n        margin-left: 6px;\n      }\n      .status {\n        margin-left: auto;\n        color: var(--muted);\n        font-size: 12px;\n      }\n      .status-line {\n        flex-basis: 100%;\n        padding: 0 4px;\n        font-size: 12px;\n        overflow-wrap: anywhere;\n      }\n\n      main {\n        display: flex;\n        flex-direction: column;\n        padding: 8px 0 4px;\n      }\n      /* Sections sit on the page. A hairline separates them, starting at the text column. */\n      section {\n        position: relative;\n        padding: 10px 0;\n      }\n      section + section::before {\n        content: \'\';\n        position: absolute;\n        top: 0;\n        left: var(--text-x);\n        right: 0;\n        height: 1px;\n        background: var(--soft);\n      }\n      .group-title {\n        padding: 0 14px 6px var(--text-x);\n      }\n      .group-title b {\n        font-weight: 600;\n      }\n      .group-title .count {\n        color: var(--muted);\n        white-space: pre;\n      }\n\n      /* A PR\'s block: its number, title and verdict, its actions, then its threads and checks. */\n      .pr-head,\n      .pr-status,\n      .pr-actions,\n      .pr-last {\n        padding: 0 14px 0 var(--text-x);\n        overflow-wrap: anywhere;\n      }\n      .pr-head {\n        font-weight: 600;\n      }\n      .pr-head .num,\n      .pr-head .pr-verdict {\n        font-weight: 400;\n      }\n      .pr-actions {\n        margin-top: 8px;\n      }\n      .pr-last {\n        margin-top: 6px;\n      }\n      .pr-groups {\n        margin-top: 12px;\n      }\n      /* A PR\'s rows sit a step in from their group\'s title, as the PR\'s sections sit under its title. */\n      .pr-groups .list {\n        --mark-x: 41px;\n        --text-x: 67px;\n      }\n      .pr-groups .group-title + .list {\n        margin-bottom: 6px;\n      }\n      .link {\n        padding: 0;\n        text-align: left;\n        text-decoration: underline;\n        text-decoration-color: color-mix(in oklab, var(--text) 30%, transparent);\n        text-underline-offset: 2px;\n      }\n      .link:hover {\n        text-decoration-color: currentColor;\n      }\n\n      /* Rows. */\n      /* Three columns: the mark, the text, and the age. */\n      .row {\n        display: grid;\n        grid-template-columns: calc(var(--text-x) - var(--mark-x)) minmax(0, 1fr) auto;\n        padding: var(--row-pad) 14px var(--row-pad) var(--mark-x);\n      }\n      /* An open row keeps a closed row\'s padding, so its line does not move as it opens. */\n      .row.selected {\n        background-color: var(--selected);\n      }\n      /* Marks center in a badge\'s width, so a ?, a \u2022 and a number line up. */\n      .mark {\n        align-self: start;\n        padding-right: 8px;\n        text-align: center;\n        color: var(--muted);\n      }\n      .mark.done {\n        color: var(--done);\n      }\n      .mark.issue {\n        color: var(--issue);\n      }\n      .mark.opportunity {\n        color: var(--done);\n      }\n      .mark.error {\n        color: var(--error-mark);\n      }\n      .side {\n        align-self: start;\n        margin-left: 12px;\n        color: var(--age);\n        font-variant-numeric: tabular-nums;\n        white-space: nowrap;\n      }\n      /* A closed row\'s last press reads before its age, cut short so a long step label cannot squeeze the title. */\n      .side-label {\n        display: inline-block;\n        max-width: 11em;\n        overflow: hidden;\n        text-overflow: ellipsis;\n        vertical-align: bottom;\n        margin-right: 4px;\n      }\n      .row.collapsed:hover .side {\n        color: var(--muted);\n      }\n      .content {\n        min-width: 0;\n        display: flex;\n        flex-direction: column;\n      }\n      /* Its space above is padding, not a gap, so the row\'s height grows smoothly when the panel mounts. Its 2px below,\n         with the row\'s padding, matches the space from the row\'s top edge to its title\'s text. */\n      .panel {\n        display: flex;\n        flex-direction: column;\n        gap: 8px;\n        padding: 8px 0 2px;\n      }\n      .content > .tight,\n      .content.tight {\n        display: flex;\n        flex-direction: column;\n        gap: 0;\n      }\n      /* A closed row\'s last action reads under its title, so it never squeezes the title. */\n      .line {\n        display: flex;\n        flex-direction: column;\n        width: 100%;\n        min-width: 0;\n      }\n      /* A closed row\'s title wraps to two lines, then clips. */\n      .line .text {\n        min-width: 0;\n        overflow: hidden;\n        text-overflow: ellipsis;\n        display: -webkit-box;\n        -webkit-line-clamp: 2;\n        -webkit-box-orient: vertical;\n      }\n      .line .after {\n        color: var(--muted);\n      }\n      .row.collapsed .line .after:not(.tone-error) {\n        color: var(--age);\n      }\n      .row.collapsed:hover .line .after:not(.tone-error) {\n        color: var(--muted);\n      }\n      .line .after.tone-error {\n        color: var(--error);\n      }\n      /* Open, and while closing, the title shows in full where it stood, with the age following its last word. */\n      .row.selected .line,\n      .row.closing .line {\n        display: block;\n      }\n      .row.selected .line .text,\n      .row.closing .line .text {\n        display: inline;\n        font-weight: 600;\n      }\n      .row.selected .line .after,\n      .row.closing .line .after {\n        white-space: normal;\n        font-weight: 400;\n      }\n      /* A PR thread or check: where it is or which workflow ran it leads the title, muted. */\n      .line .lead {\n        color: var(--muted);\n        font-weight: 400;\n      }\n      .line .meta {\n        display: block;\n        color: var(--muted);\n        overflow: hidden;\n        text-overflow: ellipsis;\n        white-space: nowrap;\n      }\n      .row.collapsed:not(:hover) .line .meta {\n        color: var(--age);\n      }\n      .row.selected .line .meta {\n        display: none;\n      }\n      .quote {\n        white-space: pre-line;\n      }\n      .row.collapsed:hover {\n        background-color: var(--row-hover);\n      }\n      /* After a click, rows slide under a pointer that has not moved, so nothing they bring under it lights up. */\n      .still .row.collapsed:not(:active):hover {\n        background-color: transparent;\n      }\n      .still .fold:not(:active):hover {\n        color: var(--muted);\n      }\n      .title {\n        font-weight: 600;\n      }\n      .title .after {\n        font-weight: 400;\n        color: var(--muted);\n      }\n      .body {\n        overflow-wrap: anywhere;\n      }\n      .body p {\n        margin: 0;\n      }\n      .body p + p {\n        margin-top: 4px;\n      }\n      code {\n        padding: 1px 4px;\n        border-radius: 4px;\n        background: var(--soft);\n        font-family: var(--mono);\n      }\n      /*\n       * Actions are Codex\'s own pill buttons, size sm, in three levels: the one primary action is filled, the\n       * others are outlined, and the follow-ups are plain text, with Dismiss last. Keys are an\n       * extra, so no key text shows.\n       */\n      .keys {\n        display: flex;\n        flex-wrap: wrap;\n        align-items: center;\n        gap: 6px;\n      }\n      .key {\n        display: inline-flex;\n        align-items: center;\n        justify-content: center;\n        gap: 5px;\n        min-height: 26px;\n        padding: 3px 11px;\n        border: 1px solid color-mix(in oklab, var(--text) 28%, transparent);\n        border-radius: 999px;\n        background: transparent;\n        font-weight: 400;\n        text-align: center;\n        white-space: nowrap;\n      }\n      .key:not(:disabled):hover {\n        background: var(--soft);\n      }\n      .key:focus-visible {\n        outline-width: 2px;\n        outline-offset: 2px;\n        border-radius: 999px;\n      }\n      .key.primary {\n        border-color: transparent;\n        background: var(--text);\n        color: var(--bg);\n      }\n      .key.primary:not(:disabled):hover {\n        background: color-mix(in srgb, var(--text) 82%, var(--bg));\n      }\n      .key .icon {\n        flex: none;\n        width: 14px;\n        height: 14px;\n      }\n      /* A follow-up is plain text: muted, the text color under the pointer, with no fill, border or padding. */\n      .key.ghost {\n        padding: 0 4px;\n        border-color: transparent;\n        background: none;\n        color: var(--muted);\n      }\n      .key.ghost:not(:disabled):hover {\n        background: none;\n        color: var(--text);\n      }\n      .actions {\n        display: flex;\n        flex-direction: column;\n        gap: 4px;\n      }\n      form {\n        display: flex;\n        align-items: center;\n        gap: 6px;\n      }\n      /* Codex\'s own fields: its border color, a 10px radius, and a heavier gray border on focus, not a colored ring. */\n      input {\n        flex: 1;\n        min-width: 0;\n        min-height: 28px;\n        font: inherit;\n        color: inherit;\n        background: transparent;\n        border: 1px solid color-mix(in oklab, var(--text) 15%, transparent);\n        border-radius: 10px;\n        padding: 4px 10px;\n      }\n      input::placeholder {\n        color: var(--muted);\n      }\n      /* The radius again, since :focus-visible sets 4px. */\n      input:focus,\n      textarea:focus {\n        outline: none;\n        border-color: color-mix(in oklab, var(--text) 32%, transparent);\n        border-radius: 10px;\n      }\n      textarea {\n        width: 100%;\n        font: 12px var(--mono);\n        color: inherit;\n        background: transparent;\n        border: 1px solid color-mix(in oklab, var(--text) 15%, transparent);\n        border-radius: 10px;\n      }\n\n      /*\n       * Holds a group\'s empty line and fold, so its height can move as one. Its content sits at its bottom, so while it\n       * grows, a fold already shown stays in view and the empty line slides in above it.\n       */\n      .group-end {\n        display: flex;\n        flex-direction: column;\n        justify-content: flex-end;\n      }\n      /* Keeps the fold\'s margin inside, so its height is the whole end\'s content height. */\n      .group-end-content {\n        display: flow-root;\n        position: relative;\n      }\n      /* A group\'s line in place of its rows while it has none open, where a row\'s text would start. */\n      .group-empty {\n        padding: var(--row-pad) 14px var(--row-pad) var(--text-x);\n        color: var(--muted);\n      }\n      /*\n       * A leaving empty line takes no height and stays where it was, above the fold, while the group\'s end shrinks\n       * and clips it from the top as rows grow in over it.\n       */\n      .group-empty.leaving {\n        position: absolute;\n        inset: auto 0 100% 0;\n        pointer-events: none;\n        animation: fade-out var(--enter) forwards;\n      }\n      @keyframes fade-out {\n        to {\n          opacity: 0;\n        }\n      }\n      /* The chevron centers in the mark column and the label starts at the rows\' text, as a group\'s rows do. */\n      .fold {\n        display: block;\n        margin: 8px 0 0 calc(var(--mark-x) - 1px);\n        padding: 1px 4px;\n        border-radius: 5px;\n        color: var(--muted);\n      }\n      .fold:hover {\n        color: var(--text);\n      }\n      .fold .icon {\n        width: 12px;\n        height: 12px;\n        margin-right: calc(var(--text-x) - var(--mark-x) - 15px);\n        vertical-align: -1px;\n      }\n      /* The closed items\' marks sit under the fold\'s label. */\n      .closed-list {\n        --mark-x: 41px;\n        --text-x: 67px;\n      }\n      /* The gap above a Closed list\'s rows is content, not padding, so the list opens from and closes to 0. */\n      .closed-list::before {\n        content: \'\';\n        display: block;\n        height: 4px;\n      }\n      .closed-list .row {\n        padding-top: calc(var(--row-pad) / 2);\n        padding-bottom: calc(var(--row-pad) / 2);\n      }\n      /* A closed item\'s outcome stays quieter than any open row. */\n      .outcome {\n        color: var(--age);\n      }\n      .settled-head {\n        display: flex;\n        align-items: center;\n        min-width: 0;\n      }\n      /* A row that settles while open fades its fill out as its height shrinks over the panel. */\n      .row.settled.was-open {\n        transition: background-color var(--move);\n        @starting-style {\n          background-color: var(--selected);\n        }\n      }\n      /* The title and its outcome wrap, so neither is cut in the middle. */\n      .settled-line {\n        flex: 1;\n        min-width: 0;\n        overflow-wrap: anywhere;\n      }\n      .settled .outcome-label {\n        color: var(--muted);\n      }\n      /* Undo\'s fill is the time it has left. The pill keeps the line\'s height, so the row does not grow. */\n      .key.undo {\n        flex: none;\n        border-color: transparent;\n        position: relative;\n        isolation: isolate;\n        overflow: hidden;\n        margin: -3px 0 -3px 12px;\n        background: color-mix(in oklab, var(--soft) 45%, transparent);\n      }\n      /* While an Undo press is out, its label and arrow dim and the arrow turns. The label stays, so the pill keeps its width and the line its wrap. */\n      .key.undo.undoing {\n        color: var(--muted);\n      }\n      .key.undo.undoing .icon {\n        animation: undo-turn 900ms linear infinite;\n      }\n      @keyframes undo-turn {\n        to {\n          transform: rotate(-360deg);\n        }\n      }\n      .time-left {\n        position: absolute;\n        inset: 0;\n        z-index: -1;\n        background: var(--soft);\n        transform-origin: left;\n        animation-name: empty;\n        animation-timing-function: linear;\n        animation-fill-mode: forwards;\n      }\n      .key.undo:not(:disabled):hover .time-left {\n        background: var(--soft-hover);\n      }\n      .time-left.paused {\n        animation-play-state: paused;\n      }\n      @keyframes empty {\n        from {\n          transform: scaleX(1);\n        }\n        to {\n          transform: scaleX(0);\n        }\n      }\n      /* The page is at least the pane\'s height. The footer sits at its bottom, and an empty tab\'s text fills the space above it. */\n      #app {\n        display: flex;\n        flex-direction: column;\n        min-height: 100vh;\n      }\n      .empty {\n        flex: 1;\n        display: flex;\n        flex-direction: column;\n        justify-content: center;\n        padding: 32px;\n        text-align: center;\n      }\n      .empty .title {\n        margin-bottom: 4px;\n      }\n      footer {\n        margin-top: auto;\n        display: flex;\n        flex-wrap: wrap;\n        justify-content: space-between;\n        gap: 4px 16px;\n        padding: 8px 16px 16px;\n        color: var(--muted);\n        font-size: 12px;\n      }\n      .demo-toggle {\n        padding: 0 6px;\n        border-radius: 5px;\n        color: var(--muted);\n      }\n      .demo-toggle:hover {\n        color: var(--text);\n        background: var(--hover);\n      }\n      /* One line: the notice, with Hide demo at the right. */\n      .demo-note {\n        display: flex;\n        align-items: center;\n        justify-content: space-between;\n        gap: 6px;\n        padding: 8px 12px 0;\n        font-size: 11px;\n        color: var(--muted);\n        white-space: nowrap;\n      }\n      .demo-note .key {\n        flex: none;\n        padding: 0;\n      }\n      .demo-note span {\n        min-width: 0;\n        overflow: hidden;\n        text-overflow: ellipsis;\n      }\n      .earlier {\n        padding: 2px 14px 2px var(--text-x);\n      }\n      /*\n       * Motion, with the Codex app\'s own timing, only for what enters or leaves. Hover, press and\n       * selection fills change at once. What a draw mounts fades in from @starting-style, and heights\n       * move in the script, around each draw. A row\'s own parts do not fade: a row that settles or is\n       * undone swaps them in place, where a fade from nothing reads as a flicker.\n       */\n      /* The new-row bar fades out. */\n      .row {\n        transition: box-shadow var(--enter);\n      }\n      /* A panel does not fade: it stays opaque, clipped by its row\'s height, so a row closing and the row\n         opening in its place move as one. */\n      .status-line,\n      .demo-note,\n      .empty,\n      main,\n      form {\n        transition: opacity var(--quick);\n        @starting-style {\n          opacity: 0;\n        }\n      }\n      @media (prefers-reduced-motion: reduce) {\n        *,\n        *::before,\n        *::after {\n          transition-duration: 0s !important;\n        }\n        /* With no motion, Undo stays full and does not count down, and its arrow does not turn. */\n        .time-left,\n        .key.undo.undoing .icon {\n          animation: none;\n        }\n      }\n    </style>\n  </head>\n  <body>\n    <div id="app"></div>\n    <script id="inbox-script">\n      "use strict";(()=>{var je,k,$n,li,G,En,Cn,In,Rt,Fe,we,On,Et,St,Tt,ci,Ue={},qe=[],ui=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine[ch]|zoo|^ord|itera/i,Ke=Array.isArray;function j(e,t){for(var n in t)e[n]=t[n];return e}function Pt(e){e&&e.parentNode&&e.parentNode.removeChild(e)}function pi(e,t,n){var s,i,o,r={};for(o in t)o=="key"?s=t[o]:o=="ref"?i=t[o]:r[o]=t[o];if(arguments.length>2&&(r.children=arguments.length>3?je.call(arguments,2):n),typeof e=="function"&&e.defaultProps!=null)for(o in e.defaultProps)r[o]===void 0&&(r[o]=e.defaultProps[o]);return Ve(e,r,s,i,null)}function Ve(e,t,n,s,i){var o={type:e,props:t,key:n,ref:s,__k:null,__:null,__b:0,__e:null,__c:null,constructor:void 0,__v:i??++$n,__i:-1,__u:0};return i==null&&k.vnode!=null&&k.vnode(o),o}function O(e){return e.children}function He(e,t){this.props=e,this.context=t}function Z(e,t){if(t==null)return e.__?Z(e.__,e.__i+1):null;for(var n;t<e.__k.length;t++)if((n=e.__k[t])!=null&&n.__e!=null)return n.__e;return typeof e.type=="function"?Z(e):null}function fi(e){if(e.__P&&e.__d){var t=e.__v,n=t.__e,s=[],i=[],o=j({},t);o.__v=t.__v+1,k.vnode&&k.vnode(o),Lt(e.__P,o,t,e.__n,e.__P.namespaceURI,32&t.__u?[n]:null,s,n??Z(t),!!(32&t.__u),i),o.__v=t.__v,o.__.__k[o.__i]=o,Vn(s,o,i),t.__e=t.__=null,o.__e!=n&&Dn(o)}}function Dn(e){if((e=e.__)!=null&&e.__c!=null)return e.__e=e.__c.base=null,e.__k.some(function(t){if(t!=null&&t.__e!=null)return e.__e=e.__c.base=t.__e}),Dn(e)}function Pn(e){(!e.__d&&(e.__d=!0)&&G.push(e)&&!We.__r++||En!=k.debounceRendering)&&((En=k.debounceRendering)||Cn)(We)}function We(){try{for(var e,t=1;G.length;)G.length>t&&G.sort(In),e=G.shift(),t=G.length,fi(e)}finally{G.length=We.__r=0}}function Nn(e,t,n,s,i,o,r,c,l,u,p){var m,d,f,g,h,y,b=s&&s.__k||qe,w=t.length;for(l=mi(n,t,b,l,w),m=0;m<w;m++)(f=n.__k[m])!=null&&(d=f.__i!=-1&&b[f.__i]||Ue,f.__i=m,y=Lt(e,f,d,i,o,r,c,l,u,p),g=f.__e,f.ref&&d.ref!=f.ref&&(d.ref&&At(d.ref,null,f),p.push(f.ref,f.__c||g,f)),h==null&&g!=null&&(h=g),4&f.__u?(l=Mn(f,l,e),d.__e&&(d.__e=null)):typeof f.type=="function"&&y!==void 0?l=y:g&&(l=g.nextSibling),f.__u&=-7);return n.__e=h,l}function mi(e,t,n,s,i){var o,r,c,l,u,p=n.length,m=p,d=0;for(e.__k=new Array(i),o=0;o<i;o++)(r=t[o])!=null&&typeof r!="boolean"&&typeof r!="function"?(typeof r=="string"||typeof r=="number"||typeof r=="bigint"||r.constructor==String?r=e.__k[o]=Ve(null,r,null,null,null):Ke(r)?r=e.__k[o]=Ve(O,{children:r},null,null,null):r.constructor===void 0&&r.__b>0?r=e.__k[o]=Ve(r.type,r.props,r.key,r.ref?r.ref:null,r.__v):e.__k[o]=r,l=o+d,r.__=e,r.__b=e.__b+1,c=null,(u=r.__i=gi(r,n,l,m))!=-1&&(m--,(c=n[u])&&(c.__u|=2)),c==null||c.__v==null?(u==-1&&(i>p?d--:i<p&&d++),typeof r.type!="function"&&(r.__u|=4)):u!=l&&(u==l-1?d--:u==l+1?d++:(u>l?d--:d++,r.__u|=4))):e.__k[o]=null;if(m)for(o=0;o<p;o++)(c=n[o])!=null&&(2&c.__u)==0&&(c.__e==s&&(s=Z(c)),Un(c,c));return s}function Mn(e,t,n){var s,i;if(typeof e.type=="function"){for(s=e.__k,i=0;s&&i<s.length;i++)s[i]&&(s[i].__=e,t=Mn(s[i],t,n));return t}e.__e!=t&&(t&&e.type&&!t.parentNode&&(t=Z(e)),t=n.insertBefore(e.__e,t||null));do t=t&&t.nextSibling;while(t!=null&&t.nodeType==8);return t}function gi(e,t,n,s){var i,o,r,c=e.key,l=e.type,u=t[n],p=u!=null&&(2&u.__u)==0;if(u===null&&c==null||p&&c==u.key&&l==u.type)return n;if(s>(p?1:0)){for(i=n-1,o=n+1;i>=0||o<t.length;)if((u=t[r=i>=0?i--:o++])!=null&&(2&u.__u)==0&&c==u.key&&l==u.type)return r}return-1}function Ln(e,t,n){t[0]=="-"?e.setProperty(t,n??""):e[t]=n==null?"":typeof n!="number"||ui.test(t)?n:n+"px"}function Me(e,t,n,s,i){var o,r;e:if(t=="style")if(typeof n=="string")e.style.cssText=n;else{if(typeof s=="string"&&(e.style.cssText=s=""),s)for(t in s)n&&t in n||Ln(e.style,t,"");if(n)for(t in n)s&&n[t]==s[t]||Ln(e.style,t,n[t])}else if(t[0]=="o"&&t[1]=="n")o=t!=(t=t.replace(On,"$1")),r=t.toLowerCase(),t=r in e||t=="onFocusOut"||t=="onFocusIn"?r.slice(2):t.slice(2),e.l||(e.l={}),e.l[t+o]=n,n?s?n[we]=s[we]:(n[we]=Et,e.addEventListener(t,o?Tt:St,o)):e.removeEventListener(t,o?Tt:St,o);else{if(i=="http://www.w3.org/2000/svg")t=t.replace(/xlink(H|:h)/,"h").replace(/sName$/,"s");else if(t!="width"&&t!="height"&&t!="href"&&t!="list"&&t!="form"&&t!="tabIndex"&&t!="download"&&t!="rowSpan"&&t!="colSpan"&&t!="role"&&t!="popover"&&t in e)try{e[t]=n??"";break e}catch{}typeof n=="function"||(n==null||n===!1&&t[4]!="-"?e.removeAttribute(t):e.setAttribute(t,t=="popover"&&n==1?"":n))}}function An(e){return function(t){if(this.l){var n=this.l[t.type+e];if(t[Fe]==null)t[Fe]=Et++;else if(t[Fe]<n[we])return;return n(k.event?k.event(t):t)}}}function Lt(e,t,n,s,i,o,r,c,l,u){var p,m,d,f,g,h,y,b,w,v,$,N,S,Ne,le,ce,C=t.type;if(t.constructor!==void 0)return null;128&n.__u&&(l=!!(32&n.__u),o=[c=t.__e=n.__e]),(p=k.__b)&&p(t);e:if(typeof C=="function"){m=r.length;try{if(w=t.props,v=C.prototype&&C.prototype.render,$=(p=C.contextType)&&s[p.__c],N=p?$?$.props.value:p.__:s,n.__c?b=(d=t.__c=n.__c).__=d.__E:(v?t.__c=d=new C(w,N):(t.__c=d=new He(w,N),d.constructor=C,d.render=wi),$&&$.sub(d),d.state||(d.state={}),d.__n=s,f=d.__d=!0,d.__h=[],d._sb=[]),v&&d.__s==null&&(d.__s=d.state),v&&C.getDerivedStateFromProps!=null&&(d.__s==d.state&&(d.__s=j({},d.__s)),j(d.__s,C.getDerivedStateFromProps(w,d.__s))),g=d.props,h=d.state,d.__v=t,f)v&&C.getDerivedStateFromProps==null&&d.componentWillMount!=null&&d.componentWillMount(),v&&d.componentDidMount!=null&&d.__h.push(d.componentDidMount);else{if(v&&C.getDerivedStateFromProps==null&&w!==g&&d.componentWillReceiveProps!=null&&d.componentWillReceiveProps(w,N),t.__v==n.__v||!d.__e&&d.shouldComponentUpdate!=null&&d.shouldComponentUpdate(w,d.__s,N)===!1){t.__v!=n.__v&&(d.props=w,d.state=d.__s,d.__d=!1),t.__e=n.__e,t.__k=n.__k,t.__k.some(function(U){U&&(U.__=t)}),qe.push.apply(d.__h,d._sb),d._sb=[],d.__h.length&&r.push(d),c=Z(n);break e}d.componentWillUpdate!=null&&d.componentWillUpdate(w,d.__s,N),v&&d.componentDidUpdate!=null&&d.__h.push(function(){d.componentDidUpdate(g,h,y)})}if(d.context=N,d.props=w,d.__P=e,d.__e=!1,S=k.__r,Ne=0,v)d.state=d.__s,d.__d=!1,S&&S(t),p=d.render(d.props,d.state,d.context),qe.push.apply(d.__h,d._sb),d._sb=[];else do d.__d=!1,S&&S(t),p=d.render(d.props,d.state,d.context),d.state=d.__s;while(d.__d&&++Ne<25);d.state=d.__s,d.getChildContext!=null&&(s=j(j({},s),d.getChildContext())),v&&!f&&d.getSnapshotBeforeUpdate!=null&&(y=d.getSnapshotBeforeUpdate(g,h)),le=p!=null&&p.type===O&&p.key==null?Hn(p.props.children):p,c=Nn(e,Ke(le)?le:[le],t,n,s,i,o,r,c,l,u),d.base=t.__e,t.__u&=-161,d.__h.length&&r.push(d),b&&(d.__E=d.__=null)}catch(U){if(r.length=m,t.__v=null,l||o!=null){if(U.then){for(t.__u|=l?160:128;c&&c.nodeType==8&&c.nextSibling;)c=c.nextSibling;o!=null&&(o[o.indexOf(c)]=null),t.__e=c}else if(o!=null)for(ce=o.length;ce--;)Pt(o[ce])}else t.__e=n.__e;t.__k==null&&(t.__k=n.__k||[]),U.then||Fn(t),k.__e(U,t,n)}}else o==null&&t.__v==n.__v?(t.__k=n.__k,t.__e=n.__e):c=t.__e=hi(n.__e,t,n,s,i,o,r,l,u);return(p=k.diffed)&&p(t),128&t.__u?void 0:c}function Fn(e){e&&(e.__c&&(e.__c.__e=!0),e.__k&&e.__k.some(Fn))}function Vn(e,t,n){for(var s=0;s<n.length;s++)At(n[s],n[++s],n[++s]);k.__c&&k.__c(t,e),e.some(function(i){try{e=i.__h,i.__h=[],e.some(function(o){o.call(i)})}catch(o){k.__e(o,i.__v)}})}function Hn(e){return typeof e!="object"||e==null||e.__b>0?e:Ke(e)?e.map(Hn):e.constructor!==void 0?null:j({},e)}function hi(e,t,n,s,i,o,r,c,l){var u,p,m,d,f,g,h,y=n.props||Ue,b=t.props,w=t.type;if(w=="svg"?i="http://www.w3.org/2000/svg":w=="math"?i="http://www.w3.org/1998/Math/MathML":i||(i="http://www.w3.org/1999/xhtml"),o!=null){for(u=0;u<o.length;u++)if((f=o[u])&&"setAttribute"in f==!!w&&(w?f.localName==w:f.nodeType==3)){e=f,o[u]=null;break}}if(e==null){if(w==null)return document.createTextNode(b);e=document.createElementNS(i,w,b.is&&b),c&&(k.__m&&k.__m(t,o),c=!1),o=null}if(w==null)y===b||c&&e.data==b||(e.data=b);else{if(o=w=="textarea"&&b.defaultValue!=null?null:o&&je.call(e.childNodes),!c&&o!=null)for(y={},u=0;u<e.attributes.length;u++)y[(f=e.attributes[u]).name]=f.value;for(u in y)f=y[u],u=="dangerouslySetInnerHTML"?m=f:u=="children"||u in b||u=="value"&&"defaultValue"in b||u=="checked"&&"defaultChecked"in b||Me(e,u,null,f,i);for(u in b)f=b[u],u=="children"?d=f:u=="dangerouslySetInnerHTML"?p=f:u=="value"?g=f:u=="checked"?h=f:c&&typeof f!="function"||y[u]===f||Me(e,u,f,y[u],i);if(p)c||m&&(p.__html==m.__html||p.__html==e.innerHTML)||(e.innerHTML=p.__html),t.__k=[];else if(m&&(e.innerHTML=""),Nn(t.type=="template"?e.content:e,Ke(d)?d:[d],t,n,s,w=="foreignObject"?"http://www.w3.org/1999/xhtml":i,o,r,o?o[0]:n.__k&&Z(n,0),c,l),o!=null)for(u=o.length;u--;)Pt(o[u]);c&&w!="textarea"||(u="value",w=="progress"&&g==null?e.removeAttribute("value"):g!=null&&(g!==e[u]||w=="progress"&&!g||w=="option"&&g!=y[u])&&Me(e,u,g,y[u],i),u="checked",h!=null&&h!=e[u]&&Me(e,u,h,y[u],i))}return e}function At(e,t,n){try{if(typeof e=="function"){var s=typeof e.__u=="function";s&&e.__u(),s&&t==null||(e.__u=e(t))}else e.current=t}catch(i){k.__e(i,n)}}function Un(e,t,n){var s,i;if(k.unmount&&k.unmount(e),(s=e.ref)&&(s.current&&s.current!=e.__e||At(s,null,t)),(s=e.__c)!=null){if(s.componentWillUnmount)try{s.componentWillUnmount()}catch(o){k.__e(o,t)}s.base=s.__P=s.__n=null}if(s=e.__k)for(i=0;i<s.length;i++)s[i]&&Un(s[i],t,n||typeof e.type!="function");n||Pt(e.__e),e.__c=e.__=e.__e=void 0}function wi(e,t,n){return this.constructor(e,n)}function $t(e,t,n){var s,i,o,r;t==document&&(t=document.documentElement),k.__&&k.__(e,t),i=(s=typeof n=="function")?null:n&&n.__k||t.__k,o=[],r=[],Lt(t,e=(!s&&n||t).__k=pi(O,null,[e]),i||Ue,Ue,t.namespaceURI,!s&&n?[n]:i?null:t.firstChild?je.call(t.childNodes):null,o,!s&&n?n:i?i.__e:t.firstChild,s,r),Vn(o,e,r),e.props.children=null}je=qe.slice,k={__e:function(e,t,n,s){for(var i,o,r;t=t.__;)if((i=t.__c)&&!i.__)try{if((o=i.constructor)&&o.getDerivedStateFromError!=null&&(i.setState(o.getDerivedStateFromError(e)),r=i.__d),i.componentDidCatch!=null&&(i.componentDidCatch(e,s||{}),r=i.__d),r)return i.__E=i}catch(c){e=c}throw e}},$n=0,li=function(e){return e!=null&&e.constructor===void 0},He.prototype.setState=function(e,t){var n;n=this.__s!=null&&this.__s!=this.state?this.__s:this.__s=j({},this.state),typeof e=="function"&&(e=e(j({},n),this.props)),e&&j(n,e),e!=null&&this.__v&&(t&&this._sb.push(t),Pn(this))},He.prototype.forceUpdate=function(e){this.__v&&(this.__e=!0,e&&this.__h.push(e),Pn(this))},He.prototype.render=O,G=[],Cn=typeof Promise=="function"?Promise.prototype.then.bind(Promise.resolve()):setTimeout,In=function(e,t){return e.__v.__b-t.__v.__b},We.__r=0,Rt=Math.random().toString(8),Fe="__d"+Rt,we="__a"+Rt,On=/(PointerCapture)$|Capture$/i,Et=0,St=An(!1),Tt=An(!0),ci=0;function ye(e){let t=Math.round(e/6e4);if(t<1)return"just now";if(t<60)return`${t}m ago`;let n=Math.round(t/60);return n<48?`${n}h ago`:`${Math.round(n/24)}d ago`}function Ct(e){if(e.how==="dismissed")return"dismissed";if(e.how==="expired")return"lapsed";let t=/^(?:closed by \\w+: )?(?:no longer applies|replaced|superseded|moot)/i.test(e.outcome);return(e.how==="claude"||e.how==="update")&&t?"lapsed":"handled"}function ue(e){return e.threads.filter(t=>t.isWaiting)}function Ye(e,t){return ue(e).filter(n=>!n.isLinesChanged&&!t(e,n))}function yi(e){let t={pass:0,fail:0,pending:0,skip:0};for(let n of e.checks)t[n.bucket]+=1;return t}function bi(e){return`${e} ${e===1?"thread":"threads"} waiting on you`}function It(e,t,n){return`${e} ${e===1?t:n}`}function Ot(e,t=()=>!1){let n=(h,y,b=[],w=": ")=>{let v=b.join(", "),$=h==="ready"?[]:b.filter(N=>!s.includes(N));return{status:h,text:v?`${y}${w}${v}`:y,head:y,reasons:v,reasonList:b,unlisted:$}},s=[];if(e.state==="MERGED")return n("merged","Merged");if(e.state!=="OPEN")return n("closed","Closed");let{fail:i,pending:o}=yi(e),r=ue(e),c=Ye(e,t).length,l=r.filter(h=>t(e,h)).length,u=r.filter(h=>h.isLinesChanged&&!t(e,h)).length,p=h=>h!==null,m=h=>(h===null||s.push(h),h),d=[e.mergeable==="CONFLICTING"?`conflicts with ${e.base}`:null,m(i>0?It(i,"failing check","failing checks"):null),e.reviewDecision==="CHANGES_REQUESTED"?"changes requested":null,m(c>0?bi(c):null)].filter(p),f=[m(l>0?`${It(l,"thread","threads")} sent to Claude`:null),m(u>0?`${It(u,"thread","threads")} on changed lines`:null),e.reviewDecision==="REVIEW_REQUIRED"?"needs approval":null,o>0?`${o} ${o===1?"check":"checks"} running`:null].filter(p);if(e.isDraft)return n("draft","Draft",[...d,...f]);if(d.length>0)return n("blocked","Blocked",d);if(f.length>0)return n("waiting","Waiting",f);let g=e.reviewDecision==="APPROVED";return n("ready","Ready to merge",[...g?["approved"]:[],"checks pass","no threads waiting on you"],g?": ":", ")}var ki=/<\\/?(?:a|b|br|code|details|div|em|h[1-6]|hr|i|img|kbd|li|ol|p|pre|span|strong|sub|summary|sup|table|tbody|td|th|thead|tr|ul)\\b[^>]*>/g;function Ge(e){return e.replace(/<!--[\\s\\S]*?-->/g,"").replace(ki,"").replace(/^[^\\S\\n]*Useful\\?[^\\S\\n]+React[^\\S\\n]+with[^\\S\\n]+\u{1F44D}[^\\S\\n]*\\/[^\\S\\n]*\u{1F44E}\\.?[^\\S\\n]*$/gmu,"").replace(/!\\[([^\\]]*)\\]\\([^)]*\\)/g,(t,n)=>n.replace(/\\s*badge$/i,"")).trim()}function Dt(e){return Ge(e).replace(/\\[([^\\]]*)\\]\\([^)]*\\)/g,"$1").replace(/^\\s*(?:#{1,6}|>)\\s*/gm,"").replace(/\\*\\*|__|`/g,"").replace(/\\s+/g," ")}var Nt=120;function qn(e){let t=Ge(e),[n="",...s]=t.split(`\n`),i=Dt(n).trim();return{head:i,rest:i.length>Nt?t:s.join(`\n`).trim()}}function Mt(e,t=e.path){return`${t}${e.line?`:${e.line}`:""}`}function Wn(e){let t=Math.max(0,Math.round(e/1e3));return t<60?`${t}s`:`${Math.floor(t/60)}m ${t%60}s`}function Be(e){return e.checks.filter(t=>t.bucket==="fail")}function ee(e,t){return e.length>t?`${e.slice(0,t-1)}\\u2026`:e}function Xe(e){return e.replace(/\\/+$/,"").split("/").pop()??e}function jn(e,t){let n=e?.delivery?.state!=="failed"?e?.turnsStarted:void 0;return n!==void 0&&n<=t.turnsStarted&&t.turnsApplied<=n}function Kn(e){return e.startsWith("pr:")||e.includes(" ")}function ze(e,t){return!e.startsWith("pr:")&&t?.kind==="handoff"&&t.action!=="address"}function Ft(e){return e.action==="step"?`step-${e.step}`:e.action}function Qe(e){return e.charAt(0).toUpperCase()+e.slice(1)}var Ri="This changed before your press. Nothing was sent.";function be(e){return e==="sample"?"Sample entry: nothing was sent.":Ri}function Si(e,t){switch(t.kind){case"run":return{kind:"send",text:Ei.run(e,t.command),by:{id:e.id,action:"run"}};case"open":return{kind:"open",target:t.path,name:Xe(t.path)};case"link":return{kind:"open",target:t.url,name:t.name??t.url};case"copy":return{kind:"copy",text:t.text,name:t.name??"snippet",isCommand:!1};case"terminal":return{kind:"copy",text:t.command,name:t.name??ee(t.command,32),isCommand:!0}}}function Yn(e,t){return t.step.map(n=>Si(e,n))}function Je(e,t,n){return{state:"pending",parts:e.flatMap(s=>s.kind==="send"?[]:[{kind:s.kind,name:s.name,isCommand:s.kind==="copy"&&s.isCommand,error:null}]),at:t,...n?{pressId:n}:{}}}function Gn(e,t){if(!/^[if]\\d+$/.test(e))return null;let n=/^step-(\\d+)$/.exec(t.action);if(n)return{action:"step",id:e,step:Number(n[1]),label:t.text};switch(t.action){case"answer":return{action:"answer",id:e,option:t.text};case"explain":case"address":case"discuss":return{action:t.action,id:e};default:return null}}function Ti(e){return[`${e.kind==="issue"?"Issue":"Opportunity"}: ${e.title}`,e.detail,...e.path?[`File: ${e.path}`]:[]]}var Ei={answer:(e,t)=>`Re "${e.ask}": ${t}`,explain:e=>{let t=e.kind==="task"?"this task you left for me is about: why it came up, and what each choice would mean":"this question you asked me is about: why it came up, what each choice would mean, and which you would pick",n=e.options.length>0?`\nOptions: ${e.options.join(" / ")}`:"";return`Remind me what ${t}. Don\'t act on it yet.\n"${e.ask}"${n}`},run:(e,t)=>`For "${e.ask}", run this:\n\\`\\`\\`\n${t}\n\\`\\`\\``,taskReply:(e,t)=>`Re the task you left for me, "${e.ask}": ${t}`,done:e=>e.length===1?`Done: ${e[0]}`:`Done:\n${e.map(t=>`- ${t}`).join(`\n`)}`,finding:(e,t,n="")=>[t==="address"?"Please address this finding you recorded:":t==="discuss"?"Let\'s talk through this finding you recorded before changing anything:":"About this finding you recorded:",...Ti(e),...t==="typed"?["",n]:[]].join(`\n`)};var Bn=[..."abcfghilm"],L="\\u2007\\xB7\\u2002",Ut={issue:{title:"Issues",mark:"\\u25B2",tone:"issue"},opportunity:{title:"Opportunities",mark:"\\u2726",tone:"done"}},Xn={handled:"\\u2713",dismissed:"\\u2715",lapsed:"\\u2013"},Pi=3,T=5120,Wt=400,Li=1e3;function Ai(e,t){return e?.delivery?.state==="queued"&&t-e.at>=Li}function $i(e,t){return e?.delivery?.state==="unconfirmed"?"unconfirmed":Ai(e,t)?"queued":null}function zn(e,t){return e>0&&t-e<Wt}var te={retry:"Try again",send:"Send",cancel:"Cancel",relevantFile:"Relevant file: ",allOptions:e=>`All ${e} options`};function jt(e,t){if(e.state.is==="handedOff"&&e.feedback?.is!=="unconfirmed")return{text:"\\u2713",tone:"done"};if(e.finding){let n=Ut[e.finding.kind];return{text:n.mark,tone:n.tone}}return{text:t==="terminal"?e.handle:""}}function Kt(e,t){return e.replyKind==="answer"?"Your answer":`Your reply to ${t}`}function Qn(e){return e.isPrimary?`${e.label} (recommended)`:e.label}function Jn(e,t){let n=e.feedback;return n?n.is==="done"&&e.state.is==="handedOff"?n.label:pe(n,t):null}function ke(e){return[...e.needsYou.questions,...e.needsYou.tasks,...e.findings.rows]}function Zn(e){return e.filter(t=>t.state.is==="settled").map(t=>t.id)}function Yt(e,t){return e.filter(n=>!t.has(n.id)).slice(0,Pi)}function Ze(e,t){return e.filter(n=>!t.has(n.id)).length}function es(e){return`${e} closed`}function ts(e,t){return e>t?`${e-t} earlier`:null}function ne(e){let t=ye(e);return t==="just now"?"now":t.replace(/ ago$/,"")}function ns(e){return`No open ${e.toLowerCase()}`}var ss="Sample entries. Presses send nothing.";function _e(e,t,n,s,i){let o=t?.result;if(n&&i-n.at<T&&n.at>=Math.max(t?.at??0,o?.at??0))return{is:"note",note:n.note,at:n.at};if(o&&(o.state!=="done"||i-o.at<T))return{is:"local",result:o};if(!t||t.kind==="local")return null;let r=t.delivery,c=$i(t,i);if(c)return{is:c,label:t.text,at:t.at};if(r?.state==="failed")return{is:"notSent",reason:r.reason,retry:Gn(e,t)};let l=jn(t,s),u=Ci[t.action];if(t.kind==="talk"&&u&&l)return{is:"working",label:u,at:t.at};if(!l&&!Kn(e)&&ze(e,t))return{is:"stillOpen",at:t.at};let p=t.kind==="handoff"&&t.action.startsWith("step-");return{is:"done",label:Ii[t.action]?.(t.text)??t.text,at:t.at,...p?{isHandedStep:!0}:{}}}var Ci={explain:"Explaining\\u2026",discuss:"Discussing\\u2026","thread-discuss":"Discussing\\u2026","thread-draft":"Drafting a reply\\u2026"},Ii={address:()=>"Handed off",discuss:()=>"Discussed",explain:()=>"Explained",dismiss:()=>"Dismissed",type:()=>"Replied","thread-address":()=>"Addressed","thread-discuss":()=>"Discussed","thread-draft":()=>"Drafted a reply","pr-conflicts":()=>"Asked to resolve conflicts","pr-merge":()=>"Asked to merge","pr-address-all":e=>e.replace(/^Address\\b/,"Addressed")};function Gt(e){return e?.is==="notSent"||e?.is==="local"&&e.result.state==="failed"}function Bt(e){return e.is==="done"||e.is==="working"||e.is==="stillOpen"||e.is==="queued"||e.is==="unconfirmed"}var Oi=e=>e==="terminal"?"Run it in a terminal, or type ! and paste.":"Run it in Terminal.",Vt={open:{pending:"Opening",done:"Opened",failed:"open"},copy:{pending:"Copying",done:"Copied",failed:"copy"}};function Di(e,t){let s=e.parts.length>1&&e.parts.every(r=>r.kind==="open"&&r.error===null&&/^PR #\\d+$/.test(r.name))?[{...e.parts[0],name:`${e.parts.length} PRs`}]:e.parts;if(e.state==="pending")return`${s.map(r=>`${Vt[r.kind].pending} ${r.name}`).join(L)}\\u2026`;let i=s.map(r=>r.error===null?`${Vt[r.kind].done} ${r.name}`:`Could not ${Vt[r.kind].failed} ${r.name}: ${r.error}`).join(L);if(e.state==="failed")return i;let o=s.some(r=>r.kind==="copy"&&r.isCommand);return`\\u2713 ${i}${o?`. ${Oi(t)}`:""}`}function pe(e,t){switch(e.is){case"note":return be(e.note);case"local":return Di(e.result,t);case"queued":return qt(e.is,e.label);case"unconfirmed":return qt(e.is,e.label);case"notSent":return`Not sent: ${e.reason}`;case"done":return e.isHandedStep?`\\u2713 Handed off: ${e.label}`:`\\u2713 ${e.label}`;case"working":return e.label;case"stillOpen":return"Still open"}}function qt(e,t){return e==="queued"?`Queued: ${t}`:`Delivery unconfirmed: ${t}`}function Xt(e,t){return t&&typeof t=="object"?`${e} \\xB7 Not sent: ${t.error}`:t===null?e:qt(t,e)}var et=[{id:"needsYou",label:"Needs you",hotkey:"1"},{id:"findings",label:"Findings",hotkey:"2"},{id:"prs",label:"PRs",hotkey:"3"}],pr=et.filter(e=>e.id!=="prs");function xe(e,t){return e==="needsYou"?{title:"Nothing needs you.",hint:`${t}\'s questions and the tasks only you can do show up here.`}:{title:"No findings yet",hint:`${t} flags issues and opportunities it spots beyond your task.`}}function zt(e,t,n){let s=l=>l.flatMap(u=>{if(u.state.is==="settled")return t(u.id)?[{settled:u,state:u.state}]:[];let p=n(u);return p===null?[]:[{row:p}]}),i=s(e.needsYou.questions),o=s(e.needsYou.tasks),r=Object.keys(Ut).map(l=>({kind:l,title:Ut[l].title,entries:s(e.findings.rows.filter(u=>u.finding?.kind===l))})),c=r.flatMap(l=>l.entries);return{questions:i,tasks:o,findings:c,findingGroups:r,byTab:{needsYou:[...Ht(i),...Ht(o)],findings:Ht(c)}}}function se(e){return"row"in e?e.row.id:e.settled.id}function is(e){let t=zt(e,()=>!0,s=>s),n=s=>s.map(i=>"row"in i?{id:i.row.id,isWaiting:i.row.state.is==="open"}:{id:i.settled.id,isWaiting:!1});return{needsYou:n([...t.questions,...t.tasks]),findings:n(t.findings)}}function Qt(e){return e.find(t=>t.isWaiting)?.id??null}function os(e,t){return Qt(e.filter(n=>!t.includes(n.id)))}function rs(e,t){let n=e.findIndex(s=>s.id===t);return n<0?null:(e.slice(n+1).find(s=>s.isWaiting)??e.slice(0,n).reverse().find(s=>s.isWaiting))?.id??null}function Ht(e){return e.flatMap(t=>"row"in t?[t.row]:[])}function tt(e){return new Set(e.flatMap(t=>"settled"in t?[t.settled.id]:[]))}function as(e,t,n){let s=e.actions.filter(m=>t||!m.isFolded),i=e.actions.length-s.length,o=s.map(m=>m.press.action).lastIndexOf("answer"),r=[],c=[],l=[],u=e.feedback?.is==="notSent"?e.feedback.retry:null;if(u){let m=e.actions.find(d=>Ft(d.press)===Ft(u))?.kind??"talk";r.push({slot:"retry",press:u,kind:m,label:te.retry,emphasis:"normal",icon:"retry"})}let p=0;for(let[m,d]of s.entries()){let{press:f}=d;if(f.action==="answer"||f.action==="step"){let g=p<Bn.length?{hotkey:Bn[p++]}:{};r.push({slot:"choice",action:{...d,press:f},...g}),m===o&&i>0&&r.push({slot:"allOptions",count:e.actions.filter(h=>h.press.action==="answer").length,label:te.allOptions(e.actions.filter(h=>h.press.action==="answer").length),emphasis:"quiet"})}else d.hotkey&&(f.action==="explain"&&n?l:d.isFollowUp?c:r).push({slot:"action",action:d,hotkey:d.hotkey})}return{keys:r,more:c,hidden:l}}var Ni=0;function a(e,t,n,s,i,o){t||(t={});var r,c,l=t;if("ref"in l)for(c in l={},t)c=="ref"?r=t[c]:l[c]=t[c];var u={type:e,props:l,key:n,ref:r,__k:null,__:null,__b:0,__e:null,__c:null,constructor:void 0,__v:--Ni,__i:-1,__u:0,__source:i,__self:o};if(typeof e=="function"&&(r=e.defaultProps))for(c in r)l[c]===void 0&&(l[c]=r[c]);return k.vnode&&k.vnode(u),u}var Mi={check:"M20 6 9 17l-5-5",play:"M7 4.5v15l12-7.5z",copy:"M9 9h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1zM5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1",open:"M7 17 17 7M8 7h9v9",retry:"M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5",undo:"M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11",right:"m9 18 6-6-6-6",down:"m6 9 6 6 6-6"},Fi={done:"check",retry:"retry",open:"open",copy:"copy",run:"play"};function ve({name:e}){return a("svg",{class:"icon",viewBox:"0 0 24 24",fill:"none",stroke:"currentColor","stroke-width":"2","stroke-linecap":"round","stroke-linejoin":"round","aria-hidden":"true",children:a("path",{d:Mi[e]})})}function ds(e,t,n){let s=as(e,t,!0),i=o=>{if(o.slot==="retry")return{label:o.label,emphasis:o.emphasis,icon:o.icon,run:()=>n.press(o.press)};if(o.slot==="allOptions")return{label:o.label,emphasis:o.emphasis,run:n.showOptions};let r=o.action;return{label:Qn(r),emphasis:r.emphasis,...o.hotkey?{hotkey:o.hotkey}:{},...r.icon?{icon:Fi[r.icon]}:{},...r.press.action==="dismiss"?{isDismiss:!0}:{},run:r.press.action==="type"?n.reply:()=>n.press(r.press)}};return{keys:s.keys.map(i),more:s.more.map(i),hidden:s.hidden.map(i)}}function Jt({action:e,isBlocked:t}){return a("button",{type:"button",class:`${e.emphasis==="primary"?"key primary":e.emphasis==="quiet"?"key ghost":"key"}${e.isDismiss?" dismiss":""}`,disabled:t(),onClick:()=>{t()||e.run()},children:[e.icon?a(ve,{name:e.icon}):null,e.label]})}function ls({actions:e,reply:t,isBlocked:n}){return t?a("div",{class:"actions",children:a("form",{onSubmit:s=>{s.preventDefault();let i=t.draft().trim();i&&t.send(i)},children:[a("input",{id:`type-${t.id}`,value:t.draft(),placeholder:t.hint,"aria-label":t.hint,onInput:s=>t.onDraft(s.currentTarget.value)}),a("button",{type:"submit",class:"key primary",children:te.send}),a("button",{type:"button",class:"key ghost",onClick:t.cancel,children:te.cancel})]})}):a("div",{class:"actions",children:e.length>0?a("div",{class:"keys",children:e.map(s=>a(Jt,{action:s,isBlocked:n}))}):null})}function Re(e,t){return Vi(e.ref,t.id)}function Zt(e,t){return Hi(e.ref,t.name)}function Vi(e,t){return`${e} thread ${t}`}function Hi(e,t){return`${e} check ${t}`}function ie(e){return`pr:${e}`}function Se(e){return(t,n)=>{let s=e[Re(t,n)];return s?.kind==="handoff"&&s.delivery?.state!=="failed"&&s.at>((n.reply??n).at??0)}}function cs(e){let t=Se(e);return(n,s)=>{let i=e[Re(n,s)]?.delivery;return t(n,s)&&i?.state!=="unconfirmed"}}function us(e,t){let n=Se(t);return e.flatMap(s=>[...ue(s).map(i=>({id:Re(s,i),isWaiting:!n(s,i)})),...Be(s).map(i=>{let o=Zt(s,i),r=t[o];return{id:o,isWaiting:!ze(o,r)||r?.delivery?.state==="failed"}})])}var ps={ready:"done",blocked:"needsYou",waiting:null,draft:null,merged:"findings",closed:"error"};function nt(e,t,n,s=null){if(e?.delivery?.state!=="failed")return null;let i=e.action;return s!==null?i==="check-fix"?{press:{action:i,ref:t,check:s},kind:e.kind}:null:n!==null&&(i==="thread-address"||i==="thread-draft"||i==="thread-discuss")?{press:{action:i,ref:t,thread:n},kind:e.kind}:n===null&&(i==="pr-conflicts"||i==="pr-address-all"||i==="pr-merge")?{press:{action:i,ref:t},kind:e.kind}:null}function fs(e,t){let n={...e},s={};for(let i of Object.keys(t)){let o=t[i],r=e[i];s[i]=o&&r?o.filter(c=>!r.has(c)):[],o&&(n[i]=new Set(o))}return{seen:n,added:s}}function ms({rows:e,settled:t,closed:n,hasBlocker:s}){return!s&&!e.some(i=>i.state.is!=="settled"||t.has(i.id))&&!n.some(i=>i.isUnfolded&&i.rows.some(o=>!t.has(o.id)))}function gs(e,t,n,s){return n?e.find(i=>i!==t&&s[i].length>0)??null:null}var Ui=/`([^`\\n]+)`|\\*\\*(?=\\S)(.+?)(?<=\\S)\\*\\*(?!\\*)|~~(?=\\S)(.+?)(?<=\\S)~~|(?<![\\w*])\\*(?=\\S)([^*\\n]+?)(?<=\\S)\\*(?![\\w*])|(?<!\\w)_(?=\\S)([^_\\n]+?)(?<=\\S)_(?!\\w)|\\[([^\\]\\n]+)\\]\\((https:\\/\\/[^\\s)]+)\\)/g;function st(e,t={}){let n=[],s=0;for(let i of e.matchAll(Ui)){i.index>s&&n.push({...t,text:e.slice(s,i.index)});let[,o,r,c,l,u,p,m]=i;o!==void 0?n.push({...t,text:o,code:!0}):r!==void 0?n.push(...st(r,{...t,bold:!0})):c!==void 0?n.push(...st(c,{...t,strike:!0})):l!==void 0||u!==void 0?n.push({...t,text:l??u??"",italic:!0}):n.push({...t,text:p??"",link:m}),s=i.index+i[0].length}return s<e.length&&n.push({...t,text:e.slice(s)}),n}var it={question:"needsYou",task:"needsYou",finding:"findings"},Te=["needsYou","findings"];function qi(e){return{needsYou:[...e.needsYou.questions,...e.needsYou.tasks].map(t=>t.id),findings:e.findings.rows.map(t=>t.id)}}function hs(e){let t=n=>n.filter(s=>s.state.is!=="settled").map(s=>s.id);return{needsYou:t([...e.needsYou.questions,...e.needsYou.tasks]),findings:t(e.findings.rows)}}function ws(e,t){return fs(e,qi(t))}function ys(e,t,n,s){let i=t==="findings"?[{isUnfolded:s.has("issue"),rows:e.findings.closed.filter(o=>o.kind==="issue")},{isUnfolded:s.has("opportunity"),rows:e.findings.closed.filter(o=>o.kind==="opportunity")}]:[{isUnfolded:s.has("question"),rows:e.needsYou.closed.questions},{isUnfolded:s.has("task"),rows:e.needsYou.closed.tasks}];return ms({rows:t==="findings"?e.findings.rows:[...e.needsYou.questions,...e.needsYou.tasks],settled:n,closed:i,hasBlocker:t==="needsYou"&&e.heard!=="heard"})}var ot={entering:300,opening:200,closing:200,settling:200,leaving:200,closed:0,open:0,settled:0,undoing:0};function en(e){return ot[e]>0}function ks(e,t,n,s=!1,i=!1){let o=t==="undoing"?"settled":t;if(!e)return s&&!i&&(o==="closed"||o==="open")?{state:"entering",since:n,hasPanel:o==="open"}:bs(void 0,o,t,n);let r=Wi(e)===o?e:ji(e,o,n);return en(r.state)&&!i&&n-r.since<ot[r.state]?r:bs(r,o,t,n)}function Wi({state:e,hasPanel:t}){switch(e){case"entering":return t?"open":"closed";case"opening":case"open":return"open";case"closing":case"closed":return"closed";case"settling":case"settled":case"undoing":return"settled";case"leaving":return"gone"}}function ji(e,t,n){switch(t){case"open":return{state:"opening",since:n,hasPanel:!0};case"closed":return e.state==="leaving"?{state:"entering",since:n,hasPanel:!1}:{state:"closing",since:n,hasPanel:e.hasPanel};case"settled":return{state:"settling",since:n,hasPanel:e.hasPanel};case"gone":return{state:"leaving",since:n,hasPanel:e.hasPanel}}}function bs(e,t,n,s){if(t==="gone")return null;let i=n==="undoing"?"undoing":t;return e?.state===i?e:{state:i,since:s,hasPanel:i==="open"}}var rt=3e3,tn=6e4,qr=T+2*rt;function _s(e){return Zn(ke(e))}function xs(e,t,n){return new Map(t.map(s=>[s,e.get(s)??n]))}function vs(e,t,n=new Set){return new Set([...e].filter(([s,i])=>n.has(s)||t-i<T).map(([s])=>s))}var E=null,Q=!1,J=null,Pe=null,Os=!1,ct=!1,Ee=null,Rs=!1,Ds={},on={},kt=0,mn=0,_="needsYou",P={needsYou:null,findings:null,prs:null},A=null,ut=!1,re=new Map,pt=new Set,B=new Set,Ae=new Map,nn=new Map,F=new Map,rn=new Map,$e=new Map,me=null,K=new Map,dt={},ge=new Set,V=new Set,lt=new Set,I=new Map,ft=null,Ns=0,mt=0,Ce=0,X=0,Ss="inbox-tab-kept",M=window,Y=M.__inboxHandoff??null,q=Y?.root??document.getElementById("app"),Oe=new AbortController,Ie=new Set,gt=new Set,ae=new Map,R=!1,D=Y===null;Y&&(Y.dispose=gn);function W(e,t){if(R)return 0;let n=window.setTimeout(()=>{Ie.delete(n),R||e()},t);return Ie.add(n),n}function ht(e){e!==void 0&&(window.clearTimeout(e),Ie.delete(e))}function gn(){if(!R){R=!0,Oe.abort();for(let e of Ie)window.clearTimeout(e);Ie.clear();for(let e of gt)e.onfinish=null,e.oncancel=null,e.cancel();gt.clear();for(let e of ae.values())e.reject(new Error("Inbox page replaced"));ae.clear(),$t(null,q),D&&document.body.classList.remove("still")}}function Yi(){return{version:1,isDemo:Q,tab:_,selection:{needsYou:P.needsYou?.id??null,findings:P.findings?.id??null,prs:P.prs?.id??null},typing:A,drafts:[...re].map(([e,t])=>[e,t.text]),optionsShown:[...pt],unfolded:[...B]}}function Ms(e){let t=e??M.__inboxKept??null;if(!e){delete M.__inboxKept;try{let n=sessionStorage.getItem(Ss);sessionStorage.removeItem(Ss),t??=n?JSON.parse(n):null}catch{}}if(t?.version===1){Q=t.isDemo,_=t.tab;for(let n of[...Te,"prs"]){let s=t.selection[n];P[n]=s?{id:s,openedAt:0}:null}A=t.typing,ut=A!==null;for(let[n,s]of t.drafts)re.set(n,{text:s});for(let n of t.optionsShown)pt.add(n);for(let n of t.unfolded)for(let s of n==="finding"?["issue","opportunity"]:[n])B.add(s)}}function Fs(e,t,n){return R?Promise.reject(new Error("Inbox page replaced")):new Promise((s,i)=>{let o=M.__inboxRequestId=(M.__inboxRequestId??Date.now())+1,r=n===void 0?void 0:W(()=>{ae.delete(o)&&i(new Error(`The inbox did not answer in ${Math.round(n/1e3)} s`))},n);ae.set(o,{resolve:s,reject:i,timer:r}),parent.postMessage({jsonrpc:"2.0",id:o,method:e,params:t},"*")})}window.addEventListener("message",e=>{if(R)return;let t=e.data;if(!(!t||t.jsonrpc!=="2.0")){if(t.id!=null&&!t.method&&ae.has(t.id)){let n=ae.get(t.id);ae.delete(t.id),ht(n.timer),t.error?n.reject(t.error):n.resolve(t.result);return}t.method==="ui/notifications/host-context-changed"&&(D?an(t.params??{}):on=Gi(on,t.params??{})),D&&t.id!=null&&t.method&&parent.postMessage({jsonrpc:"2.0",id:t.id,result:{}},"*")}},{signal:Oe.signal});function an(e){if(!(R||!D)){e.theme&&(document.documentElement.dataset.theme=e.theme);for(let[t,n]of Object.entries(e.styles?.variables??{}))document.documentElement.style.setProperty(t,n)}}function Gi(e,t){return{...e,...t,styles:{...e.styles,...t.styles,variables:{...e.styles?.variables,...t.styles?.variables}}}}async function hn(e,t={},n){let s=await Fs("tools/call",{name:e,arguments:t},n);if(R)throw new Error("Inbox page replaced");if(!s||s.isError||s.structuredContent===void 0)throw new Error(s?.isError&&s.content?.[0]?.text||"The answer had nothing to show");return s.structuredContent}function Vs(e,t){if(R||t<mt)return;mt=t,J=null,kt=0,mn=Date.now();let n=K;K=xs(K,_s(e),Date.now()),[...K.keys()].some(r=>!n.has(r))&&he(T),E=e;for(let{pr:r,isSettled:c}of e.prs.drawn)c&&he(Math.max(0,T-(e.at-(e.lastActions[ie(r.ref)]?.at??e.at))));let s=Te.every(r=>dt[r]===void 0),i=ws(dt,e);dt=i.seen;let o=[...i.added.needsYou,...i.added.findings];for(let r of o)ge.add(r);for(let r of Te){let c=!P[r]&&i.added[r].length>0?os(_t(e,r),i.added[r]):null;c&&(P[r]={id:c,openedAt:0})}Bi(e,s?hs(e):i.added),x()}function Bi(e,t){if(_==="prs")return;let n=yn(),s=gs(Te,_,ys(e,_,n,B),t);s&&(_=s,P[s]=null)}var Xi=300,zi=2e3,wt=3*rt;async function wn(){let e=X,t=++Ns;try{let n=await hn("inbox_view",{demo:Q},wt);if(e!==X||t<mt)return;oe=n.devPage,z?.page!==oe&&(z=null);let s=oe!==Hs;s&&!z&&Us(oe),Pe=n.serverLoadError?{text:`The inbox server could not load its new build, so it still runs the last one. ${n.serverLoadError}`,isReloadable:!1}:n.serverBuild!=="602c1c7673b0"&&!s?{text:"This tab and the inbox server are from different builds.",isReloadable:!0}:null,Vs(n,t)}catch(n){if(R||e!==X||t<mt)return;E?kt++:J=Qi(n),x()}}function Qi(e){let t=typeof e=="object"&&e!==null&&typeof e.message=="string"?e.message:String(e),n=ee(t.replace(/^(Failed|Not done): /,"").replace(/\\s+/g," ").trim(),120)||"No reason given";return Qe(/[.!?\u2026]$/.test(n)?n:`${n}.`)}var Hs=Y?.page??M.__inboxPage,sn=!1,oe=null,z=null;async function Us(e){if(sn||R||e===Hs)return;sn=!0;let t=null,n=null,s=!1;try{let{html:i}=await hn("inbox_tab_page",{},wt);if(R||oe!==e)return;if(!/<\\/html>\\s*$/i.test(i))throw new Error("The new page is incomplete.");let o=new DOMParser().parseFromString(i,"text/html"),r=o.getElementById("app"),c=o.getElementById("inbox-style")??o.head.querySelector("style"),l=o.getElementById("inbox-script")??o.body.querySelector("script"),u=[...o.head.querySelectorAll("script")].map(S=>S.textContent?.match(/^\\s*window\\.__inboxPage\\s*=\\s*("[^"\\n]+")\\s*;?\\s*$/)?.[1]).find(S=>S!==void 0),p=u?JSON.parse(u):null,m=o.querySelector(\'meta[name="inbox-handoff"]\')?.getAttribute("content")==="1",d=document.getElementById("inbox-style"),f=document.getElementById("inbox-script");if(!(r instanceof HTMLDivElement)||r.childNodes.length>0||!(c instanceof HTMLStyleElement)||!c.textContent||!(l instanceof HTMLScriptElement)||l.src||!l.textContent||typeof p!="string"||p!==e||!/^ui:\\/\\/inbox\\/tab-[a-f0-9]{12}$/.test(p)||!m||!(d instanceof HTMLStyleElement)||!(f instanceof HTMLScriptElement))throw new Error("The new page is incomplete.");let g=document.createElement("div");g.id="app";let h=document.createElement("style");h.id="inbox-style",h.textContent=c.textContent,n=document.createElement("script"),n.id="inbox-script-candidate",n.textContent=l.textContent;let y,b=new Promise(S=>y=S);t={page:p,root:g,aborted:!1,ready:S=>{!t?.aborted&&M.__inboxHandoff===t&&y(S)}},M.__inboxHandoff=t,document.body.append(n);let w=(S,Ne)=>new Promise((le,ce)=>{let C=W(()=>ce(new Error("The new page did not start.")),Ne);S.then(U=>{ht(C),le(U)},U=>{ht(C),ce(U)})}),v=await w(b,zi);if(!await w(v.initialize(),wt))throw new Error("The new page could not connect.");let $=Date.now()+tn;for(;Ce>0&&Date.now()<$;)await new Promise(S=>W(S,30));if(Ce>0)throw new Error("The current press is still running.");if(R||oe!==e||t.aborted)return;let N=Yi();q.replaceWith(g);try{d.replaceWith(h),v.activate(N),v.start()}catch(S){throw g.isConnected&&g.replaceWith(q),h.isConnected&&h.replaceWith(d),Tn(),S}gn(),f.remove(),n.id="inbox-script",M.__inboxPage=p,s=!0}catch{!R&&oe===e&&(z={page:e,text:"Could not load the inbox update."},x())}finally{if(t&&(t.aborted=!0,M.__inboxHandoff===t&&delete M.__inboxHandoff,!s))try{t.dispose?.()}catch{}s||n?.remove(),sn=!1}}async function qs(){Ce===0&&await wn(),W(qs,rt)}function Ji(e,t){return ke(e).some(n=>n.id===t&&n.state.is!=="settled")||Gs(e).some(n=>n.id===t)||e.prs.drawn.some(n=>ie(n.pr.ref)===t)}function Zi(e,t){return ke(e).some(n=>n.id===t&&n.feedback?.is==="notSent")||_e(t,e.lastActions[t],void 0,e.turns,e.at)?.is==="notSent"}async function H(e,t,n,s="Sending\\u2026"){if(R)return;let i=X,o=++Ns;nn.set(e,o);let r=()=>nn.get(e)===o;t.action!=="undo"&&!e.startsWith("pr:")&&zs(e);let c=!!E&&_t(E,_).some(l=>l.id===e&&l.isWaiting);Ae.set(e,s),F.delete(e),rn.delete(e),$e.delete(e),x(),Ce++;try{let l=await hn("inbox_press",{press:t,thread:E?.thread,demo:Q},tn);if(R||i!==X||(l.copy&&await to(e,l.copy,r),R||i!==X||!r()))return;l.view&&Vs(l.view,o),l.error&&!(E&&Zi(E,e))&&F.set(e,l.error),!l.error&&l.note!=="stale"&&l.delivery!=="unconfirmed"&&n?.(),!l.error&&l.note!=="stale"&&l.delivery!=="unconfirmed"&&l.view&&c&&A!==e&&eo(l.view,e);let u=l.note;u&&E&&Ji(E,e)?(rn.set(e,{text:be(u),at:Date.now()}),he(T),u==="stale"&&t.action==="type"&&(A=e)):u&&(me={text:be(u),at:Date.now()},he(T))}catch{if(R||i!==X||!r())return;F.set(e,"Action unconfirmed: the inbox did not answer.")}finally{Ce--,r()&&(nn.delete(e),Ae.delete(e),x())}}function _t(e,t){return t==="prs"?us(e.prs.drawn.filter(n=>!n.isSettled).map(n=>n.pr),e.lastActions):is(e)[t]}function eo(e,t){if(P[_]?.id!==t)return;let n=_t(e,_);if(n.find(o=>o.id===t)?.isWaiting)return;let s=rs(n,t),i=s===null?-1:Bs(e,_).findIndex(o=>o.id===s);if(s===null||i<0){P[_]=null;return}xt(_,s,i),W(ri,0)}async function to(e,t,n){try{await navigator.clipboard.writeText(t.text)}catch{if(!n())return;F.set(e,`Could not copy ${t.name}: this tab has no clipboard access`),$e.set(e,t)}}function Ws(e,t){let n=re.get(e);H(e,{action:"type",id:e,text:t},()=>{re.get(e)===n&&re.delete(e)})}function no(e){zs(e),A=e,ut=!0,x()}function js(e){return ds(e,pt.has(e.id),{press:n=>{let s=n.action==="step"?e.steps[n.step]:void 0,o=e.actions.find(r=>r.press.action==="step"&&n.action==="step"&&r.press.step===n.step)?.kind==="local"&&e.item&&s?pe({is:"local",result:Je(Yn(e.item,s),Date.now())},"codex"):void 0;H(e.id,n,void 0,o)},reply:()=>no(e.id),showOptions:()=>{pt.add(e.id),x()}})}function so(e,t){let n=jt(t,"codex"),s=t.state.is==="handedOff",i=t.id;return{id:i,view:t,handle:n.text,handleTone:n.tone,...s?{fold:{}}:{},title:t.title,age:t.at===null?void 0:ne(e.at-t.at),...js(t),typing:{hint:Kt(t,"Codex"),send:o=>Ws(i,o)},feedback:t.feedback}}function io(e,t,n){let s=t.state.is==="handedOff",i=t.id,o=jt(t,"codex");return{id:i,view:t,handle:o.text,handleTone:o.tone,kind:n.kind,...s?{fold:{}}:{},title:t.title,age:t.at===null?void 0:ne(e.at-t.at),body:a("div",{children:[a("p",{style:{whiteSpace:"pre-line"},children:cn(t.detail??"")}),n.path?a("p",{children:[a("span",{class:"muted",children:te.relevantFile}),a("code",{title:n.path,children:t.fileName})]}):null]}),...js(t),typing:{hint:Kt(t,"Codex"),send:r=>Ws(i,r)},feedback:t.feedback}}function de(e,t,n,s){let i=e.lastActions[t];return i?.action===n&&i.delivery?.state!=="failed"?`${s} again`:s}function yt(e){let t=Je([{kind:"open",target:"",name:e}],Date.now());return pe({is:"local",result:t},"codex")}function oo(e,t,n){let s=Re(t,n),i=Se(e.lastActions)(t,n),o=cs(e.lastActions)(t,n),r=!i&&n.isLinesChanged,c=nt(e.lastActions[s],t.ref,n.id),l=(d,f)=>()=>{H(s,{action:d,ref:t.ref,thread:n.id},void 0,f)},u=Mt(n),{head:p,rest:m}=qn(n.body);return{id:s,handle:o?"\\u2713":"\\u25E6",handleTone:o?"done":void 0,...i||r?{fold:n.isLinesChanged?{note:`Lines changed since this comment${L}still open on GitHub`}:{}}:{},title:ee(p,Nt),meta:[Mt(n,Xe(n.path)),r?"Lines changed":"",n.reply?`@${n.reply.author}: ${Dt(n.reply.body)}`:`@${n.author}`].filter(Boolean).join(L),age:n.at===null?void 0:ne(e.at-n.at),body:a("div",{children:[m?a("p",{class:"quote",children:cn(ee(m,1200))}):null,a("p",{class:"muted",children:[a("button",{type:"button",class:"link",onClick:l("thread-open",yt("the comment")),children:u}),`${L}@${n.author}`]}),n.reply?a("p",{class:"quote",children:[a("b",{children:["@",n.reply.author,":"]})," ",cn(ee(Ge(n.reply.body),1200))]}):null]}),keys:[...c?[{label:"Try again",emphasis:"normal",icon:"retry",run:()=>{H(s,c.press)}}]:[],{hotkey:"a",label:de(e,s,"thread-address","Address"),emphasis:"primary",run:l("thread-address")},{hotkey:"r",label:de(e,s,"thread-draft","Draft reply"),emphasis:"normal",run:l("thread-draft")},{hotkey:"o",label:"Open comment",emphasis:"normal",icon:"open",run:l("thread-open",yt("the comment"))}],more:[{hotkey:"e",label:de(e,s,"thread-discuss","Discuss"),emphasis:"quiet",run:l("thread-discuss")}],hidden:[],feedback:_e(s,e.lastActions[s],void 0,e.turns,e.at)}}function ro(e,t,n){let s=Zt(t,n),i=n.startedAt!==void 0&&n.finishedAt!==void 0?`Failed after ${Wn(n.finishedAt-n.startedAt)}`:"Failed",o=n.url?"the log":`PR #${t.number}`,r=nt(e.lastActions[s],t.ref,null,n.name);return{id:s,handle:"\\u2717",handleTone:"error",...n.workflow?{lead:`${n.workflow} /`}:{},title:n.name,meta:i,age:n.finishedAt===void 0?void 0:ne(e.at-n.finishedAt),body:a("div",{class:"muted",children:i}),keys:[...r?[{label:"Try again",emphasis:"normal",icon:"retry",run:()=>{H(s,r.press)}}]:[],{hotkey:"a",label:de(e,s,"check-fix","Fix"),emphasis:"primary",run:()=>{H(s,{action:"check-fix",ref:t.ref,check:n.name})}},{hotkey:"o",label:"Open log",emphasis:"normal",icon:"open",run:()=>{H(s,{action:"log",ref:t.ref,check:n.name},void 0,yt(o))}}],more:[],hidden:[],feedback:_e(s,e.lastActions[s],void 0,e.turns,e.at)}}function Ks(e,t){return mn-(e.at-(e.lastActions[ie(t.ref)]?.at??e.at))}function Ys(e){let t=[];for(let{pr:n,isSettled:s}of e.prs.drawn)if(s){let i=ie(n.ref);(V.has(i)||Date.now()-Ks(e,n)<T)&&t.push({pr:n,isSettled:s,threads:[],checks:[]})}else t.push({pr:n,isSettled:s,threads:ue(n).map(i=>oo(e,n,i)),checks:Be(n).map(i=>ro(e,n,i))});return{blocks:t,rows:t.flatMap(n=>[...n.threads,...n.checks])}}function Gs(e){return Ys(e).rows}function Bs(e,t){return t==="prs"?Gs(e):Xs(e,yn()).byTab[t]}function Xs(e,t){return zt(e,n=>t.has(n),n=>n.item?so(e,n):n.finding?io(e,n,n.finding):null)}function yn(){return vs(K,Date.now(),V)}var at={question:"questions",task:"tasks",finding:"findings"};function ao(e){let t=Date.now(),n=Xs(e,yn()),s=_==="prs"?[]:n.byTab[_],i=s[bn(s,_,e)]?.id,o=new Set,r=new Set;for(let c of Object.keys(at).filter(l=>it[l]===_)){let l=n[at[c]],u=new Set(l.map(se)),p=[...l];for(let[d,f]of(ft?.[at[c]]??[]).entries()){let g=se(f);!u.has(g)&&I.has(g)&&p.splice(Math.min(d,p.length),0,f)}let m=[];for(let d of p){let f=se(d),g=I.get(f),h=u.has(f)?"settled"in d?V.has(f)?"undoing":"settled":f===i?"open":"closed":"gone",y=ks(g?.track,h,t,ge.has(f),vt.matches);if(!y)continue;y!==g?.track&&o.add(f);let b=y.hasPanel?"row"in d&&u.has(f)?d.row:g?.openRow:void 0;I.set(f,{track:y,openRow:b}),r.add(f),m.push(d)}n[at[c]]=m}n.findingGroups=n.findingGroups.map(c=>({...c,entries:n.findings.filter(l=>("row"in l?l.row.kind:l.settled.finding?.kind)===c.kind)}));for(let c of[...I.keys()])r.has(c)||I.delete(c);return{lists:n,changed:o}}async function lo(e){if(V.has(e.id))return;let t=it[e.type];V.add(e.id);try{await H(e.id,{action:"undo",id:e.id},()=>xt(t,e.id))}finally{V.delete(e.id);let n=K.get(e.id),s=n!==void 0&&Date.now()-n<T,i=F.get(e.id);i&&!s&&(me={text:i,at:Date.now(),isError:!0},he(T)),n!==void 0&&!s&&K.set(e.id,Date.now()-T),x()}}function bn(e,t,n){let s=P[t];if(s){let o=e.findIndex(c=>c.id===s.id);if(o>=0||I.has(s.id)||e.length===0)return o;let r=Math.min(s.index??0,e.length-1);return xt(t,e[r].id,r),r}let i=Qt(_t(n,t));return i?e.findIndex(o=>o.id===i):-1}function xt(e,t,n){P[e]={id:t,openedAt:Date.now(),...n===void 0?{}:{index:n}},he(Wt)}function kn(e,t,n){let s=t[n];s&&(xt(e,s.id,n),x())}function zs(e){P[_]||(P[_]={id:e,openedAt:0})}function Qs(){return zn(P[_]?.openedAt??0,Date.now())}function Js(e){return e.typing&&A===e.id?{keys:[],more:[],hidden:[]}:{keys:e.keys,more:e.more,hidden:e.hidden}}function co({k:e,isGuarded:t=!0}){return a(Jt,{action:e,isBlocked:()=>t&&Qs()})}function uo(e){let t=e.feedback;return t?e.view?Jn(e.view,"codex"):t.is==="done"&&e.handleTone==="done"?t.label:pe(t,"codex"):null}function _n(e){let t=rn.get(e);return t&&Date.now()-t.at<T?t.text:null}function po(e){return!F.has(e.id)&&_n(e.id)===null&&!$e.has(e.id)}function Zs({row:e,track:t,onSelect:n,now:s}){let i=t.hasPanel&&(t.state==="closing"||t.state==="leaving"),o=t.hasPanel&&!i,r=a("span",{class:`mark ${e.handleTone??e.kind??""}`,children:e.handle}),c=Ae.get(e.id),l=po(e)?e.feedback:null,u=c??(l?uo(e):null),p=!c&&l&&Bt(l)?l.at:null,m=p!==null&&!o&&!i&&l?.is!=="queued"&&l?.is!=="unconfirmed",d=m?null:u,f=p!==null?ne(s-p):d?null:e.age,g=!c&&Gt(e.feedback)?"error":void 0;return a("div",{class:`row ${o?"selected":"collapsed"}${i?" closing":""}`,onClick:o?void 0:n,children:[r,a("div",{class:"content",children:[a("button",{type:"button",class:"line",...o?{tabIndex:-1,"aria-disabled":!0}:{"aria-expanded":!1},children:[a("span",{class:"text",children:[e.lead?a(O,{children:[a("span",{class:"lead",children:e.lead})," "]}):null,e.title]}),e.meta?a("span",{class:"meta",children:e.meta}):null,d?a("span",{class:`after ${g?`tone-${g}`:""}`,children:o||i?`${L}${d}`:d}):null]}),o||i?a(ei,{row:e,isClosing:i}):null]}),a("span",{class:"side",children:[m?a("span",{class:"side-label",children:u}):null,f]})]})}function ei({row:e,isClosing:t}){let{keys:n,more:s}=Js(e),i=$e.get(e.id),o=_n(e.id),r=!!e.typing&&A===e.id,c=[e.fold?.note?a("div",{class:"muted",children:e.fold.note}):null,o?a("div",{class:"muted",children:o}):null,F.has(e.id)?a("div",{class:"tone-error",children:F.get(e.id)}):null].filter(Boolean);return a("div",{class:t?"panel closing":"panel",inert:t,children:[e.body?a("div",{class:"body",children:e.body}):null,c.length>0?a("div",{class:"tight",children:c}):null,a(ls,{actions:[...n,...s],reply:r?{id:e.id,hint:e.typing.hint,draft:()=>re.get(e.id)?.text??"",onDraft:l=>re.set(e.id,{text:l}),send:l=>{A=null,e.typing.send(l)},cancel:()=>{A=null,x()}}:null,isBlocked:Qs}),i?a("div",{children:[a("div",{class:"muted",children:["Copy ",i.name," from here:"]}),a("textarea",{rows:3,readOnly:!0,value:i.text,onFocus:l=>l.currentTarget.select()}),a("button",{type:"button",class:"key",onClick:()=>{$e.delete(e.id),x()},children:"Close"})]}):null]})}function fo({settled:e,panel:t}){let{state:n}=e;if(n.is!=="settled")return null;let s=K.get(e.id)??Date.now(),i=V.has(e.id),o=F.get(e.id);return a("div",{class:t?"row settled was-open":"row settled",children:[a("span",{class:"mark",children:n.delivery!==null?"":"\\u2713"}),a("div",{class:"content",children:[a("div",{class:"settled-head",children:[a("div",{class:"settled-line",children:[a("span",{class:"what",children:e.title}),a("span",{class:"outcome-label",children:[L,Xt(n.label,n.delivery)]}),o?a("span",{class:"tone-error",children:[L,o]}):null]}),n.canUndo?a("button",{type:"button",class:i?"key undo undoing":"key undo",disabled:i,onClick:()=>{lo(e)},children:[a("span",{class:i?"time-left paused":"time-left",style:{animationDuration:`${T}ms`},ref:r=>{r&&!r.style.animationDelay&&(r.style.animationDelay=`-${Math.max(0,Date.now()-s)}ms`)}},s),a(ve,{name:"undo"}),"Undo"]}):null]}),t?a(ei,{row:t,isClosing:!0}):null]})]})}function ti({entries:e,group:t,all:n,now:s}){let i=it[t];return e.length===0?null:a("div",{class:"list",children:e.map(o=>{let r=se(o),c=I.get(r);return a("div",{class:"entry","data-motion":r,children:"row"in o?a(Zs,{row:o.row,track:c.track,now:s,onSelect:()=>kn(i,n,n.indexOf(o.row))}):a(fo,{settled:o.settled,panel:c.openRow})},r)})})}function xn({title:e,count:t}){return a("div",{class:"group-title",children:[a("b",{children:e}),t>0?a("span",{class:"count",children:[L,t]}):null]})}function dn(e,t,n){return Yt(e.needsYou.closed[t==="question"?"questions":"tasks"],tt(n)).map(s=>({id:s.id,ask:s.ask,outcome:s.outcome,state:Ct(s),at:s.at,delivery:s.delivery}))}function Ts({v:e,kind:t,entries:n,all:s,now:i}){let o=t==="question"?"Questions":"Tasks",r=ln(n),c=dn(e,t,r),l=r.flatMap(u=>"row"in u?[u.row]:[]);return a("section",{children:[a(xn,{title:o,count:l.filter(u=>!u.fold).length}),a(ti,{entries:n,group:t,all:s,now:i}),a(si,{group:t,empty:ni(o,r),closed:c,total:Ze(e.needsYou.closed[t==="question"?"questions":"tasks"],tt(r)),now:i})]})}function ln(e){return e.filter(t=>I.get(se(t))?.track.state!=="leaving")}function ni(e,t){let n=t.every(s=>I.get(se(s))?.track.state==="entering");return t.length===0||n?{text:ns(e),isLeaving:t.length>0}:null}function cn(e){return st(e).map(t=>{let n=t.code?a("code",{children:t.text}):t.text;return t.italic&&(n=a("i",{children:n})),t.bold&&(n=a("b",{children:n})),t.strike&&(n=a("s",{children:n})),t.link?a(O,{children:[a("u",{children:n}),a("span",{class:"muted",children:[" ",t.link]})]}):n})}function si({group:e,empty:t,closed:n,total:s,now:i}){let o=ts(s,n.length),r=B.has(e),c=s>0&&(r||lt.has(e));return a(O,{children:[a("div",{class:"group-end","data-motion":`end-${e}`,children:a("div",{class:"group-end-content",children:[t?a("div",{class:t.isLeaving?"group-empty leaving":"group-empty","aria-hidden":t.isLeaving,children:t.text}):null,s>0?a("button",{type:"button",class:"fold","data-fold":e,onClick:()=>Io(e),children:[a(ve,{name:r?"down":"right"}),es(s)]}):null]})}),c?a("div",{class:"list closed-list","data-motion":`closed-${e}`,children:[n.map(l=>a("div",{class:"entry",children:a("div",{class:"row",children:[a("span",{class:"mark",children:l.delivery===null?Xn[l.state]:""}),a("div",{class:"content tight",children:[a("div",{class:"muted",children:l.ask}),a("div",{class:"outcome",children:Xt(Qe(l.outcome),l.delivery)}),l.delivery&&typeof l.delivery=="object"&&l.delivery.canUndo?a("button",{type:"button",disabled:Ae.has(l.id),onClick:()=>H(l.id,{id:l.id,action:"undo"}),children:"Undo"}):null]}),a("span",{class:"side",children:ne(i-l.at)})]})},`closed-${l.id}`)),o?a("div",{class:"earlier muted",children:o}):null]}):null]})}function mo(e){return e.heard==="heard"?null:["The inbox has not heard from this chat\\u2019s hooks.",e.heard==="none"?"Codex runs a plugin\\u2019s hooks only after you trust them.":"Items from Codex\\u2019s replies are missing."]}function go({v:e,lists:t,now:n}){let s=t.byTab.needsYou,i=t.questions.length===0&&t.tasks.length===0,o=dn(e,"question",t.questions).length>0||dn(e,"task",t.tasks).length>0,r=mo(e);return i&&!o?r?a("div",{class:"empty",children:[a("div",{class:"title",children:r[0]}),a("div",{class:"muted",children:r[1]})]}):a("div",{class:"empty",children:[a("div",{class:"title",children:xe("needsYou","Codex").title}),a("div",{class:"muted",children:xe("needsYou","Codex").hint})]}):a("main",{children:[r?a("section",{children:a("div",{class:"group-title",children:[r[0],a("div",{class:"muted",children:r[1]})]})}):null,a(Ts,{v:e,kind:"question",entries:t.questions,all:s,now:n}),a(Ts,{v:e,kind:"task",entries:t.tasks,all:s,now:n})]})}function ho({v:e,lists:t,now:n}){let s=tt(ln(t.findings)),i=c=>e.findings.closed.filter(l=>l.kind===c),o=c=>Yt(i(c),s).map(l=>({id:l.id,ask:l.title,outcome:l.outcome,state:Ct(l),at:l.closedAt,delivery:l.delivery}));return t.findings.length===0&&Ze(e.findings.closed,s)===0?a("div",{class:"empty",children:[a("div",{class:"title",children:xe("findings","Codex").title}),a("div",{class:"muted",children:xe("findings","Codex").hint})]}):a("main",{children:t.findingGroups.map(c=>{let l=ln(c.entries),u=l.flatMap(p=>"row"in p?[p.row]:[]);return a("section",{children:[a(xn,{title:c.title,count:u.filter(p=>!p.fold).length}),a(ti,{entries:c.entries,group:"finding",all:t.byTab.findings,now:n}),a(si,{group:c.kind,empty:ni(c.title,l),closed:o(c.kind),total:Ze(i(c.kind),s),now:n})]})})})}function wo({v:e,pr:t}){let n=ie(t.ref),s=Ks(e,t),i=V.has(n),o=F.get(n);return a("div",{class:"row settled",children:[a("span",{class:"mark",children:"\\u2713"}),a("div",{class:"content",children:a("div",{class:"settled-head",children:[a("div",{class:"settled-line",children:[a("span",{class:"what",children:[a("span",{class:"tone-prs",children:["#",t.number]})," ",t.title]}),a("span",{class:"outcome-label",children:`${L}Dismissed`}),o?a("span",{class:"tone-error",children:`${L}${o}`}):null]}),a("button",{type:"button",class:i?"key undo undoing":"key undo",disabled:i,onClick:()=>{yo(n,t.ref)},children:[a("span",{class:i?"time-left paused":"time-left",style:{animationDuration:`${T}ms`},ref:r=>{r&&!r.style.animationDelay&&(r.style.animationDelay=`-${Math.max(0,Date.now()-s)}ms`)}},s),a(ve,{name:"undo"}),"Undo"]})]})})]})}async function yo(e,t){if(!V.has(e)){V.add(e);try{await H(e,{action:"pr-undo",ref:t})}finally{V.delete(e),x()}}}function bo(e,t){let n=Ae.get(t);if(n)return{text:n,isError:!1};let s=F.get(t);if(s)return{text:s,isError:!0};let i=_n(t);if(i)return{text:i,isError:!1};let o=e.lastActions[t]?.action==="pr-dismiss"?null:_e(t,e.lastActions[t],void 0,e.turns,e.at);if(!o)return null;let r=pe(o,"codex");return{text:Bt(o)?`${r}${L}${ye(e.at-o.at)}`:r,isError:Gt(o)}}function ko({v:e,pr:t,threads:n,checks:s,openId:i,all:o,now:r}){let c=Se(e.lastActions),{status:l,head:u,unlisted:p}=Ot(t,c),m=ps[l],d=ie(t.ref),f=Ye(t,c),g=(v,$)=>()=>{H(d,v,void 0,$)},h=nt(e.lastActions[d],t.ref,null),y=[...l==="ready"?[{label:de(e,d,"pr-merge","Merge"),run:g({action:"pr-merge",ref:t.ref})}]:[],...t.state==="OPEN"&&t.mergeable==="CONFLICTING"?[{label:de(e,d,"pr-conflicts","Resolve conflicts"),run:g({action:"pr-conflicts",ref:t.ref})}]:[],...f.length>1?[{label:de(e,d,"pr-address-all",`Address all ${f.length} threads`),run:g({action:"pr-address-all",ref:t.ref})}]:[]].map((v,$)=>({...v,emphasis:$===0?"primary":"normal"})),b=[...h?[{label:"Try again",emphasis:"normal",icon:"retry",run:g(h.press)}]:[],...y,{label:"Open PR",emphasis:"normal",icon:"open",run:g({action:"pr-open",ref:t.ref},yt(`PR #${t.number}`))},...t.ref===e.prs.branchRef?[]:[{label:"Dismiss",emphasis:"quiet",isDismiss:!0,run:g({action:"pr-dismiss",ref:t.ref})}]],w=bo(e,d);return a("section",{children:[a("div",{class:"pr-head",children:[a("span",{class:"tone-prs num",children:["#",t.number]})," ",t.title," ",a("span",{class:m?`pr-verdict tone-${m}`:"pr-verdict muted",children:u}),a("span",{class:"pr-verdict muted",children:p.map(v=>`${L}${v}`).join("")})]}),t.error?a("div",{class:"pr-status tone-error",children:["Last refresh failed: ",t.error]}):null,a("div",{class:"pr-actions keys",children:b.map(v=>a(co,{k:v,isGuarded:!1}))}),w?a("div",{class:w.isError?"pr-last tone-error":"pr-last muted",children:w.text}):null,a("div",{class:"pr-groups",children:[a(Es,{title:"Review threads",rows:n,all:o,openId:i,now:r}),a(Es,{title:"Failing checks",rows:s,all:o,openId:i,now:r})]})]})}function Es({title:e,rows:t,all:n,openId:s,now:i}){return t.length===0?null:a(O,{children:[a(xn,{title:e,count:t.length}),a("div",{class:"list",children:t.map(o=>{let r=o.id===s;return a("div",{class:"entry",children:a(Zs,{row:o,track:{state:r?"open":"closed",since:0,hasPanel:r},now:i,onSelect:()=>kn("prs",n,n.indexOf(o))})},o.id)})})]})}var _o="Your PRs show here when this conversation opens or links one, or when your branch has one.";function xo({v:e,now:t}){let{blocks:n,rows:s}=Ys(e);if(n.length===0)return a("div",{class:"empty",children:[a("div",{class:"title",children:e.isFetchingPrs?"Checking for PRs\\u2026":"No PRs"}),a("div",{class:"muted",children:e.isGhMissing?Ps:_o})]});let i=s[bn(s,"prs",e)]?.id;return a("main",{children:[e.isGhMissing?a("section",{children:a("div",{class:"group-title muted",children:Ps})}):null,n.map(o=>o.isSettled?a("section",{children:a(wo,{v:e,pr:o.pr})}):a(ko,{...o,v:e,openId:i,all:s,now:t})),e.prs.olderText?a("section",{children:a("div",{class:"group-title muted",children:e.prs.olderText})}):null]})}var Ps="The inbox could not find gh, so it cannot read your PRs.",vo=6e4;function Ro({v:e}){let t=Date.now()-mn,n=kt>=2?a("span",{class:t>vo?"tone-error":void 0,children:["Last read ",ye(t),L,"retrying"]}):e.status.isUpdating?"Updating\\u2026":null;return a("div",{class:"status",children:n})}function So({v:e}){let t={needsYou:e.needsYou.count,findings:e.findings.count,prs:e.prs.count},{error:n}=e.status;return a("nav",{children:[a("div",{class:"tabs",children:et.map(s=>a("button",{type:"button",class:`tab ${_===s.id?"shown":""}`,onClick:()=>{_=s.id,x()},children:[s.label,t[s.id]>0?a("span",{class:`count tone-${s.id}`,children:t[s.id]}):null]}))}),Pe?Pe.isReloadable?a(un,{text:Pe.text,reload:()=>location.reload()}):a("div",{class:"status-line tone-error",children:Pe.text}):null,z?a(un,{text:z.text,label:"Retry",reload:()=>{let s=z?.page;z=null,x(),s&&Us(s)}}):null,n?a("div",{class:"status-line tone-error",children:n}):null,me&&Date.now()-me.at<T?a("div",{class:me.isError?"status-line tone-error":"status-line muted",children:me.text}):null]})}async function To(){X++,Q=!Q,J=null,kt=0,E=null,K=new Map,dt={},I.clear(),ft=null,P.needsYou=null,P.findings=null,P.prs=null,A=null,x(),await wn()}function un({text:e,reload:t,label:n="Reload"}){return a("div",{class:"error-strip",children:[a("span",{children:e}),a("button",{type:"button",class:"key",onClick:t,children:n})]})}function Eo({lists:e}){if(!E||!e)return J!==null?a(un,{text:`Could not read the inbox. ${J}`,reload:()=>{ct?wn():pn()}}):Os?a("div",{class:"notice muted",children:"Loading\\u2026"}):null;let t=E,n=t.at;return a(O,{children:[Q?a("div",{class:"demo-note",children:[a("span",{children:ss}),a("button",{type:"button",class:"key ghost",onClick:()=>{To()},children:"Hide demo"})]}):null,a(So,{v:t}),_==="needsYou"?a(go,{v:t,lists:e,now:n}):_==="findings"?a(ho,{v:t,lists:e,now:n}):a(xo,{v:t,now:n}),a("footer",{children:[null,a(Ro,{v:t})]})]})}var vn={duration:300,easing:"cubic-bezier(.19, 1, .22, 1)"},bt={duration:200,easing:"cubic-bezier(.65, 0, .35, 1)"},Rn={duration:200,easing:"cubic-bezier(.8, 0, .4, 1)",fill:"forwards"},vt=matchMedia("(prefers-reduced-motion: reduce)");function Po(){let e=new Map;for(let t of q.querySelectorAll("[data-motion]"))e.set(t.dataset.motion,{el:t,height:t.getBoundingClientRect().height});return e}function Lo(e,t,n,s){e.style.overflow="hidden",e.dataset.to=String(s);let i=e.animate(t,n);gt.add(i);let o=()=>{gt.delete(i),!R&&e.getAnimations().length===0&&ii(e)};i.onfinish=o,i.oncancel=o}function Ls(e){for(let t of e.getAnimations())t.cancel();ii(e)}function ii(e){e.style.overflow="",delete e.dataset.to}function Sn(e){return[...e.children].reduce((t,n)=>t+n.getBoundingClientRect().height,0)}function De(e,t,n,s){let i=o=>({height:`${o.height}px`,opacity:o.opacity});Lo(e,[i(t),i(n)],s,n.height)}function oi(e,t){De(e,{height:0,opacity:0},{height:t,opacity:1},vn)}function Ao(e,t){if(vt.matches){ge.clear();return}let n=new Set([...t].map(i=>I.get(i)?.track.state)),s=n.has("leaving")?{...Rn,fill:"none"}:n.has("entering")?vn:bt;for(let i of q.querySelectorAll("[data-motion]")){let o=i.dataset.motion,r=e.get(o);if(i.dataset.closing)continue;let c=I.get(o)?.track.state,l=!r||r.el!==i,u=()=>i.getAnimations().length>0||l?i.getBoundingClientRect().height:r.height;if(c&&t.has(o)&&$o(i,c,u)||c==="closing"||c==="settling"||c==="leaving")continue;let p=c||i.classList.contains("group-end")?Sn(i):i.scrollHeight;if(l){!c&&ge.delete(o)&&oi(i,p);continue}let m=i.getAnimations();if(m.length>0&&Math.abs(Number(i.dataset.to)-p)<1)continue;let d=u(),f=m.length>0?Number(getComputedStyle(i).opacity):1;for(let g of m)g.cancel();Math.abs(d-p)<1&&f>.99||De(i,{height:d,opacity:f},{height:p,opacity:1},c?bt:s)}ge.clear()}function $o(e,t,n){switch(t){case"opening":return!1;case"entering":return Ls(e),oi(e,Sn(e)),!0;case"closing":case"settling":return Co(e,As(e,n)),!0;case"leaving":{let s=As(e,n);for(let i of e.getAnimations())i.cancel();return De(e,s,{height:0,opacity:0},Rn),!0}default:return Ls(e),!0}}function As(e,t){return{height:t(),opacity:Number(getComputedStyle(e).opacity)}}function Co(e,t){let n=e.querySelector(".panel.closing"),s=e.querySelector(".row.closing");s?.classList.remove("closing"),n&&(n.style.display="none");let i=Sn(e);n&&(n.style.display=""),s?.classList.add("closing");for(let o of e.getAnimations())o.cancel();De(e,t,{height:i,opacity:1},{...bt,fill:"forwards"})}function Io(e){let t=q.querySelector(`[data-motion="closed-${e}"]`);if(!B.has(e)){B.add(e),lt.delete(e)&&t?delete t.dataset.closing:ge.add(`closed-${e}`),x();return}if(B.delete(e),!t||vt.matches){x();return}lt.add(e),x(),t.dataset.closing="1";let n=t.getBoundingClientRect().height;for(let s of t.getAnimations())s.cancel();De(t,{height:n,opacity:1},{height:0,opacity:0},Rn),W(()=>{B.has(e)||!lt.delete(e)||x()},200)}function ri(){R||(q.querySelector(".row.selected")?.scrollIntoView({block:"nearest"}),vt.matches||W(()=>q.querySelector(".row.selected")?.scrollIntoView({block:"nearest"}),220))}function Tn(){document.documentElement.style.setProperty("--row-pad",`${8}px`),document.documentElement.style.setProperty("--move",`${200}ms ${bt.easing}`),document.documentElement.style.setProperty("--enter",`${300}ms ${vn.easing}`)}var ai=50;function he(e){W(x,e+ai)}var fe=null;function Oo(){let e=Date.now(),t=[...I.values()].flatMap(({track:s})=>en(s.state)?[s.since+ot[s.state]]:[]);if(t.length===0)return;let n=Math.min(...t)+ai;fe&&fe.at<=n||(fe&&ht(fe.timer),fe={at:n,timer:W(()=>{fe=null,x()},n-e)})}function x(){if(R||!D)return;let e=Po(),t=E?ao(E):null;ft=t?.lists??null,Oo(),$t(a(Eo,{lists:ft}),q),Ao(e,t?.changed??new Set);let n=ut&&A?document.getElementById(`type-${A}`):null;n&&(ut=!1,n.focus())}var Le=null;document.addEventListener("pointerdown",e=>{D&&(!(e.target instanceof Element)||!q.contains(e.target)||!e.target.closest(".list, .fold")||(Le={x:e.clientX,y:e.clientY},document.body.classList.add("still")))},{signal:Oe.signal});document.addEventListener("pointermove",e=>{D&&(!Le||Math.hypot(e.clientX-Le.x,e.clientY-Le.y)<3||(Le=null,document.body.classList.remove("still")))},{signal:Oe.signal});document.addEventListener("keydown",e=>{if(!D||e.metaKey||e.ctrlKey||e.altKey||!E)return;let t=e.target;if(t?.closest("input, textarea")){e.key==="Escape"&&t.tagName==="INPUT"&&(A=null,x());return}let n=et.find(m=>m.hotkey===e.key);if(n){_=n.id,x();return}let s=Bs(E,_),i=bn(s,_,E),o=e.key==="j"||e.key==="ArrowDown"?1:e.key==="k"||e.key==="ArrowUp"?-1:0;if(o!==0){e.preventDefault(),kn(_,s,Math.max(0,Math.min(s.length-1,i+o))),ri();return}let r=s[i];if(!r)return;let{keys:c,more:l,hidden:u}=Js(r),p=[...c,...l,...u].find(m=>m.hotkey===e.key);p&&(e.preventDefault(),p.run())},{signal:Oe.signal});function di(){R||!D||!ct||Rs||(Rs=!0,an(Ds),an(on),parent.postMessage({jsonrpc:"2.0",method:"ui/notifications/initialized",params:{}},"*"),qs())}function pn(){return R?Promise.resolve(!1):ct?Promise.resolve(!0):Ee||(J=null,D&&x(),Ee=Fs("ui/initialize",{protocolVersion:"2026-01-26",appInfo:{name:"inbox",version:"0.2.5"},appCapabilities:{tools:{}}},wt).then(e=>R?!1:(Ds=e?.hostContext??{},ct=!0,di(),!0)).catch(()=>(D&&!R&&(J="The inbox could not connect to Codex.",x()),!1)).finally(()=>{Ee=null}),Ee)}function $s(){di(),W(()=>{Os=!0,!E&&J===null&&x()},Xi)}function Do(e){if(R||!Y||Y.aborted)throw new Error("The new page stopped.");Ms(e),D=!0,Tn(),x()}Y?Y.ready({initialize:pn,activate:Do,start:$s,dispose:gn}):(Tn(),Ms(),pn(),$s());})();\n\n    </script>\n  </body>\n</html>\n';
 
 // src/run.ts
 import { execFile } from "node:child_process";
-var run = (args, { cwd, stdin, timeoutMs }) => new Promise((resolve) => {
+var run = (args, { cwd, stdin, timeoutMs }) => new Promise((resolve2) => {
   const [file = "", ...rest] = args;
   const child = execFile(
     file,
@@ -2311,7 +2707,7 @@ var run = (args, { cwd, stdin, timeoutMs }) => new Promise((resolve) => {
     { cwd, timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, encoding: "utf8" },
     (err, stdout, stderr) => {
       const code = err ? typeof err.code === "number" ? err.code : -1 : 0;
-      resolve({ code, stdout: String(stdout), stderr: String(stderr) });
+      resolve2({ code, stdout: String(stdout), stderr: String(stderr) });
     }
   );
   if (stdin !== void 0) child.stdin?.end(stdin);
@@ -2332,7 +2728,7 @@ function devPageIn(dir) {
       const dev = await devBuild(dir);
       if (!dev) return null;
       const { tab } = dev;
-      const { mtimeMs } = await stat3(tab);
+      const { mtimeMs } = await stat2(tab);
       if (cached?.path !== tab || cached.mtimeMs !== mtimeMs)
         cached = { path: tab, mtimeMs, html: await readFile2(tab, "utf8") };
       return cached.html;
@@ -2349,7 +2745,7 @@ function createHandler(dir, loadError = () => null) {
     tabHtml: tab_default,
     fallbackCli: appCli,
     devPage: devPageIn(dir),
-    build: "b0c2370670a4",
+    build: "602c1c7673b0",
     loadError
   });
 }

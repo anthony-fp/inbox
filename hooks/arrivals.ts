@@ -1,6 +1,4 @@
-// Which rows are new to a look, and where it moves for them. The pane and the
-// Codex tab both follow these rules, each with its own tabs and its own rule
-// for when a tab shows only its empty text. Pure, and imports nothing from the engine.
+import type { RowView } from './view'
 
 /** Each tab's row ids as last recorded. A tab with no record yet has none. */
 export type RowRecord<T extends string> = Partial<Record<T, ReadonlySet<string>>>
@@ -24,6 +22,24 @@ export function recordRows<T extends string>(
   }
 
   return { seen: next, added }
+}
+
+export function isTabEmpty({
+  rows,
+  settled,
+  closed,
+  hasBlocker,
+}: {
+  rows: readonly Pick<RowView, 'id' | 'state'>[]
+  settled: ReadonlySet<string>
+  closed: readonly { isUnfolded: boolean; rows: readonly { id: string }[] }[]
+  hasBlocker: boolean
+}): boolean {
+  return (
+    !hasBlocker &&
+    !rows.some(r => r.state.is !== 'settled' || settled.has(r.id)) &&
+    !closed.some(g => g.isUnfolded && g.rows.some(r => !settled.has(r.id)))
+  )
 }
 
 /**

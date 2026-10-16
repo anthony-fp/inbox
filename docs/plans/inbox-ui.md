@@ -10,7 +10,7 @@ The facts behind it are in [docs/reference/](../reference/README.md), checked on
 
 ## Terms
 
-- **Item**: a question Claude asked, or a task only the person can do.
+- **Item**: a question the agent asked, or a task only the person can do.
 - **Row**: one entry in a list. A row is an item, a finding, a PR, a PR check or a review thread.
 - **Need you**: the rows the Needs you tab counts. Section 2.1 defines it.
 - **Per-turn update**: a model call after each reply that adds and closes items. It is the only source of items besides the agent's own `record_finding` and `close` tools.
@@ -19,7 +19,7 @@ The facts behind it are in [docs/reference/](../reference/README.md), checked on
 - **Band**: the mod's lines above the prompt.
 - **Pane**: the mod's `/inbox` view.
 - **Surface**: the app that draws a session, `terminal` or `desktop`. The mod reads it from `e.surface` on each draw.
-- **Carry text**: the inbox text the mod adds beside a prompt or at the start of the context, so Claude knows the open items and their ids.
+- **Carry text**: the inbox text the mod adds beside a prompt or at the start of the context, so the agent knows the open items and their ids.
 - **Guard**: the built-in mod `cc-plugin-sec-default`. On Team or Enterprise sign-ins and managed machines it loads ahead of user mods and limits what they can change.
 - **MCP App view**: an HTML view an MCP tool names, which the host draws in an iframe. The Codex Inbox tab is one.
 - **Hand-off**: a press that gives the row's work to the agent, so it stops waiting on the person for now.
@@ -34,15 +34,15 @@ The mod draws the terminal and desktop looks. One HTML view draws the Codex tab.
 
 **Desktop.** The same band and pane, drawn for clicks. Actions are native buttons with no key letters. A tab, a closed row and a Closed fold line each take a click anywhere on them. The shown tab is a rounded raised segment with a bold label. The app's own ✕ closes the pane. Nothing depends on a key.
 
-**Codex.** The Inbox thread tab, with the same rows as the pane and three tabs: Needs you, Findings and PRs. A press shows Sending…, then Queued, then a check mark once the hooks see the message arrive. An empty tab tells "the inbox has not heard from this chat's hooks" apart from "nothing needs you". The model's `inbox` tool returns text only, so it does not mount the full tab inline.
+**Codex.** The Inbox thread tab has the same rows as the pane and three tabs: Needs you, Findings and PRs. A send shows `Sending…` while the server accepts it, then the shared delivery feedback in section 2.3. An empty tab tells "the inbox has not heard from this chat's hooks" apart from "nothing needs you". The model's `inbox` tool returns text only, so it does not mount the full tab inline.
 
-Every action is a button in every look. Keys are an optional extra wherever they work.
+Each drawn action is clickable. Keys are an extra where the host supports them. Explain is key-only in terminal and Codex; desktop draws it because its action keys do nothing.
 
 ## 2. Shared vocabulary
 
 ### 2.1 What comes first
 
-The count of what needs the person and the top row come first. The card goal and current step go only to Claude, in the carry text. Every platform already shows which session waits on the person. The inbox adds the item itself.
+The count of what needs the person and the top row come first. The card goal and current step go to the agent, in the carry text. Every platform already shows which session waits on the person. The inbox adds the item itself.
 
 The count is named by its tab, Needs you. The band reads tab names with counts, and an empty inbox reads "Nothing needs you".
 
@@ -55,11 +55,11 @@ It leaves out findings, PR rows, handed-off rows and the stop line. A queued sen
 
 **The order of the Needs you list.** The top row is the first row of this list. [Open inbox] opens the pane with it open.
 
-1. Questions from Claude's latest reply, in the order Claude asked them.
-2. Other open questions, newest first.
-3. Tasks not handed off, oldest first.
+1. Questions from the agent's newest reply, in the order asked.
+2. Questions from older replies, newest reply first and each reply in its original order.
+3. Tasks not handed off, newest reply first and each reply in its original order.
 
-The Herdr sidebar line names the latest reply's first question (`hooks/ledger.ts:statusLine`). The band and pane lead with the same question: it is what Claude is waiting on, and question numbers then read 1, 2, 3 from the top.
+The Herdr sidebar line names the latest reply's first question through `hooks/claude.ts:statusLine`. The band shows counts. The pane orders questions by reply, and its terminal handles use the numbered-answer mapping below.
 
 ### 2.2 Row types
 
@@ -90,9 +90,9 @@ The Closed fold's outcomes are the answer itself ("Yes, rename"), "Done", "You r
 
 No view shows the card goal and step. The band shows only counts, and the pane only rows. The Codex tab has no band, and its tab labels carry the counts, so it draws no count or goal line either.
 
-**Question numbers.** Typing "1 yes" in the prompt answers a numbered question through `hooks/ledger.ts:answerNote`. That function maps a typed number to Claude's latest batch of questions: by Claude's own label when it gave one, else by position in the batch. It does this only when that batch came from the reply just before.
+**Question numbers.** Typing "1 yes" in the prompt answers a numbered question through `hooks/model-text.ts:answerNote`. That function maps a typed number to the agent's latest batch of questions: by the agent's own label when it gave one, else by position in the batch. It does this only when that batch came from the reply just before.
 
-The rule, in the terminal: a question's handle shows a number only when a typed number reaches it now, and shows the number `answerNote` would resolve. Every other open question shows a task's bullet, `•`. The Claude app pane and the Codex tab draw no number or bullet: a question's own buttons answer it there, and Claude's reply already shows the numbers a typed answer uses. Once the person sends any message, the batch is no longer "the reply just before", and every handle becomes `•` until Claude asks again. The Codex tab follows the same rule, since it uses `answerNote` through `promptNotes`.
+The rule, in the terminal: a question's handle shows a number only when a typed number reaches it now, and shows the number `answerNote` would resolve. Every other open question shows a task's bullet, `•`. The Claude app pane and the Codex tab draw no number or bullet: a question's own buttons answer it there, and the agent's reply already shows the numbers a typed answer uses. Once the person sends any message, the batch is no longer "the reply just before", and every handle becomes `•` until the agent asks again. The Codex tab follows the same rule, since it uses `answerNote` through `promptNotes`.
 
 **Which row is open.**
 
@@ -109,19 +109,19 @@ Every press is one of five kinds. The kind decides what the screen shows at once
 
 | Kind | What it does | What shows at once |
 |---|---|---|
-| **Talk** | Sends a message asking Claude to talk or draft. The row's work is not given away. | The row stays open and in the count. Its age, on the row's top line, open or closed, reads where the message is: `Queued: Explain` until it reaches Claude, `Explaining…` until Claude's reply, then `✓ Explained · 1m ago`. The top line is the kind line where the row has one, else the title's line. The press adds no line. The button reads "Explain again". |
-| **Hand-off** | Sends a message that gives the work to Claude. | The row closes to its one line, its handle a ✓, and leaves the count. Its age reads the press, as `Run load script · 1m ago`. The next row that waits opens. It stays closed after Claude's reply, and the re-entry rule below says when it counts again. A PR block, which is always open, records `✓ Asked to resolve conflicts` on the block. |
+| **Talk** | Sends a message asking the agent to talk or draft. The row's work is not given away. | The row stays open and in the count. Its top line reads `Explaining…` or `Discussing…` until the reply, then `✓ Explained · 1m ago` or `✓ Discussed · 1m ago`. Delivery feedback below can replace that text. The press adds no line. The button reads "Explain again" or "Discuss again". |
+| **Hand-off** | Sends a message that gives the work to the agent. | The row closes to its one line, its handle a ✓, and leaves the count. Its age reads the press, as `Run load script · 1m ago`. Unconfirmed delivery replaces the feedback and removes the ✓. The next row that waits opens. It stays closed after the agent's reply, and the re-entry rule below says when it counts again. A PR block, which is always open, records `✓ Asked to resolve conflicts` on the block. |
 | **Local** | Opens or copies on the person's machine. | A note on the row at once: `Opening settings.json…` or `Copying npm test…`. The result replaces it: `✓ Opened settings.json`, or in red, `Could not open settings.json: it was moved`. |
 | **Mark** | Changes state, and sends nothing while it can be undone. | The row settles in place with the Mark's own label, `✓ Done` or `✓ Dismissed`, and an [Undo] button, then leaves after 5.12 s. The next row that waits opens. |
 | **View** | Changes only what is on screen, or reloads it. | The change itself: a view opens or closes, a row unfolds, a tab switches, a status reads `Refreshing PRs`. |
 
 The View kind covers [Open inbox], the tab buttons, [All 7 options], the Closed fold, Show demo and Hide demo, Undo and Retry. [Try again] repeats a failed press, so it takes that press's kind.
 
-**A finding's Fix** is a Hand-off that settles the row in place as `✓ Fix` or `✓ Do it`, with Undo. The finding then moves to its Closed fold. It stays open in the ledger until Claude closes it. **A finding's Discuss** is a Talk, so the finding stays open after it. A finding's Reply is a Hand-off that folds the row, and the re-entry rule below applies.
+**A finding's Fix** is a Hand-off that settles the row in place as `✓ Fix` or `✓ Do it`, with Undo. The finding then moves to its Closed fold. It stays open in the ledger until the agent closes it. **A finding's Discuss** is a Talk, so the finding stays open after it. A finding's Reply is a Hand-off that folds the row, and the re-entry rule below applies.
 
 **Done on a task** can tell the agent after its Undo ends. When the agent is idle and waits on the task, one message goes out once the row leaves: `Done: <ask>`. Done presses on several tasks in a row go as one message.
 
-**Answering a question** is a Mark and a send together. The row settles as `✓ Yes, rename`, and `Re "<ask>": <answer>` goes to Claude. It has no Undo, because the message is already on its way.
+**Answering a question** is a Mark and a send together. The row settles as `✓ Yes, rename`, and `Re "<ask>": <answer>` goes to the agent. It has no Undo, because the message is already on its way.
 
 **A terminal help step** copies a command for the person to run. Its note names where to run it:
 
@@ -130,22 +130,25 @@ The View kind covers [Open inbox], the tab buttons, [All 7 options], the Closed 
 
 A step with several helps of one kind gets one note: `✓ Opened 3 PRs`. A mixed step lists each part: `✓ Copied the key · Opened .env`.
 
-**A send that has not arrived yet.** A send has arrived once the agent has the message as a turn's prompt. Until the client sees that:
+**Delivery feedback.** A send arrives when its message enters the agent's turn. Each host records the press immediately and tracks the message separately.
 
-- The row reads `Queued: Yes, rename` or `Queued: Explain`, with its age, in place of the ✓.
-- The press otherwise counts as done. An answered question is closed and leaves the count. A hand-off folds. A talk send keeps the row open.
-- When the client sees the message arrive, the row reads `✓ Yes, rename`.
-- When the send fails, or the client sees it withdrawn, the press is undone. A closed question reopens, a folded row unfolds, and the row reads `Not sent: <reason>` in red with [Try again]. A typed draft is kept.
-- When the client has no signal for arrival, the row stays `Queued` with its age growing. It never claims a ✓ it cannot back.
+- Queued feedback appears after one second while arrival is pending, as `Queued: Yes, rename` or `Queued: Explain`. During that first second, the row shows its normal press feedback.
+- An answered question closes and leaves the count. A hand-off folds. A Talk send keeps the row open.
+- A matched arrival clears Queued. An answered question then reads `✓ Yes, rename`. Explain and Discuss keep their working text until the agent's reply.
+- An ambiguous arrival shows `Delivery unconfirmed: <action>` immediately. Open rows, settled rows and Closed folds retain that status with no success mark.
+- A failed send reopens a closed question or unfolds a handed-off row. It reads `Not sent: <reason>` in red. A repeatable press offers [Try again]; a typed reply keeps its draft for Reply.
+- With no arrival event, Queued remains and its age grows. An ambiguous arrival remains unconfirmed until a later event can confirm its saved send.
 
-Each look's signal:
+Each host keeps a local delivery ID for the press, but its arrival callback supplies only message text. The callback consumes the oldest saved send with matching text. That record can update only its own press; newer identical sends become unconfirmed. Missing older send history also prevents confirmation. A lost arrival can therefore leave a later send unconfirmed. Exact reconciliation needs stronger host evidence, as [looks.md](../looks.md) describes.
 
-- **Mod**: the prompt's own row being stored (`session.append`). `hooks/register.tsx:send` waits for it to attach its context. When Claude is idle, `$.prompt.submit` starts a turn at once, so `Queued` shows only for a press during a turn.
-- **Codex**: see 3.3.
+Each host's arrival signal:
 
-**Undo.** These Marks get Undo, in every look: an item's Done and Dismiss, a finding's Dismiss and Fix, and a PR's Dismiss. Undo puts the row back where it was, open, in its state before the press. If the close already reached Claude in carry text, the next carry text reports the item reopened. The Codex server records Undo as it records the Mark.
+- **Mod**: the prompt's own row being stored in `session.append`. Inbox attaches the saved context when that row is stored. A prompt that arrives within the first second skips the Queued label.
+- **Codex**: the `UserPromptSubmit` hook, described in section 3.3.
 
-**Re-entry after a hand-off.** A handed-off row waits on Claude until Claude has replied once. If the row still waits on the person then, it counts again and takes back its own handle. Its age reads `Still open · 3m ago`, timed from the press. It stays closed until the person opens it.
+**Undo.** These Marks get Undo, in every look: an item's Done and Dismiss, a finding's Dismiss and Fix, and a PR's Dismiss. Undo puts the row back where it was, open, in its state before the press. If the close already reached the agent, Undo clears the saved closed-note acknowledgement so the next inbox note reports the open item again. The Codex server records Undo as it records the Mark.
+
+**Re-entry after a hand-off.** A handed-off row waits on the agent until it has replied once. If the row still waits on the person then, it counts again and takes back its own handle. Its age reads `Still open · 3m ago`, timed from the press. It stays closed until the person opens it.
 
 - Questions and tasks: the row waits until the update for a turn started after the press has applied (`hooks/presses.ts:isHandedOff`). An update that failed counts, since the reply has ended. A typed reply hands a question off as it does a task.
 - Findings: the same turn rule, for a typed reply.
@@ -159,12 +162,12 @@ Each look's signal:
 
 ### 2.4 Actions per row
 
-Actions keep one order on every row: the main action, then the action that finishes the row, then talk actions, then Dismiss where the row has one.
+The shared `rowKeyPlan` puts retry first, then options or help steps, then Done or Fix, then the follow-ups. Within each group, `actionsOf` sets the order. Primary emphasis changes appearance without promoting an action ahead of retry or help.
 
 | Row | Action | Shows when | Kind |
 |---|---|---|---|
 | Question | each option | Always. With 5 or fewer options, all show. With more, the first 4 and [All 7 options]. | Mark and send |
-| | Reply | A text field draws (2.5) | Mark and send |
+| | Reply | A text field draws (2.5) | Hand-off |
 | | Explain | Always | Talk |
 | | Dismiss | Always | Mark |
 | Task | each help step | One per step the item carries | Local; a Run step is a Hand-off |
@@ -202,12 +205,10 @@ A finding's done label after Fix is "Handed off". "Address" names only the press
 
 ### 2.5 Typing a reply
 
-The field opens under the open row with [Send] and [Cancel]. Each row keeps its own draft, so opening another row does not throw the words away.
+The field replaces every other row action and its keys with [Send] and [Cancel]. Each row keeps its own draft. Cancel restores the actions and keeps the words for the next Reply.
 
-- **Reply** on a question opens a field for an answer. Send closes the question with the typed words.
-- **Reply** on a task or finding hands the row off with the typed words and keeps it.
-
-The two behaviors differ because the presses differ: one closes the row and one does not.
+- **Reply** on a question uses the hint `Your answer`. Send hands the words to the agent. The question remains open until the agent or inbox model establishes that the words answer it. A question back does not close it.
+- **Reply** on a task or finding uses `Your reply to Claude` or `Your reply to Codex`. Send hands the row off and keeps its ledger record.
 
 ### 2.6 Status
 
@@ -221,7 +222,9 @@ The UI reads one status record for items and one for PRs. The status shows only 
 
 The PRs tab shows the PR status. The other tabs show the item status. The mod picks between them where it draws the footer status. The Codex tab shows `Updating…` at the footer's right. While polls fail it shows `Last read 1m ago · retrying` there instead, muted, and red after a minute.
 
-The UI never names the per-turn update or a tool. For the per-turn update the error reads `Last update failed. Items from that reply may be missing. It retries after your next message.` Where the update does not retry, the last sentence is left out.
+The UI names the result, not the model call or tool. The failure text is `Last update failed. Items from that reply may be missing.` A stopped worker shows that error. An active update shows `Updating…` and hides the prior error.
+
+The mod catches up after the next message. Codex keeps its first failed exchange until the next Stop starts a retry, so that waiting state includes `It retries after your next message.` A second failure drops the exchange. Once no exchange awaits retry, the failure text has no retry promise. Both hosts advance applied turns after a failed update, so a handed-off row can return to the count.
 
 An expired item closes as `Expired`. The rule behind it, 12 prompts or more than 20 open, belongs to the per-turn update.
 
@@ -255,13 +258,15 @@ An expired item closes as `Expired`. The rule behind it, 12 prompts or more than
 
 ### 2.9 Keys
 
-Keys are an optional extra wherever they work. No action depends on them. Only the terminal shows key text, because keys are verified there. The Codex tab keeps its working keys with no key text. Desktop drops them, because a `Button`'s hotkey does nothing there.
+Keys supplement clickable actions, except Explain: it is key-only in terminal and Codex. Only the terminal shows key text. The Codex tab keeps its working keys with no key text. Desktop shows Explain as a clickable follow-up because a `Button`'s hotkey does nothing there.
 
 ### 2.10 Demo
 
-`/inbox demo` in the mod shows sample entries. In the Codex tab, a [Show demo] button does the same, and it draws only in dev builds (`DEMO_BUTTON` in `codex/build.mjs`).
+`/inbox demo` in the mod shows sample entries. The Codex tab offers [Show demo] in dev builds and builds made with `INBOX_DEMO_BUTTON=1` or `INBOX_DEMO_RECORDING=1`.
 
-While the demo is on, the mod pane and the Codex tab show `DEMO_NOTICE` from `hooks/view.ts` at the top: `Sample entries. Presses send nothing.` with a [Hide demo] button. The band starts its counts with `Demo:` and also has [Hide demo]. A press on a sample action reads on the row: `Sample entry: nothing was sent.`
+The normal demo shows `DEMO_NOTICE` from `hooks/view.ts` at the top: `Sample entries. Presses send nothing.` with a [Hide demo] button. The band starts its counts with `Demo:` and also has [Hide demo]. A press on a sample action reads on the row: `Sample entry: nothing was sent.`
+
+For a recording, `/inbox demo recording` hides those notices, the band's `Demo:` prefix, Hide demo and sample press notes. A Codex build made with `INBOX_DEMO_RECORDING=1` also hides the demo notice, Hide demo and sample press notes. Recording demos still use sample entries and send nothing.
 
 ## 3. Each look
 
@@ -341,7 +346,7 @@ Tasks
 • Add STRIPE_KEY to .env
 ```
 
-Below 50 columns, a closed row drops its age; the open form still shows it. At 50 columns or more, closed rows show their age and the status moves onto the tab line. An open row's actions take one line that wraps. The options, help steps, and Done or Fix come first, then Reply, Explain or Discuss, and Dismiss. The recommended option, or else Done or Fix, is the primary button. An action that copies, opens, runs or hands off starts with an icon, as `desktop-polish.md` rule 8 lists.
+A desktop row Client reserves a side column for the age at narrow widths too. The status is in the footer. An open row's actions wrap in the shared order: retry, options or help, Done or Fix, then follow-ups. The recommended option, Done, Fix or Do it has primary emphasis. The shared action's icon kind maps to the native glyph.
 
 **After [Explain] is pressed**, the row stays open and records the press:
 
@@ -360,15 +365,16 @@ Below 50 columns, a closed row drops its age; the open form still shows it. At 5
 | Action labels | `a: Explain`: a Text letter beside a ": Label" Button | `[Explain]` | Hotkeys do nothing on desktop. "a" beside a native ": Explain" button is noise. |
 | Hidden hotkey Box | Drawn | Not drawn | It does nothing there, and might draw as visible native buttons. |
 | Tabs | Raised panel; 5 plain Buttons per unselected tab | One Client draws the three tabs. A click anywhere on a tab shows it. Only the shown tab has a fill: raised, rounded and bold. A hovered tab takes the tab gray. Other labels and every count are muted. | A Button takes a click only on its label. A Client takes one over its whole region. The selection color means the open row, so the shown tab does not use it. |
+| Reply | A labeled action with its key | A follow-up in a Client region | Native Buttons fill and pad only their labels. The Client preserves follow-up hit areas and spacing. The shared action retains normal emphasis and order. |
 | Closed row | Handle Button and title Button, two when the title wraps | One Client per row. A click anywhere on it opens the row. The title is cut to one line with "…". | A Button takes a click only on its label. |
 | Keys drawer, "1 2 3", "j k", "ctrl+x tab" | Shown | Not drawn | Nothing to press. |
 | Tab draw-in | Kept | Not drawn | It drops most frames at 10 redraws a second. |
 | Closing the pane | Esc | The app's own ✕ on the pane's title bar | The app draws it, so a [Close] in the pane would be a second close. |
-| Tree lines and dividers | `│ ├─ └─` and a `─` rule between rows | None. Closed rows sit flush, each padded a quarter line above and below. A PR's status block starts at the title's column, so only its check and thread rows are indented. | Desktop text is proportional and its lines differ in height, so stacked glyphs break into bars and a rule sized in columns wraps. A rail drawn as a Box is a full cell wide and would read as the new-row bar. |
+| Tree lines and dividers | `│ ├─ └─` and a `─` rule between rows | None. Closed rows sit flush, each padded a quarter line above and below. A PR's status block starts at the title's column, so only its check and thread rows are indented. | Desktop text is proportional and its lines differ in height, so stacked glyphs break into bars and a rule sized in columns wraps. A rail drawn as a Box is a full cell wide and makes the separator too heavy. |
 | Title cut | By columns | By about 1.25 characters per column | A column of `bodyColumns` holds more than one character of desktop text. |
 | Links | `Link` | `Link` for https. A button that runs `open` for local files and folders. | `Link` is live only for https. `$.process` works on desktop. |
 
-**Typing.** The engine types list `Input` for desktop, so `$.ui.resolve(e)` returns it there. The pane drops the Reply field's key when `Input` does not resolve. Whether the app paints `Input`, and whether Enter sends, is not checked live. The person can then type in the composer, and Claude already holds the item through carry text. The inbox cannot prefill the composer, because `$.prompt.fill` does nothing in a headless session.
+**Typing.** The engine types list `Input` for desktop, so `$.ui.resolve(e)` returns it there. The pane drops the Reply field's key when `Input` does not resolve. Typing, Enter and focus need current-build native verification. The person can then type in the composer, and Claude already holds the item through carry text. The inbox cannot prefill the composer, because `$.prompt.fill` does nothing in a headless session.
 
 **PRs.** The PR tab stays. Desktop shows a CI status bar and a Code review card. The PR block adds what those lack: threads that wait on the person, and Address all. It shows CI as status with Open log.
 
@@ -410,7 +416,7 @@ The tool is split because the tab is already where the person acts. Codex mounts
  [Show demo]                                  Updating…
 ```
 
-The footer holds the status at its right. [Show demo] at its left draws only in dev builds. A read error or a note takes its own line under the tabs, so the status never moves the tabs. Codex's Activity view already shows which chat waits.
+The footer holds the status at its right. [Show demo] at its left follows the build settings in section 2.10. A read error or a note takes its own line under the tabs, so the status never moves the tabs. Codex's Activity view already shows which chat waits.
 
 **Tabs.** Needs you, Findings and PRs. The PRs tab has the same PR blocks as the pane (2.4). The server runs gh in the session's folder and refetches a view when the last fetch is over 2 minutes old.
 
@@ -425,14 +431,14 @@ The footer holds the status at its right. [Show demo] at its left draws only in 
 
 **How a press shows what it did.** A send goes through `codex queue`, which holds the message until the running turn ends.
 
-1. `Sending…` while the server runs `codex queue`.
-2. `Queued: Explain` once `codex queue` prints `Queued message {id}`. The server keeps that id.
-3. `✓ Explain · 1m ago` when the `UserPromptSubmit` hook fires with the exact text the server queued. The server matches this in `codex/src/core.ts:notePrompt` through its `sent` list.
-4. Otherwise the row stays `Queued: Explain · 2m ago`, with its age growing. This covers an untrusted `UserPromptSubmit` hook. It also covers a queued message the person edited, if Codex lets them. The docs say queued messages can be edited above the composer. Whether `codex queue` messages show there is not checked.
+1. The row shows `Sending…` while the server runs `codex queue`.
+2. The server keeps the returned queue ID and a local delivery ID for the press. Its response uses the shared feedback in section 2.3. Queued appears after one second while arrival remains pending.
+3. `UserPromptSubmit` provides the message text. `codex/src/core.ts:notePrompt` consumes the oldest matching saved send and uses its local delivery ID to update that press. Newer identical sends show Delivery unconfirmed immediately.
+4. A matched arrival clears Queued or unconfirmed feedback. Explain and Discuss keep their working text until the reply; arrival alone does not complete them.
 
-A text match is the only signal proven live. There is no "removed from the queue" state: the server holds no app-server connection, so it cannot list the queue.
+An absent callback leaves Queued visible. Older records without delivery identity remain unconfirmed after a matching arrival. The callback supplies no queue ID, and the server has no app-server connection to list or reconcile the queue. Missing events and edited messages therefore remain subject to the limits in section 2.3.
 
-A failed `codex queue` shows `Not sent: <reason>` in red with [Try again]. The press is undone, as in 2.3.
+A failed `codex queue` shows `Not sent: <reason>` in red. Repeatable presses offer [Try again]; typed replies keep their drafts, as in section 2.3.
 
 **Not hearing from this chat.** Codex runs a plugin's hooks only after the person trusts each hook definition, and skips a hook until its current definition is trusted. If hooks need review at startup, Codex prints a warning. Trust is per hook, so `SessionStart` can run while a changed `Stop` hook is skipped. The tab checks each hook it needs:
 
@@ -474,7 +480,7 @@ When only some hooks are missing, the second line names the cost: `Items from Co
 ## 4. Decisions
 
 1. **A finding's Fix and Discuss.** Fix hands the finding off and moves it to its Closed fold with the outcome "Fix" or "Do it". The finding stays open for Claude to close. Discuss is a Talk, so the finding stays open after it, because talking a finding through does not resolve it. A typed reply folds the finding until Claude's reply leaves it open.
-2. **No row opens on its own after a press.** It costs one more click per item. It prevents a second click from landing on the next item and sending a wrong answer as the person.
+2. **A close opens the next waiting row.** The shared navigation skips handed-off rows and uses the nearest waiting row above when none is below. Its action buttons are guarded for 0.4 s, so a second click cannot immediately answer the next row.
 3. **The band holds no answer buttons.** An answer sends at once and has no Undo, and the band shows no question body. [Open inbox] opens the pane with the top question open, next to its body and Explain.
 4. **Claude mode is a separate proposal.** [claude-mode.md](claude-mode.md) holds its design. The built looks need nothing from it.
 
@@ -483,7 +489,9 @@ When only some hooks are missing, the second line names the cost: `Items from Co
 - A status line `Claude does not see the inbox here: your organization's settings skip its context.` The guard can skip the mod's `prompt.compose` and `prompt.context` hooks, so Claude gets no guidance or carry text. The mod would need to detect that its `prompt.compose` hook has not run by the first `turn.start`, and that needs a live check.
 - Answer buttons in the band, as in decision 3.
 
-## 6. Not checked live
+## 6. Current-build live checks
+
+Component and state tests do not establish native painting or focus. The checks below remain separate acceptance evidence.
 
 On desktop:
 
@@ -491,7 +499,7 @@ On desktop:
 - whether toasts draw;
 - whether `Markdown` draws, which the review thread body uses;
 - whether a `Button` honors `dimColor`;
-- whether `/inbox` and `/inbox demo` work as typed commands.
+- whether `/inbox` and `/inbox demo` work as typed commands. The known desktop prompt queue waits for a running turn to end, even though the command is registered `immediate`.
 
 In Codex:
 

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 // src/hook.ts
 import { spawn } from "node:child_process";
-import { resolve } from "node:path";
+import { resolve as resolve2 } from "node:path";
 
 // ../hooks/ledger.ts
 var EMPTY = {
@@ -20,7 +20,6 @@ var EMPTY = {
   turn: 0,
   batchTurn: 0
 };
-var NL = "\n";
 var EXPIRED = "expired, unanswered";
 function readKind(kind) {
   return kind === "task" || kind === "do" ? "task" : "question";
@@ -66,6 +65,10 @@ function howFromOutcome(outcome) {
   if (outcome.startsWith(CLOSED_BY_CLAUDE)) return "claude";
   return "update";
 }
+var CLOSED_BY_CLAUDE = "closed by Claude";
+
+// ../hooks/model-text.ts
+var NL = "\n";
 function guidanceText(host) {
   return `# Inbox
 ${host.intro}
@@ -85,6 +88,10 @@ Close with mcp__inbox__close:
 The answer to a question is the user's to give. Close a question with their answer, or once it no longer applies, and never with an answer of your own.`;
 }
 var START_TITLE = 'inbox: where this session stands, as of the last reply. An "inbox:" text beside a later prompt replaces this.';
+var MAX_ACTIVITY = 40;
+function addActivity(activity, line) {
+  return !line || activity.length >= MAX_ACTIVITY || activity.includes(line) ? activity : [...activity, line];
+}
 function toolActivity(tool, input) {
   const text = (key) => typeof input[key] === "string" ? input[key] : "";
   switch (tool) {
@@ -106,7 +113,6 @@ function surfaceAtStart(host) {
 function screenText(host, isOpen, tab) {
   return isOpen ? `${surfaceAtStart(host)} is open beside the conversation, ${tab ? `on its ${tab} tab, ` : ""}listing every open item.` : `${surfaceAtStart(host)} is closed.`;
 }
-var CLOSED_BY_CLAUDE = "closed by Claude";
 function latestBatch(ledger) {
   return ledger.batchTurn === 0 ? [] : ledger.items.filter((i) => i.turn === ledger.batchTurn);
 }
@@ -289,6 +295,28 @@ function upgradeLastActions(saved) {
     })
   );
 }
+function withArrival(lastActions, message, pressedAt, deliveryId) {
+  const isWaiting = (a) => (a.delivery?.state === "queued" || a.delivery?.state === "unconfirmed") && a.delivery.message === message;
+  const waiting = Object.values(lastActions).filter(
+    (a) => isWaiting(a) && (deliveryId ? a.delivery?.id === deliveryId : a.delivery?.id === void 0)
+  );
+  if (waiting.length === 0) return lastActions;
+  const at = pressedAt ?? Math.min(...waiting.map((a) => a.at));
+  return Object.fromEntries(
+    Object.entries(lastActions).map(([id, a]) => [
+      id,
+      isWaiting(a) && (deliveryId ? a.delivery?.id === deliveryId : a.delivery?.id === void 0 && a.at === at) ? { ...a, delivery: { state: "arrived" } } : a
+    ])
+  );
+}
+function withUnconfirmed(lastActions, message, pressedAt, deliveryId) {
+  return Object.fromEntries(
+    Object.entries(lastActions).map(([id, action]) => [
+      id,
+      action.delivery?.state === "queued" && action.delivery.message === message && (deliveryId ? action.delivery.id === deliveryId : pressedAt === void 0 || action.delivery.id === void 0 && action.at === pressedAt) ? { ...action, delivery: { ...action.delivery, state: "unconfirmed" } } : action
+    ])
+  );
+}
 
 // ../hooks/view.ts
 var CHOICE_KEYS = [..."abcfghilm"];
@@ -320,7 +348,6 @@ var CODEX = {
 
 // src/core.ts
 var TAB_OPEN_MS = 15e3;
-var MAX_ACTIVITY = 40;
 function isTabOpen(s, now) {
   return now - s.tabSeenAt < TAB_OPEN_MS;
 }
@@ -340,11 +367,24 @@ function cleared(s) {
   };
 }
 function notePrompt(s, text, now) {
-  const sentAt = s.sent.findIndex((x) => x.text === text);
+  const matchingAt = s.sent.findIndex((x) => x.text === text);
+  const matching = matchingAt >= 0 ? s.sent[matchingAt] : void 0;
+  const sentAt = matching && (matching.phase === void 0 || matching.phase === "accepted") ? matchingAt : -1;
   const sentBy = sentAt >= 0 ? s.sent[sentAt]?.press ?? null : null;
-  const row = sentAt >= 0 ? s.sent[sentAt]?.row ?? null : null;
-  const last = row === null ? void 0 : s.lastActions[row];
-  const lastActions = row !== null && last?.delivery?.state === "queued" && last.delivery.message === text ? { ...s.lastActions, [row]: { ...last, delivery: { state: "arrived" } } } : s.lastActions;
+  const sent = sentAt >= 0 ? s.sent[sentAt] : void 0;
+  const eligible = sent?.deliveryId === null ? Object.fromEntries(
+    Object.entries(s.lastActions).filter(
+      ([_id, last]) => (last.delivery?.state === "queued" || last.delivery?.state === "unconfirmed") && last.delivery.id === void 0
+    )
+  ) : s.lastActions;
+  const arrived = sent && sent.row !== null ? {
+    ...s.lastActions,
+    ...sent.deliveryId === null ? withUnconfirmed(eligible, text) : withArrival(eligible, text, sent.pressedAt ?? void 0, sent.deliveryId)
+  } : s.lastActions;
+  const lastActions = s.sent.slice(matchingAt + 1).reduce(
+    (actions, later) => later.text === text && later.row !== null ? withUnconfirmed(actions, text, later.pressedAt ?? void 0, later.deliveryId) : actions,
+    arrived
+  );
   const ledger = { ...s.ledger, turn: s.ledger.turn + 1 };
   const r = promptNotes(CODEX, ledger, { text, isPress: sentAt >= 0, isOpen: isTabOpen(s, now) }, s.told);
   const person = s.turn.person === null ? text : `${s.turn.person}
@@ -364,9 +404,9 @@ ${text}`;
   };
 }
 function noteActivity(s, line) {
-  const activity = s.turn.activity;
-  if (!line || activity.length >= MAX_ACTIVITY || activity.includes(line)) return s;
-  return { ...s, turn: { ...s.turn, activity: [...activity, line] } };
+  const activity = addActivity(s.turn.activity, line);
+  if (activity === s.turn.activity) return s;
+  return { ...s, turn: { ...s.turn, activity } };
 }
 function activityOf(tool, input) {
   return toolActivity(tool === "Bash" ? "Bash" : tool, input);
@@ -406,9 +446,23 @@ function noteHook(s, hook, now, turnId) {
 }
 
 // src/state.ts
-import { mkdir, readFile, rename, rmdir, stat, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  readlink,
+  realpath,
+  rename,
+  rmdir,
+  symlink,
+  unlink,
+  writeFile
+} from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 var NOTHING_HEARD = {
   startAt: null,
   promptAt: null,
@@ -453,6 +507,8 @@ function statePath(dir, sessionId) {
   return join(dir, "sessions", `${fileName(sessionId)}.json`);
 }
 function upgraded(saved, sessionId) {
+  if (saved.version !== void 0 && saved.version !== 1)
+    throw new Error(`Unsupported inbox state version: ${saved.version}`);
   const base = emptyState(sessionId);
   const { checks: _checks, snapshots: _snapshots, recordedRuns: _runs, top: _top, ...kept } = saved;
   const { sentBack: _sentBack, ...turn } = saved.turn ?? {};
@@ -467,7 +523,14 @@ function upgraded(saved, sessionId) {
     presence: { ...base.presence, ...saved.presence },
     pending: (saved.pending ?? []).map(({ ex: { checks: _exChecks, ...ex }, ...p }) => ({ ...p, ex })),
     // A message sent before the server kept its row changes no row when it arrives.
-    sent: (saved.sent ?? []).map((x) => ({ ...x, row: x.row ?? null, queuedId: x.queuedId ?? null })),
+    sent: (saved.sent ?? []).map((x) => ({
+      ...x,
+      row: x.row ?? null,
+      queuedId: x.queuedId ?? null,
+      pressedAt: x.pressedAt ?? null,
+      deliveryId: x.deliveryId ?? null,
+      phase: x.phase ?? "accepted"
+    })),
     lastActions: upgradeLastActions(saved.lastActions ?? {}),
     prViews: { ...NO_PRS, ...saved.prViews, isFetching: false },
     // A file saved before the hooks kept this record came from hooks that ran, so it reads as heard.
@@ -489,43 +552,137 @@ async function readState(dir, sessionId) {
   return saved === null ? emptyState(sessionId) : upgraded(JSON.parse(saved), sessionId);
 }
 var LOCK_WAIT_MS = 1e4;
-var LOCK_STALE_MS = 15e3;
-var sleep = (ms) => new Promise((resolve2) => setTimeout(resolve2, ms));
-async function withLock(path, fn, waitMs = LOCK_WAIT_MS) {
-  await mkdir(dirname(path), { recursive: true });
-  const until = Date.now() + waitMs;
-  for (; ; ) {
-    try {
-      await mkdir(path);
-      break;
-    } catch (err) {
-      if (err.code !== "EEXIST") throw err;
-      const age = await stat(path).then(
-        (s) => Date.now() - s.mtimeMs,
-        () => 0
-      );
-      if (age > LOCK_STALE_MS) await rmdir(path).catch(() => void 0);
-      else if (Date.now() > until) throw new Error(`Timed out waiting for ${path}`);
-      else await sleep(15);
-    }
-  }
+var LOCK_CHILD = "held";
+var sleep = (ms) => new Promise((resolve3) => setTimeout(resolve3, ms));
+var LockBusyError = class extends Error {
+};
+var bootSession = null;
+var ownIdentity = null;
+function lockOwner(suffix) {
+  const match = /^(\d+)-[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}(?:-([a-f\d]{32}))?$/.exec(suffix);
+  const pid = Number(match?.[1]);
+  return Number.isSafeInteger(pid) && pid > 0 ? { pid, identity: match?.[2] ?? null } : null;
+}
+function processIdentity(pid) {
+  if (pid === process.pid && ownIdentity) return ownIdentity;
   try {
+    const options = {
+      encoding: "utf8",
+      env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
+      stdio: "pipe",
+      timeout: 1e3
+    };
+    const boot = bootSession ?? execFileSync("/usr/sbin/sysctl", ["-n", "kern.bootsessionuuid"], options).trim();
+    const started = execFileSync("/bin/ps", ["-p", String(pid), "-o", "lstart="], options).trim();
+    if (!boot || !started) return null;
+    bootSession = boot;
+    const identity = createHash("sha256").update(boot).update("\0").update(started).digest("hex").slice(0, 32);
+    if (pid === process.pid) ownIdentity = identity;
+    return identity;
+  } catch {
+    return null;
+  }
+}
+function isLive(owner, generation, observedLiveAt) {
+  try {
+    process.kill(owner.pid, 0);
+  } catch (err) {
+    return err.code !== "ESRCH";
+  }
+  if (owner.identity === null) return true;
+  const checkedAt = observedLiveAt.get(generation);
+  if (checkedAt !== void 0 && Date.now() - checkedAt < 250) return true;
+  const identity = processIdentity(owner.pid);
+  if (identity !== null && identity !== owner.identity) return false;
+  observedLiveAt.set(generation, Date.now());
+  return true;
+}
+async function lockTarget(path) {
+  return readlink(path).catch((err) => {
+    if (err.code === "ENOENT" || err.code === "EINVAL") return null;
+    throw err;
+  });
+}
+async function removeOwnedLock(path, target, owner, source) {
+  const identity = processIdentity(process.pid);
+  const claimed = `${owner}.recover-${process.pid}-${randomUUID()}${identity ? `-${identity}` : ""}`;
+  const isDirectory = await lstat(source).then(
+    (s) => s.isDirectory(),
+    (err) => {
+      if (err.code === "ENOENT") return false;
+      throw err;
+    }
+  );
+  if (!isDirectory) return false;
+  try {
+    await rename(source, claimed);
+  } catch (err) {
+    if (err.code === "ENOENT") return false;
+    throw err;
+  }
+  if (await lockTarget(path) === target) await unlink(path);
+  await rmdir(claimed);
+  return true;
+}
+async function recoverLock(path, observedLiveAt) {
+  const target = await lockTarget(path);
+  if (!target || !isAbsolute(target)) return false;
+  const owner = basename(target) === LOCK_CHILD ? dirname(target) : target;
+  if (target !== owner && target !== join(owner, LOCK_CHILD)) return false;
+  const prefix = `${basename(path)}.owner-`;
+  if (!basename(owner).startsWith(prefix)) return false;
+  if (await realpath(dirname(owner)).catch(() => null) !== dirname(path)) return false;
+  const holder = lockOwner(basename(owner).slice(prefix.length));
+  if (!holder || isLive(holder, owner, observedLiveAt)) return false;
+  if (await removeOwnedLock(path, target, owner, owner)) return true;
+  const recoverPrefix = `${basename(owner)}.recover-`;
+  const entries = await readdir(dirname(path));
+  for (const entry of entries) {
+    if (!entry.startsWith(recoverPrefix)) continue;
+    const recovering = lockOwner(entry.slice(recoverPrefix.length));
+    if (!recovering || isLive(recovering, entry, observedLiveAt)) continue;
+    if (await removeOwnedLock(path, target, owner, join(dirname(path), entry))) return true;
+  }
+  return false;
+}
+async function withLock(path, fn, waitMs = LOCK_WAIT_MS) {
+  path = resolve(path);
+  await mkdir(dirname(path), { recursive: true });
+  path = join(await realpath(dirname(path)), basename(path));
+  const identity = processIdentity(process.pid);
+  const owner = `${path}.owner-${process.pid}-${randomUUID()}${identity ? `-${identity}` : ""}`;
+  const target = join(owner, LOCK_CHILD);
+  await mkdir(owner);
+  const until = Date.now() + waitMs;
+  const observedLiveAt = /* @__PURE__ */ new Map();
+  try {
+    for (; ; ) {
+      try {
+        await symlink(target, path);
+        break;
+      } catch (err) {
+        if (err.code !== "EEXIST") throw err;
+        if (await recoverLock(path, observedLiveAt)) continue;
+        if (Date.now() > until) throw new LockBusyError(`Timed out waiting for ${path}`);
+        await sleep(15);
+      }
+    }
     return await fn();
   } finally {
-    await rmdir(path).catch(() => void 0);
+    await removeOwnedLock(path, target, owner, owner);
   }
 }
 async function updateState(dir, sessionId, change) {
   const path = statePath(dir, sessionId);
   return withLock(`${path}.lock`, async () => {
-    const current = await readState(dir, sessionId).catch(async () => {
-      await rename(path, `${path}.unreadable-${Date.now()}`);
-      return emptyState(sessionId);
-    });
-    const next = await change(current);
-    const tmp = `${path}.${process.pid}.tmp`;
-    await writeFile(tmp, JSON.stringify(next));
-    await rename(tmp, path);
+    const current = await readState(dir, sessionId);
+    const checkpoint = async (state) => {
+      const tmp = `${path}.${process.pid}.tmp`;
+      await writeFile(tmp, JSON.stringify(state));
+      await rename(tmp, path);
+    };
+    const next = await change(current, checkpoint);
+    await checkpoint(next);
     return next;
   });
 }
@@ -582,7 +739,7 @@ async function handleHook(input, deps) {
       const toolInput = input.tool_input ?? {};
       const command = typeof toolInput.command === "string" ? toolInput.command : "";
       if (tool === "apply_patch") {
-        const files = patchFiles(command).map((f) => resolve(input.cwd || "/", f));
+        const files = patchFiles(command).map((f) => resolve2(input.cwd || "/", f));
         await updateState(dir, id, (s) => files.reduce((x, f) => noteActivity(x, `edited ${f}`), s));
         return null;
       }

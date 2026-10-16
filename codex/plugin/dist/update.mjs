@@ -5,9 +5,38 @@ import { dirname as dirname2 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/state.ts
-import { mkdir, readFile, rename, rmdir, stat, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  readlink,
+  realpath,
+  rename,
+  rmdir,
+  symlink,
+  unlink,
+  writeFile
+} from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+
+// ../hooks/text.ts
+var NL = "\n";
+var FENCE = /```[^\n]*\n([\s\S]*?)```/g;
+function codeBlocks(reply) {
+  return [...reply.matchAll(FENCE)].map((m) => (m[1] ?? "").replace(/\n$/, ""));
+}
+function numberBlocks(reply) {
+  let n = 0;
+  return reply.replace(FENCE, (block) => `[block ${n += 1}]${NL}${block}`);
+}
+function clipMiddle(text, max, head) {
+  if (text.length <= max) return text;
+  return `${text.slice(0, head)}${NL}\u2026[cut]${NL}${text.slice(text.length - (max - head))}`;
+}
 
 // ../hooks/ledger.ts
 var EMPTY = {
@@ -21,13 +50,12 @@ var EMPTY = {
   turn: 0,
   batchTurn: 0
 };
-var NL = "\n";
+var NL2 = "\n";
 var MAX_OPEN = 20;
 var STALE_AFTER = 12;
 var MAX_CLOSED = 12;
 var EXPIRED = "expired, unanswered";
 var MAX_HELPS = 3;
-var MODEL_KIND = { question: "decide", task: "do" };
 function readKind(kind) {
   return kind === "task" || kind === "do" ? "task" : "question";
 }
@@ -74,64 +102,6 @@ function howFromOutcome(outcome) {
 }
 var NEEDS_PERSON = /(?:^|[\s;&|])(?:login|logout|signin|sign-in|sudo|passwd|ssh-add|ssh-keygen)(?=[\s:]|$)|\binit --interactive\b/i;
 var PERSON_ONLY_REASON = /credential|password|passphrase|secret|\btoken|\b2fa\b|\bmfa\b|\bdevice\b|phone|android|tablet|account|sign(?:ed)?[- ]?in|log(?:ged)?[- ]?in|only you|you hold|your (?:mac|machine|laptop|computer|keychain)|\bsudo\b/i;
-function systemText(host) {
-  const band = host.band ? ` They always see how many items are in <open> and <findings> in ${host.band}.` : "";
-  return `You keep a short ledger for a person who works with a coding agent across many parallel sessions. They glance at your ledger between tasks, or after time away, to see where this session stands. You read one exchange and update the ledger.
-
-Input:
-- <card>: the ledger before this exchange (may be empty)
-- <open>: items still waiting on the person, as id | kind | label | ask | options | rec
-- <findings>: findings the agent recorded for the person to review later, outside the current task, each with an id
-- <decided>: items the person already settled, and how. Never add one of these again as NEW, even when the reply asks it again.
-- <person>: what the person just sent, and the commands they ran themselves: "$ cmd" for a shell command, with its output, and "/name" for a slash command
-- <activity>: what the agent did this turn (files edited, commands, URLs)
-- <reply>: the agent's final reply
-- <screen>: what the person has on screen besides the conversation.${band}
-
-Answer with lines only, each starting with one of these keys. No other text.
-
-GOAL: what this session is for, at most 12 words. Keep the previous goal unless the person clearly changed direction. "-" until the person has asked for something.
-DONE: one finished outcome, at most 8 words. Up to 4 DONE lines, oldest first, keeping the most recent. Outcomes, not activity: "PR #12 opened", not "ran gh".
-NOW: where the work stands at the end of this reply, at most 12 words. Name what it waits on, if anything. "-" when no work has started.
-RUNNING: something still running that the person may open, as "name: URL or port". Dev servers, simulators, background jobs. Omit anything the agent stopped. Zero or more lines.
-CLOSED: <id> | the outcome, at most 8 words, in one of three forms. When the person answered in <person>, write their answer. Otherwise write "done: <what the agent did>" when the work is done, or "no longer applies: <why>". An option the agent picked on its own, or an option the work made moot, is not the person's answer: write it in the "done:" or "no longer applies:" form. One line for each item in <open> the person answered in <person> (including "all recommended", "go", "yes to all", numbered answers), or that the reply or <activity> shows is done or no longer applies. A person asking what an item means has not answered it, and a reply explaining it does not close it. When <person> asks to run an item's command and the reply says it ran, that item is done. So is an item whose command the person ran themselves, per <person>, when its output shows it worked. An item that has nothing to do with this exchange stays open: being outside the current work does not make it no longer apply.
-FIXED: <id> | the change that fixed it, at most 8 words. One line for each finding in <findings> whose problem the reply, <activity> or <person> shows was fixed by a change to the work. Only a change fixes a finding. When the person puts a finding off, sets it aside or says it does not matter, write no FIXED line: it stays open until they dismiss it.
-ASKED: <id> | <item>
-  For a finding in <findings> that a NEW line or an item in <open> asks the person about. item: "new N" for the Nth NEW line in your answer, or an id from <open>. The item takes the finding's place, so the person sees it once.
-NEW: <kind> | <label> | <ask> | <options> | <rec>
-  One line per thing in <reply> that waits on the person and is not already in <open> or <findings>. A finding the agent recorded is not NEW unless the reply asks the person to decide or do something about it now; then also write an ASKED line for it. When the reply restates, rewords or narrows an item in <open>, it is not new: add HELP lines to that item's id instead.
-  kind: "decide" (a choice, approval, or information only the person has, explicitly put to them, without which the agent cannot go on with its task) or "do" (an action only the person can take, without which the agent cannot continue or finish: sign in, run a command needing their password, test on their device, reply to a teammate).
-  label: the reply's own number or id for it ("1", "D3"), or "-".
-  ask: plain words, readable without the reply, at most 12 words, or up to 16 when 12 would lose meaning. Keep the question's meaning and every alternative it names. Replace any term the reply coined with what it means. Name an item or finding by what it says, never by its id: the person does not see ids.
-  options: the answers the person can pick, separated by " / ", at most 5 words each; "-" for kind "do". For kind "decide", always at least one, so one press can answer. Use the choices the reply offers, plus the answer it recommends when that is not one of them. When the reply offers none, predict the answers the person would most likely give: the yes and the no for an approval or a yes-or-no question ("Approve / Not yet"); the 1 to 3 likeliest answers to an open question, from the conversation; or, when the conversation suggests no answer, what the person would most likely ask the agent to do instead ("List the choices", "Pick one for me").
-  rec: the option the reply states it recommends for this question ("I'd go with X", "I recommend X"), copied from options, or "-" when it states none for this question. A reason the reply gives for one answer is not a recommendation: it must say it recommends or prefers that answer.
-  Skip: rhetorical questions; offers to continue ("Want me to start?") when continuing is the obvious default; FYIs; generic "let me know"; invitations to look at, try or check finished work ("Open X to see it", "reload to check") unless the agent waits on the person's verdict before going on; optional suggestions; anything the person already has on screen, per <screen>; questions asking the person to describe what they saw, did or meant, even when the answer would help diagnose a problem ("What happens when you click it?", "Which file did you mean?"). The person answers those by replying.
-UPDATE: <id> | <options> | <rec>
-  For a "decide" item in <open> when the reply now offers it different answers, or states a recommendation for it that <open> does not show. options: the answers the person can now pick, as in NEW, or "-" to keep them. rec: as in NEW, or "-" to keep it. Rewording the question is not a change.
-HELP: <item> | <kind> | <value> | <name>
-  A step that does part of an item's work in one press, when the reply or activity already spells it out: the file to edit, the text to paste, the command to run, the page to visit. Not background reading. Up to 3 per item, most useful first.
-  item: "new N" for the Nth NEW line in your answer, or an id from <open>.
-  kind and value:
-    open | a file or folder the person needs to open or edit, the path as written
-    copy | text for the person to paste into a file or form, never a command: "block N" for the code block marked [block N] in <reply>, or one line of text
-    run | a shell command the reply asks the person to run or approve: "block N" or the command
-    terminal | a shell command the reply says only the person can run, because it needs their credentials, password, device or account: "block N" or the command
-    link | an https URL the person needs to visit
-  name: what a copy, command or link is, at most 3 words ("settings snippet", "removal command", "token page"), or "-".
-  Use only paths, commands, text and URLs that appear in <reply> or <activity>. Never invent one.
-TODO: <work>
-  For a todo in <person>: work the person sets aside for later, as in "todo: X", and the reply leaves undone. work: at most 12 words, worded to follow "Ready to start on".
-
-Write plainly. No jargon, no filler, no markdown.`;
-}
-var FENCE = /```[^\n]*\n([\s\S]*?)```/g;
-function codeBlocks(reply) {
-  return [...reply.matchAll(FENCE)].map((m) => (m[1] ?? "").replace(/\n$/, ""));
-}
-function numberBlocks(reply) {
-  let n = 0;
-  return reply.replace(FENCE, (block) => `[block ${n += 1}]${NL}${block}`);
-}
 function readHelp(kind, value, name, blocks, source) {
   const isQuoted = (text) => source === null || source.includes(text);
   const block = value.match(/^block\s+(\d+)$/i);
@@ -193,39 +163,6 @@ function withHelp(helps, help) {
   const isCovered = kept.some((h) => helpTarget(h) === helpTarget(help));
   return isCovered || kept.length >= MAX_HELPS ? kept : [...kept, help];
 }
-function clipMiddle(text, max, head) {
-  if (text.length <= max) return text;
-  return `${text.slice(0, head)}${NL}\u2026[cut]${NL}${text.slice(text.length - (max - head))}`;
-}
-function ledgerBlocks(ledger) {
-  const card = ledger.card ? [
-    `GOAL: ${ledger.card.goal}`,
-    ...ledger.card.done.map((d) => `DONE: ${d}`),
-    `NOW: ${ledger.card.now}`,
-    ...ledger.card.running.map((r) => `RUNNING: ${r}`)
-  ].join(NL) : "";
-  const open = ledger.items.map(
-    (i) => `${i.id} | ${MODEL_KIND[i.kind]} | ${i.label ?? "-"} | ${i.ask} | ${i.options.join(" / ") || "-"} | ${i.rec ?? "-"}`
-  ).join(NL);
-  const findings = ledger.findings.map((f) => `${f.id} | ${f.kind}: ${f.title}`).join(NL);
-  const closed = ledger.closed.filter((d) => d.how !== "expired").slice(-8).map((d) => `${d.ask} \u2192 ${outcomeText(d)}`).join(NL);
-  return [
-    `<card>${NL}${card}${NL}</card>`,
-    `<open>${NL}${open}${NL}</open>`,
-    `<findings>${NL}${findings}${NL}</findings>`,
-    `<decided>${NL}${closed}${NL}</decided>`
-  ];
-}
-function buildPrompt(ledger, ex) {
-  const person = ex.person ?? `(The person sent nothing. The turn was started by: ${ex.trigger ?? "unknown"}.)`;
-  return [
-    ...ledgerBlocks(ledger),
-    `<person>${NL}${clipMiddle(person, 4e3, 1500)}${NL}</person>`,
-    `<activity>${NL}${clipMiddle(ex.activity.join(NL), 2500, 500)}${NL}</activity>`,
-    `<reply>${NL}${clipMiddle(numberBlocks(ex.reply), 12e3, 4e3)}${NL}</reply>`,
-    `<screen>${NL}${ex.screen}${NL}</screen>`
-  ].join(NL);
-}
 function dash(value) {
   const v = (value ?? "").trim();
   return v === "" || v === "-" ? null : v;
@@ -242,7 +179,7 @@ function parseReply(text, source = null) {
   const asks = [];
   const todos = [];
   let seen = 0;
-  const lines = text.split(NL);
+  const lines = text.split(NL2);
   const lastGoal = lines.findLastIndex((line) => KEY_LINE.exec(line)?.[1] === "GOAL");
   const newLines = [];
   for (const raw of lines.slice(Math.max(lastGoal, 0))) {
@@ -377,6 +314,16 @@ function closeFinding(ledger, id, closing, now) {
     closedFindings: [...ledger.closedFindings, closedFindingRecord(finding, closing, now)].slice(-MAX_CLOSED)
   };
 }
+function applyExchangeUpdate(ledger, update, exchange, now, promptAt) {
+  const explainedId = exchange.press?.action === "explain" ? exchange.press.id : null;
+  return applyUpdate(
+    ledger,
+    { ...update, closed: update.closed.filter((c) => c.id !== explainedId) },
+    now,
+    exchange.turn,
+    promptAt
+  );
+}
 function applyUpdate(ledger, u, now, turn, promptAt = now) {
   const prev = ledger.card;
   const card = {
@@ -461,6 +408,89 @@ function withUpdate(item, updated) {
   if (!change || item.kind !== "question") return item;
   const options = change.options ?? item.options;
   return { ...item, options, rec: recommendedOption(options, change.rec ?? item.rec) };
+}
+
+// ../hooks/model-text.ts
+var NL3 = "\n";
+var MODEL_KIND = { question: "decide", task: "do" };
+function systemText(host) {
+  const band = host.band ? ` They always see how many items are in <open> and <findings> in ${host.band}.` : "";
+  return `You keep a short ledger for a person who works with a coding agent across many parallel sessions. They glance at your ledger between tasks, or after time away, to see where this session stands. You read one exchange and update the ledger.
+
+Input:
+- <card>: the ledger before this exchange (may be empty)
+- <open>: items still waiting on the person, as id | kind | label | ask | options | rec
+- <findings>: findings the agent recorded for the person to review later, outside the current task, each with an id
+- <decided>: items the person already settled, and how. Never add one of these again as NEW, even when the reply asks it again.
+- <person>: what the person just sent, and the commands they ran themselves: "$ cmd" for a shell command, with its output, and "/name" for a slash command
+- <activity>: what the agent did this turn (files edited, commands, URLs)
+- <reply>: the agent's final reply
+- <screen>: what the person has on screen besides the conversation.${band}
+
+Answer with lines only, each starting with one of these keys. No other text.
+
+GOAL: what this session is for, at most 12 words. Keep the previous goal unless the person clearly changed direction. "-" until the person has asked for something.
+DONE: one finished outcome, at most 8 words. Up to 4 DONE lines, oldest first, keeping the most recent. Outcomes, not activity: "PR #12 opened", not "ran gh".
+NOW: where the work stands at the end of this reply, at most 12 words. Name what it waits on, if anything. "-" when no work has started.
+RUNNING: something still running that the person may open, as "name: URL or port". Dev servers, simulators, background jobs. Omit anything the agent stopped. Zero or more lines.
+CLOSED: <id> | the outcome, at most 8 words, in one of three forms. When the person answered in <person>, write their answer. Otherwise write "done: <what the agent did>" when the work is done, or "no longer applies: <why>". An option the agent picked on its own, or an option the work made moot, is not the person's answer: write it in the "done:" or "no longer applies:" form. One line for each item in <open> the person answered in <person> (including "all recommended", "go", "yes to all", numbered answers), or that the reply or <activity> shows is done or no longer applies. A person asking what an item means has not answered it, and a reply explaining it does not close it. When <person> asks to run an item's command and the reply says it ran, that item is done. So is an item whose command the person ran themselves, per <person>, when its output shows it worked. An item that has nothing to do with this exchange stays open: being outside the current work does not make it no longer apply.
+FIXED: <id> | the change that fixed it, at most 8 words. One line for each finding in <findings> whose problem the reply, <activity> or <person> shows was fixed by a change to the work. Only a change fixes a finding. When the person puts a finding off, sets it aside or says it does not matter, write no FIXED line: it stays open until they dismiss it.
+ASKED: <id> | <item>
+  For a finding in <findings> that a NEW line or an item in <open> asks the person about. item: "new N" for the Nth NEW line in your answer, or an id from <open>. The item takes the finding's place, so the person sees it once.
+NEW: <kind> | <label> | <ask> | <options> | <rec>
+  One line per thing in <reply> that waits on the person and is not already in <open> or <findings>. A finding the agent recorded is not NEW unless the reply asks the person to decide or do something about it now; then also write an ASKED line for it. When the reply restates, rewords or narrows an item in <open>, it is not new: add HELP lines to that item's id instead.
+  kind: "decide" (a choice, approval, or information only the person has, explicitly put to them, without which the agent cannot go on with its task) or "do" (an action only the person can take, without which the agent cannot continue or finish: sign in, run a command needing their password, test on their device, reply to a teammate).
+  label: the reply's own number or id for it ("1", "D3"), or "-".
+  ask: plain words, readable without the reply, at most 12 words, or up to 16 when 12 would lose meaning. Keep the question's meaning and every alternative it names. Replace any term the reply coined with what it means. Name an item or finding by what it says, never by its id: the person does not see ids.
+  options: the answers the person can pick, separated by " / ", at most 5 words each; "-" for kind "do". For kind "decide", always at least one, so one press can answer. Use the choices the reply offers, plus the answer it recommends when that is not one of them. When the reply offers none, predict the answers the person would most likely give: the yes and the no for an approval or a yes-or-no question ("Approve / Not yet"); the 1 to 3 likeliest answers to an open question, from the conversation; or, when the conversation suggests no answer, what the person would most likely ask the agent to do instead ("List the choices", "Pick one for me").
+  rec: the option the reply states it recommends for this question ("I'd go with X", "I recommend X"), copied from options, or "-" when it states none for this question. A reason the reply gives for one answer is not a recommendation: it must say it recommends or prefers that answer.
+  Skip: rhetorical questions; offers to continue ("Want me to start?") when continuing is the obvious default; FYIs; generic "let me know"; invitations to look at, try or check finished work ("Open X to see it", "reload to check") unless the agent waits on the person's verdict before going on; optional suggestions; anything the person already has on screen, per <screen>; questions asking the person to describe what they saw, did or meant, even when the answer would help diagnose a problem ("What happens when you click it?", "Which file did you mean?"). The person answers those by replying.
+UPDATE: <id> | <options> | <rec>
+  For a "decide" item in <open> when the reply now offers it different answers, or states a recommendation for it that <open> does not show. options: the answers the person can now pick, as in NEW, or "-" to keep them. rec: as in NEW, or "-" to keep it. Rewording the question is not a change.
+HELP: <item> | <kind> | <value> | <name>
+  A step that does part of an item's work in one press, when the reply or activity already spells it out: the file to edit, the text to paste, the command to run, the page to visit. Not background reading. Up to 3 per item, most useful first.
+  item: "new N" for the Nth NEW line in your answer, or an id from <open>.
+  kind and value:
+    open | a file or folder the person needs to open or edit, the path as written
+    copy | text for the person to paste into a file or form, never a command: "block N" for the code block marked [block N] in <reply>, or one line of text
+    run | a shell command the reply asks the person to run or approve: "block N" or the command
+    terminal | a shell command the reply says only the person can run, because it needs their credentials, password, device or account: "block N" or the command
+    link | an https URL the person needs to visit
+  name: what a copy, command or link is, at most 3 words ("settings snippet", "removal command", "token page"), or "-".
+  Use only paths, commands, text and URLs that appear in <reply> or <activity>. Never invent one.
+TODO: <work>
+  For a todo in <person>: work the person sets aside for later, as in "todo: X", and the reply leaves undone. work: at most 12 words, worded to follow "Ready to start on".
+
+Write plainly. No jargon, no filler, no markdown.`;
+}
+function ledgerBlocks(ledger) {
+  const card = ledger.card ? [
+    `GOAL: ${ledger.card.goal}`,
+    ...ledger.card.done.map((d) => `DONE: ${d}`),
+    `NOW: ${ledger.card.now}`,
+    ...ledger.card.running.map((r) => `RUNNING: ${r}`)
+  ].join(NL3) : "";
+  const open = ledger.items.map(
+    (i) => `${i.id} | ${MODEL_KIND[i.kind]} | ${i.label ?? "-"} | ${i.ask} | ${i.options.join(" / ") || "-"} | ${i.rec ?? "-"}`
+  ).join(NL3);
+  const findings = ledger.findings.map((f) => `${f.id} | ${f.kind}: ${f.title}`).join(NL3);
+  const closed = ledger.closed.filter((d) => d.how !== "expired").slice(-8).map((d) => `${d.ask} \u2192 ${outcomeText(d)}`).join(NL3);
+  return [
+    `<card>${NL3}${card}${NL3}</card>`,
+    `<open>${NL3}${open}${NL3}</open>`,
+    `<findings>${NL3}${findings}${NL3}</findings>`,
+    `<decided>${NL3}${closed}${NL3}</decided>`
+  ];
+}
+function buildPrompt(ledger, ex) {
+  const person = ex.person ?? `(The person sent nothing. The turn was started by: ${ex.trigger ?? "unknown"}.)`;
+  return [
+    ...ledgerBlocks(ledger),
+    `<person>${NL3}${clipMiddle(person, 4e3, 1500)}${NL3}</person>`,
+    `<activity>${NL3}${clipMiddle(ex.activity.join(NL3), 2500, 500)}${NL3}</activity>`,
+    `<reply>${NL3}${clipMiddle(numberBlocks(ex.reply), 12e3, 4e3)}${NL3}</reply>`,
+    `<screen>${NL3}${ex.screen}${NL3}</screen>`
+  ].join(NL3);
 }
 function outcomeText(d) {
   if (d.how === "dismissed") return "dismissed by the user";
@@ -563,6 +593,8 @@ function statePath(dir, sessionId) {
   return join(dir, "sessions", `${fileName(sessionId)}.json`);
 }
 function upgraded(saved, sessionId) {
+  if (saved.version !== void 0 && saved.version !== 1)
+    throw new Error(`Unsupported inbox state version: ${saved.version}`);
   const base = emptyState(sessionId);
   const { checks: _checks, snapshots: _snapshots, recordedRuns: _runs, top: _top, ...kept } = saved;
   const { sentBack: _sentBack, ...turn } = saved.turn ?? {};
@@ -577,7 +609,14 @@ function upgraded(saved, sessionId) {
     presence: { ...base.presence, ...saved.presence },
     pending: (saved.pending ?? []).map(({ ex: { checks: _exChecks, ...ex }, ...p }) => ({ ...p, ex })),
     // A message sent before the server kept its row changes no row when it arrives.
-    sent: (saved.sent ?? []).map((x) => ({ ...x, row: x.row ?? null, queuedId: x.queuedId ?? null })),
+    sent: (saved.sent ?? []).map((x) => ({
+      ...x,
+      row: x.row ?? null,
+      queuedId: x.queuedId ?? null,
+      pressedAt: x.pressedAt ?? null,
+      deliveryId: x.deliveryId ?? null,
+      phase: x.phase ?? "accepted"
+    })),
     lastActions: upgradeLastActions(saved.lastActions ?? {}),
     prViews: { ...NO_PRS, ...saved.prViews, isFetching: false },
     // A file saved before the hooks kept this record came from hooks that ran, so it reads as heard.
@@ -599,50 +638,163 @@ async function readState(dir, sessionId) {
   return saved === null ? emptyState(sessionId) : upgraded(JSON.parse(saved), sessionId);
 }
 var LOCK_WAIT_MS = 1e4;
-var LOCK_STALE_MS = 15e3;
-var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-async function withLock(path, fn, waitMs = LOCK_WAIT_MS) {
-  await mkdir(dirname(path), { recursive: true });
-  const until = Date.now() + waitMs;
-  for (; ; ) {
-    try {
-      await mkdir(path);
-      break;
-    } catch (err) {
-      if (err.code !== "EEXIST") throw err;
-      const age = await stat(path).then(
-        (s) => Date.now() - s.mtimeMs,
-        () => 0
-      );
-      if (age > LOCK_STALE_MS) await rmdir(path).catch(() => void 0);
-      else if (Date.now() > until) throw new Error(`Timed out waiting for ${path}`);
-      else await sleep(15);
-    }
-  }
+var LOCK_CHILD = "held";
+var sleep = (ms) => new Promise((resolve2) => setTimeout(resolve2, ms));
+var LockBusyError = class extends Error {
+};
+var bootSession = null;
+var ownIdentity = null;
+function lockOwner(suffix) {
+  const match = /^(\d+)-[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}(?:-([a-f\d]{32}))?$/.exec(suffix);
+  const pid = Number(match?.[1]);
+  return Number.isSafeInteger(pid) && pid > 0 ? { pid, identity: match?.[2] ?? null } : null;
+}
+function processIdentity(pid) {
+  if (pid === process.pid && ownIdentity) return ownIdentity;
   try {
+    const options = {
+      encoding: "utf8",
+      env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
+      stdio: "pipe",
+      timeout: 1e3
+    };
+    const boot = bootSession ?? execFileSync("/usr/sbin/sysctl", ["-n", "kern.bootsessionuuid"], options).trim();
+    const started = execFileSync("/bin/ps", ["-p", String(pid), "-o", "lstart="], options).trim();
+    if (!boot || !started) return null;
+    bootSession = boot;
+    const identity = createHash("sha256").update(boot).update("\0").update(started).digest("hex").slice(0, 32);
+    if (pid === process.pid) ownIdentity = identity;
+    return identity;
+  } catch {
+    return null;
+  }
+}
+function isLive(owner, generation, observedLiveAt) {
+  try {
+    process.kill(owner.pid, 0);
+  } catch (err) {
+    return err.code !== "ESRCH";
+  }
+  if (owner.identity === null) return true;
+  const checkedAt = observedLiveAt.get(generation);
+  if (checkedAt !== void 0 && Date.now() - checkedAt < 250) return true;
+  const identity = processIdentity(owner.pid);
+  if (identity !== null && identity !== owner.identity) return false;
+  observedLiveAt.set(generation, Date.now());
+  return true;
+}
+async function lockTarget(path) {
+  return readlink(path).catch((err) => {
+    if (err.code === "ENOENT" || err.code === "EINVAL") return null;
+    throw err;
+  });
+}
+async function removeOwnedLock(path, target, owner, source) {
+  const identity = processIdentity(process.pid);
+  const claimed = `${owner}.recover-${process.pid}-${randomUUID()}${identity ? `-${identity}` : ""}`;
+  const isDirectory = await lstat(source).then(
+    (s) => s.isDirectory(),
+    (err) => {
+      if (err.code === "ENOENT") return false;
+      throw err;
+    }
+  );
+  if (!isDirectory) return false;
+  try {
+    await rename(source, claimed);
+  } catch (err) {
+    if (err.code === "ENOENT") return false;
+    throw err;
+  }
+  if (await lockTarget(path) === target) await unlink(path);
+  await rmdir(claimed);
+  return true;
+}
+async function recoverLock(path, observedLiveAt) {
+  const target = await lockTarget(path);
+  if (!target || !isAbsolute(target)) return false;
+  const owner = basename(target) === LOCK_CHILD ? dirname(target) : target;
+  if (target !== owner && target !== join(owner, LOCK_CHILD)) return false;
+  const prefix = `${basename(path)}.owner-`;
+  if (!basename(owner).startsWith(prefix)) return false;
+  if (await realpath(dirname(owner)).catch(() => null) !== dirname(path)) return false;
+  const holder = lockOwner(basename(owner).slice(prefix.length));
+  if (!holder || isLive(holder, owner, observedLiveAt)) return false;
+  if (await removeOwnedLock(path, target, owner, owner)) return true;
+  const recoverPrefix = `${basename(owner)}.recover-`;
+  const entries = await readdir(dirname(path));
+  for (const entry of entries) {
+    if (!entry.startsWith(recoverPrefix)) continue;
+    const recovering = lockOwner(entry.slice(recoverPrefix.length));
+    if (!recovering || isLive(recovering, entry, observedLiveAt)) continue;
+    if (await removeOwnedLock(path, target, owner, join(dirname(path), entry))) return true;
+  }
+  return false;
+}
+async function withLock(path, fn, waitMs = LOCK_WAIT_MS) {
+  path = resolve(path);
+  await mkdir(dirname(path), { recursive: true });
+  path = join(await realpath(dirname(path)), basename(path));
+  const identity = processIdentity(process.pid);
+  const owner = `${path}.owner-${process.pid}-${randomUUID()}${identity ? `-${identity}` : ""}`;
+  const target = join(owner, LOCK_CHILD);
+  await mkdir(owner);
+  const until = Date.now() + waitMs;
+  const observedLiveAt = /* @__PURE__ */ new Map();
+  try {
+    for (; ; ) {
+      try {
+        await symlink(target, path);
+        break;
+      } catch (err) {
+        if (err.code !== "EEXIST") throw err;
+        if (await recoverLock(path, observedLiveAt)) continue;
+        if (Date.now() > until) throw new LockBusyError(`Timed out waiting for ${path}`);
+        await sleep(15);
+      }
+    }
     return await fn();
   } finally {
-    await rmdir(path).catch(() => void 0);
+    await removeOwnedLock(path, target, owner, owner);
+  }
+}
+async function tryWithLock(path, fn) {
+  let acquired = false;
+  try {
+    return {
+      acquired: true,
+      value: await withLock(
+        path,
+        () => {
+          acquired = true;
+          return fn();
+        },
+        0
+      )
+    };
+  } catch (err) {
+    if (!acquired && err instanceof LockBusyError) return { acquired: false };
+    throw err;
   }
 }
 async function updateState(dir, sessionId, change) {
   const path = statePath(dir, sessionId);
   return withLock(`${path}.lock`, async () => {
-    const current = await readState(dir, sessionId).catch(async () => {
-      await rename(path, `${path}.unreadable-${Date.now()}`);
-      return emptyState(sessionId);
-    });
-    const next = await change(current);
-    const tmp = `${path}.${process.pid}.tmp`;
-    await writeFile(tmp, JSON.stringify(next));
-    await rename(tmp, path);
+    const current = await readState(dir, sessionId);
+    const checkpoint = async (state) => {
+      const tmp = `${path}.${process.pid}.tmp`;
+      await writeFile(tmp, JSON.stringify(state));
+      await rename(tmp, path);
+    };
+    const next = await change(current, checkpoint);
+    await checkpoint(next);
     return next;
   });
 }
 
 // src/run.ts
 import { execFile } from "node:child_process";
-var run = (args, { cwd, stdin, timeoutMs }) => new Promise((resolve) => {
+var run = (args, { cwd, stdin, timeoutMs }) => new Promise((resolve2) => {
   const [file = "", ...rest] = args;
   const child = execFile(
     file,
@@ -650,7 +802,7 @@ var run = (args, { cwd, stdin, timeoutMs }) => new Promise((resolve) => {
     { cwd, timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, encoding: "utf8" },
     (err, stdout, stderr) => {
       const code = err ? typeof err.code === "number" ? err.code : -1 : 0;
-      resolve({ code, stdout: String(stdout), stderr: String(stderr) });
+      resolve2({ code, stdout: String(stdout), stderr: String(stderr) });
     }
   );
   if (stdin !== void 0) child.stdin?.end(stdin);
@@ -658,7 +810,7 @@ var run = (args, { cwd, stdin, timeoutMs }) => new Promise((resolve) => {
 });
 
 // src/update.ts
-import { randomUUID } from "node:crypto";
+import { randomUUID as randomUUID2 } from "node:crypto";
 import { mkdir as mkdir2, readFile as readFile2, rm, writeFile as writeFile2 } from "node:fs/promises";
 import { join as join2 } from "node:path";
 
@@ -696,7 +848,7 @@ function codexAsk(exec, cli, dir, model = MODEL) {
   return async (prompt) => {
     const work = join2(dir, "exec");
     const system = join2(dir, "inbox-system.md");
-    const out = join2(work, `reply-${randomUUID()}.txt`);
+    const out = join2(work, `reply-${randomUUID2()}.txt`);
     await mkdir2(work, { recursive: true });
     const instructions = systemText(CODEX);
     if (await readFile2(system, "utf8").catch(() => "") !== instructions) await writeFile2(system, instructions);
@@ -754,14 +906,7 @@ function applied(s, reply, now, promptAt) {
       pending: [{ ...next, failed: true }, ...s.pending.slice(1)],
       presence: { ...s.presence, ledgerState: "failed" }
     };
-  const explained = ex.press?.action === "explain" ? ex.press.id : null;
-  const ledger = parsed ? applyUpdate(
-    s.ledger,
-    { ...parsed, closed: parsed.closed.filter((c) => c.id !== explained) },
-    now,
-    ex.turn,
-    promptAt
-  ) : s.ledger;
+  const ledger = parsed ? applyExchangeUpdate(s.ledger, parsed, ex, now, promptAt) : s.ledger;
   return {
     ...s,
     ledger,
@@ -775,57 +920,35 @@ function applied(s, reply, now, promptAt) {
     }
   };
 }
-function isAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return err.code === "EPERM";
-  }
-}
-async function takeUpdateLock(path) {
-  for (let tries = 0; tries < 2; tries += 1) {
-    try {
-      await mkdir2(path);
-      await writeFile2(join2(path, "pid"), String(process.pid));
-      return true;
-    } catch (err) {
-      if (err.code !== "EEXIST") throw err;
-      const pid = Number(await readFile2(join2(path, "pid"), "utf8").catch(() => ""));
-      if (!pid || isAlive(pid)) return false;
-      await rm(path, { recursive: true, force: true });
-    }
-  }
-  return false;
-}
 async function runUpdates(dir, sessionId, ask, now) {
   const lock = `${statePath(dir, sessionId)}.updating`;
   while ((await readState(dir, sessionId)).pending.length > 0) {
-    if (!await takeUpdateLock(lock)) return;
-    try {
-      for (; ; ) {
-        const s = await updateState(dir, sessionId, (x) => ({
-          ...x,
-          presence: { ...x.presence, isUpdating: x.pending.length > 0 }
-        }));
-        const next = s.pending[0];
-        if (!next) break;
-        const promptAt = now();
-        const reply = await ask(buildPrompt(s.ledger, next.ex)).catch(() => null);
-        const after = await updateState(
-          dir,
-          sessionId,
-          (x) => (
-            // A cleared conversation dropped the exchange while the model ran.
-            x.pending[0]?.turnsStarted === next.turnsStarted && x.pending[0].ex.turn === next.ex.turn ? applied(x, reply, now(), promptAt) : x
-          )
-        );
-        if (after.pending[0]?.failed && !next.failed) return;
+    const held = await tryWithLock(lock, async () => {
+      try {
+        for (; ; ) {
+          const s = await updateState(dir, sessionId, (x) => ({
+            ...x,
+            presence: { ...x.presence, isUpdating: x.pending.length > 0 }
+          }));
+          const next = s.pending[0];
+          if (!next) break;
+          const promptAt = now();
+          const reply = await ask(buildPrompt(s.ledger, next.ex)).catch(() => null);
+          const after = await updateState(
+            dir,
+            sessionId,
+            (x) => (
+              // A cleared conversation dropped the exchange while the model ran.
+              x.pending[0]?.turnsStarted === next.turnsStarted && x.pending[0].ex.turn === next.ex.turn ? applied(x, reply, now(), promptAt) : x
+            )
+          );
+          if (after.pending[0]?.failed && !next.failed) return "retry";
+        }
+      } finally {
+        await updateState(dir, sessionId, (x) => ({ ...x, presence: { ...x.presence, isUpdating: false } }));
       }
-    } finally {
-      await updateState(dir, sessionId, (x) => ({ ...x, presence: { ...x.presence, isUpdating: false } }));
-      await rm(lock, { recursive: true, force: true });
-    }
+    });
+    if (!held.acquired || held.value === "retry") return;
   }
 }
 

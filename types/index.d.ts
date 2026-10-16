@@ -54,8 +54,9 @@ export type Closed = {
   at: number
   /** The item as it was while open, so it can be reopened; missing on a record saved before the mod kept it. */
   item?: Item
-  /** A Done whose message went to the agent, which Undo can no longer take back. */
+  /** A Done notification that may have reached the agent, so Undo cannot retract it. */
   isSentToAgent?: true
+  doneNotification?: { id: string; error?: string }
 }
 
 /**
@@ -74,6 +75,8 @@ export type LastAction = {
   /** The label of the action pressed, as in "Discuss". The row shows it after a ✓. */
   text: string
   at: number
+  /** Order of presses in the Claude host while their saves may overlap. */
+  pressOrder?: number
   /** The turns started when it was pressed, so a handed-off row folds until the update for a later turn applies. */
   turnsStarted?: number
   /** The latest Local press's outcome: its opens and copies, pending until each has run. Talk, Hand-off and Mark presses clear it. */
@@ -85,11 +88,17 @@ export type LastAction = {
 }
 
 /**
- * A sent message's way to the agent: queued once the press sent it, with its
- * text to match the arrival by; arrived once it entered as a turn's prompt;
- * failed when it will not enter, with why.
+ * A sent message's way to the agent: queued after sending, unconfirmed when
+ * an identical arrival cannot identify its press, arrived when identified,
+ * or failed when it will not enter.
  */
-export type Delivery = { state: 'queued'; message: string } | { state: 'arrived' } | { state: 'failed'; reason: string }
+export type Delivery =
+  | { state: 'queued'; message: string; id?: string }
+  | { state: 'unconfirmed'; message: string; id?: string }
+  | { state: 'arrived' }
+  | { state: 'failed'; reason: string; id?: string }
+
+export type SentPrompt = { id: string; sessionId: string; text: string; pressedAt: number | null }
 
 /** One open or copy of a Local press, by the name the row shows for it, and why it failed. */
 export type LocalPart = {
@@ -102,7 +111,7 @@ export type LocalPart = {
 }
 
 /** What a Local press did. The words are built per surface when the row is drawn. */
-export type LocalResult = { state: 'pending' | 'done' | 'failed'; parts: LocalPart[]; at: number }
+export type LocalResult = { state: 'pending' | 'done' | 'failed'; parts: LocalPart[]; at: number; pressId?: string }
 
 /**
  * A short note on a row that is not a press's result: a press that found its
@@ -283,6 +292,10 @@ declare module 'claude-code' {
       notes: Record<string, RowNote>
       /** Each row's last action, by the row's id. */
       lastActions: Record<string, LastAction>
+      /** Prompts this mod submitted without an observed stored prompt row. */
+      sent: SentPrompt[]
+      /** Message texts whose older unsaved send history cannot be matched safely. */
+      untrackedSent: { sessionId: string; text: string }[]
       /** The Needs you groups and the kinds of finding whose closed items show. Each starts folded. */
       unfolded: FoldKind[]
       /** The desktop Closed fold under the pointer, whose chevron draws in the hover color. */

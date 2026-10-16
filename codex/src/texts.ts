@@ -3,7 +3,7 @@
 // inbox in a tab beside the conversation, with no band above the prompt.
 // The shared texts in ../../hooks/ledger.ts name Codex and the tab through CODEX.
 
-import type { Host } from '../../hooks/ledger'
+import type { Host } from '../../hooks/model-text'
 import type { InboxView, RowView } from '../../hooks/view'
 
 /** How the shared texts name Codex and the tab. */

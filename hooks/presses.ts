@@ -289,7 +289,8 @@ export type Effect =
  * effects to perform. `last` null leaves the row's last action as it was.
  * `stale` when the row the press was drawn for is gone or changed under it.
  */
-export type PressResult = { ledger: Ledger; last: LastAction | null; effects: Effect[] } | { stale: true }
+export type PressResult =
+  { ledger: Ledger; last: LastAction | null; effects: Effect[]; reopenedId?: string } | { stale: true }
 
 /** Whether a close can be undone: the person's own Done or Dismiss, while it has sent nothing. */
 export function isUndoable(c: Pick<Closed, 'how' | 'isSentToAgent'>): boolean {
@@ -307,7 +308,12 @@ export function doneWake(
 ): { text: string; ids: string[] } | null {
   if (ctx.isTurnRunning) return null
   const waited = ledger.closed.filter(
-    c => c.how === 'done' && c.outcome === 'done' && !c.isSentToAgent && c.item?.turn === ledger.turn,
+    c =>
+      c.how === 'done' &&
+      c.outcome === 'done' &&
+      !c.isSentToAgent &&
+      !c.doneNotification &&
+      c.item?.turn === ledger.turn,
   )
   if (waited.length === 0 || waited.some(c => ctx.now - c.at < ctx.windowMs)) return null
 
@@ -315,8 +321,26 @@ export function doneWake(
 }
 
 /** Marks Done closes as sent to the agent, so Undo leaves them closed. */
-export function markSentToAgent(ledger: Ledger, ids: string[]): Ledger {
-  return { ...ledger, closed: ledger.closed.map(c => (ids.includes(c.id) ? { ...c, isSentToAgent: true } : c)) }
+export function markSentToAgent(ledger: Ledger, ids: string[], notificationId?: string): Ledger {
+  return {
+    ...ledger,
+    closed: ledger.closed.map(c =>
+      ids.includes(c.id)
+        ? { ...c, isSentToAgent: true, ...(notificationId ? { doneNotification: { id: notificationId } } : {}) }
+        : c,
+    ),
+  }
+}
+
+export function refuseDoneNotification(ledger: Ledger, notificationId: string, reason: string): Ledger {
+  return {
+    ...ledger,
+    closed: ledger.closed.map(c => {
+      if (c.how !== 'done' || c.doneNotification?.id !== notificationId) return c
+      const { isSentToAgent: _sent, ...closed } = c
+      return { ...closed, doneNotification: { id: notificationId, error: reason } }
+    }),
+  }
 }
 
 /** What a row reads after a press that found it gone or changed. */
@@ -349,7 +373,7 @@ export function stepEffects(item: Item, step: HelpStep): Effect[] {
 }
 
 /** A Local press's opens and copies, each pending until its host has run it. */
-export function pendingResult(effects: Effect[], at: number): LocalResult {
+export function pendingResult(effects: Effect[], at: number, pressId?: string): LocalResult {
   return {
     state: 'pending',
     parts: effects.flatMap(e =>
@@ -358,6 +382,7 @@ export function pendingResult(effects: Effect[], at: number): LocalResult {
         : [{ kind: e.kind, name: e.name, isCommand: e.kind === 'copy' && e.isCommand, error: null }],
     ),
     at,
+    ...(pressId ? { pressId } : {}),
   }
 }
 
@@ -365,7 +390,12 @@ export function pendingResult(effects: Effect[], at: number): LocalResult {
 export function finishedResult(pending: LocalResult, errors: (string | null)[], at: number): LocalResult {
   const parts = pending.parts.map((part, n) => ({ ...part, error: errors[n] ?? null }))
 
-  return { state: parts.some(part => part.error !== null) ? 'failed' : 'done', parts, at }
+  return {
+    state: parts.some(part => part.error !== null) ? 'failed' : 'done',
+    parts,
+    at,
+    ...(pending.pressId ? { pressId: pending.pressId } : {}),
+  }
 }
 
 /**
@@ -381,10 +411,6 @@ export function localLast(
   return last && last.kind !== 'local' ? { ...last, result } : { kind: 'local', ...pressed, at: result.at, result }
 }
 
-/**
- * Writes a Local press's finished result on its row, unless a later press has
- * replaced the pending one, which `pendingAt` names.
- */
 export function withResult(
   lastActions: Record<string, LastAction>,
   rowId: string,
@@ -392,7 +418,8 @@ export function withResult(
   result: LocalResult,
 ): Record<string, LastAction> {
   const last = lastActions[rowId]
-  if (last?.result?.state !== 'pending' || last.result.at !== pendingAt) return lastActions
+  if (last?.result?.state !== 'pending' || last.result.at !== pendingAt || last.result.pressId !== result.pressId)
+    return lastActions
 
   return { ...lastActions, [rowId]: { ...last, result } }
 }
@@ -408,7 +435,7 @@ export function applyPress(
   ledger: Ledger,
   last: LastAction | undefined,
   p: RowPress,
-  ctx: { now: number; turnsStarted: number; extraSteps: HelpStep[] },
+  ctx: { now: number; turnsStarted: number; extraSteps: HelpStep[]; localPressId?: string },
 ): PressResult {
   const r = pressed(ledger, last, p, ctx)
 
@@ -422,36 +449,106 @@ export function withQueued(last: LastAction, effects: Effect[]): LastAction {
   return send ? { ...last, delivery: { state: 'queued', message: send.text } } : last
 }
 
-/**
- * Last actions once a message entered as a turn's prompt: the oldest press
- * still queued with that text arrived. Every row that one press recorded
- * arrives together, as a PR's Address all records each thread it sends.
- */
-export function withArrival(lastActions: Record<string, LastAction>, message: string): Record<string, LastAction> {
-  const isWaiting = (a: LastAction) => a.delivery?.state === 'queued' && a.delivery.message === message
-  const waiting = Object.values(lastActions).filter(isWaiting)
-  if (waiting.length === 0) return lastActions
-  const at = Math.min(...waiting.map(a => a.at))
-
+export function withDeliveryId(
+  lastActions: Record<string, LastAction>,
+  rows: string[],
+  at: number,
+  message: string,
+  id: string,
+): Record<string, LastAction> {
   return Object.fromEntries(
-    Object.entries(lastActions).map(([id, a]) => [
-      id,
-      isWaiting(a) && a.at === at ? { ...a, delivery: { state: 'arrived' as const } } : a,
+    Object.entries(lastActions).map(([row, action]) => [
+      row,
+      rows.includes(row) &&
+      action.at === at &&
+      action.delivery?.state === 'queued' &&
+      action.delivery.id === undefined &&
+      action.delivery.message === message
+        ? { ...action, delivery: { ...action.delivery, id } }
+        : action,
     ]),
   )
 }
 
-/** Replaces the delivery of each row the press made at `at` that is still queued and passes `matches`. */
+/** A known delivery id acknowledges its press; old id-less receipts match only old id-less actions by time. */
+export function withArrival(
+  lastActions: Record<string, LastAction>,
+  message: string,
+  pressedAt?: number,
+  deliveryId?: string | null,
+): Record<string, LastAction> {
+  const isWaiting = (
+    a: LastAction,
+  ): a is LastAction & { delivery: Extract<Delivery, { state: 'queued' | 'unconfirmed' }> } =>
+    (a.delivery?.state === 'queued' || a.delivery?.state === 'unconfirmed') && a.delivery.message === message
+  const waiting = Object.values(lastActions).filter(
+    a => isWaiting(a) && (deliveryId ? a.delivery?.id === deliveryId : a.delivery?.id === undefined),
+  )
+  if (waiting.length === 0) return lastActions
+  const at = pressedAt ?? Math.min(...waiting.map(a => a.at))
+
+  return Object.fromEntries(
+    Object.entries(lastActions).map(([id, a]) => [
+      id,
+      isWaiting(a) && (deliveryId ? a.delivery?.id === deliveryId : a.delivery?.id === undefined && a.at === at)
+        ? { ...a, delivery: { state: 'arrived' as const } }
+        : a,
+    ]),
+  )
+}
+
+export function withUnconfirmed(
+  lastActions: Record<string, LastAction>,
+  message: string,
+  pressedAt?: number,
+  deliveryId?: string | null,
+): Record<string, LastAction> {
+  return Object.fromEntries(
+    Object.entries(lastActions).map(([id, action]) => [
+      id,
+      action.delivery?.state === 'queued' &&
+      action.delivery.message === message &&
+      (deliveryId
+        ? action.delivery.id === deliveryId
+        : pressedAt === undefined || (action.delivery.id === undefined && action.at === pressedAt))
+        ? { ...action, delivery: { ...action.delivery, state: 'unconfirmed' as const } }
+        : action,
+    ]),
+  )
+}
+
+export function withAcceptedSend(
+  lastActions: Record<string, LastAction>,
+  rows: string[],
+  at: number,
+  message: string,
+  deliveryId: string,
+): Record<string, LastAction> {
+  return withQueuedDelivery(
+    lastActions,
+    rows,
+    at,
+    text => text === message,
+    { state: 'queued', message, id: deliveryId },
+    deliveryId,
+  )
+}
+
+/** Replaces the delivery of each row the press made at `at` that still waits and passes `matches`. */
 function withQueuedDelivery(
   lastActions: Record<string, LastAction>,
   rows: string[],
   at: number,
   matches: (message: string) => boolean,
   delivery: Delivery,
+  deliveryId?: string,
 ): Record<string, LastAction> {
   const changed = rows.flatMap(id => {
     const a = lastActions[id]
-    return a?.at === at && a.delivery?.state === 'queued' && matches(a.delivery.message)
+    return a?.at === at &&
+      (a.delivery?.state === 'queued' || a.delivery?.state === 'unconfirmed') &&
+      (deliveryId ? a.delivery.id === deliveryId : a.delivery.id === undefined) &&
+      matches(a.delivery.message)
       ? [[id, { ...a, delivery }] as const]
       : []
   })
@@ -468,8 +565,16 @@ export function withFailure(
   rows: string[],
   at: number,
   reason: string,
+  deliveryId?: string,
 ): Record<string, LastAction> {
-  return withQueuedDelivery(lastActions, rows, at, () => true, { state: 'failed', reason })
+  return withQueuedDelivery(
+    lastActions,
+    rows,
+    at,
+    () => true,
+    { state: 'failed', reason, ...(deliveryId ? { id: deliveryId } : {}) },
+    deliveryId,
+  )
 }
 
 /**
@@ -483,8 +588,20 @@ export function withRewrite(
   at: number,
   message: string,
   entered: string,
+  deliveryId?: string,
 ): Record<string, LastAction> {
-  return withQueuedDelivery(lastActions, rows, at, m => m === message, { state: 'queued', message: entered })
+  return Object.fromEntries(
+    Object.entries(lastActions).map(([id, action]) => [
+      id,
+      rows.includes(id) &&
+      action.at === at &&
+      (action.delivery?.state === 'queued' || action.delivery?.state === 'unconfirmed') &&
+      (deliveryId ? action.delivery.id === deliveryId : action.delivery.id === undefined) &&
+      action.delivery.message === message
+        ? { ...action, delivery: { ...action.delivery, message: entered } }
+        : action,
+    ]),
+  )
 }
 
 /**
@@ -530,8 +647,11 @@ export type EffectHost = {
   now(): Promise<number> | number
   /** Opens or copies. Returns why it could not, or null. */
   perform(e: Exclude<Effect, { kind: 'send' }>): Promise<string | null>
-  /** Sends a message. Returns why it will not enter, or null once it entered or was queued. */
-  send(e: Extract<Effect, { kind: 'send' }>): Promise<string | null>
+  send(
+    e: Extract<Effect, { kind: 'send' }>,
+    deliveryId: string,
+  ): Promise<{ state: 'accepted' } | { state: 'rejected'; reason: string } | { state: 'unconfirmed'; reason: string }>
+  deliveryId(): string
   /** Changes the saved last actions, and returns them as changed. */
   saveLasts(change: (a: Record<string, LastAction>) => Record<string, LastAction>): Promise<Record<string, LastAction>>
   saveLedger(change: (l: Ledger) => Ledger): Promise<void>
@@ -548,7 +668,14 @@ export async function runLocalEffects(
   pending: LocalResult | undefined,
 ): Promise<LocalResult | null> {
   const errors: (string | null)[] = []
-  for (const e of effects) if (e.kind !== 'send') errors.push(await host.perform(e))
+  for (const e of effects)
+    if (e.kind !== 'send') {
+      try {
+        errors.push(await host.perform(e))
+      } catch (err) {
+        errors.push(err instanceof Error ? err.message : String(err))
+      }
+    }
   if (pending?.state !== 'pending') return null
   const result = finishedResult(pending, errors, await host.now())
   await host.saveLasts(a => withResult(a, rowId, pending.at, result))
@@ -557,10 +684,8 @@ export async function runLocalEffects(
 }
 
 /**
- * Sends an applied press's messages in order. The first that will not enter undoes the press: each row it
- * recorded at `at` reads why, an answer it made on `rowId` reopens its question, and its later messages stay
- * unsent. Its earlier messages, opens and copies stand. Returns why, and whether `rowId` still reads this press's
- * failure, or null when every message went.
+ * Sends an applied press's messages in order. A rejected send marks its rows failed and reopens an answer it closed.
+ * An unconfirmed send leaves its rows and ledger in place; later effects do not run.
  */
 export async function runSends(
   host: EffectHost,
@@ -568,16 +693,24 @@ export async function runSends(
   rowId: string,
   rows: string[],
   at: number,
-): Promise<{ reason: string; isRowFailed: boolean } | null> {
+): Promise<
+  { state: 'rejected'; reason: string; isRowFailed: boolean } | { state: 'unconfirmed'; reason: string } | null
+> {
   for (const e of effects) {
     if (e.kind !== 'send') continue
-    const reason = await host.send(e)
-    if (reason === null) continue
-    const last = (await host.saveLasts(a => withFailure(a, rows, at, reason)))[rowId]
-    const isRowFailed = last?.at === at && last.delivery?.state === 'failed'
+    const deliveryId = host.deliveryId()
+    const outcome = await host.send(e, deliveryId)
+    if (outcome.state === 'accepted') continue
+    if (outcome.state === 'unconfirmed') {
+      await host.saveLasts(a => withUnconfirmed(a, e.text, at, deliveryId))
+      return outcome
+    }
+    const reason = outcome.reason
+    const last = (await host.saveLasts(a => withFailure(a, rows, at, reason, deliveryId)))[rowId]
+    const isRowFailed = last?.at === at && last.delivery?.state === 'failed' && last.delivery.id === deliveryId
     if (isRowFailed && last.kind === 'mark') await host.saveLedger(l => reopenOnFailure(l, rowId, at))
 
-    return { reason, isRowFailed }
+    return { state: 'rejected', reason, isRowFailed }
   }
 
   return null
@@ -608,8 +741,20 @@ export function withLasts(
   lastActions: Record<string, LastAction>,
   lasts: Record<string, LastAction>,
   drop: string[],
+  pressOrder?: number,
 ): Record<string, LastAction> {
-  return Object.fromEntries(Object.entries({ ...lastActions, ...lasts }).filter(([id]) => !drop.includes(id)))
+  const merged = { ...lastActions }
+  for (const [id, last] of Object.entries(lasts)) {
+    const current = merged[id]
+    if (pressOrder !== undefined && current?.pressOrder !== undefined && current.pressOrder > pressOrder) continue
+    merged[id] = last
+  }
+  for (const id of drop) {
+    const current = merged[id]
+    if (pressOrder !== undefined && current?.pressOrder !== undefined && current.pressOrder > pressOrder) continue
+    delete merged[id]
+  }
+  return merged
 }
 
 /** The last action a press records on its row. */
@@ -626,7 +771,7 @@ function pressed(
   ledger: Ledger,
   last: LastAction | undefined,
   p: RowPress,
-  ctx: { now: number; turnsStarted: number; extraSteps: HelpStep[] },
+  ctx: { now: number; turnsStarted: number; extraSteps: HelpStep[]; localPressId?: string },
 ): PressResult {
   const stale = { stale: true as const }
   const record = (kind: LastAction['kind']) => recordPress(kind, actionId(p), pressText(p), ctx)
@@ -639,9 +784,10 @@ function pressed(
     // Only the person's own Done or Dismiss undoes, so an old drawing cannot reopen an answered, expired or agent-closed row.
     if (ledger.items.some(i => i.id === p.id) || ledger.findings.some(f => f.id === p.id)) return stale
     const closed = ledger.closed.findLast(c => c.id === p.id)
-    if (closed?.item && isUndoable(closed)) return { ...unchanged, ledger: reopenItem(ledger, p.id) }
+    if (closed?.item && isUndoable(closed)) return { ...unchanged, ledger: reopenItem(ledger, p.id), reopenedId: p.id }
     const closedFinding = ledger.closedFindings.findLast(f => f.id === p.id)
-    if (closedFinding && isUndoable(closedFinding)) return { ...unchanged, ledger: reopenFinding(ledger, p.id) }
+    if (closedFinding && isUndoable(closedFinding))
+      return { ...unchanged, ledger: reopenFinding(ledger, p.id), reopenedId: p.id }
     return stale
   }
 
@@ -712,7 +858,11 @@ function pressed(
       if (effects.some(e => e.kind === 'send')) return { ledger, last: record('handoff'), effects }
       return {
         ledger,
-        last: localLast(last, { action: actionId(p), text: pressText(p) }, pendingResult(effects, ctx.now)),
+        last: localLast(
+          last,
+          { action: actionId(p), text: pressText(p) },
+          pendingResult(effects, ctx.now, ctx.localPressId),
+        ),
         effects,
       }
     }

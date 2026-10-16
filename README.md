@@ -129,9 +129,7 @@ the agent replies, then "✓ Discussed".
 - **Terminal:** each action shows the letter that runs it. `1`, `2` and `3`
   switch tabs, and `j` and `k` move up and down. ctrl+x tab moves focus from
   the prompt to the line above it, then to the panel, then back to the prompt.
-- **Claude desktop app:** you click. `/inbox` sent as the first message of a
-  new session is not recognized as a command. Send it after the first
-  message.
+- **Claude desktop app:** you click. Type `/inbox` to open the pane.
 - **ChatGPT app:** you click, or press the same keys as in the terminal. The
   tab shows no letters.
 

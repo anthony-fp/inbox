@@ -6,17 +6,17 @@ The inbox is drawn in three looks: the Claude Code terminal, the Claude desktop 
 
 - The repo is public. Keep private paths, other people's names and session content out of commits.
 - Run `./scripts/check.sh` after every change.
-- Change a rule in the file that owns it, never in one look's drawing code. Shared modules in `hooks/` decide; `hooks/register.tsx` and `codex/src/tab.tsx` only draw. A change to a shared module reaches all three looks, and the Codex bundles must be rebuilt with `npm --prefix codex run build`.
+- Change shared behavior in the owner listed in `docs/looks.md`. Adapters map shared row and action descriptions to native controls. Hosts run events, storage and effects. Rebuild the Codex bundles after a shared-module change with `npm --prefix codex run build`.
 - When you finish a change to a shared module or a look's drawing code, say for each look whether the change applies and what you checked there. A difference between looks that is not in the "Differences on purpose" table in `docs/looks.md` is drift: fix it, or add it to the table with its reason.
-- Saved state outlives the code. Its shape is `PluginState` in `types/index.d.ts`. When a saved shape changes, convert old state in `upgradeLedger` or `upgradeState`, and in `upgraded` in `codex/src/state.ts`.
+- Saved state outlives the code. The mod uses `PluginState` in `types/index.d.ts`; Codex uses `SessionState` in `codex/src/state.ts`. Convert old shared fields in `upgradeLedger` or `upgradeLastActions`, and old host fields in `upgradeState` and `upgraded`.
 
 ## Text a model reads
 
 Test a change to text a model reads before keeping it. Small rewordings change behavior: a one-word edit to the findings rule in `systemText` made the inbox model re-add questions the user had dismissed.
 
-- Claude and Codex read the guidance `guidanceText` builds, and the `inbox:` texts that `inboxText`, `closedText`, `carryText` and `answerNote` build, all in `hooks/ledger.ts`. Each host's `Host` supplies its names and the guidance's first paragraph, so a change there reaches both agents.
+- Claude and Codex read the guidance `guidanceText` builds, and the `inbox:` texts that `inboxText`, `closedText`, `carryText` and `answerNote` build, all in `hooks/model-text.ts`. Each host's `Host` supplies its names and the guidance's first paragraph, so a change there reaches both agents.
 - Claude reads the tool descriptions and results from `hooks/tools.ts`. Codex reads those too, and its own tool texts in `codex/src/texts.ts`.
-- The inbox model reads `systemText` and the blocks from `buildPrompt` in `hooks/ledger.ts`. In the mod it is a Sonnet call after each reply. In Codex it is `codex exec` with the model in `MODEL` in `codex/src/update.ts`.
+- The inbox model reads `systemText` and the blocks from `buildPrompt` in `hooks/model-text.ts`. In the mod it is a Sonnet call after each reply. In Codex it is `codex exec` with the model in `MODEL` in `codex/src/update.ts`.
 - To compare two versions, print each one's prompt for the same sample exchange. Run each several times with `claude -p --model sonnet --tools "" --system-prompt …`, and for text Codex reads, with `codex exec` and the Codex model. Count the outcomes.
 - After a change to `systemText` or `buildPrompt`, run `./scripts/eval.sh`. It runs the inbox model on the cases in `evals/cases.json`, on Sonnet and on Codex, and fails a case that passes in too few runs. Add a case for each behavior a change sets out to fix. `check.sh` leaves the evals out, since each run calls a model.
 
@@ -28,7 +28,7 @@ Every action shows what it did as soon as it is pressed. When Discuss showed not
 - A Talk or Hand-off press leaves a ✓ and its label on the row, as in "✓ Discussed". A Talk press reads "Explaining…" or "Discussing…" until the agent's reply, and a handed-off row the reply left open reads "Still open". It stores its action id from `actionId()`, so the same action then reads "… again".
 - A Local press, an open or a copy, shows "Opening x…" on its row, then its result: "✓ Opened x", or in red why it could not. It never reports through a toast.
 - A Mark or View press shows itself, as closing a row or opening the text field does.
-- Every Button's press runs `runPress()`. It applies a row press with `applyPress()` and a PR press with `applyPrPress()`, then records the row's last action, so a click and a key press record the same.
+- Row and PR presses use `applyPress()` and `applyPrPress()`. The mod's `runPress()` and the Codex server run their effects through each host. A click and a key press record the same result.
 
 ## Tests and live checks
 

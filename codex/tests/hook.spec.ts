@@ -3,7 +3,8 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
-import { EMPTY, inboxText } from '../../hooks/ledger'
+import { EMPTY } from '../../hooks/ledger'
+import { inboxText } from '../../hooks/model-text'
 import { feedbackText } from '../../hooks/view'
 import { notePrompt, noteToolCall, viewOf } from '../src/core'
 import { handleHook } from '../src/hook'
@@ -246,17 +247,24 @@ test('the inbox line Codex reads names the Inbox tab, never the mod’s /inbox p
   }
 })
 
-test('a session file this build cannot read is kept aside, and the session starts over', async () => {
+test('a session file this build cannot read remains intact after a routine update', async () => {
   const dir = tempDir()
-  mkdirSync(join(dir, 'sessions'), { recursive: true })
-  writeFileSync(statePath(dir, 's1'), '{"ledger": ')
-  await assert.rejects(readState(dir, 's1'))
-
-  const s = await updateState(dir, 's1', s => ({ ...s, tabSeenAt: 5 }))
-  assert.equal(s.tabSeenAt, 5)
-  const kept = readdirSync(join(dir, 'sessions')).filter(f => f.startsWith('s1.json.unreadable-'))
-  assert.equal(kept.length, 1)
-  assert.equal(readFileSync(join(dir, 'sessions', kept[0]!), 'utf8'), '{"ledger": ')
+  const initial = await updateState(dir, 's1', s => ({
+    ...s,
+    ledger: { ...s.ledger, card: { goal: 'Keep me', done: [], now: '', running: [] } },
+  }))
+  const path = statePath(dir, 's1')
+  for (const saved of [
+    '{"ledger": ',
+    JSON.stringify({ ...initial, pending: { broken: true } }),
+    JSON.stringify({ ...initial, version: 2 }),
+  ]) {
+    writeFileSync(path, saved)
+    await assert.rejects(readState(dir, 's1'))
+    await assert.rejects(updateState(dir, 's1', s => ({ ...s, tabSeenAt: 5 })))
+    assert.equal(readFileSync(path, 'utf8'), saved)
+  }
+  assert.deepEqual(readdirSync(join(dir, 'sessions')), ['s1.json'])
 })
 
 test('a PR link in the agent’s reply is linked to the session', async () => {

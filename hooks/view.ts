@@ -16,10 +16,14 @@ import type {
   Tab,
   Turns,
 } from '../types'
-import { ago, isLapsed, questionNumbers, reopenFinding, reopenItem } from './ledger'
+import { isLapsed, reopenFinding, reopenItem } from './ledger'
+import { ago } from './text'
+import { questionNumbers } from './model-text'
 import type { ClosedState } from './ledger'
 import {
   actionId,
+  baseName,
+  stepIconKind,
   capitalized,
   clipLabel,
   isAwaitingReply,
@@ -61,15 +65,17 @@ export const CLOSED_SHOWN = 3
 export const SETTLED_MS = 5120
 /** How long a row's buttons ignore clicks after it opens, so a double-click cannot land on one that just drew. */
 export const PRESS_GUARD_MS = 400
-/**
- * How long a press's message waits on its way to the agent before its row reads "Queued". A message to an idle agent
- * arrives within this, so its row goes straight to its outcome.
- */
+/** Milliseconds before a queued delivery is shown. */
 export const QUEUED_AFTER_MS = 1000
 
 /** Whether a press's message has waited on its way to the agent for QUEUED_AFTER_MS or more. */
 export function isQueuedAt(last: LastAction | undefined, now: number): boolean {
   return last?.delivery?.state === 'queued' && now - last.at >= QUEUED_AFTER_MS
+}
+
+function pendingDeliveryAt(last: LastAction | undefined, now: number): 'queued' | 'unconfirmed' | null {
+  if (last?.delivery?.state === 'unconfirmed') return 'unconfirmed'
+  return isQueuedAt(last, now) ? 'queued' : null
 }
 
 /** Whether a row opened at `openedAt` still ignores clicks. 0 means no click opened it, so nothing is guarded. */
@@ -95,21 +101,28 @@ export type ViewInput = {
   now: number
 }
 
+export type ClosedDelivery = 'queued' | 'unconfirmed' | { error: string; canUndo: boolean } | null
+
 /**
  * A handed-off row stays in its place, folded, and leaves the count. A settled
  * row just closed: it stays in its place with its outcome, `label`, and leaves
  * the count. `canUndo` when the person's own Done or Dismiss closed it.
- * `isQueued` once the answer that closed it has waited QUEUED_AFTER_MS without reaching the agent.
+ * `delivery` shows queued answers after QUEUED_AFTER_MS, and unconfirmed answers immediately.
  */
 export type RowState =
   | { is: 'open' }
   | { is: 'handedOff' }
-  | { is: 'settled'; label: string; at: number; canUndo: boolean; isQueued: boolean; isLapsed: boolean }
+  | {
+      is: 'settled'
+      label: string
+      at: number
+      canUndo: boolean
+      delivery: ClosedDelivery
+      isLapsed: boolean
+    }
 
 /**
- * What a row says about its last press: "✓ Explained · 1m ago". While its message has waited QUEUED_AFTER_MS without
- * arriving it reads "Queued: Explain · 1m ago", and once it failed, "Not sent: <reason>" with the press [Try again]
- * repeats, if any. A Talk press reads
+ * What a row says about its last press: "✓ Explained · 1m ago". A Talk press reads
  * "Explaining…" until the agent's reply, so its ✓ claims only an explanation there is to read. A row a hand-off left
  * open after the agent's reply reads "Still open".
  * A Local press's result shows while pending, for SETTLED_MS once done,
@@ -120,6 +133,7 @@ export type Feedback =
   | { is: 'working'; label: string; at: number }
   | { is: 'stillOpen'; at: number }
   | { is: 'queued'; label: string; at: number }
+  | { is: 'unconfirmed'; label: string; at: number }
   | { is: 'notSent'; reason: string; retry: RowPress | null }
   | { is: 'local'; result: LocalResult }
   | { is: 'note'; note: RowNote['note']; at: number }
@@ -132,11 +146,24 @@ export type Look = 'terminal' | 'desktop' | 'codex'
 /** The looks the mod draws. */
 export type ModLook = Exclude<Look, 'codex'>
 
+export type ActionEmphasis = 'primary' | 'normal' | 'quiet'
+export type ActionIcon = 'done' | 'retry' | 'open' | 'copy' | 'run'
+
+export const ROW_COPY = {
+  retry: 'Try again',
+  send: 'Send',
+  cancel: 'Cancel',
+  relevantFile: 'Relevant file: ',
+  allOptions: (count: number) => `All ${count} options`,
+} as const
+
 export type ActionView = {
   press: RowPress
   /** "Explain", or "Explain again" when the row's last action was this one. */
   label: string
   kind: PressKind
+  emphasis: ActionEmphasis
+  icon?: ActionIcon
   /** The option Claude recommended. */
   isPrimary: boolean
   /** An option behind [All N options]. */
@@ -154,6 +181,9 @@ export type RowView = {
   handle: string
   title: string
   at: number | null
+  detail: string | null
+  fileName: string | null
+  replyKind: 'answer' | 'reply'
   item: Item | null
   finding: Finding | null
   /** The item's own steps, then the host's extra ones. */
@@ -164,6 +194,28 @@ export type RowView = {
   actions: ActionView[]
 }
 
+export function rowMark(row: RowView, look: Look): { text: string; tone?: 'done' | 'issue' } {
+  if (row.state.is === 'handedOff' && row.feedback?.is !== 'unconfirmed') return { text: '✓', tone: 'done' }
+  if (row.finding) {
+    const group = FINDING_GROUPS[row.finding.kind]
+    return { text: group.mark, tone: group.tone }
+  }
+  return { text: look === 'terminal' ? row.handle : '' }
+}
+
+export function replyHint(row: RowView, agent: string): string {
+  return row.replyKind === 'answer' ? 'Your answer' : `Your reply to ${agent}`
+}
+
+export function actionLabel(action: Pick<ActionView, 'label' | 'isPrimary'>): string {
+  return action.isPrimary ? `${action.label} (recommended)` : action.label
+}
+
+export function rowFeedbackText(row: RowView, look: Look): string | null {
+  const f = row.feedback
+  return f ? (f.is === 'done' && row.state.is === 'handedOff' ? f.label : feedbackText(f, look)) : null
+}
+
 export type InboxView = {
   needsYou: {
     /** Open questions, and open tasks that are not handed off. */
@@ -171,12 +223,14 @@ export type InboxView = {
     questions: RowView[]
     tasks: RowView[]
     /** Every close the ledger keeps, newest first, settled rows included. */
-    closed: { questions: Closed[]; tasks: Closed[] }
+    closed: { questions: ClosedView<Closed>[]; tasks: ClosedView<Closed>[] }
   }
   /** Newest first. The count leaves out handed-off findings. `closed` is every close the ledger keeps, newest first. */
-  findings: { count: number; rows: RowView[]; closed: ClosedFinding[] }
+  findings: { count: number; rows: RowView[]; closed: ClosedView<ClosedFinding>[] }
   status: ItemStatus
 }
+
+export type ClosedView<T> = T & { delivery: ClosedDelivery }
 
 /** Every row a view lists: questions, tasks, then findings. */
 export function allRows(v: InboxView): RowView[] {
@@ -258,7 +312,8 @@ export function feedbackOf(
   if (result && (result.state !== 'done' || now - result.at < SETTLED_MS)) return { is: 'local', result }
   if (!last || last.kind === 'local') return null
   const delivery = last.delivery
-  if (isQueuedAt(last, now)) return { is: 'queued', label: last.text, at: last.at }
+  const pending = pendingDeliveryAt(last, now)
+  if (pending) return { is: pending, label: last.text, at: last.at }
   if (delivery?.state === 'failed') return { is: 'notSent', reason: delivery.reason, retry: retryOf(id, last) }
   const isAwaiting = isAwaitingReply(last, turns)
   const working = WORKING_LABELS[last.action]
@@ -312,8 +367,10 @@ export function isFailure(f: Feedback | null): boolean {
 }
 
 /** Feedback that reads with its age, in its place on the row's top line: a press's ✓, or where its message is. */
-export function hasAge(f: Feedback): f is Extract<Feedback, { is: 'done' | 'working' | 'stillOpen' | 'queued' }> {
-  return f.is === 'done' || f.is === 'working' || f.is === 'stillOpen' || f.is === 'queued'
+export function hasAge(
+  f: Feedback,
+): f is Extract<Feedback, { is: 'done' | 'working' | 'stillOpen' | 'queued' | 'unconfirmed' }> {
+  return f.is === 'done' || f.is === 'working' || f.is === 'stillOpen' || f.is === 'queued' || f.is === 'unconfirmed'
 }
 
 // Where a copied command runs. The desktop app's composer is not known to take "!" for shell mode.
@@ -353,7 +410,9 @@ export function feedbackText(f: Feedback, look: Look): string {
     case 'local':
       return localText(f.result, look)
     case 'queued':
-      return `Queued: ${f.label}`
+      return deliveryLabel(f.is, f.label)
+    case 'unconfirmed':
+      return deliveryLabel(f.is, f.label)
     case 'notSent':
       return `Not sent: ${f.reason}`
     case 'done':
@@ -365,6 +424,15 @@ export function feedbackText(f: Feedback, look: Look): string {
     case 'stillOpen':
       return 'Still open'
   }
+}
+
+function deliveryLabel(state: 'queued' | 'unconfirmed', label: string): string {
+  return state === 'queued' ? `Queued: ${label}` : `Delivery unconfirmed: ${label}`
+}
+
+export function settledLabel(label: string, delivery: ClosedDelivery): string {
+  if (delivery && typeof delivery === 'object') return `${label} · Not sent: ${delivery.error}`
+  return delivery === null ? label : deliveryLabel(delivery, label)
 }
 
 /** A step's kind: one that asks Claude to run a command hands the row off; the rest open or copy. */
@@ -426,6 +494,17 @@ function actionsOf(
         ? `${label} again`
         : label,
     kind,
+    emphasis:
+      flags.isPrimary || press.action === 'done' || press.action === 'address'
+        ? 'primary'
+        : press.action === 'discuss' || press.action === 'explain' || press.action === 'dismiss'
+          ? 'quiet'
+          : 'normal',
+    ...(press.action === 'done'
+      ? { icon: 'done' as const }
+      : press.action === 'step' && stepIconKind(steps[press.step])
+        ? { icon: stepIconKind(steps[press.step])! }
+        : {}),
     isPrimary: flags.isPrimary ?? false,
     isFolded: flags.isFolded ?? false,
     isFollowUp: FOLLOW_UPS.has(press.action),
@@ -594,13 +673,13 @@ export type ActionKey = { slot: 'action'; action: ActionView; hotkey: string }
  * `allOptions` shows a question's folded options.
  */
 export type PlannedKey =
-  | { slot: 'retry'; press: RowPress; kind: PressKind }
+  | { slot: 'retry'; press: RowPress; kind: PressKind; label: string; emphasis: 'normal'; icon: 'retry' }
   | {
       slot: 'choice'
       action: ActionView & { press: Extract<RowPress, { action: 'answer' | 'step' }> }
       hotkey?: string
     }
-  | { slot: 'allOptions'; count: number }
+  | { slot: 'allOptions'; count: number; label: string; emphasis: 'quiet' }
   | ActionKey
 
 /**
@@ -624,7 +703,7 @@ export function rowKeyPlan(
   const retry = r.feedback?.is === 'notSent' ? r.feedback.retry : null
   if (retry) {
     const kind = r.actions.find(a => actionId(a.press) === actionId(retry))?.kind ?? 'talk'
-    keys.push({ slot: 'retry', press: retry, kind })
+    keys.push({ slot: 'retry', press: retry, kind, label: ROW_COPY.retry, emphasis: 'normal', icon: 'retry' })
   }
   let letters = 0
   for (const [n, a] of shown.entries()) {
@@ -633,7 +712,12 @@ export function rowKeyPlan(
       const hotkey = letters < CHOICE_KEYS.length ? { hotkey: CHOICE_KEYS[letters++]! } : {}
       keys.push({ slot: 'choice', action: { ...a, press }, ...hotkey })
       if (n === lastOption && folded > 0)
-        keys.push({ slot: 'allOptions', count: r.actions.filter(x => x.press.action === 'answer').length })
+        keys.push({
+          slot: 'allOptions',
+          count: r.actions.filter(x => x.press.action === 'answer').length,
+          label: ROW_COPY.allOptions(r.actions.filter(x => x.press.action === 'answer').length),
+          emphasis: 'quiet',
+        })
     } else if (a.hotkey)
       (press.action === 'explain' && hasKeys ? hidden : a.isFollowUp ? more : keys).push({
         slot: 'action',
@@ -689,8 +773,12 @@ export function inboxView({
         canUndo: isUndoable(closed),
         // Dismissed, expired or closed by the agent: drawn muted, as the Closed fold draws it.
         isLapsed: isLapsed(closed),
-        // Queued only while the answer press that closed the row waits to reach Claude. Claude's own close sends nothing.
-        isQueued: closed.how === 'answered' && last?.kind === 'mark' && last.at === at && isQueuedAt(last, now),
+        delivery:
+          'doneNotification' in closed && closed.doneNotification?.error !== undefined
+            ? { error: closed.doneNotification.error, canUndo: isUndoable(closed) }
+            : (closed.how === 'answered' || closed.how === 'done') && last?.kind === 'mark' && last.at === at
+              ? pendingDeliveryAt(last, now)
+              : null,
       }
     }
 
@@ -703,7 +791,7 @@ export function inboxView({
         label: fixLabel(sent),
         at: last.at,
         canUndo: true,
-        isQueued: isQueuedAt(last, now),
+        delivery: pendingDeliveryAt(last, now),
         isLapsed: false,
       }
 
@@ -729,6 +817,9 @@ export function inboxView({
       handle: n === undefined ? '•' : `${n})`,
       title: item.ask,
       at: item.at,
+      detail: null,
+      fileName: null,
+      replyKind: item.kind === 'question' ? 'answer' : 'reply',
       item,
       finding: null,
       steps: stepsOf(item, extraSteps[item.id] ?? []),
@@ -752,17 +843,36 @@ export function inboxView({
         handle: '•',
         title: finding.title,
         at: finding.at,
+        detail: finding.detail,
+        fileName: finding.path ? baseName(finding.path) : null,
+        replyKind: 'reply',
         item: null,
         finding,
         steps: [],
       }),
     )
-  const closed = [...ledger.closed].reverse()
+  const closed: ClosedView<Closed>[] = [...ledger.closed].reverse().map(d => ({
+    ...d,
+    delivery:
+      d.doneNotification?.error !== undefined
+        ? { error: d.doneNotification.error, canUndo: isUndoable(d) }
+        : (d.how === 'answered' || d.how === 'done') &&
+            lastActions[d.id]?.kind === 'mark' &&
+            lastActions[d.id]?.at === d.at
+          ? pendingDeliveryAt(lastActions[d.id], now)
+          : null,
+  }))
   // Listed in the Closed fold as the person's choice, while the ledger keeps them open for the agent to close. Like a
   // close, one counts from the press; each fold leaves out the rows it still draws settled.
-  const fixesSent: ClosedFinding[] = ledger.findings
+  const fixesSent: ClosedView<ClosedFinding>[] = ledger.findings
     .filter(f => isFixSent(lastActions[f.id]))
-    .map(f => ({ ...f, how: 'answered', outcome: fixLabel(f), closedAt: lastActions[f.id]!.at }))
+    .map(f => ({
+      ...f,
+      how: 'answered',
+      outcome: fixLabel(f),
+      closedAt: lastActions[f.id]!.at,
+      delivery: pendingDeliveryAt(lastActions[f.id], now),
+    }))
 
   return {
     needsYou: {
@@ -774,7 +884,9 @@ export function inboxView({
     findings: {
       count: findingRows.filter(r => r.state.is === 'open').length,
       rows: findingRows,
-      closed: [...ledger.closedFindings, ...fixesSent].sort((a, b) => b.closedAt - a.closedAt),
+      closed: [...ledger.closedFindings.map(f => ({ ...f, delivery: null as null })), ...fixesSent].sort(
+        (a, b) => b.closedAt - a.closedAt,
+      ),
     },
     status,
   }

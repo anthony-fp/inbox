@@ -2,12 +2,20 @@
 // the Inbox tab with the app-only tools it calls. It speaks MCP over stdio by
 // hand, since it needs only a few message shapes.
 
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
 
-import { applyPrPress, fetchTracked, isDismissing, isTracked, prRowId, splitLinked } from '../../hooks/pr-tab'
-import type { PrPress } from '../../hooks/pr-tab'
+import {
+  applyPrPress,
+  fetchTracked,
+  isDismissing,
+  isTracked,
+  itemPrSteps,
+  prRowId,
+  splitLinked,
+} from '../../hooks/pr-tab'
+import type { Applied, PrPress } from '../../hooks/pr-tab'
 import {
   applyPress,
   demoRecord,
@@ -15,13 +23,17 @@ import {
   doneWake,
   localPath,
   markSentToAgent,
+  recordPress,
+  withDeliveryId,
   noteText,
   openCommands,
   runLocalEffects,
   runSends,
+  withAcceptedSend,
   withLasts,
+  withUnconfirmed,
 } from '../../hooks/presses'
-import type { Effect, EffectHost, RowPress } from '../../hooks/presses'
+import type { EffectHost, RowPress } from '../../hooks/presses'
 import {
   CLOSE_DESCRIPTION,
   CLOSE_SCHEMA,
@@ -37,10 +49,11 @@ import { ghFinder, ghIn } from './gh'
 import { SETTLED_MS } from '../../hooks/view'
 import { SETTLE_WINDOW_MS } from './settle'
 import { readState, updateState } from './state'
+import { reconcileUpdateStatus } from './update'
 import type { SessionState } from './state'
 import { CODEX, INBOX_DESCRIPTION, inboxToolText, VIEW_DESCRIPTION } from './texts'
 import type { Run } from './run'
-import type { LastAction, Ledger, PrViews, RowNote } from '../../types'
+import type { LastAction, PrViews, RowNote } from '../../types'
 
 /**
  * The tab's address for one build of its page. Codex keeps a tab's page by its address, even across server
@@ -53,14 +66,13 @@ export function tabUri(tabHtml: string): string {
 const TAB_MIME = 'text/html;profile=mcp-app'
 
 const APP_ONLY = { ui: { visibility: ['app'] } }
-const MAX_SENT = 20
 /** How old a session's PRs may be before a view asks gh again. */
 const PRS_REFRESH_MS = 120_000
 /** How soon a PR linked since the last fetch, which has no view yet, is fetched. */
 const NEW_PR_FETCH_MS = 15_000
 
 /** A press as the server applies it: the ledger after it, the last actions it records and removes, and its effects. */
-type Pressed = { ledger: Ledger; lasts: Record<string, LastAction>; drop: string[]; effects: Effect[] }
+type Pressed = Exclude<Applied, { stale: true }>
 
 /** The PR views a session still shows: those it tracks, and a PR dismissed moments ago, which draws settled. */
 function viewsStillShown(
@@ -171,6 +183,7 @@ export type PressReply = {
   copy: { text: string; name: string } | null
   error: string | null
   note: RowNote['note'] | null
+  delivery?: 'unconfirmed'
 }
 
 export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<string, unknown> | null> {
@@ -183,44 +196,106 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
   const prsFetchedAt = new Map<string, number>()
   let isGhMissing = false
 
-  /**
-   * Sends a message into the session as the person's own: it runs after any
-   * running turn. Returns the id `codex queue` printed for it, or null when it printed none.
-   */
-  async function queue(s: SessionState, message: string): Promise<string | null> {
-    const cli = s.cliPath ?? (await deps.fallbackCli())
-    const r = await deps.exec([cli, 'queue', '--thread', s.sessionId, '--message', message], {
-      cwd: s.root || '/',
-      timeoutMs: 15_000,
-    })
-    if (r.code !== 0) throw new Error(r.stderr.trim() || `codex queue exited ${r.code}`)
-
-    return /Queued message (\S+)/.exec(r.stdout)?.[1] ?? null
+  async function queueMessage(
+    s: SessionState,
+    message: string,
+    resolvedCli?: string,
+  ): Promise<
+    | { state: 'accepted'; queuedId: string | null }
+    | { state: 'rejected'; reason: string }
+    | { state: 'unconfirmed'; reason: string }
+  > {
+    let cli: string
+    try {
+      cli = resolvedCli ?? s.cliPath ?? (await deps.fallbackCli())
+    } catch (err) {
+      return { state: 'rejected', reason: err instanceof Error ? err.message : String(err) }
+    }
+    try {
+      const r = await deps.exec([cli, 'queue', '--thread', s.sessionId, '--message', message], {
+        cwd: s.root || '/',
+        timeoutMs: 15_000,
+      })
+      if (r.code !== 0) return { state: 'unconfirmed', reason: r.stderr.trim() || `codex queue exited ${r.code}` }
+      return { state: 'accepted', queuedId: /Queued message (\S+)/.exec(r.stdout)?.[1] ?? null }
+    } catch (err) {
+      return { state: 'unconfirmed', reason: err instanceof Error ? err.message : String(err) }
+    }
   }
 
-  /**
-   * Tells an idle Codex the person did tasks it waits on, as `doneWake` decides. It sends under the session's lock,
-   * so an Undo lands before or after it, and the closes it names are marked sent either way, so a failing
-   * `codex queue` is not retried at every poll. Codex then reads them beside the next prompt.
-   */
+  function completedAttempt(
+    state: SessionState,
+    deliveryId: string,
+    outcome: Awaited<ReturnType<typeof queueMessage>>,
+  ): SessionState {
+    if (outcome.state === 'rejected') return { ...state, sent: state.sent.filter(s => s.deliveryId !== deliveryId) }
+    const index = state.sent.findIndex(s => s.deliveryId === deliveryId)
+    const attempt = state.sent[index]
+    if (!attempt) return state
+    const earlierUnknown = state.sent
+      .slice(0, index)
+      .some(s => s.text === attempt.text && (s.phase === 'attempting' || s.phase === 'uncertain'))
+    let lastActions = state.lastActions
+    if (outcome.state === 'accepted' && !earlierUnknown) {
+      for (const [id, action] of Object.entries(lastActions)) {
+        if (action.delivery && 'id' in action.delivery && action.delivery.id === deliveryId)
+          lastActions = withAcceptedSend(lastActions, [id], action.at, attempt.text, deliveryId)
+      }
+    }
+    return {
+      ...state,
+      lastActions,
+      sent: state.sent.map(s =>
+        s.deliveryId === deliveryId
+          ? {
+              ...s,
+              phase: outcome.state === 'accepted' ? ('accepted' as const) : ('uncertain' as const),
+              queuedId: outcome.state === 'accepted' ? outcome.queuedId : null,
+            }
+          : s,
+      ),
+    }
+  }
+
   async function wakeForDone(id: string) {
     const check = (s: SessionState) =>
       doneWake(s.ledger, { now: now(), windowMs: SETTLE_WINDOW_MS, isTurnRunning: s.turn.person !== null })
     if (!check(await readState(dir, id))) return
-    await updateState(dir, id, async s => {
+    await updateState(dir, id, async (s, checkpoint) => {
       const wake = check(s)
       if (!wake) return s
-      const ledger = markSentToAgent(s.ledger, wake.ids)
-      const queuedId = await queue(s, wake.text).catch(() => undefined)
-      if (queuedId === undefined) return { ...s, ledger }
-      const sent = {
-        text: wake.text,
-        press: { id: wake.ids[0] ?? '', action: 'done' as const },
-        at: now(),
-        row: null,
-        queuedId,
+      const cli = s.cliPath ?? (await deps.fallbackCli())
+      const deliveryId = randomUUID()
+      const lastActions = { ...s.lastActions }
+      for (const closed of s.ledger.closed) {
+        if (!wake.ids.includes(closed.id)) continue
+        const previous = lastActions[closed.id]
+        const last =
+          previous?.kind === 'mark' && previous.action === 'done' && previous.at === closed.at
+            ? previous
+            : recordPress('mark', 'done', 'Done', { now: closed.at, turnsStarted: s.presence.turnsStarted })
+        lastActions[closed.id] = { ...last, delivery: { state: 'unconfirmed', message: wake.text, id: deliveryId } }
       }
-      return { ...s, ledger, sent: [...s.sent, sent].slice(-MAX_SENT) }
+      const next: SessionState = {
+        ...s,
+        ledger: markSentToAgent(s.ledger, wake.ids),
+        lastActions,
+        sent: [
+          ...s.sent,
+          {
+            text: wake.text,
+            press: { id: wake.ids[0]!, action: 'done' },
+            at: now(),
+            row: wake.ids[0]!,
+            queuedId: null,
+            pressedAt: null,
+            deliveryId,
+            phase: 'attempting',
+          },
+        ],
+      }
+      await checkpoint(next)
+      return completedAttempt(next, deliveryId, await queueMessage(next, wake.text, cli))
     })
   }
 
@@ -228,13 +303,28 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
   const currentPage = async () => (await deps.devPage?.()) ?? deps.tabHtml
 
   /** Applies a row press or a PR press to the session's state. Pure. */
-  const pressOn = (s: SessionState, p: RowPress | PrPress, at = now()): Pressed | { stale: true } => {
-    const ctx = { now: at, turnsStarted: s.presence.turnsStarted }
+  const pressOn = (
+    s: SessionState,
+    p: RowPress | PrPress,
+    at = now(),
+    localPressId?: string,
+  ): Pressed | { stale: true } => {
+    const ctx = { now: at, turnsStarted: s.presence.turnsStarted, localPressId }
     if ('ref' in p) return applyPrPress(s.ledger, s.prViews, s.lastActions, p, ctx)
-    const r = applyPress(s.ledger, s.lastActions[p.id], p, { ...ctx, extraSteps: [] })
+    const item = s.ledger.items.find(i => i.id === p.id)
+    const r = applyPress(s.ledger, s.lastActions[p.id], p, {
+      ...ctx,
+      extraSteps: item ? itemPrSteps(item, s.prViews, s.ledger.prs) : [],
+    })
     if ('stale' in r) return r
 
-    return { ledger: r.ledger, lasts: r.last ? { [p.id]: r.last } : {}, drop: [], effects: r.effects }
+    return {
+      ledger: r.ledger,
+      lasts: r.last ? { [p.id]: r.last } : {},
+      drop: [],
+      effects: r.effects,
+      ...(r.reopenedId ? { reopenedId: r.reopenedId } : {}),
+    }
   }
 
   /**
@@ -285,9 +375,10 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
   /** The view for the tab, with the session it was read for and the page the server serves now. */
   const served = async (s: SessionState, id: string, isDemo = false): Promise<TabView> => {
     const loadError = deps.loadError?.()
+    const current = !isDemo && s.presence.isUpdating ? await reconcileUpdateStatus(dir, id) : s
 
     return {
-      ...viewOf(s, now()),
+      ...viewOf(current, now()),
       thread: id,
       isFetchingPrs: !isDemo && fetchingPrs.has(id),
       isGhMissing: !isDemo && isGhMissing,
@@ -297,24 +388,23 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     }
   }
 
-  /**
-   * Applies a press drawn for `thread` in session `id`'s state, and runs its effects with `runSends` and
-   * `runLocalEffects`. Its messages send under the lock that applies it, so no prompt reads the press before its
-   * message went, and a failed send's undo lands in the same write. Its opens run after, outside the lock. A press
-   * drawn for another session, or for a row that changed, sends nothing and returns a stale note.
-   */
   async function onPress(id: string, p: RowPress | PrPress, thread: unknown): Promise<PressReply> {
     const rowId = 'ref' in p ? prRowId(p) : p.id
+    const localPressId = randomUUID()
+    let checkpointSaved = false
+    let appliedSaved = false
+    let isUnconfirmed = false
     let copy: PressReply['copy'] = null
     let error: string | null = null
     let note: PressReply['note'] = thread === id ? null : 'stale'
     // The press as applied under the lock, read once the lock is released.
-    const pressed: { r?: Pressed } = {}
+    const pressed: { r?: Pressed; deliveryId?: string } = {}
     /** The press's effects, saving through `change`: the state a held lock writes, or a fresh lock each time. */
     const hostFor = (
       change: (f: (s: SessionState) => SessionState | Promise<SessionState>) => Promise<SessionState>,
     ): EffectHost => ({
       now,
+      deliveryId: () => pressed.deliveryId ?? randomUUID(),
       // The tab copies, and shows the text to copy by hand when its frame has no clipboard.
       perform: async e => {
         if (e.kind === 'copy') {
@@ -323,52 +413,91 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
         }
         return open(await readState(dir, id), e.target)
       },
-      send: e =>
-        change(async s => {
-          const queuedId = await queue(s, e.text)
-          const sent = { text: e.text, press: e.by, at: now(), row: rowId, queuedId }
-          return { ...s, sent: [...s.sent, sent].slice(-MAX_SENT) }
+      send: async (e, deliveryId) => {
+        let sentOutcome: Awaited<ReturnType<typeof queueMessage>> | null = null
+        return change(async s => {
+          const outcome = await queueMessage(s, e.text)
+          sentOutcome = outcome
+          if (outcome.state === 'unconfirmed') isUnconfirmed = true
+          return completedAttempt(s, deliveryId, outcome)
         }).then(
-          () => null,
-          (err: unknown) => (err instanceof Error ? err.message : String(err)),
-        ),
+          () =>
+            sentOutcome?.state === 'accepted'
+              ? { state: 'accepted' as const }
+              : sentOutcome?.state === 'rejected'
+                ? { state: 'rejected' as const, reason: sentOutcome.reason }
+                : { state: 'unconfirmed' as const, reason: sentOutcome?.reason ?? 'Queue outcome unknown' },
+          (err: unknown) => ({
+            state: 'unconfirmed' as const,
+            reason: err instanceof Error ? err.message : String(err),
+          }),
+        )
+      },
       saveLasts: async f => (await change(s => ({ ...s, lastActions: f(s.lastActions) }))).lastActions,
       saveLedger: async f => {
         await change(s => ({ ...s, ledger: f(s.ledger) }))
       },
     })
-    await updateState(dir, id, async s => {
+    await updateState(dir, id, async (s, checkpoint) => {
       if (note) return s
       // Read under the lock, so the press is timed after every write that landed before it.
       const at = now()
-      const r = pressOn(s, p, at)
+      const r = pressOn(s, p, at, localPressId)
       if ('stale' in r) {
         note = 'stale'
         return s
       }
       pressed.r = r
+      const firstSend = r.effects.find(e => e.kind === 'send')
+      pressed.deliveryId = firstSend ? randomUUID() : undefined
+      const pressLasts =
+        firstSend && pressed.deliveryId
+          ? withDeliveryId(r.lasts, Object.keys(r.lasts), at, firstSend.text, pressed.deliveryId)
+          : r.lasts
       let next: SessionState = {
         ...s,
         ledger: r.ledger,
-        lastActions: withLasts(s.lastActions, r.lasts, r.drop),
-        // Codex was told of the close; with the id out of `told`, a second close of the row is reported too.
-        told:
-          !('ref' in p) && p.action === 'undo'
-            ? { ...s.told, closed: s.told.closed.filter(id => id !== p.id) }
-            : s.told,
+        lastActions: withLasts(s.lastActions, pressLasts, r.drop),
+        told: r.reopenedId ? { ...s.told, closed: s.told.closed.filter(id => id !== r.reopenedId) } : s.told,
+      }
+      if (firstSend && pressed.deliveryId) {
+        next = {
+          ...next,
+          lastActions: withUnconfirmed(next.lastActions, firstSend.text, at, pressed.deliveryId),
+          sent: [
+            ...next.sent,
+            {
+              text: firstSend.text,
+              press: firstSend.by,
+              at: now(),
+              row: rowId,
+              queuedId: null,
+              pressedAt: at,
+              deliveryId: pressed.deliveryId,
+              phase: 'attempting',
+            },
+          ],
+        }
+        await checkpoint(next)
+        checkpointSaved = true
       }
       const held = hostFor(async f => (next = await f(next)))
       const failed = await runSends(held, r.effects, rowId, Object.keys(r.lasts), at)
-      if (failed) error = `Not sent: ${failed.reason}`
+      if (failed?.state === 'rejected') error = `Not sent: ${failed.reason}`
 
       return next
-    }).catch((err: unknown) => {
-      error = `Not sent: ${err instanceof Error ? err.message : String(err)}`
     })
+      .then(() => {
+        appliedSaved = true
+      })
+      .catch((err: unknown) => {
+        if (checkpointSaved) isUnconfirmed = true
+        error = checkpointSaved ? null : `Not sent: ${err instanceof Error ? err.message : String(err)}`
+      })
     // A server restart loses the timer; the tab's next poll checks again.
     if (pressed.r && !('ref' in p) && p.action === 'done')
       setTimeout(() => void wakeForDone(id).catch(() => undefined), SETTLE_WINDOW_MS).unref()
-    if (pressed.r)
+    if (pressed.r && (appliedSaved || checkpointSaved))
       await runLocalEffects(
         hostFor(f => updateState(dir, id, f)),
         pressed.r.effects,
@@ -376,7 +505,13 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
         pressed.r.lasts[rowId]?.result,
       )
 
-    return { view: await served(await readState(dir, id), id), copy, error, note }
+    return {
+      view: await served(await readState(dir, id), id),
+      copy,
+      error,
+      note,
+      ...(isUnconfirmed ? { delivery: 'unconfirmed' as const } : {}),
+    }
   }
 
   /** Opens a link, or a path as `openCommands` decides. Returns why it could not, or null. */

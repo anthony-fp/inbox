@@ -1,6 +1,6 @@
 # The Claude desktop app
 
-Checked on 2026-10-08, with versions rechecked on 2026-10-09. The app is version 2.31226.1 on macOS (its `Info.plist`). The terminal `claude` is 2.1.296. The app holds its own Claude Code copies, 2.1.293 and 2.1.295. On 2026-10-08 it was 2.31226.0 and held 2.1.289 and 2.1.293.
+Startup and Reply focus were rechecked on 2026-10-15 in Claude desktop 2.42304.0 with its bundled Claude Code engine 2.1.299. Other results below retain their original dates and versions. The initial reference used desktop 2.31226.0 and 2.31226.1, with engine copies from 2.1.289 through 2.1.295.
 
 The desktop app is the inbox's third client, beside the terminal and Codex. Its Code mode runs Claude Code sessions, so the inbox mod (the plugin code in `hooks/`) can run there. Its Claude mode is the chat side of the app; whether it can host any part of the inbox is unknown.
 
@@ -12,7 +12,7 @@ Terms used below:
 - **Attach**: a client such as the desktop app connecting to a running session (`session.attach`).
 - **SDK host**: a program that runs Claude Code headless and talks to it over stream-json, as the Agent SDK does.
 - **Guard**: the built-in mod `sec-default@builtin` (shown as `cc-plugin-sec-default`), which runs ahead of a user's mods in some setups.
-- **Live**: checked on this Mac on 2026-10-08, not taken from docs.
+- **Live**: checked in the app on the stated date. Undated observations come from the initial 2026-10-08 probe.
 
 ## The facts that most constrain the inbox
 
@@ -42,7 +42,7 @@ On 2026-10-08, a throwaway mod logged one new local Code-mode session in the app
 
 What follows from it:
 
-- **Turning on.** A desktop session turns on at `session.attach`, never at `session.start`. The first prompt can arrive before setup that runs at attach has finished.
+- **Turning on in this probe.** Inbox activated at `session.attach`. The first prompt arrived before its setup finished. Current Inbox registers its command during `session.start` and waits for initialization when the command runs.
 - **Tools on turn one.** A tool registered at attach was still offered on the first turn, because the turn starts after registration finishes. The margin was 70 ms. This is one run, not a guarantee.
 - **The person's words.** A typed prompt is `composer`, the same as in the terminal.
 - **`$.process.run`** works. `git --version` and `gh auth status` succeeded, and `gh` used the keychain sign-in. The session's `PATH` matched the login shell's.
@@ -102,12 +102,11 @@ There is no `-p` flag and no `--plugin-dir` on the command line. It is still a h
 
 **How the inbox handles it now** (`hooks/register.tsx`):
 
-- `:1966`: at `session.start`, turn on if `e.isInteractive` or `$.session.surfaces()` includes `desktop`.
-- `:1971`: at `session.attach` with surface `desktop`, turn on if not already on.
-- `:1977`: at `classic.SessionStart` with source `clear`, `resume` or `fork`, load the conversation the event names.
-- `:2022`: skip the inbox's own plugin prompts.
-- `:2025`: count as the person's words only origin `composer`, `bridge`, or `plugin` with `asUser`.
-- `turnOn` (`:1877`) sets `isOn` and registers `/inbox` and the tools. It has no guard of its own. The attach path checks `isOn`; the start path does not. If attach fires before start, `turnOn` runs twice. Whether that order happens is unknown.
+- `session.start` calls `registerInboxCommand` before `next(e)`, so `/inbox` is registered before the first prompt. Registration retries when Inbox activates.
+- An interactive start or a desktop attach activates Inbox. A shared initialization promise prevents concurrent handlers from loading it twice.
+- `command.run` waits for initialization. While Inbox is inactive, only an engine-stamped `composer` origin can activate it; SDK and plugin command calls leave it inactive.
+- `classic.SessionStart` with source `clear`, `resume` or `fork` loads the conversation the event names.
+- Prompt bookkeeping skips Inbox's own plugin prompts and counts origins `composer`, `bridge`, or `plugin` with `asUser` as the person's words.
 
 **App tools passed into each session (live):** `mcp__ccd_session__*` (`list_sessions`, `send_message`, `spawn_task`, `dismiss_task`), `mcp__ccd_session_mgmt__*`, `mcp__ccd_view__*` (`show_pane`, `close_pane`), `mcp__ccd_window__*`, `mcp__ccd_sidebar__*`, `mcp__ccd_pr__get_status`, `mcp__ccd_connectors__*` and `mcp__ccd_settings__get_settings`. They are not documented publicly.
 
@@ -239,13 +238,13 @@ Read this before designing any desktop UI for the inbox. It lists what a mod can
 | Button `role: 'dismiss'` | Desktop draws its native close control at the trailing edge, with the label as its accessible name. Not seen live. | stated | types:1117-1118 (`ButtonProps.role`); mods.md:665 |
 | Button props | Only key, label, hotkey, action, plain, dimColor, variant, role, autoFocus, hover, onPress. No width, padding, flex, color, bold, border, icon, disabled or tooltip. Any other prop fails the whole tree. | stated (list); inferred (absences) | types:1060-1152 (`ButtonProps`), 9309-9311 (`RenderElement`), 9323-9389 (`RenderElement` Button) |
 | Button children | A string label only on 2.1.293. String and `Text` children need engine 2.1.295. On 2.1.295 a `Text` child draws inside the button, but its `dimColor` draws no dimmer than the label. TypeScript does not catch an element child, because every element constructor accepts children. The types say a press on an Svg or Raster "goes on an enclosing Button", but a Button is a leaf and cannot enclose anything. | verified live (string on 2.1.293, Text child on 2.1.295); stated (TypeScript, contradiction) | live; desktop.md:3, :130; mods.md:668, :1469; types:9320 (`RenderElement` Button), 3744-3756 (`ElementChildren`, `ElementConstructor`), 9579, 9610 |
-| Clicks | Buttons and Clients take clicks, and a Box takes none. A press carries surface `'desktop'`. Clicks on Input, Select and Link were not tested. | verified live (Button, Client, Box) | live; desktop.md:53 |
-| Slash command (`/inbox`) | Once the session has started, `/inbox` is in the app's `/` menu and runs. Sent as the first message of a new session, it is refused with "/inbox isn't a command here", and the app sends the text to the model as a prompt. | verified live (2026-10-12, engine 2.1.296) | live; anthropics/claude-code#99691 |
+| Clicks | Buttons and Clients take clicks, and a Box takes none. A press carries surface `desktop`. Clicking an Input directly gives it typing and preserves text in the chat composer. Select and Link clicks remain untested. | verified live (Input, 2026-10-15, engine 2.1.299; earlier Button, Client and Box probes) | live; desktop.md:53 |
+| Slash command (`/inbox`) | Registering during `session.start` lets the first `/inbox demo` open the sample pane. The current worktree candidate did so with no assistant API messages. Its only safety changes blocked ordinary prompts and background ledger model calls. The host still showed a stale “/inbox isn't a command here” warning despite correct dispatch. | verified live (2026-10-15, desktop 2.42304.0, engine 2.1.299) | live; [anthropics/claude-code#99691](https://github.com/anthropics/claude-code/issues/99691) |
 | Hotkeys | Do nothing. A Button's hotkey logs no press while the pane is focused. The types do not limit hotkeys to the terminal, and the docs say a small key shows beside the label. The live result wins. | verified live | live; desktop.md:54; types:1071-1078 (`ButtonProps.hotkey`); mods.md:656-659 |
 | Button `action` chord | Terminal only. | stated | types:1083-1086 (`ButtonProps.action`); mods.md:662 |
 | Focus | The pane and the band each keep a focus ring. The `focus` request on open is not a grant. If the focused Button is missing from the next drawing, the app takes focus off the pane, and the next click only refocuses it (anthropics/claude-code#100874). Keeping the same key avoids this. `$.ui.focus` acts only in a site that holds the keyboard. | verified live; stated | live; types:13736-13739 (`UiFocusComponent`), 7350-7356 (`PaneOpenArgs.focus`), 13712 (`ui.focus`) |
 | Band (AbovePrompt) | Draws on desktop. `maxRows` was 12, where a 49-row terminal gave 19. `bodyColumns` shrank as the pane widened. The types explain why: the band's column is the transcript beside a docked pane, less 5 columns for `[-]`. The types describe the engine's `[-]` and `n more` rows without naming a surface. Past `maxRows`, desktop clips the band through the middle of a line and draws no `[-]` (2.1.295). Every mod shares the band. | verified live; stated | desktop.md:52; types:10181-10188 (`AbovePrompt`), 10212-10216 (`AbovePrompt.bodyColumns`); mods.md:588-589, 615-617 |
-| Input, Select | Draw on desktop. Leaf elements with no width or style props. An Input keeps its own width, even inside a growing Box. Its `submitLabel` draws as a native button beside it, also before the field is clicked, and a click on that button runs `onSubmit` with the field's text. The field does not take the keyboard until clicked (#100966). | verified live (Input, 2.1.295); stated | live; types:5441-5483 (`InputProps`), 10419-10458 (`SelectProps`); mods.md:640, 675 |
+| Input, Select | Draw on desktop. Leaf elements with no width or style props. An Input keeps its own width, even inside a growing Box. Its `submitLabel` draws as a native button beside it; clicking that button runs `onSubmit`. On the first Reply, `autoFocus` and a successful `ui.focus` leave typing in the chat composer. Clicking the Input directly enables typing and preserves the composer draft. | verified live (Input, 2026-10-15, engine 2.1.299); stated | live; [anthropics/claude-code#100966](https://github.com/anthropics/claude-code/issues/100966); types:5441-5483 (`InputProps`), 10419-10458 (`SelectProps`); mods.md:640, 675 |
 | Link | Drawn as an anchor. The sources conflict: the types allow only `https:` on a remote surface. The docs also allow `http://localhost`, with no `@` and in canonical form. Anything else draws as plain text. The types leave where a click opens to the surface. Where it opens is untested. | stated, conflicting | types:5608-5619 (`LinkProps`); desktop.md:184; mods.md:683-684 |
 | Markdown | A leaf element. A link that is not https, http or file draws as text. The types describe `onLinkPress` clicks only for "the fullscreen terminal". Whether desktop sends link clicks to it is unknown. | stated; unknown | types:5688-5695 (`MarkdownProps.onLinkPress`); mods.md:687 |
 | Code | Colors come from the engine's highlighter, never the mod. | stated | types:1612-1614 (`CodeProps`) |
@@ -280,7 +279,7 @@ Read this before designing any desktop UI for the inbox. It lists what a mod can
 - **Trying a prop just to see what happens.** One unsupported prop drops the mod's whole drawing.
 - **Image or Raster.** They are not drawn on desktop. Svg is the only image route, and the mod receives no clicks from it.
 - **Redrawing a focused Button under a new key.** The pane loses focus (#100874), unless the mod moves the focus to a Button that is still drawn.
-- **Giving a text field the keyboard.** An `Input` with `autoFocus`, or one `$.ui.focus` moves to, never takes typed keys until the person clicks it, though `$.ui.focus` resolves to `{}` (live, 2.1.295, #100966).
+- **Giving a text field the keyboard.** On the first Reply in desktop 2.42304.0 with engine 2.1.299, an `Input` with `autoFocus` stays empty while typing enters the composer. `ui.open` returns `{ isPlaced: true }` and `ui.focus` returns `{}`. Clicking the field enables typing. Pointer-up and requesting focus before any await produced the same failure. A native Reply Button needed a second click to activate. These probes leave the host failure open ([#100966](https://github.com/anthropics/claude-code/issues/100966)).
 - **Redrawing the pane every fraction of a second.** While a settled row's leave bar redrew every 213 ms, clicks on the pane's Buttons did nothing. With one redraw at the end, they worked (live, 2.1.295, #100924).
 
 ### What works

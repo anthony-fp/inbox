@@ -2,9 +2,8 @@
 // rows each lists, and when a tab shows only its empty text. Pure, so tests can
 // run them without the tab's page.
 
-import { recordRows } from '../../hooks/arrivals'
+import { isTabEmpty, recordRows } from '../../hooks/arrivals'
 import type { RowRecord } from '../../hooks/arrivals'
-import { closedShown } from '../../hooks/view'
 import type { InboxView, RowView } from '../../hooks/view'
 import type { HeardState } from './core'
 
@@ -54,27 +53,20 @@ export function isShownEmpty(
   drawn: ReadonlySet<string>,
   unfolded: ReadonlySet<FoldGroup>,
 ): boolean {
-  const isListed = (rows: RowView[]) => rows.some(r => r.state.is !== 'settled' || drawn.has(r.id))
-  const isClosedShown = (g: FoldGroup, closed: { id: string }[]) =>
-    unfolded.has(g) && closedShown(closed, drawn).length > 0
-  if (t === 'findings')
-    return (
-      !isListed(v.findings.rows) &&
-      !isClosedShown(
-        'issue',
-        v.findings.closed.filter(f => f.kind === 'issue'),
-      ) &&
-      !isClosedShown(
-        'opportunity',
-        v.findings.closed.filter(f => f.kind === 'opportunity'),
-      )
-    )
-
-  return (
-    v.heard === 'heard' &&
-    !isListed(v.needsYou.questions) &&
-    !isListed(v.needsYou.tasks) &&
-    !isClosedShown('question', v.needsYou.closed.questions) &&
-    !isClosedShown('task', v.needsYou.closed.tasks)
-  )
+  const groups =
+    t === 'findings'
+      ? [
+          { isUnfolded: unfolded.has('issue'), rows: v.findings.closed.filter(f => f.kind === 'issue') },
+          { isUnfolded: unfolded.has('opportunity'), rows: v.findings.closed.filter(f => f.kind === 'opportunity') },
+        ]
+      : [
+          { isUnfolded: unfolded.has('question'), rows: v.needsYou.closed.questions },
+          { isUnfolded: unfolded.has('task'), rows: v.needsYou.closed.tasks },
+        ]
+  return isTabEmpty({
+    rows: t === 'findings' ? v.findings.rows : [...v.needsYou.questions, ...v.needsYou.tasks],
+    settled: drawn,
+    closed: groups,
+    hasBlocker: t === 'needsYou' && v.heard !== 'heard',
+  })
 }

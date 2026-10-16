@@ -6,8 +6,9 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { applyUpdate, buildPrompt, parseReply, systemText } from '../../hooks/ledger'
-import { readState, statePath, updateState } from './state'
+import { applyExchangeUpdate, parseReply } from '../../hooks/ledger'
+import { buildPrompt, systemText } from '../../hooks/model-text'
+import { readState, statePath, tryWithLock, updateState } from './state'
 import type { SessionState } from './state'
 import { CODEX } from './texts'
 import type { Run } from './run'
@@ -116,17 +117,7 @@ export function applied(s: SessionState, reply: string | null, now: number, prom
       pending: [{ ...next, failed: true }, ...s.pending.slice(1)],
       presence: { ...s.presence, ledgerState: 'failed' },
     }
-  // An Explain turn talks about its item without deciding it.
-  const explained = ex.press?.action === 'explain' ? ex.press.id : null
-  const ledger = parsed
-    ? applyUpdate(
-        s.ledger,
-        { ...parsed, closed: parsed.closed.filter(c => c.id !== explained) },
-        now,
-        ex.turn,
-        promptAt,
-      )
-    : s.ledger
+  const ledger = parsed ? applyExchangeUpdate(s.ledger, parsed, ex, now, promptAt) : s.ledger
 
   return {
     ...s,
@@ -142,32 +133,24 @@ export function applied(s: SessionState, reply: string | null, now: number, prom
   }
 }
 
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === 'EPERM'
-  }
-}
-
-/** Takes the session's update lock, a folder holding the owner's pid; false when a live process holds it. */
-async function takeUpdateLock(path: string): Promise<boolean> {
-  for (let tries = 0; tries < 2; tries += 1) {
-    try {
-      await mkdir(path)
-      await writeFile(join(path, 'pid'), String(process.pid))
-      return true
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
-      const pid = Number(await readFile(join(path, 'pid'), 'utf8').catch(() => ''))
-      // A lock with no pid yet was just taken.
-      if (!pid || isAlive(pid)) return false
-      await rm(path, { recursive: true, force: true })
-    }
-  }
-
-  return false
+export async function reconcileUpdateStatus(dir: string, sessionId: string): Promise<SessionState> {
+  const state = await readState(dir, sessionId)
+  if (!state.presence.isUpdating) return state
+  const checked = await tryWithLock(`${statePath(dir, sessionId)}.updating`, () =>
+    updateState(dir, sessionId, current =>
+      current.presence.isUpdating
+        ? {
+            ...current,
+            presence: {
+              ...current.presence,
+              isUpdating: false,
+              ledgerState: current.pending.length > 0 ? 'failed' : current.presence.ledgerState,
+            },
+          }
+        : current,
+    ),
+  )
+  return checked.acquired ? checked.value : state
 }
 
 /**
@@ -178,29 +161,30 @@ async function takeUpdateLock(path: string): Promise<boolean> {
 export async function runUpdates(dir: string, sessionId: string, ask: Ask, now: () => number): Promise<void> {
   const lock = `${statePath(dir, sessionId)}.updating`
   while ((await readState(dir, sessionId)).pending.length > 0) {
-    if (!(await takeUpdateLock(lock))) return
-    try {
-      for (;;) {
-        const s = await updateState(dir, sessionId, x => ({
-          ...x,
-          presence: { ...x.presence, isUpdating: x.pending.length > 0 },
-        }))
-        const next = s.pending[0]
-        if (!next) break
-        const promptAt = now()
-        const reply = await ask(buildPrompt(s.ledger, next.ex)).catch(() => null)
-        const after = await updateState(dir, sessionId, x =>
-          // A cleared conversation dropped the exchange while the model ran.
-          x.pending[0]?.turnsStarted === next.turnsStarted && x.pending[0].ex.turn === next.ex.turn
-            ? applied(x, reply, now(), promptAt)
-            : x,
-        )
-        // An exchange kept for another try waits for the next update, rather than failing twice in a row now.
-        if (after.pending[0]?.failed && !next.failed) return
+    const held = await tryWithLock(lock, async () => {
+      try {
+        for (;;) {
+          const s = await updateState(dir, sessionId, x => ({
+            ...x,
+            presence: { ...x.presence, isUpdating: x.pending.length > 0 },
+          }))
+          const next = s.pending[0]
+          if (!next) break
+          const promptAt = now()
+          const reply = await ask(buildPrompt(s.ledger, next.ex)).catch(() => null)
+          const after = await updateState(dir, sessionId, x =>
+            // A cleared conversation dropped the exchange while the model ran.
+            x.pending[0]?.turnsStarted === next.turnsStarted && x.pending[0].ex.turn === next.ex.turn
+              ? applied(x, reply, now(), promptAt)
+              : x,
+          )
+          // An exchange kept for another try waits for the next update, rather than failing twice in a row now.
+          if (after.pending[0]?.failed && !next.failed) return 'retry' as const
+        }
+      } finally {
+        await updateState(dir, sessionId, x => ({ ...x, presence: { ...x.presence, isUpdating: false } }))
       }
-    } finally {
-      await updateState(dir, sessionId, x => ({ ...x, presence: { ...x.presence, isUpdating: false } }))
-      await rm(lock, { recursive: true, force: true })
-    }
+    })
+    if (!held.acquired || held.value === 'retry') return
   }
 }

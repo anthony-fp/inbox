@@ -1,0 +1,161 @@
+import type { SessionMessage } from 'claude-code'
+import type { Dialog, Ledger, Stop } from '../types'
+import { toolActivity } from './model-text'
+import { clip } from './text'
+
+const NL = '\n'
+
+export function dialogLine(answer: string, isTimedOut: boolean): string {
+  const how = isTimedOut
+    ? 'it timed out while the user was away, so the user did not answer; it went on with'
+    : 'answer'
+
+  return `asked the user in a dialog; ${how}: ${answer.slice(0, 400)}`
+}
+
+const TRANSCRIPT_MAX = 80_000
+
+const MESSAGE_MAX = 6000
+
+export function transcriptText(messages: SessionMessage[]): string {
+  const lines: string[] = []
+  for (const m of messages) {
+    const text = m.text.trim()
+    if (m.role === 'user') {
+      if (!text || text.startsWith('inbox:')) continue
+      const row = readCommandRow(text)
+      const line = row ? commandRowLine(row) : clip(text, MESSAGE_MAX)
+      if (line) lines.push(`Person: ${line}`)
+      continue
+    }
+    if (text) lines.push(`Agent: ${clip(text, MESSAGE_MAX)}`)
+    for (const use of m.toolUses) {
+      const timedOut = typeof (use.result as { afkTimeoutMs?: unknown } | undefined)?.afkTimeoutMs === 'number'
+      const line =
+        use.tool === 'AskUserQuestion' ? dialogLine(use.text ?? '', timedOut) : toolActivity(use.tool, use.input)
+      if (line) lines.push(`Agent ${line}`)
+    }
+  }
+  const kept: string[] = []
+  let size = 0
+  for (const line of lines.reverse()) {
+    size += line.length + 1
+    if (size > TRANSCRIPT_MAX) {
+      kept.push('(earlier conversation left out)')
+      break
+    }
+    kept.push(line)
+  }
+
+  return kept.reverse().join(NL)
+}
+
+export type CommandRow =
+  | { kind: 'shell'; command: string }
+  | { kind: 'output'; stdout: string; stderr: string }
+  | { kind: 'slash'; name: string; args: string }
+
+export function readCommandRow(text: string): CommandRow | null {
+  const input = text.match(/^<bash-input>([\s\S]*)<\/bash-input>$/)
+  if (input) return { kind: 'shell', command: (input[1] ?? '').trim() }
+  const output = text.match(/<bash-stdout>([\s\S]*?)<\/bash-stdout><bash-stderr>([\s\S]*?)<\/bash-stderr>/)
+  if (output) return { kind: 'output', stdout: (output[1] ?? '').trim(), stderr: (output[2] ?? '').trim() }
+  const name = text.match(/<command-name>\/?([^<\s]+)<\/command-name>/)
+  if (name)
+    return {
+      kind: 'slash',
+      name: name[1] ?? '',
+      args: (text.match(/<command-args>([\s\S]*?)<\/command-args>/)?.[1] ?? '').trim(),
+    }
+
+  return null
+}
+
+const QUIET_COMMANDS = new Set(['inbox', 'clear'])
+
+export function commandRowLine(row: CommandRow): string | null {
+  if (row.kind === 'shell') return `$ ${row.command}`
+  if (row.kind === 'slash') return QUIET_COMMANDS.has(row.name) ? null : `/${row.name} ${row.args}`.trim()
+  const output = [row.stdout, row.stderr].filter(Boolean).join(NL)
+
+  return output ? `output: ${clip(output, 600)}` : null
+}
+
+export function stopKindOf(error: string, message: string): Stop['kind'] {
+  if (error === 'rate_limit') return /\bhit your\b.*\blimit\b/i.test(message) ? 'usage-limit' : 'api-error'
+  switch (error) {
+    case 'authentication_failed':
+    case 'oauth_org_not_allowed':
+    case 'verification_required':
+    case 'cloud_credential_error':
+      return 'sign-in'
+    case 'billing_error':
+    case 'account_on_hold':
+      return 'billing'
+    default:
+      return 'api-error'
+  }
+}
+
+export function resetTime(message: string): string | null {
+  return message.match(/\bresets\s+(?:at\s+)?([^·(\n]+?)\s*(?:\(|·|$)/i)?.[1]?.trim() ?? null
+}
+
+export function stopText(stop: Stop): string {
+  switch (stop.kind) {
+    case 'sign-in':
+      return 'sign-in expired'
+    case 'billing':
+      return 'billing problem'
+    case 'usage-limit':
+      return 'usage limit reached'
+    default:
+      return stop.detail === 'rate_limit'
+        ? 'the API is limiting requests'
+        : stop.detail === 'overloaded'
+          ? 'the API is overloaded'
+          : `API error (${stop.detail})`
+  }
+}
+
+export function stopFix(stop: Stop): string {
+  switch (stop.kind) {
+    case 'sign-in':
+      return 'Run /login, then send a message to resume.'
+    case 'billing':
+      return 'Check billing in the Claude console, then resume.'
+    case 'usage-limit':
+      return stop.resets ? `Resume after ${stop.resets}.` : 'Resume when the limit resets.'
+    default:
+      return 'Send a message to resume.'
+  }
+}
+
+function stopShort(stop: Stop): string {
+  switch (stop.kind) {
+    case 'sign-in':
+      return 'Signed out: /login'
+    case 'billing':
+      return 'Billing problem'
+    case 'usage-limit':
+      return stop.resets ? `Limit: resets ${stop.resets}` : 'Usage limit reached'
+    default:
+      return 'API error: resume'
+  }
+}
+
+function dialogText(dialog: Dialog): string {
+  return dialog.kind === 'permission' ? `Allow ${dialog.text}?` : dialog.text
+}
+
+export function statusLine(ledger: Ledger, stop: Stop | null, dialogs: Dialog[]): string {
+  if (stop) return `! ${stopShort(stop)}`
+  const dialog = dialogs[0]
+  if (dialog) return dialogText(dialog)
+  const first = ledger.items[0]
+  if (first) return ledger.items.length > 1 ? `${ledger.items.length} · ${first.ask}` : first.ask
+  const count = ledger.findings.length
+  const findings = count === 0 ? null : `${count} finding${count === 1 ? '' : 's'}`
+
+  return [ledger.card?.now, findings].filter(Boolean).join(' · ')
+}
