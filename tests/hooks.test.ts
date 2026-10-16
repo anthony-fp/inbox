@@ -2783,19 +2783,18 @@ test('every row in the demo, on every tab, draws its plan’s buttons in the pla
       const links = (await pane.findAll({ type: 'Client' })).flatMap(
         c => (c.props.props as Partial<LinksProps>).links ?? [],
       )
-      const controls = [
-        ...(await pane.findAll({ type: 'Button' }))
-          .filter(b => !(b.key ?? '').endsWith('-key'))
-          .map(b => b.text.replace(/^\p{L}: /u, '')),
-        ...links.map(l => l.label),
-      ].map(label =>
+      const clean = (label: string) =>
         label
+          .replace(/^\p{L}: /u, '')
           .replace(/^[^\p{L}\p{N}]+/u, '')
           .replace(/ \(recommended\)$/, '')
-          .trim(),
-      )
+          .trim()
+      const buttons = (await pane.findAll({ type: 'Button' }))
+        .filter(b => !(b.key ?? '').endsWith('-key'))
+        .map(b => ({ key: b.key ?? '', label: clean(b.text) }))
+      const controls = [...buttons.map(b => b.label), ...links.map(l => clean(l.label))]
       const texts = (await pane.findAll({ type: 'Text' })).map(t => t.text ?? '')
-      return { controls, texts }
+      return { buttons, controls, texts }
     }
     for (const [n, tab] of tabs.entries()) {
       if (look === 'terminal') {
@@ -2840,8 +2839,11 @@ test('every row in the demo, on every tab, draws its plan’s buttons in the pla
     const isSent = threadSentIn(lastActions)
     for (const pr of prs) {
       const labels = prBlockActions(pr, isSent, prViews.branchRef, lastActions).map(a => a.label)
-      const { controls } = await drawn()
-      expect(inOrder(controls, labels), `${look} PR #${pr.number}: ${controls.join(', ')}`).toBe(true)
+      const { buttons } = await drawn()
+      expect(
+        buttons.filter(b => b.key.endsWith(`-${pr.ref}`)).map(b => b.label),
+        `${look} PR #${pr.number}`,
+      ).toEqual(labels)
     }
     const prRows = prs.flatMap(pr => [
       ...waitingThreads(pr).map(t => ({ id: prThreadId(pr, t), labels: threadActions(pr, t, lastActions) })),
