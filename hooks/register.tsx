@@ -259,6 +259,7 @@ const FINDING_TOOL = 'mcp__inbox__record_finding'
 const CLOSE_TOOL = 'mcp__inbox__close'
 
 const PANE = 'inbox'
+const REPLY_ROWS = 3
 // Whether the desktop pane offers a typed reply. Set it false if the app does not paint `Input`: the engine still resolves it, so the mod cannot tell.
 const DESKTOP_TYPING = true
 // From this many columns, the desktop pane shows each closed row's age.
@@ -4413,6 +4414,7 @@ export const register: Register = on => {
             {...(fieldSeeds.get(row.id) ? { value: fieldSeeds.get(row.id) } : {})}
             submitLabel={look === 'desktop' ? ROW_COPY.send : 'send'}
             autoFocus
+            {...(look === 'terminal' ? { rows: REPLY_ROWS } : {})}
             onInput={(value: string) => void update($, DRAFTS, d => ({ ...d, [row.id]: value }))}
             onSubmit={(value: string, submit) => sendTyped($, row.id, value, submit.surface)}
           />
