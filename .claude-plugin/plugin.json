@@ -4,6 +4,9 @@
   "description": "Gathers the questions, tasks, findings and PRs waiting on you in a session",
   "author": { "name": "Pete Petrash" },
   "repository": "https://github.com/petekp/inbox",
+  "homepage": "https://github.com/petekp/inbox",
+  "documentationUrl": "https://github.com/petekp/inbox#readme",
+  "supportUrl": "https://github.com/petekp/inbox/issues",
   "license": "MIT",
   "types": "./types/index.d.ts"
 }
