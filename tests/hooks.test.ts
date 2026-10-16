@@ -7,6 +7,8 @@ import type { LinksProps } from '../hooks/links-client'
 import type { RowProps } from '../hooks/row-client'
 import type { TabsProps } from '../hooks/tabs-client'
 import { demoView } from '../hooks/demo'
+import { checkActions, prBlockActions, prCheckId, prThreadId, threadActions, threadSentIn } from '../hooks/pr-tab'
+import { failingChecks, waitingThreads } from '../hooks/prs'
 import { PRESS_GUARD_MS, QUEUED_AFTER_MS, SETTLED_MS, inboxView, perTurnStatus, rowKeyPlan } from '../hooks/view'
 
 const LEDGER_REPLY = `GOAL: Add a greeting CLI
@@ -2727,13 +2729,23 @@ test('a tool call after a hot reload, before the load converts the ledger, still
   expect(r.result).toBe('Closed the finding.')
 })
 
-test('every Needs you and Findings row in the demo, with its actions, is drawn in the terminal and desktop looks', async ($, on) => {
+const inOrder = (drawn: string[], plan: string[]) => {
+  let at = 0
+  for (const label of plan) {
+    at = drawn.indexOf(label, at)
+    if (at === -1) return false
+    at++
+  }
+  return true
+}
+
+test('every row in the demo, on every tab, draws its plan’s buttons in the plan’s order in the terminal and desktop looks', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   await $.command.run({ command: 'inbox', args: 'demo' } as never)
 
-  const { ledger, lastActions, notes, turns } = demoView(1_000_000)
+  const { ledger, lastActions, notes, turns, prViews } = demoView(1_000_000)
   const view = inboxView({
     ledger,
     lastActions,
@@ -2811,9 +2823,44 @@ test('every Needs you and Findings row in the demo, with its actions, is drawn i
         )
         expect(isTitleDrawn, `${look} ${tab.id} row ${row.id} draws its title`).toBe(true)
         if (row.state.is !== 'open') continue
-        for (const w of expectedLabels(row, look))
-          expect(controls.includes(w), `${look} ${tab.id} row ${row.id} draws "${w}"`).toBe(true)
+        expect(
+          inOrder(controls, expectedLabels(row, look)),
+          `${look} ${tab.id} row ${row.id}: ${controls.join(', ')}`,
+        ).toBe(true)
       }
     }
+    if (look === 'terminal') await pane.press({ key: 'tab-prs' })
+    else {
+      const { tabs: bar, gap } = (await pane.find({ key: 'tabs' }))?.props.props as TabsProps
+      const x = bar.slice(0, 2).reduce((sum, t) => sum + t.width + gap, 0)
+      await pane.pointer({ type: 'down', x, y: 1, button: 'left', in: 'tabs' })
+    }
+    await clock.settle()
+    const prs = Object.values(prViews.views)
+    const isSent = threadSentIn(lastActions)
+    for (const pr of prs) {
+      const labels = prBlockActions(pr, isSent, prViews.branchRef, lastActions).map(a => a.label)
+      const { controls } = await drawn()
+      expect(inOrder(controls, labels), `${look} PR #${pr.number}: ${controls.join(', ')}`).toBe(true)
+    }
+    const prRows = prs.flatMap(pr => [
+      ...waitingThreads(pr).map(t => ({ id: prThreadId(pr, t), labels: threadActions(pr, t, lastActions) })),
+      ...failingChecks(pr).map(c => ({ id: prCheckId(pr, c), labels: checkActions(pr, c, lastActions) })),
+    ])
+    let checked = 0
+    for (const row of prRows) {
+      await clock.advance(PRESS_GUARD_MS)
+      if (!(await pane.find({ key: `select-${row.id}` }))) continue
+      if (look === 'terminal') await pane.press({ key: `select-${row.id}` })
+      else await pane.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: `select-${row.id}` })
+      await clock.settle()
+      const { controls } = await drawn()
+      const labels = [...row.labels.filter(a => !a.isFollowUp), ...row.labels.filter(a => a.isFollowUp)].map(
+        a => a.label,
+      )
+      expect(inOrder(controls, labels), `${look} ${row.id}: ${controls.join(', ')}`).toBe(true)
+      checked++
+    }
+    expect(checked, `${look} PR rows checked`).toBeGreaterThan(1)
   }
 })

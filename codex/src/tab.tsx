@@ -48,16 +48,18 @@ import {
 import { ROW_PAD_PT } from '../../hooks/layout'
 import type { ActionEmphasis, DrawnEntry, DrawnLists, Feedback, RowView, RowWait } from '../../hooks/view'
 import {
+  checkActions,
   PR_TONES,
+  prBlockActions,
   prCheckId,
   prMarkId,
-  prRetryOf,
   prRowWaits,
   prThreadId,
+  threadActions,
   threadShowsCheckIn,
   threadSentIn,
 } from '../../hooks/pr-tab'
-import type { PrPress } from '../../hooks/pr-tab'
+import type { PrAction, PrPress } from '../../hooks/pr-tab'
 import {
   commentLine,
   commentParts,
@@ -65,7 +67,6 @@ import {
   readableComment,
   readiness,
   THREAD_TITLE_CHARS,
-  threadsOnYou,
   threadWhere,
   took,
   waitingThreads,
@@ -829,11 +830,16 @@ function findingRow(v: View, r: RowView, f: Finding): Row {
 
 // ── PRs ─────────────────────────────────────────────────────────────────────
 
-/** A PR action's label, "Address again" once it was its row's last action and its message went. */
-function again(v: View, rowId: string, action: string, label: string): string {
-  const last = v.lastActions[rowId]
-
-  return last?.action === action && last.delivery?.state !== 'failed' ? `${label} again` : label
+/** A PR plan's button as the tab's key. `pending` is what an open's row reads while it is out. */
+function prKey(rowId: string, a: PrAction, pending?: string): Key {
+  return {
+    ...(a.hotkey ? { hotkey: a.hotkey } : {}),
+    label: a.label,
+    emphasis: a.emphasis,
+    ...(a.icon ? { icon: a.icon } : {}),
+    ...(a.press.action === 'pr-dismiss' ? { isDismiss: true } : {}),
+    run: () => void act(rowId, a.press, undefined, a.kind === 'local' ? pending : undefined),
+  }
 }
 
 /** What a row reads while an open of `name` is out. */
@@ -848,7 +854,6 @@ function prThreadRow(v: View, pr: PrView, t: PrThread): Row {
   const isSent = threadSentIn(v.lastActions)(pr, t)
   const showsCheck = threadShowsCheckIn(v.lastActions)(pr, t)
   const isChanged = !isSent && t.isLinesChanged
-  const retry = prRetryOf(v.lastActions[id], pr.ref, t.id)
   const press =
     (action: 'thread-address' | 'thread-draft' | 'thread-discuss' | 'thread-open', pending?: string) => () =>
       void act(id, { action, ref: pr.ref, thread: t.id }, undefined, pending)
@@ -889,45 +894,10 @@ function prThreadRow(v: View, pr: PrView, t: PrThread): Row {
         ) : null}
       </div>
     ),
-    keys: [
-      ...(retry
-        ? [
-            {
-              label: 'Try again',
-              emphasis: 'normal' as const,
-              icon: 'retry' as const,
-              run: () => void act(id, retry.press),
-            },
-          ]
-        : []),
-      {
-        hotkey: 'a',
-        label: again(v, id, 'thread-address', 'Address'),
-        emphasis: 'primary',
-        run: press('thread-address'),
-      },
-      {
-        hotkey: 'r',
-        label: again(v, id, 'thread-draft', 'Draft reply'),
-        emphasis: 'normal',
-        run: press('thread-draft'),
-      },
-      {
-        hotkey: 'o',
-        label: 'Open comment',
-        emphasis: 'normal',
-        icon: 'open',
-        run: press('thread-open', opening('the comment')),
-      },
-    ],
-    more: [
-      {
-        hotkey: 'e',
-        label: again(v, id, 'thread-discuss', 'Discuss'),
-        emphasis: 'quiet',
-        run: press('thread-discuss'),
-      },
-    ],
+    keys: threadActions(pr, t, v.lastActions).flatMap(a =>
+      a.isFollowUp ? [] : [prKey(id, a, opening('the comment'))],
+    ),
+    more: threadActions(pr, t, v.lastActions).flatMap(a => (a.isFollowUp ? [prKey(id, a)] : [])),
     hidden: [],
     feedback: feedbackOf(id, v.lastActions[id], undefined, v.turns, v.at),
   }
@@ -940,7 +910,6 @@ function prCheckRow(v: View, pr: PrView, c: PrCheck): Row {
       ? `Failed after ${took(c.finishedAt - c.startedAt)}`
       : 'Failed'
   const target = c.url ? 'the log' : `PR #${pr.number}`
-  const retry = prRetryOf(v.lastActions[id], pr.ref, null, c.name)
 
   return {
     id,
@@ -951,31 +920,7 @@ function prCheckRow(v: View, pr: PrView, c: PrCheck): Row {
     meta: ran,
     age: c.finishedAt === undefined ? undefined : shortAgo(v.at - c.finishedAt),
     body: <div class="muted">{ran}</div>,
-    keys: [
-      ...(retry
-        ? [
-            {
-              label: 'Try again',
-              emphasis: 'normal' as const,
-              icon: 'retry' as const,
-              run: () => void act(id, retry.press),
-            },
-          ]
-        : []),
-      {
-        hotkey: 'a',
-        label: again(v, id, 'check-fix', 'Fix'),
-        emphasis: 'primary',
-        run: () => void act(id, { action: 'check-fix', ref: pr.ref, check: c.name }),
-      },
-      {
-        hotkey: 'o',
-        label: 'Open log',
-        emphasis: 'normal',
-        icon: 'open',
-        run: () => void act(id, { action: 'log', ref: pr.ref, check: c.name }, undefined, opening(target)),
-      },
-    ],
+    keys: checkActions(pr, c, v.lastActions).map(a => prKey(id, a, opening(target))),
     more: [],
     hidden: [],
     feedback: feedbackOf(id, v.lastActions[id], undefined, v.turns, v.at),
@@ -1759,54 +1704,9 @@ function PrBlock({
   const { status, head, unlisted } = readiness(pr, isSent)
   const tone = PR_TONES[status]
   const id = prMarkId(pr.ref)
-  const waitingOn = threadsOnYou(pr, isSent)
-  const press = (p: PrPress, pending?: string) => () => void act(id, p, undefined, pending)
-  const retry = prRetryOf(v.lastActions[id], pr.ref, null)
-  // The first action that moves the PR on leads, as the filled button.
-  const moves: Key[] = [
-    ...(status === 'ready'
-      ? [{ label: again(v, id, 'pr-merge', 'Merge'), run: press({ action: 'pr-merge', ref: pr.ref }) }]
-      : []),
-    ...(pr.state === 'OPEN' && pr.mergeable === 'CONFLICTING'
-      ? [
-          {
-            label: again(v, id, 'pr-conflicts', 'Resolve conflicts'),
-            run: press({ action: 'pr-conflicts', ref: pr.ref }),
-          },
-        ]
-      : []),
-    ...(waitingOn.length > 1
-      ? [
-          {
-            label: again(v, id, 'pr-address-all', `Address all ${waitingOn.length} threads`),
-            run: press({ action: 'pr-address-all', ref: pr.ref }),
-          },
-        ]
-      : []),
-  ].map((k, n) => ({ ...k, emphasis: n === 0 ? ('primary' as const) : ('normal' as const) }))
-  const keys: Key[] = [
-    ...(retry
-      ? [{ label: 'Try again', emphasis: 'normal' as const, icon: 'retry' as const, run: press(retry.press) }]
-      : []),
-    ...moves,
-    {
-      label: 'Open PR',
-      emphasis: 'normal',
-      icon: 'open',
-      run: press({ action: 'pr-open', ref: pr.ref }, opening(`PR #${pr.number}`)),
-    },
-    // The branch's PR has no Dismiss: the tab shows it while the branch has it.
-    ...(pr.ref === v.prs.branchRef
-      ? []
-      : [
-          {
-            label: 'Dismiss',
-            emphasis: 'quiet' as const,
-            isDismiss: true,
-            run: press({ action: 'pr-dismiss', ref: pr.ref }),
-          },
-        ]),
-  ]
+  const keys = prBlockActions(pr, isSent, v.prs.branchRef, v.lastActions).map(a =>
+    prKey(id, a, opening(`PR #${pr.number}`)),
+  )
   const last = prLastLine(v, id)
 
   return (

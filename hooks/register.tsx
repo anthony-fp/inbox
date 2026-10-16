@@ -48,6 +48,7 @@ import { demoView, isDemoCopy } from './demo'
 import type { Exchange, Press, Update } from './ledger'
 import {
   applyPrPress,
+  checkActions,
   drawnPrs,
   fetchTracked,
   itemPrSteps,
@@ -56,23 +57,23 @@ import {
   linkedPrs,
   olderPrsText,
   PR_TONES,
+  prBlockActions,
   prCheckId,
   prMarkId,
-  prRetryOf,
   prRowId,
   prRowWaits,
   prThreadId,
+  threadActions,
   threadSentIn,
   threadShowsCheckIn,
 } from './pr-tab'
-import type { Applied, GhRun, PrPress } from './pr-tab'
+import type { Applied, GhRun, PrAction, PrPress } from './pr-tab'
 import {
   commentLine,
   commentParts,
   failingChecks,
   prRefs,
   prNeedsYou,
-  threadsOnYou,
   readableComment,
   readiness,
   THREAD_TITLE_CHARS,
@@ -2585,6 +2586,21 @@ type KeyAction = Action & { hotkey?: string }
 
 const ACTION_GLYPHS: Partial<Record<ActionIcon, string>> = { run: '▶', copy: '⧉', open: '↗', retry: '↻' }
 
+const PR_KEYS: Record<PrPress['action'], string> = {
+  'thread-address': 'address',
+  'thread-draft': 'draft',
+  'thread-open': 'open',
+  'thread-discuss': 'discuss',
+  'pr-conflicts': 'resolve',
+  'pr-address-all': 'address-all',
+  'pr-merge': 'merge',
+  'pr-open': 'open',
+  'pr-dismiss': 'dismiss-pr',
+  'pr-undo': 'undo-pr',
+  'check-fix': 'fix',
+  log: 'log',
+}
+
 /** A question, task or finding's keys, in the order `rowKeyPlan` sets, as the pane's actions. */
 function rowKeyActions(
   $: EngineInterface,
@@ -3674,12 +3690,17 @@ export const register: Register = on => {
     })
     const isThreadSent = threadSentIn(lastActions)
     const threadShowsCheck = threadShowsCheckIn(lastActions)
-    // A PR action labeled "… again" once it was its row's last action, unless its message failed to send.
-    const again = (rowId: string, action: PrActionId, label: string) =>
-      lastActions[rowId]?.action === action && lastActions[rowId]?.delivery?.state !== 'failed'
-        ? `${label} again`
-        : label
     const prPress = (p: PrPress) => (press: UiPressArgument) => runPress($, p, press.surface)
+    // A PR plan's button as the pane's action, keyed as "<what>-<row>".
+    const prKeyAction = (a: PrAction, row: string): KeyAction => ({
+      key: `${a.icon === 'retry' ? 'retry' : PR_KEYS[a.press.action]}-${row}`,
+      label: a.label,
+      emphasis: a.emphasis,
+      kind: a.kind,
+      ...(a.icon ? { icon: ACTION_GLYPHS[a.icon] } : {}),
+      ...(a.hotkey ? { hotkey: a.hotkey } : {}),
+      onPress: prPress(a.press),
+    })
     const checkRowBase = (pr: PrView, c: PrCheck): Row => ({
       id: prCheckId(pr, c),
       handle: '✗',
@@ -3687,37 +3708,7 @@ export const register: Register = on => {
       title: c.name,
       line: { text: c.name },
       body: null,
-      keys: () => [
-        ...[prRetryOf(lastActions[prCheckId(pr, c)], pr.ref, null, c.name)].flatMap(retry =>
-          retry
-            ? [
-                {
-                  key: `retry-${pr.ref}-${c.name}`,
-                  label: 'Try again',
-                  icon: '↻',
-                  kind: retry.kind,
-                  onPress: prPress(retry.press),
-                },
-              ]
-            : [],
-        ),
-        {
-          key: `fix-${pr.ref}-${c.name}`,
-          label: again(prCheckId(pr, c), 'check-fix', 'Fix'),
-          isMain: true,
-          hotkey: 'a',
-          kind: 'handoff',
-          onPress: prPress({ action: 'check-fix', ref: pr.ref, check: c.name }),
-        },
-        {
-          key: `log-${pr.ref}-${c.name}`,
-          label: 'Open log',
-          icon: '↗',
-          hotkey: 'o',
-          kind: 'local',
-          onPress: prPress({ action: 'log', ref: pr.ref, check: c.name }),
-        },
-      ],
+      keys: () => checkActions(pr, c, lastActions).map(a => prKeyAction(a, `${pr.ref}-${c.name}`)),
     })
     // The block's "Failing checks" title says the kind, so the row reads as GitHub lists it: "CI / lint", then how
     // long it ran.
@@ -3783,7 +3774,6 @@ export const register: Register = on => {
       const isSent = isThreadSent(pr, t)
       const showsCheck = threadShowsCheck(pr, t)
       const isChanged = !isSent && t.isLinesChanged
-      const retry = prRetryOf(lastActions[id], pr.ref, t.id)
 
       return {
         id,
@@ -3809,51 +3799,8 @@ export const register: Register = on => {
         },
         body: comment,
         clippedBody: clippedComment,
-        keys: () => [
-          ...(retry
-            ? [
-                {
-                  key: `retry-${t.id}`,
-                  label: 'Try again',
-                  icon: '↻',
-                  kind: retry.kind,
-                  onPress: prPress(retry.press),
-                },
-              ]
-            : []),
-          {
-            key: `address-${t.id}`,
-            label: again(id, 'thread-address', 'Address'),
-            isMain: true,
-            hotkey: 'a',
-            kind: 'handoff',
-            onPress: prPress({ action: 'thread-address', ref: pr.ref, thread: t.id }),
-          },
-          {
-            key: `draft-${t.id}`,
-            label: again(id, 'thread-draft', 'Draft reply'),
-            hotkey: 'r',
-            kind: 'talk',
-            onPress: prPress({ action: 'thread-draft', ref: pr.ref, thread: t.id }),
-          },
-          {
-            key: `open-${t.id}`,
-            label: 'Open comment',
-            icon: '↗',
-            hotkey: 'o',
-            kind: 'local',
-            onPress: prPress({ action: 'thread-open', ref: pr.ref, thread: t.id }),
-          },
-        ],
-        moreKeys: () => [
-          {
-            key: `discuss-${t.id}`,
-            label: again(id, 'thread-discuss', 'Discuss'),
-            hotkey: 'e',
-            kind: 'talk',
-            onPress: prPress({ action: 'thread-discuss', ref: pr.ref, thread: t.id }),
-          },
-        ],
+        keys: () => threadActions(pr, t, lastActions).flatMap(a => (a.isFollowUp ? [] : [prKeyAction(a, t.id)])),
+        moreKeys: () => threadActions(pr, t, lastActions).flatMap(a => (a.isFollowUp ? [prKeyAction(a, t.id)] : [])),
       }
     }
 
@@ -5575,70 +5522,11 @@ export const register: Register = on => {
       if (isSettled) return settledPrBlock(pr)
       const { status, head: statusHead, unlisted } = readiness(pr, isThreadSent)
       const tone = PR_TONES[status]
-      const waitingOn = threadsOnYou(pr, isThreadSent)
       // A Dismiss left on a PR that is tracked again, as one a later reply links, is over.
       const prLast = lastActions[prMarkId(pr.ref)]?.action === 'pr-dismiss' ? null : lastActionText(prMarkId(pr.ref))
-      const retry = prRetryOf(lastActions[prMarkId(pr.ref)], pr.ref, null)
-      const prActions: Action[] = [
-        ...(retry
-          ? [
-              {
-                key: `retry-${pr.ref}`,
-                label: 'Try again',
-                icon: '↻',
-                kind: retry.kind,
-                onPress: prPress(retry.press),
-              },
-            ]
-          : []),
-        ...(status === 'ready'
-          ? [
-              {
-                key: `merge-${pr.ref}`,
-                label: again(prMarkId(pr.ref), 'pr-merge', 'Merge'),
-                kind: 'handoff' as const,
-                onPress: prPress({ action: 'pr-merge', ref: pr.ref }),
-              },
-            ]
-          : []),
-        ...(pr.state === 'OPEN' && pr.mergeable === 'CONFLICTING'
-          ? [
-              {
-                key: `resolve-${pr.ref}`,
-                label: again(prMarkId(pr.ref), 'pr-conflicts', 'Resolve conflicts'),
-                kind: 'handoff' as const,
-                onPress: prPress({ action: 'pr-conflicts', ref: pr.ref }),
-              },
-            ]
-          : []),
-        ...(waitingOn.length > 1
-          ? [
-              {
-                key: `address-all-${pr.ref}`,
-                label: again(prMarkId(pr.ref), 'pr-address-all', `Address all ${waitingOn.length} threads`),
-                kind: 'handoff' as const,
-                onPress: prPress({ action: 'pr-address-all', ref: pr.ref }),
-              },
-            ]
-          : []),
-        {
-          key: `open-${pr.ref}`,
-          label: 'Open PR',
-          icon: '↗',
-          kind: 'local',
-          onPress: prPress({ action: 'pr-open', ref: pr.ref }),
-        },
-        ...(pr.ref !== prState.branchRef
-          ? [
-              {
-                key: `dismiss-pr-${pr.ref}`,
-                label: 'Dismiss',
-                kind: 'mark' as const,
-                onPress: prPress({ action: 'pr-dismiss', ref: pr.ref }),
-              },
-            ]
-          : []),
-      ]
+      const prActions = prBlockActions(pr, isThreadSent, prState.branchRef, lastActions).map(a =>
+        prKeyAction(a, pr.ref),
+      )
 
       // The status word follows the title in its color, then the reasons no row below lists, muted, so the title stays
       // the loudest text.
@@ -5672,15 +5560,15 @@ export const register: Register = on => {
             rowGap={look === 'desktop' ? 1 : 0}
             marginTop={blankLine}
           >
-            {/* On desktop the first action, the one that moves the PR on, is the primary button. Dismiss is quiet. */}
-            {prActions.map((a, n) =>
-              a.key.startsWith('dismiss-') ? (
+            {/* Desktop fills the primary button. Dismiss is quiet. */}
+            {prActions.map(a =>
+              a.emphasis === 'quiet' ? (
                 <Button key={a.key} plain dimColor label={a.label} onPress={a.onPress} />
               ) : look === 'desktop' ? (
                 <Button
                   key={a.key}
                   label={desktopLabel(a)}
-                  {...(n === 0 ? { variant: 'primary' as const } : {})}
+                  {...(a.emphasis === 'primary' ? { variant: 'primary' as const } : {})}
                   onPress={a.onPress}
                 />
               ) : (

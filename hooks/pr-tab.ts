@@ -20,7 +20,7 @@ import {
 } from './prs'
 import type { IsThreadSent, PrStatus } from './prs'
 import { SETTLED_MS } from './view'
-import type { RowWait } from './view'
+import type { ActionEmphasis, RowWait } from './view'
 
 /** How many of a conversation's linked PRs the tab fetches and shows: the newest ones. */
 export const MAX_PRS = 12
@@ -269,7 +269,7 @@ export function prRowId(p: PrPress): string {
  * The PR press [Try again] repeats on a thread or PR block whose message failed
  * to send, with its kind, or null. As `retryOf` does a row press.
  */
-export function prRetryOf(
+function prRetryOf(
   last: LastAction | undefined,
   ref: string,
   thread: string | null,
@@ -284,6 +284,157 @@ export function prRetryOf(
     return { press: { action: a, ref }, kind: last.kind }
 
   return null
+}
+
+/**
+ * One button on a PR block, a review thread or a failing check, as every look draws it. A plan lists its buttons in
+ * the order every look shows them. A follow-up is drawn after the row's other buttons, as Discuss is.
+ */
+export type PrAction = {
+  press: PrPress
+  label: string
+  kind: PressKind
+  emphasis: ActionEmphasis
+  icon?: 'retry' | 'open'
+  hotkey?: string
+  isFollowUp?: boolean
+}
+
+/** A PR action's label, "Address again" once it was its row's last action and its message went. */
+function again(lastActions: Record<string, LastAction>, rowId: string, action: PrActionId, label: string): string {
+  const last = lastActions[rowId]
+
+  return last?.action === action && last.delivery?.state !== 'failed' ? `${label} again` : label
+}
+
+function retryAction(retry: { press: PrPress; kind: PressKind } | null): PrAction[] {
+  return retry ? [{ press: retry.press, label: 'Try again', kind: retry.kind, emphasis: 'normal', icon: 'retry' }] : []
+}
+
+/** A review thread's buttons: [Try again], Address, Draft reply, Open comment, then Discuss. */
+export function threadActions(pr: PrView, t: PrThread, lastActions: Record<string, LastAction>): PrAction[] {
+  const id = threadRowId(pr.ref, t.id)
+  const on = { ref: pr.ref, thread: t.id }
+
+  return [
+    ...retryAction(prRetryOf(lastActions[id], pr.ref, t.id)),
+    {
+      press: { action: 'thread-address', ...on },
+      label: again(lastActions, id, 'thread-address', 'Address'),
+      kind: 'handoff',
+      emphasis: 'primary',
+      hotkey: 'a',
+    },
+    {
+      press: { action: 'thread-draft', ...on },
+      label: again(lastActions, id, 'thread-draft', 'Draft reply'),
+      kind: 'talk',
+      emphasis: 'normal',
+      hotkey: 'r',
+    },
+    {
+      press: { action: 'thread-open', ...on },
+      label: 'Open comment',
+      kind: 'local',
+      emphasis: 'normal',
+      icon: 'open',
+      hotkey: 'o',
+    },
+    {
+      press: { action: 'thread-discuss', ...on },
+      label: again(lastActions, id, 'thread-discuss', 'Discuss'),
+      kind: 'talk',
+      emphasis: 'quiet',
+      hotkey: 'e',
+      isFollowUp: true,
+    },
+  ]
+}
+
+/** A failing check's buttons: [Try again], Fix, Open log. */
+export function checkActions(pr: PrView, c: PrCheck, lastActions: Record<string, LastAction>): PrAction[] {
+  const id = checkRowId(pr.ref, c.name)
+  const on = { ref: pr.ref, check: c.name }
+
+  return [
+    ...retryAction(prRetryOf(lastActions[id], pr.ref, null, c.name)),
+    {
+      press: { action: 'check-fix', ...on },
+      label: again(lastActions, id, 'check-fix', 'Fix'),
+      kind: 'handoff',
+      emphasis: 'primary',
+      hotkey: 'a',
+    },
+    {
+      press: { action: 'log', ...on },
+      label: 'Open log',
+      kind: 'local',
+      emphasis: 'normal',
+      icon: 'open',
+      hotkey: 'o',
+    },
+  ]
+}
+
+/**
+ * A PR block's buttons: [Try again], the presses that move the PR on (Merge, Resolve conflicts, Address all N
+ * threads), Open PR, then Dismiss. The first press that moves the PR on is the primary one. The branch's own PR has
+ * no Dismiss, since the PRs tab shows it while the branch has it.
+ */
+export function prBlockActions(
+  pr: PrView,
+  isThreadSent: IsThreadSent,
+  branchRef: string | null,
+  lastActions: Record<string, LastAction>,
+): PrAction[] {
+  const id = prMarkId(pr.ref)
+  const { status } = readiness(pr, isThreadSent)
+  const waitingOn = threadsOnYou(pr, isThreadSent).length
+  const moves: Omit<PrAction, 'emphasis'>[] = [
+    ...(status === 'ready'
+      ? [
+          {
+            press: { action: 'pr-merge' as const, ref: pr.ref },
+            label: again(lastActions, id, 'pr-merge', 'Merge'),
+            kind: 'handoff' as const,
+          },
+        ]
+      : []),
+    ...(pr.state === 'OPEN' && pr.mergeable === 'CONFLICTING'
+      ? [
+          {
+            press: { action: 'pr-conflicts' as const, ref: pr.ref },
+            label: again(lastActions, id, 'pr-conflicts', 'Resolve conflicts'),
+            kind: 'handoff' as const,
+          },
+        ]
+      : []),
+    ...(waitingOn > 1
+      ? [
+          {
+            press: { action: 'pr-address-all' as const, ref: pr.ref },
+            label: again(lastActions, id, 'pr-address-all', `Address all ${waitingOn} threads`),
+            kind: 'handoff' as const,
+          },
+        ]
+      : []),
+  ]
+
+  return [
+    ...retryAction(prRetryOf(lastActions[id], pr.ref, null)),
+    ...moves.map((m, n): PrAction => ({ ...m, emphasis: n === 0 ? 'primary' : 'normal' })),
+    { press: { action: 'pr-open', ref: pr.ref }, label: 'Open PR', kind: 'local', emphasis: 'normal', icon: 'open' },
+    ...(pr.ref === branchRef
+      ? []
+      : [
+          {
+            press: { action: 'pr-dismiss' as const, ref: pr.ref },
+            label: 'Dismiss',
+            kind: 'mark' as const,
+            emphasis: 'quiet' as const,
+          },
+        ]),
+  ]
 }
 
 /**
