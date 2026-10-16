@@ -1,6 +1,6 @@
 # Codex plugins and the Codex app
 
-Checked on 2026-10-08.
+Checked on 2026-10-08. The section "Checked against Codex 0.163.0" was added on 2026-10-16.
 
 The Codex client of the inbox is a plugin. It packages a local MCP server
 (a process that serves tools and an HTML tab over the Model Context
@@ -15,7 +15,10 @@ Versions this file was checked against:
 | --- | --- |
 | Codex bundled in the ChatGPT desktop app on the test Mac | `codex-cli 0.160.1` (live) |
 | `codex` on the test Mac's `PATH` | `codex-cli 0.154.0` (live) |
+| Codex CLI 0.163.0 (`npm install @openai/codex@0.163.0` into a scratch folder, not the app) | `codex-cli 0.163.0` (live 2026-10-16) |
+| Codex bundled in the ChatGPT desktop app, second check | `0.162.0-alpha.17.2` (not run; the app still bundles it) |
 | Latest Codex CLI in the public changelog | 0.162.0, dated 2026-10-08 |
+| openai/codex source at the 0.163.0 tag | `rust-v0.163.0`, `8308618`, read 2026-10-16 |
 | openai/codex source | `main` at `e45069d`, fetched 2026-10-08 |
 | openai/mcp-extensions (spec, TypeScript README, sample plugin) | commit `7e1be49` |
 | MCP Apps spec, stable `2026-01-26` | modelcontextprotocol/ext-apps at `82221c0` |
@@ -67,6 +70,11 @@ Each fact also carries one of these labels when its kind is not obvious:
   `docs/plans/codex-plugin.md` unless noted.
 - **[live 2026-10-08]**: checked read-only on 2026-10-08 while writing this
   file.
+- **[live 0.163.0]**: seen on 2026-10-16 running Codex CLI 0.163.0 in a
+  scratch `CODEX_HOME`, with this repo's committed plugin bundles installed
+  from a local marketplace. The desktop app was not involved.
+- **[source 0.163.0]**: read in openai/codex at tag `rust-v0.163.0`. Paths
+  below are under `codex-rs/`.
 - **[inference]**: worked out, not checked.
 - **[unknown]**: no source answers it. See "Unknown, and how to check".
 
@@ -841,7 +849,10 @@ Notes per event:
   trusted_hash = "sha256:…"` for `session_start`, `user_prompt_submit`,
   `pre_tool_use` and `stop` [live 2026-10-08].
   - [inference] Reordering hooks changes the keys, so it forces re-trust.
-  - Whether changing only `dist/hook.mjs` forces re-trust is [unknown].
+  - Changing only `dist/hook.mjs` does not force re-trust: the hash covers
+    the definition in `hooks.json`, not the script it names. Changing the
+    Stop `timeout` flipped that hook to `modified` and left the other three
+    `trusted` [live 0.163.0]. Reordering hooks is still [inference].
   - Hooks were trusted and ran in a desktop app session [live]
     (docs/plans/codex-plugin.md:421-423). The docs describe trust review only
     in the CLI's `/hooks`.
@@ -1400,8 +1411,12 @@ threads a root thread and its forks belong to. They differ after a fork.
   `subagent` (6); in all of them `id != session_id`, and in 28
   `session_id == parent_thread_id`. Whether plugin hooks fire in those
   threads, and with which id, is [unknown].
-- [inference, source] Tool calls during a queued turn should carry
-  `turn_trigger: "queue"`. Not checked live.
+- A queued turn's `task_started` event in the rollout file has
+  `turn_attribution.turn_trigger: "queue"`; the other turns have `null`
+  [live 0.163.0]. The queue service starts the turn with
+  `turn_trigger: Some("queue")` (ext/queue/src/service.rs:394, :441)
+  [source 0.163.0]. That the model's MCP calls then carry it in
+  `x-codex-turn-metadata` was not seen. [inference]
 
 ## Sending a press: `codex queue` and `thread/queue/*`
 
@@ -1530,7 +1545,8 @@ threads a root thread and its forks belong to. They differ after a fork.
   feature flag: X"; the code drops it and retries [live]
   (codex/src/update.ts:88-92; docs/plans/codex-plugin.md:407-408).
   `personality` is "removed" in 0.160.1 but still in the `OFF` list
-  (codex/src/update.ts:40).
+  (codex/src/update.ts:40). On 0.163.0 `--disable personality` is still
+  accepted [live 0.163.0].
 - **Model.** `gpt-6.1-sol` at low effort got 12 of 12 right in 4–5 s;
   `gpt-6-luna` got 10 of 12 [live] (docs/plans/codex-plugin.md:412-419).
 - `exec` threads are excluded from `thread/list` by default (see app-server).
@@ -1784,6 +1800,142 @@ read-only while writing this file.
 | Hook trust keys for all four inbox events | 2026-10-08 |
 | Transcript row types, item fields, subagent id patterns | 2026-10-08 |
 
+## Checked against Codex 0.163.0
+
+Checked on 2026-10-16. The inbox was built against 0.160.1. This section lists
+what 0.163.0 changed for it, or did not. Nothing in the plugin needed a
+change. The desktop app still bundles 0.162.0-alpha.17.2, so the Inbox tab
+itself was not checked on 0.163.0. Everything below ran in a scratch
+`CODEX_HOME` with the CLI from npm, a local marketplace pointing at this
+repo, and a probe client speaking app-server JSON-RPC over stdio.
+
+**Install and activation**
+
+- `codex plugin marketplace add <local path>` then `codex plugin add inbox@inbox`
+  installs and enables the plugin, and writes `[plugins."inbox@inbox"]
+  enabled = true` [live 0.163.0]. `plugin list` shows "installed, enabled".
+- 0.163.0 adds `plugins._default.enabled` in `config.toml`: "Defaults for
+  installed plugin activation. Omission preserves source enablement. Explicit
+  plugin enablement settings override this default, but cannot enable an
+  installation disabled by its source." (core/config.schema.json, PR #52220)
+  [source 0.163.0] With `_default.enabled = false` and no explicit entry the
+  inbox showed "installed, disabled" and `hooks/list` reported its hooks
+  disabled. `codex plugin add` after that still wrote `enabled = true` and
+  the plugin came out enabled [live 0.163.0].
+- It is a user setting. `marketplace.json` has no field for it, so the
+  marketplace entry stays as it is (`installation: AVAILABLE`,
+  `authentication: ON_INSTALL`).
+
+**Hooks**
+
+- All four events fired in an app-server thread, with the plugin's hooks
+  trusted through `[hooks.state."inbox@inbox:hooks/hooks.json:<event>:0:0"]
+  trusted_hash`: SessionStart, UserPromptSubmit, PreToolUse for a shell
+  command and for the model's `inbox` MCP call, and Stop [live 0.163.0].
+- A fresh install reports all four hooks `untrusted`. `hooks/list` gives each
+  `currentHash` [live 0.163.0].
+- Changing a hook's definition makes its trust status `modified`. Changing
+  only `dist/hook.mjs` does not [live 0.163.0].
+- Sixteen PreToolUse hook processes started at once all recorded their
+  activity line; the state lock held [live 0.163.0]. Codex 0.163.0 may now run
+  read-only tool calls in parallel (PR #52245), which makes such overlap
+  normal.
+- Stop does not run when a turn is interrupted. `turn/interrupt` ended the
+  turn as `interrupted` and no Stop hook started [live 0.163.0]. Stop runs
+  only when the turn's sampling loop ends with no follow-up
+  (core/src/session/turn.rs:718-725); an abort returns first [source 0.163.0].
+  The inbox then keeps the interrupted prompt in `turn.person` and joins it
+  with the next prompt, so that exchange is summarized with the next one.
+- A steer arrives as more input in the running turn, so Stop runs once at the
+  end [source 0.163.0].
+
+**Presses**
+
+- `codex queue --thread <id> --message <text>` sent while a turn ran did not
+  steer. The turn finished first. Its queued message started its own turn
+  17 ms later, as a user message with the `clientId` of the queued item
+  [live 0.163.0]. `thread/queue/add` only stores the item. The queue service
+  starts it with `start_turn_if_idle`, and an item that cannot start stays
+  queued (ext/queue/src/service.rs:370-460) [source 0.163.0].
+- PR #53452 closes input admission for a turn that is finishing. That
+  rejects injection into the running turn, which is the steer path. The queue
+  does not use that path, so `queue/add` has no new "admission closed" error
+  [source 0.163.0].
+- Through a daemon started in the scratch home with `app-server daemon
+  start`, `codex queue` queued a message, kept working after `daemon
+  restart`, and failed with exit 1 and the server's message for an unknown
+  thread ("no rollout found for thread id …") [live 0.163.0]. The server
+  treats a non-zero exit as `unconfirmed`, as before.
+- The `-32600` "unknown variant `thread/queue/add`" mapping still exists
+  (tui/src/session_queue_commands.rs:130-143) [source 0.163.0]. PR #52648
+  limits daemon compatibility checks to explicit CLI overrides such as `-c`;
+  the server passes none.
+
+**MCP server**
+
+- `inbox` started from `./dist/server.mjs` with `cwd` at the plugin root. It
+  received `PATH`, `HOME`, `CODEX_HOME`, `CODEX_CLI_PATH` and
+  `CODEX_MCP_NODE_PATH` from `env_vars`, and not an unlisted variable
+  [live 0.163.0].
+- `mcpServerStatus/list` shows the six tools with their `_meta`
+  (`ui.visibility: ["app"]` on the three app-only tools, the thread
+  entrypoint on `inbox_view`) and one resource. `mcpServer/resource/read`
+  returned the tab page as `text/html;profile=mcp-app` [live 0.163.0].
+- `mcpServer/tool/call` for `inbox_view` returned `structuredContent`.
+  App-server adds `threadId` to the call's `_meta` (app-server/src/request_processors/mcp_processor.rs:16);
+  `sessionOf` reads it [live 0.163.0, source 0.163.0].
+- The model's `inbox` call resolved its session and turn from
+  `x-codex-turn-metadata`, and the session's `promptMissedAt` stayed null
+  [live 0.163.0].
+- `default_tools_approval_mode: "approve"` let the model's call run under
+  `approval_policy: never` [live 0.163.0].
+- PRs #52182 and #53709 add sandbox-launcher metadata for servers that
+  advertise the sandbox-state capability. The inbox server does not
+  [source 0.163.0]. PR #51611 signals an abandoned elicitation; the inbox
+  sends none.
+
+**Per-reply update**
+
+- The exact `codex exec` command line in `codex/src/update.ts` (all 16
+  `--disable` names, `--ephemeral --ignore-user-config --ignore-rules`,
+  `-o`) exited 0 and wrote the reply. The Stop hook started the same update
+  twice in the thread test and both applied (`turnsApplied` 2) [live 0.163.0].
+  A one-word prompt used 5,383 tokens with the plugin's own instructions
+  file.
+- No shell-migration notice appeared in stdout or stderr. stderr carried one
+  new-looking line, "Code Mode is unavailable because code-mode host is
+  disabled …"; `update.ts` reads stderr only for "Unknown feature flag"
+  [live 0.163.0]. Whether 0.160.1 printed it was not checked.
+- `shell_zsh_fork` and `unified_exec_zsh_fork` are "removed" in `features
+  list`; the inbox uses neither [live 0.163.0].
+- Daybreak is the feature `cli_daybreak` (stable, default on). In `exec` it
+  picks a cyber access program from the model catalog for the turn, and fails
+  the run only when Daybreak is switched on for a provider or model that
+  cannot use it (exec/src/daybreak.rs) [source 0.163.0]. The update runs with
+  the default and succeeded, so it is not in the `OFF` list.
+- `exec --json` events: `thread.started`, `turn.started`, `item.started` and
+  `item.completed` (`agent_message`, `command_execution` with `command`,
+  `aggregated_output`, `exit_code`, `status`), `turn.completed` with `usage`
+  [live 0.163.0]. The item has no `cwd` (exec/src/exec_events.rs:161-166)
+  [source 0.163.0]. Nothing in `codex/src` reads these fields; `update.ts`
+  does not use `--json`.
+- An incomplete response (PR #53451) is a non-retryable `ResponseIncomplete`
+  error. `exec` sets `error_seen` on a non-retrying `error` notification or a
+  failed turn and exits 1 (exec/src/lib.rs:1341-1360, :1403-1405)
+  [source 0.163.0]. `update.ts` treats a non-zero exit as a failed run and
+  keeps the exchange pending. The 120 s timeout covers a hang. Not triggered
+  live.
+
+**Opportunities, not built** [source 0.163.0]
+
+- Durable thread read state with revision-checked updates (PRs #52337,
+  #52350, #52384, #52395).
+- `thread/items/read`, experimental: items of one turn by id (PR #52637).
+- `excludedThreadIds` on `thread/list` (PR #51595).
+- Command environments get `CODEX_TOOL_CALL_ID` and `CODEX_THREAD_ID` (PR
+  #52119). A shell command's call id could be matched to its hook's
+  `tool_use_id`.
+
 ## Where sources disagree
 
 | Topic | Sources | Trust | Why |
@@ -1863,7 +2015,6 @@ otherwise write to real state.
 | What do `auto` and `approve` mean exactly? Does `approve` override `destructiveHint: true`? | Give a test tool `destructiveHint: true` with `approve` and watch for a prompt. |
 | When is the cache folder `local` vs the version? Does a same-version reinstall overwrite? Are old folders deleted? | Change only file content, reinstall, compare `ls -la` timestamps under `~/.codex/plugins/cache/inbox/inbox/`. |
 | Is the data folder `<plugin>-<market>` or `<market>-<plugin>`? Where is it for Git and npm installs? | Install a scratch plugin whose plugin and marketplace names differ, from a local, a Git and an npm source; `ls ~/.codex/plugins/data`. |
-| Does editing only `dist/hook.mjs` force hook re-trust? Does reordering `hooks.json`? | Change the bundle, reinstall, and compare `trusted_hash` keys and prompts. Then reorder handlers. |
 | Do hooks and the `exec` update fire in Codex CLI and local Work threads? | Run `codex` with the plugin enabled and open a local Work thread; look for new session files in the data folder. |
 | Do hooks and MCP servers run inside the sandbox? | Under workspace-write, write outside the workspace and open a network connection from a hook and from the server. |
 | Does Codex send `ui/notifications/tool-result` to a thread-entrypoint view? | Add a handler in the tab that records arrival time relative to `initialized`. |
@@ -1880,20 +2031,17 @@ otherwise write to real state.
 | Does any Claude client (terminal, desktop Code mode, desktop Claude mode) render MCP Apps from a plugin's server? | Install a minimal `ui://` tool in each and ask the model to call it. |
 | Does the desktop app use the daemon `codex queue` finds? What happens when the app is closed? | Quit the app, run `codex queue`, reopen. Run `codex doctor`. |
 | Do `codex queue` messages show above the composer as editable items? | Queue during a busy turn and look. |
-| Does a queued turn carry `turn_trigger: "queue"` in MCP `_meta`, and do hooks see `clientId`? | Log UserPromptSubmit input and an inbox tool call's `_meta` during a queued turn. |
 | Does Activity view include Codex chats? What counts as "waiting for your response"? | Leave an approval pending and an open question in a Codex chat, then open Activity view. |
 | Does PermissionRequest fire before automatic review under "Approve for me"? | Log it under each permission mode and compare with what the person sees. |
 | How does an `mcp_tool` hook's result map to hook output? | Build a UserPromptSubmit `mcp_tool` hook that returns JSON; check whether the model gets the context. |
 | Does Codex re-read MCP `instructions` after compaction or resume? | Put a marker sentence in `instructions`, compact, ask about it. |
 | Does a slow server miss the first turn's tool catalog? | Add `sleep 2` before server start; list tools on turns one and two. |
 | Is a detached child of a synchronous Stop hook killed at session end? Does an `async` Stop hook survive closing the app? | Start a long update, close the app, read its log. |
-| Is Stop called after an Interrupt? | Interrupt a turn with Stop and Interrupt loggers. |
 | Does `non_prefixed_mcp_tool_names` change hook `tool_name`? | `codex --enable non_prefixed_mcp_tool_names` with a PreToolUse logger. |
 | Can plain stdout exceed the 2,500-token default? | Emit 20k tokens of stdout from SessionStart with `additionalContextLimit: 0`. |
 | Is `thread/attachment/*` written by the desktop PR panel? | Open a PR from a desktop chat; call `thread/attachment/list` for that thread. |
 | Does `codex://threads/<id>` open Worktree and Cloud chats? | Try it with ids of each kind. |
 | Is the `exec` cost floor the same on 0.162.0 with GPT-6.1 Sol? | Rerun the plan's measurement. |
-| Does `--disable personality` now fail? | Run `codex exec --disable personality` against `/dev/null` stdin. |
 | How does a missing `interface.displayName` show in the Plugins Directory? | Open Plugins, then Personal, and read the source label. |
 | Can an `onboardingSkill` run for a local install and walk the person through hook trust? | Add `extensions.com.openai.onboardingSkill` to a scratch copy. |
 | Which marketplace file does a workspace GitHub import read when both exist? | Import this repo in a test workspace's Admin > Plugins. |
