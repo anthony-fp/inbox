@@ -23,8 +23,6 @@ export type RowProps = {
   after: string
   /** The age, at the side. */
   side: string
-  /** A line above the title, as a finding's kind, in its color. */
-  head: { label: string; color: string | null } | null
   /** Lines of padding above and below the text. The hover covers it. */
   padY: number
   /** How many lines the title and `after` may take before they are cut. */
@@ -123,9 +121,6 @@ const Row: ClientModule<RowProps, State> = (props, surface) => {
         flexShrink: 1,
         flexGrow: 1,
         children: [
-          ...(props.head
-            ? [Text({ wrap: 'truncate-end', ...colored(props.head.color), children: props.head.label })]
-            : []),
           Text({
             wrap: 'wrap',
             ...colored(null),

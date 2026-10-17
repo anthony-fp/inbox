@@ -261,8 +261,6 @@ const CLOSE_TOOL = 'mcp__inbox__close'
 
 const PANE = 'inbox'
 const REPLY_ROWS = 3
-// Whether the desktop pane offers a typed reply. Set it false if the app does not paint `Input`: the engine still resolves it, so the mod cannot tell.
-const DESKTOP_TYPING = true
 // From this many columns, the desktop pane shows each closed row's age.
 const DESKTOP_WIDE_AT = 50
 // About how many characters of desktop's proportional text fit in one column of `bodyColumns`: sentences and
@@ -307,30 +305,25 @@ function undoSvg(fraction: number, leftMs: number): string {
   )
 }
 /**
- * Desktop text in a status color, as an Svg one line tall and `cells` wide. Text draws one color in both
+ * A desktop row's mark in a status color, as an Svg one line and one column wide. Text draws one color in both
  * appearances, which the mod cannot read, but an Svg follows the system's light or dark setting, so this takes the
- * shared tone for each, as the Codex tab does. It draws `mark`, then `label` two columns on, as a row's mark column
- * and text sit; either may be ''.
+ * shared tone for each, as the Codex tab does.
  */
-function toneSvg(tone: ToneName, mark: string, label: string, cells: number): string {
+function toneSvg(tone: ToneName, mark: string): string {
   const { light, dark } = toneColors(tone)
   // A marker needs only 3:1, so an error mark takes a stronger red than text could.
   const [lightMark, darkMark] = tone === 'error' ? [LIGHT_TONES.errorMark, DARK_TONES.errorMark] : [light, dark]
-  const width = cells * DESKTOP_CELL_PT
+  const width = DESKTOP_CELL_PT
   const height = DESKTOP_LINE_PT
   const shape = markShape(mark, height / 2)
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
     `<style>text{font-family:-apple-system,system-ui,sans-serif;font-size:14px;fill:currentColor}` +
-    `.mark{color:${lightMark}}.label{color:${light}}` +
-    `@media (prefers-color-scheme: dark){.mark{color:${darkMark}}.label{color:${dark}}}</style>` +
+    `.mark{color:${lightMark}}` +
+    `@media (prefers-color-scheme: dark){.mark{color:${darkMark}}}</style>` +
     (shape === null
       ? `<text class="mark" x="0" y="${height / 2}" dominant-baseline="central">${escapeXml(mark)}</text>`
       : `<g class="mark">${shape}</g>`) +
-    (label
-      ? `<text class="label" x="${mark ? 2 * DESKTOP_CELL_PT : 0}" y="${height / 2}" dominant-baseline="central">` +
-        `${escapeXml(label)}</text>`
-      : '') +
     `</svg>`
   )
 }
@@ -361,10 +354,6 @@ function markShape(mark: string, midY: number): string | null {
 }
 function escapeXml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-/** The cells a label of `text` takes, counted high, so an Svg sized by it never cuts the label. */
-function labelCells(text: string): number {
-  return Math.ceil(text.length / (DESKTOP_CHARS_PER_CELL - 0.15)) + 1
 }
 /**
  * The chevron in a desktop fold line's mark column: right while folded, down while unfolded. It is an Svg, the
@@ -398,15 +387,14 @@ const DESKTOP_ROW_PAD = ROW_PAD_PT / DESKTOP_LINE_PT
 // leave it half a cell to the letter's left.
 const TREE_LINE_AT = 2
 /**
- * Where a row's handle and its text start, in columns. In the terminal, a group's tree runs its │ in the lead, and a
- * flat row, as Findings lists them, has a 1-column lead. Desktop draws no tree, so every list there uses `desktop`,
+ * Where a row's handle and its text start, in columns. In the terminal, a group's tree runs its │ in the lead.
+ * Desktop draws no tree, so every list there uses `desktop`,
  * and section titles and Closed folds start at its handle column. The open row, the closed row's Client and the
  * settled row all draw at these columns, so a row's title stays put as it opens, closes or settles.
  */
 const ROW_COLUMNS = {
   // The tree's ├─ and a blank, then the 3-column handle.
   tree: { lead: TREE_LINE_AT + 3, handleAt: TREE_LINE_AT + 3, textAt: TREE_LINE_AT + 6 },
-  flat: { lead: 1, handleAt: 3, textAt: 5 },
   desktop: { lead: 1, handleAt: 1, textAt: 3 },
 } as const
 // A desktop list line's mark column and its side column, for the age, in columns.
@@ -2566,12 +2554,9 @@ type Action = {
   label: string
   /** The recommended option. The terminal and desktop looks mark it, and desktop draws it as the primary button. */
   variant?: 'primary'
-  /** The press that finishes the row, as Done or Address. Desktop draws it as the primary button. */
-  isMain?: boolean
   emphasis?: ActionEmphasis
   /** A glyph desktop draws before the label, naming what the press does, as ⧉ for a copy. */
   icon?: string
-  dimColor?: boolean
   /**
    * What the press does. A Talk or Hand-off press leaves "✓ <label>"
    * on its row, so the person sees it went through, and a Hand-off folds the
@@ -3475,8 +3460,8 @@ export const register: Register = on => {
     paneLook = look
     // Without a Client, an older desktop engine draws each of these with Buttons instead.
     const hasClient = look === 'desktop' && 'Client' in elements
-    // The mobile app draws no text field, so there the typed reply is not offered; nor on desktop without DESKTOP_TYPING.
-    const Input = 'Input' in elements && (look === 'terminal' || DESKTOP_TYPING) ? elements.Input : null
+    // The mobile app draws no text field, so there the typed reply is not offered.
+    const Input = 'Input' in elements ? elements.Input : null
     // Narrow, the desktop pane drops closed rows' ages.
     const isNarrowDesktop = look === 'desktop' && e.props.bodyColumns < DESKTOP_WIDE_AT
     // The terminal draws a row's age in its side column, so no line repeats it.
@@ -3586,7 +3571,7 @@ export const register: Register = on => {
     // A tab's half line, ▄ or ▀, raises by its glyph's color.
     const raiseEdge = { dimColor: false, color: pal.raised, inverse: false }
 
-    // One list row's content. Selected, a row shows its context line, its title
+    // One list row's content. Selected, a row shows its title
     // in full, its body and its keys; otherwise one line: `line`, or the title.
     type Row = {
       id: string
@@ -3594,8 +3579,6 @@ export const register: Register = on => {
       handle: string
       /** A status color for a marker handle, such as a failing check's ✗. A Button takes no color, so this handle is Text and only the row's text selects it. */
       handleTone?: Tone
-      /** A line above the title, open or closed: the row's kind, its age, then `notes`, such as a comment count. */
-      head?: { label: string; tone: Tone; age: string; notes?: string }
       title: string
       /** Muted text on the selected title's line, such as an age. */
       titleAfter?: string
@@ -3622,8 +3605,8 @@ export const register: Register = on => {
       /** The row no longer waits on the person, so its group's count leaves it out. Selected, it also shows `note`. */
       fold?: { note?: string }
     }
-    // An item's group header says whether it is a question or a task, so the row
-    // needs no context line. The recommended answer is marked on its key.
+    // An item's group header says whether it is a question or a task.
+    // The recommended answer is marked on its key.
     const itemRow = (r: RowView): Row => {
       const asked = r.at === null ? undefined : `${DOT}${ago(now - r.at)}`
       const mark = rowMark(r, look)
@@ -3869,17 +3852,13 @@ export const register: Register = on => {
     // On desktop a follow-up (`isFollowUp`) draws as plain text, so the row's answers and main action stand out.
     const keyedButton =
       (rowId: string, isFollowUp = false) =>
-      ({ hotkey, kind: _kind, isMain, emphasis, icon, ...action }: KeyAction) => {
+      ({ hotkey, kind: _kind, emphasis, icon, ...action }: KeyAction) => {
         const { label: _label, ...unlabeled } = action
 
         return look === 'desktop' ? (
           <Button
             {...action}
-            {...(isFollowUp
-              ? { plain: true }
-              : emphasis === 'primary' || isMain
-                ? { variant: 'primary' as const }
-                : {})}
+            {...(isFollowUp ? { plain: true } : emphasis === 'primary' ? { variant: 'primary' as const } : {})}
             label={desktopLabel({ ...action, ...(icon ? { icon } : {}) })}
             {...(isOpenGuarded ? { dimColor: true } : {})}
             onPress={press => unlessGuarded($, rowId, press, action.onPress)}
@@ -3939,7 +3918,7 @@ export const register: Register = on => {
     )
     // The Buttons that take the pane's keys, drawn in a hidden Box.
     const keyBindings = (keys: KeyAction[], suffix = '') =>
-      keys.flatMap(({ key, hotkey, kind: _kind, isMain: _isMain, emphasis: _emphasis, icon: _icon, ...k }) =>
+      keys.flatMap(({ key, hotkey, kind: _kind, emphasis: _emphasis, icon: _icon, ...k }) =>
         hotkey ? [<Button key={`${key}${suffix}`} plain hotkey={hotkey} {...k} label={shownLabel(k)} />] : [],
       )
     // In the terminal, a selected row's secondary keys share its key row when they fit, and
@@ -4033,18 +4012,14 @@ export const register: Register = on => {
 
       return f ? { text: [f.text, f.age].filter(Boolean).join(DOT), isFailure: f.isFailure } : null
     }
-    // A press that went through, or waits in the queue, takes the place of the row's age on its top line, open or
-    // closed: the head line, or the title's line. A note or failure reads under the body instead. A narrow desktop
-    // pane drops the age, not the action.
+    // A press that went through, or waits in the queue, takes the place of the row's age on the title's line, open
+    // or closed. A note or failure reads under the body instead. A narrow desktop pane drops the age, not the
+    // action.
     const pressedAge = (row: Row) => {
       const f = feedbackLabel(row.id, row)
 
       return f?.age ? `${DOT}${[f.text, isAgeDropped ? '' : f.age].filter(Boolean).join(' ')}` : null
     }
-    const headOf = (row: Row, head: NonNullable<Row['head']>) => ({
-      ...head,
-      age: `${pressedAge(row) ?? (isAgeInSide ? '' : head.age)}${head.notes ?? ''}`,
-    })
     // A section's children hang from its title like a directory listing. A
     // child's row has a 1-column bar and a blank column, 3 columns for the tree,
     // 3 for its marker, then its text. `branch` draws the tree: ├─ on the child's first line, or
@@ -4062,9 +4037,9 @@ export const register: Register = on => {
       )
     // A row with no marker, such as a group's empty line, starts its text right after the tree.
     // A row at depth 1 hangs from a tree under the marker column, as a group's closed items do.
-    // The columns a row draws at: one set on desktop, the tree's or the flat ones in the terminal.
-    const columnsFor = (tree?: TreePos | null, extra = 0) => {
-      const base = look === 'desktop' ? ROW_COLUMNS.desktop : tree ? ROW_COLUMNS.tree : ROW_COLUMNS.flat
+    // The columns a row draws at: one set on desktop, the tree's in the terminal.
+    const columnsFor = (extra = 0) => {
+      const base = look === 'desktop' ? ROW_COLUMNS.desktop : ROW_COLUMNS.tree
       return { ...base, textAt: base.textAt + extra }
     }
     // A number from 10 up, as "10)", is a column wider than the mark column, so every question then starts its text
@@ -4110,30 +4085,18 @@ export const register: Register = on => {
     // `isBarred(n)` says element n draws a just-closed row's draining bar, which stands in for the rule after it:
     // a rule under the bar would draw two dashed lines in a row.
     // `extra` moves the rules with a list whose text starts later, as numbers from 10 up make the questions' do.
-    const divided = (
-      rowEls: JSX.Element[],
-      group: string,
-      isTree: boolean,
-      isBarred = (_n: number) => false,
-      extra = 0,
-    ) =>
+    const divided = (rowEls: JSX.Element[], group: string, isBarred = (_n: number) => false, extra = 0) =>
       rowEls.flatMap((el, n) =>
         n === 0 || isInline || look === 'desktop' || isBarred(n - 1)
           ? [el]
           : [
-              isTree ? (
-                <Box key={`divider-${group}-${n}`} flexDirection="row">
-                  <Box width={TREE_LINE_AT} flexShrink={0} />
-                  <Box width={ROW_COLUMNS.tree.textAt - TREE_LINE_AT + extra} flexShrink={0}>
-                    <Text color={pal.line}>│</Text>
-                  </Box>
-                  {rule(ROW_COLUMNS.tree.textAt + 2 + extra)}
+              <Box key={`divider-${group}-${n}`} flexDirection="row">
+                <Box width={TREE_LINE_AT} flexShrink={0} />
+                <Box width={ROW_COLUMNS.tree.textAt - TREE_LINE_AT + extra} flexShrink={0}>
+                  <Text color={pal.line}>│</Text>
                 </Box>
-              ) : (
-                <Box key={`divider-${group}-${n}`} paddingLeft={5}>
-                  {rule(7)}
-                </Box>
-              ),
+                {rule(ROW_COLUMNS.tree.textAt + 2 + extra)}
+              </Box>,
               el,
             ],
       )
@@ -4144,8 +4107,7 @@ export const register: Register = on => {
     const closedLine = (row: Row) => {
       const plain = row.line ?? { text: row.title, age: row.titleAfter }
       const f = feedbackLabel(row.id, row)
-      // A head line already shows the press.
-      if (f && !(row.head && f.age))
+      if (f)
         return {
           ...plain,
           after: `${DOT}${[f.text, isAgeDropped ? '' : f.age].filter(Boolean).join(' ')}`,
@@ -4156,20 +4118,13 @@ export const register: Register = on => {
     }
     // The selected row gets a blue background, or a bar where the palette has
     // no selection color, and reads top to bottom:
-    // context line, title, body, keys. In the docked pane a blank line sets each
+    // title, body, keys. In the docked pane a blank line sets each
     // part off. In the terminal the handle is a Button that selects the row. On desktop the whole row is a
     // Client that does, or without one, the title button.
     // A Button label does not wrap or truncate, so the clickable text is clipped
     // to what fits beside the handle and the row's other text, less a desktop button's frame.
     // A row with a second line breaks its text at a space before `after`, which
     // stays on the first line, and clips the rest to the second.
-    // A row's head: its label in its tone, then its age.
-    const headLine = (head: NonNullable<Row['head']>, ageColor: string) => (
-      <Text wrap="truncate-end">
-        <Text color={pal.tone[head.tone] ?? pal.mark[head.tone]}>{head.label}</Text>
-        {head.age ? <Text color={ageColor}>{head.age}</Text> : null}
-      </Text>
-    )
     const unselectedLine = (row: Row, onPress: (press: UiPressArgument) => void, inset: number) => {
       const line = closedLine(row)
       const before = line.before?.length ?? 0
@@ -4206,7 +4161,6 @@ export const register: Register = on => {
 
       return (
         <Box flexDirection="column">
-          {row.head ? headLine(headOf(row, row.head), pal.age) : null}
           {/* Only `after` shrinks when the line is too long: a shrunk `before` would wrap mid-path. */}
           <Box flexDirection="row">
             {line.before ? (
@@ -4238,20 +4192,17 @@ export const register: Register = on => {
     }
     // A closed desktop row drawn by its Client, at the columns listRow draws an open row's handle and text.
     // The desktop side column's age: the row's last action's, or when it was asked or found.
-    // On desktop a row's toned mark, and its kind's label when the head shares the mark's tone, draw as one Svg in
-    // the shared tones. Without Svg, they stay Text in the palette's theme keys.
+    // On desktop a row's toned mark draws as an Svg in the shared tones. Without Svg, it stays Text in the palette's
+    // theme keys.
     const ToneSvg = look === 'desktop' && 'Svg' in elements ? elements.Svg : null
-    const isHeadToned = (row: Row) => ToneSvg !== null && !!row.handle && row.head?.tone === row.handleTone
     const toned = (row: Row) => {
       if (ToneSvg === null || !row.handle || !row.handleTone) return null
-      const label = isHeadToned(row) ? (row.head?.label ?? '') : ''
-      const cells = label ? 2 + labelCells(label) : 1
       return (
-        <Box width={cells} height={1} flexShrink={0}>
+        <Box width={1} height={1} flexShrink={0}>
           <ToneSvg
-            source={toneSvg(row.handleTone, row.handle, label, cells)}
-            alt={label ? `${row.handle} ${label}` : row.handle}
-            width={cells * DESKTOP_CELL_PT}
+            source={toneSvg(row.handleTone, row.handle)}
+            alt={row.handle}
+            width={DESKTOP_CELL_PT}
             height={DESKTOP_LINE_PT}
           />
         </Box>
@@ -4274,12 +4225,6 @@ export const register: Register = on => {
         title: text.trim(),
         after: f?.age ? f.text : (row.line?.after ?? '').replace(LEADING_DOT, '').trim(),
         side: sideAge(row),
-        // The hooks module draws a toned head's label in the mark's Svg, so the Client only holds its line.
-        head: row.head
-          ? isHeadToned(row)
-            ? { label: '\u00a0', color: null }
-            : { label: row.head.label, color: pal.tone[row.head.tone] ?? pal.mark[row.head.tone] }
-          : null,
         padY: DESKTOP_ROW_PAD,
         maxLines: row.hasSecondLine ? 4 : 2,
         charsPerCell: DESKTOP_CLIP_CHARS_PER_CELL,
@@ -4377,8 +4322,8 @@ export const register: Register = on => {
       ) : (
         line
       )
-    const listRow = (row: Row, tree?: TreePos) => {
-      const columns = columnsFor(tree, markExtra(row.id))
+    const listRow = (row: Row, tree: TreePos) => {
+      const columns = columnsFor(markExtra(row.id))
       const index = indexOf.get(row.id) ?? -1
       const isSelected = index === at
       // On desktop a Client takes a click on every cell of the row, where a Button takes one only on its label.
@@ -4387,7 +4332,7 @@ export const register: Register = on => {
         return (
           <Box key={`row-${row.id}`} flexDirection="row" overflow="hidden">
             {/* A Client clips its frame's inset, so the mark hangs there from here, at the frame's own spot. A toned
-                mark and the kind's label are an Svg, drawn first and under the Client, which takes the clicks. */}
+                mark is an Svg, drawn first and under the Client, which takes the clicks. */}
             {row.handle ? (
               <Box
                 position="absolute"
@@ -4425,7 +4370,7 @@ export const register: Register = on => {
           />
         ) : null
       const f = feedbackLabel(row.id, row)
-      const titleAfter = (row.head ? null : pressedAge(row)) ?? (isAgeInSide ? undefined : row.titleAfter)
+      const titleAfter = pressedAge(row) ?? (isAgeInSide ? undefined : row.titleAfter)
       const status = [
         ...(row.fold?.note ? [{ text: row.fold.note, color: pal.muted }] : []),
         ...(f && !f.age ? [{ text: f.text, color: f.isFailure ? pal.tone.error : pal.muted }] : []),
@@ -4483,14 +4428,6 @@ export const register: Register = on => {
           gapY: (2 * SELECTED_GAP_PT) / DESKTOP_LINE_PT,
           children: [
             <Box key={`view-${row.id}`} position="absolute" top={0} bottom={0} left={0} width={1} />,
-            row.head && !isHeadToned(row) ? (
-              <Text wrap="truncate-end" color={pal.tone[row.head.tone] ?? pal.mark[row.head.tone]}>
-                {row.head.label}
-              </Text>
-            ) : row.head ? (
-              // The toned mark's Svg draws the label too, so this line only holds its place.
-              <Text> </Text>
-            ) : null,
             <Text wrap="wrap">
               <Text bold>{row.title}</Text>
               {f?.age ? <Text color={pal.muted}>{unbroken(`${DOT}${f.text}`)}</Text> : null}
@@ -4541,8 +4478,8 @@ export const register: Register = on => {
           </Box>
           {isSelected ? (
             <Box flexDirection="column" flexShrink={1} flexGrow={1} paddingRight={1} paddingY={space.rowPad}>
-              {row.head ? withSideAge(row, headLine(headOf(row, row.head), pal.muted)) : null}
-              {(row.head ? (el: JSX.Element) => el : (el: JSX.Element) => withSideAge(row, el))(
+              {withSideAge(
+                row,
                 <Text wrap="wrap">
                   <Text bold>{row.title}</Text>
                   {titleAfter ? <Text color={pal.muted}>{unbroken(titleAfter)}</Text> : null}
@@ -4582,11 +4519,7 @@ export const register: Register = on => {
               <Text color={pal.age}>{sideAge(row)}</Text>
             </Box>
           ) : null}
-          {tree
-            ? isSelected
-              ? branch(tree, blankLine, TREE_LINE_AT, pal.selectionLine ?? pal.line)
-              : branch(tree, 0)
-            : null}
+          {isSelected ? branch(tree, blankLine, TREE_LINE_AT, pal.selectionLine ?? pal.line) : branch(tree, 0)}
           {isSelected && look === 'terminal' ? (
             <Box
               key={settledScrollKey(`view-${row.id}`, settledLayout)}
@@ -5285,7 +5218,7 @@ export const register: Register = on => {
     // A just-closed row with no Undo, whose draining bar shows under it.
     const isBarred = (x: Entry | undefined) =>
       x !== undefined && !('row' in x) && !x.settled.actions.some(a => a.press.action === 'undo')
-    const settledRow = ({ settled: r, state }: Extract<Entry, { settled: RowView }>, pos?: TreePos) => {
+    const settledRow = ({ settled: r, state }: Extract<Entry, { settled: RowView }>, pos: TreePos) => {
       const undo = r.actions.find(a => a.press.action === 'undo')?.press ?? null
       if (look === 'desktop') {
         const after = `${DOT}${settledLabel(state.label, state.delivery)}`
@@ -5306,30 +5239,13 @@ export const register: Register = on => {
           ],
         })
       }
-      const columns = columnsFor(pos, markExtra(r.id))
       const content = settledContent(r.title, state.label, state.at, undo, state.delivery, state.isLapsed)
       // The ✓ waits for the answer to reach Claude; the blank keeps the row's text in line.
       const mark = state.delivery !== null ? <Text> </Text> : <Text color={pal.muted}>✓</Text>
       // In a group's tree, or flat as Findings lists its rows. On desktop it pads itself as a closed row does.
-      return pos ? (
+      return (
         <Box key={`settled-${r.id}`} flexDirection="column" paddingY={space.settledPad}>
           {treeRow(pos, mark, content, undefined, 0, undefined, markExtra(r.id))}
-        </Box>
-      ) : (
-        <Box
-          key={`settled-${r.id}`}
-          flexDirection="row"
-          alignItems="flex-start"
-          overflow="hidden"
-          paddingY={space.settledPad}
-        >
-          <Box width={columns.lead} flexShrink={0} />
-          <Box width={columns.textAt - columns.lead} flexShrink={0} paddingLeft={columns.handleAt - columns.lead}>
-            {mark}
-          </Box>
-          <Box flexDirection="column" flexShrink={1} flexGrow={1} paddingRight={1}>
-            {content}
-          </Box>
         </Box>
       )
     }
@@ -5346,7 +5262,6 @@ export const register: Register = on => {
             'row' in x ? listRow(x.row, childPos(n, entries.length)) : settledRow(x, childPos(n, entries.length)),
           ),
           g.kind,
-          true,
           n => isBarred(entries[n]),
           Math.max(0, ...entries.map(x => markExtra(entryId(x)))),
         )
@@ -5457,7 +5372,6 @@ export const register: Register = on => {
               'row' in x ? listRow(x.row, childPos(n, g.entries.length)) : settledRow(x, childPos(n, g.entries.length)),
             ),
             g.kind,
-            true,
             n => isBarred(g.entries[n]),
           ),
           ...closedFold(g.kind, closed, closedTotal(closedOf, settled), unfolded.includes(g.kind)),
@@ -5501,7 +5415,6 @@ export const register: Register = on => {
             ...divided(
               group.map((r, n) => listRow(r, childPos(n, group.length))),
               key,
-              true,
             ),
           ]
     const prBlock = ({
