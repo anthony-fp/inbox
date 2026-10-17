@@ -1,21 +1,10 @@
 import type { ClientModule } from 'claude-code'
 
-/**
- * A list's "N closed" line in the desktop pane. A Button takes a click only
- * on its label, so the line is drawn here instead: this region gets the
- * pointer over every cell of the line, draws the hover, and posts the fold
- * state the click asks for to the hooks module, which sets it. It also posts
- * the hover, since the hooks module draws the chevron, an Svg a Client cannot.
- */
-
 export type FoldProps = {
-  /** The mark column's width, in columns: the label starts where the rows' text does. The hooks module draws the
-   * chevron there. */
   markCells: number
-  /** The line's text, `foldLabel` in hooks/view.ts. */
   label: string
   isUnfolded: boolean
-  /** Lines of padding above and below the text. The hover covers it. */
+  /** Lines of padding above and below the text. */
   padY: number
   /** A null color is the theme's own. */
   colors: { rest: string | null; text: string | null; hoverText: string | null }
@@ -47,7 +36,6 @@ const Fold: ClientModule<FoldProps, State> = (props, surface) => {
   const background = props.colors.rest
   const color = hover && props.colors.hoverText ? props.colors.hoverText : props.colors.text
 
-  // The pane's row frame: a rounded Box with a transparent border, as the hooks module's own lines draw.
   return Box({
     flexDirection: 'row',
     borderStyle: 'single',

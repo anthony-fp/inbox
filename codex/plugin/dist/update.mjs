@@ -913,8 +913,6 @@ function applied(s, reply, now, promptAt) {
     presence: {
       ...s.presence,
       ledgerState: parsed ? "current" : "failed",
-      // A turn that failed twice counts as summarized too: with no catch-up yet, a task
-      // handed to Codex would otherwise stay folded for good.
       turnsApplied: Math.max(s.presence.turnsApplied, next.turnsStarted)
     }
   };
@@ -936,10 +934,7 @@ async function runUpdates(dir, sessionId, ask, now) {
           const after = await updateState(
             dir,
             sessionId,
-            (x) => (
-              // A cleared conversation dropped the exchange while the model ran.
-              x.pending[0]?.turnsStarted === next.turnsStarted && x.pending[0].ex.turn === next.ex.turn ? applied(x, reply, now(), promptAt) : x
-            )
+            (x) => x.pending[0]?.turnsStarted === next.turnsStarted && x.pending[0].ex.turn === next.ex.turn ? applied(x, reply, now(), promptAt) : x
           );
           if (after.pending[0]?.failed && !next.failed) return "retry";
         }

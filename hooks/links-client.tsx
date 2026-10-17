@@ -1,13 +1,5 @@
 import type { ClientModule } from 'claude-code'
 
-/**
- * An open row's follow-ups in the desktop pane, such as Reply, Explain and Dismiss. A desktop Button is always
- * the app's native button, with its own fill and padding, so the follow-ups are drawn here as plain text: muted,
- * and the text color under the pointer. This region gets the pointer over each label and posts the clicked
- * one's key to the hooks module, which presses it.
- */
-
-/** One follow-up, its width in cells set by the hooks module, which knows the font. */
 export type ClientLink = { key: string; label: string; width: number }
 
 export type LinksProps = {
@@ -21,7 +13,6 @@ export type LinksProps = {
 
 type State = { hover: string | null }
 
-/** The link under column `x`, or null over a gap. */
 function linkAt(props: LinksProps, x: number): string | null {
   let left = 0
   for (const link of props.links) {

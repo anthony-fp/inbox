@@ -1,6 +1,3 @@
-// The PRs tab's rules both hosts share: fetching each tracked PR with gh, which PRs the tab draws, the ids of
-// their rows, and what each press on them does. Each host stores the PRs and runs gh its own way.
-
 import type { Item, LastAction, Ledger, PressKind, PrCheck, PrThread, PrView, PrViews } from '../types'
 import { isFoldingPress, localLast, pendingResult, prSteps, recordPress, withQueued } from './presses'
 import type { Effect, HelpStep, PrActionId } from './presses'
@@ -22,13 +19,11 @@ import type { IsThreadSent, PrStatus } from './prs'
 import { SETTLED_MS } from './view'
 import type { ActionEmphasis, RowWait } from './view'
 
-/** How many of a conversation's linked PRs the tab fetches and shows: the newest ones. */
 export const MAX_PRS = 12
 
 /** Runs gh with these arguments in the session's folder. */
 export type GhRun = (args: string[]) => Promise<{ exitCode: number; stdout: string; stderr: string }>
 
-/** The linked PRs after a reply or command links `refs`: each moves to the end. */
 export function linkedPrs(prs: string[], refs: string[]): string[] {
   return [...prs.filter(r => !refs.includes(r)), ...refs]
 }
@@ -42,12 +37,10 @@ export function itemPrSteps(item: Item, prState: PrViews, linked: string[]): Hel
   )
 }
 
-/** The linked PRs the tab tracks, the newest MAX_PRS, and the older ones it leaves out, each newest last. */
 export function splitLinked(linked: string[]): { tracked: string[]; older: string[] } {
   return { tracked: linked.slice(-MAX_PRS), older: linked.slice(0, Math.max(0, linked.length - MAX_PRS)) }
 }
 
-/** The line under the PR blocks that names the linked PRs the tab leaves out, newest first, or null for none. */
 export function olderPrsText(linked: string[]): string | null {
   const { older } = splitLinked(linked)
   if (older.length === 0) return null
@@ -57,8 +50,7 @@ export function olderPrsText(linked: string[]): string | null {
 }
 
 /**
- * Fetches every PR the tab shows: the linked ones and the current branch's. Only `findsBranchPr` asks gh which PR
- * the branch has; otherwise the last one found is refreshed by its ref. Returns the views fetched and the branch's PR.
+ * Only `findsBranchPr` asks gh which PR the branch has; otherwise the last one found is refreshed by its ref.
  */
 export async function fetchTracked(
   gh: GhRun,
@@ -68,7 +60,6 @@ export async function fetchTracked(
 ): Promise<{ views: Record<string, PrView>; branchRef: string | null }> {
   const { tracked } = splitLinked(linked)
   const branchTarget = findsBranchPr ? null : state.branchRef
-  // The branch's PR, when it is also linked, is fetched once, with the linked ones.
   const isBranchLinked = branchTarget !== null && tracked.includes(branchTarget)
   const [branch, ...rest] = await Promise.all([
     findsBranchPr || (branchTarget && !isBranchLinked) ? fetchPr(gh, branchTarget, state.views, state.branchRef) : null,
@@ -81,7 +72,7 @@ export async function fetchTracked(
 }
 
 /**
- * One PR's view and open threads. `target` is "owner/repo#123", or null for
+ * `target` is "owner/repo#123", or null for
  * the current branch's PR, whose ref is known only from gh's answer.
  * `knownBranchRef` is the branch's PR as of the last fetch: it stays the
  * branch's PR when the lookup fails for any reason but "no pull requests found".
@@ -108,7 +99,6 @@ export async function fetchPr(
     ])
   }
   const t = target ? parseRef(target) : null
-  // A linked PR's two calls are independent; the branch PR's threads wait for its ref.
   const [view, early] = await Promise.all([
     gh(['pr', 'view', ...(t ? [t.number, '-R', t.repo] : []), '--json', VIEW_FIELDS]),
     target ? threadsOf(target) : null,
@@ -129,7 +119,6 @@ export async function fetchPr(
   }
 }
 
-/** The ref of the PR whose `gh pr view --json` output this is. */
 export function urlRef(json: string): string | null {
   try {
     return prRefs(String((JSON.parse(json) as { url?: unknown }).url ?? ''))[0] ?? null
@@ -138,12 +127,10 @@ export function urlRef(json: string): string | null {
   }
 }
 
-/** The id of a review thread's row, which also keys its last action. */
 export function prThreadId(pr: PrView, t: PrThread): string {
   return threadRowId(pr.ref, t.id)
 }
 
-/** The id of a failing PR check's row. */
 export function prCheckId(pr: PrView, check: PrCheck): string {
   return checkRowId(pr.ref, check.name)
 }
@@ -156,7 +143,6 @@ export function checkRowId(ref: string, check: string): string {
   return `${ref} check ${check}`
 }
 
-/** The id of a PR block's own row, which keys its last action. */
 export function prMarkId(ref: string): string {
   return `pr:${ref}`
 }
@@ -199,19 +185,16 @@ export function prRowWaits(prs: PrView[], lastActions: Record<string, LastAction
   ])
 }
 
-/** A PR the session still tracks: one of the newest it linked, or the current branch's. */
 export function isTracked(prState: PrViews, linked: string[], ref: string): boolean {
   return splitLinked(linked).tracked.includes(ref) || prState.branchRef === ref
 }
 
-/** A PR the person dismissed less than SETTLED_MS ago, whose block stays in place, settled, with Undo. */
 export function isDismissing(lastActions: Record<string, LastAction>, ref: string, now: number): boolean {
   const mark = lastActions[prMarkId(ref)]
 
   return mark?.action === 'pr-dismiss' && now - mark.at < SETTLED_MS
 }
 
-/** The PRs the tab draws: each one tracked, and each one just dismissed, which draws settled. */
 export function drawnPrs(
   prState: PrViews,
   linked: string[],
@@ -227,7 +210,6 @@ export function drawnPrs(
   )
 }
 
-/** The tone each status word draws in: Blocked waits on the person, Ready is done, and Waiting has none. */
 export const PR_TONES: Record<PrStatus, 'needsYou' | 'done' | 'findings' | 'error' | null> = {
   ready: 'done',
   blocked: 'needsYou',
@@ -237,7 +219,6 @@ export const PR_TONES: Record<PrStatus, 'needsYou' | 'done' | 'findings' | 'erro
   closed: 'error',
 }
 
-/** A press on a PR block, one of its review threads, or a failing check's row. */
 export type PrPress =
   | { action: 'thread-address' | 'thread-draft' | 'thread-discuss' | 'thread-open'; ref: string; thread: string }
   | { action: 'pr-conflicts' | 'pr-address-all' | 'pr-merge' | 'pr-open' | 'pr-dismiss' | 'pr-undo'; ref: string }
@@ -252,7 +233,6 @@ export type Applied =
   | { ledger: Ledger; lasts: Record<string, LastAction>; drop: string[]; effects: Effect[]; reopenedId?: string }
   | { stale: true }
 
-/** The row a PR press was drawn on, which keys its last action and its note. */
 export function prRowId(p: PrPress): string {
   if ('check' in p) return checkRowId(p.ref, p.check)
   if ('thread' in p) return threadRowId(p.ref, p.thread)
@@ -260,10 +240,6 @@ export function prRowId(p: PrPress): string {
   return prMarkId(p.ref)
 }
 
-/**
- * The PR press [Try again] repeats on a thread or PR block whose message failed
- * to send, with its kind, or null. As `retryOf` does a row press.
- */
 function prRetryOf(
   last: LastAction | undefined,
   ref: string,
@@ -282,8 +258,7 @@ function prRetryOf(
 }
 
 /**
- * One button on a PR block, a review thread or a failing check, as every look draws it. A plan lists its buttons in
- * the order every look shows them. A follow-up is drawn after the row's other buttons, as Discuss is.
+ * A plan lists its buttons in the order every look shows them. A follow-up is drawn after the row's other buttons, as Discuss is.
  */
 export type PrAction = {
   press: PrPress
@@ -295,7 +270,6 @@ export type PrAction = {
   isFollowUp?: boolean
 }
 
-/** A PR action's label, "Address again" once it was its row's last action and its message went. */
 function again(lastActions: Record<string, LastAction>, rowId: string, action: PrActionId, label: string): string {
   const last = lastActions[rowId]
 
@@ -306,7 +280,6 @@ function retryAction(retry: { press: PrPress; kind: PressKind } | null): PrActio
   return retry ? [{ press: retry.press, label: 'Try again', kind: retry.kind, emphasis: 'normal', icon: 'retry' }] : []
 }
 
-/** A review thread's buttons: [Try again], Address, Draft reply, Open comment, then Discuss. */
 export function threadActions(pr: PrView, t: PrThread, lastActions: Record<string, LastAction>): PrAction[] {
   const id = threadRowId(pr.ref, t.id)
   const on = { ref: pr.ref, thread: t.id }
@@ -346,7 +319,6 @@ export function threadActions(pr: PrView, t: PrThread, lastActions: Record<strin
   ]
 }
 
-/** A failing check's buttons: [Try again], Fix, Open log. */
 export function checkActions(pr: PrView, c: PrCheck, lastActions: Record<string, LastAction>): PrAction[] {
   const id = checkRowId(pr.ref, c.name)
   const on = { ref: pr.ref, check: c.name }
@@ -372,9 +344,7 @@ export function checkActions(pr: PrView, c: PrCheck, lastActions: Record<string,
 }
 
 /**
- * A PR block's buttons: [Try again], the presses that move the PR on (Merge, Resolve conflicts, Address all N
- * threads), Open PR, then Dismiss. The first press that moves the PR on is the primary one. The branch's own PR has
- * no Dismiss, since the PRs tab shows it while the branch has it.
+ * The branch's own PR has no Dismiss, since the PRs tab shows it while the branch has it.
  */
 export function prBlockActions(
   pr: PrView,
@@ -433,7 +403,7 @@ export function prBlockActions(
 }
 
 /**
- * Applies a PR press, as `applyPress` does a row press. Pure. Stale when the PR
+ * Pure. Stale when the PR
  * is no longer tracked or drawn, its thread or check is gone, or what the
  * press acts on is over: the PR no longer conflicts, or no thread waits on the
  * person. Undo is stale unless the PR's block still holds its Dismiss.
@@ -448,7 +418,6 @@ export function applyPrPress(
   const stale = { stale: true as const }
   const pr = prState.views[p.ref]
   const markId = prMarkId(p.ref)
-  // Every row a sending press records on waits for the message to arrive.
   const applied = (a: Partial<Exclude<Applied, { stale: true }>>): Applied => {
     const effects = a.effects ?? []
     const lasts = Object.fromEntries(Object.entries(a.lasts ?? {}).map(([id, l]) => [id, withQueued(l, effects)]))
@@ -464,7 +433,6 @@ export function applyPrPress(
   const record = (kind: 'talk' | 'handoff' | 'mark', action: PrActionId, text: string) =>
     recordPress(kind, action, text, ctx)
   const send = (text: string): Effect => ({ kind: 'send', text, by: null })
-  // An open is Local: its row keeps its last action, with the open's result on it.
   const open = (rowId: string, text: string, url: string, name: string): Applied => {
     const effects: Effect[] = [{ kind: 'open', target: url, name }]
     const result = pendingResult(effects, ctx.now, ctx.localPressId)
@@ -502,7 +470,6 @@ export function applyPrPress(
     case 'pr-address-all': {
       const waiting = threadsOnYou(pr, threadSentIn(lastActions))
       if (waiting.length === 0) return stale
-      // Each thread it sends reads as if its own Address were pressed, so it folds too.
       const threads = waiting.map(t => [prThreadId(pr, t), record('handoff', 'thread-address', 'Address')])
       return applied({
         lasts: {
@@ -518,9 +485,7 @@ export function applyPrPress(
     case 'pr-open':
       return open(markId, 'Open PR', pr.url, `PR #${pr.number}`)
     case 'pr-dismiss':
-      // The branch's PR has no Dismiss: the tab shows it while the branch has it.
       if (!ledger.prs.includes(p.ref) || prState.branchRef === p.ref) return stale
-      // Its view stays, so its block settles in place until it leaves.
       return applied({
         ledger: { ...ledger, prs: ledger.prs.filter(r => r !== p.ref) },
         lasts: { [markId]: record('mark', p.action, 'Dismissed') },
@@ -536,7 +501,6 @@ export function applyPrPress(
     case 'log': {
       const check = pr.checks.find(c => c.name === p.check)
       if (!check) return stale
-      // A check with no log link opens the PR's page instead.
       return open(prCheckId(pr, check), 'Open log', check.url ?? pr.url, check.url ? 'the log' : `PR #${pr.number}`)
     }
   }

@@ -1,5 +1,3 @@
-// The MCP server's entry point, bundled as dist/server.mjs. One JSON-RPC message per line on stdin and stdout.
-//
 // Codex starts this process once per app launch and keeps it. So it only reads lines and passes each to the
 // handler module, which it imports again whenever that module's file changes: a reinstalled plugin, or the build
 // `npm --prefix codex run dev` keeps while it runs. A change to this file itself still needs Codex restarted.
@@ -17,7 +15,6 @@ type Handler = ReturnType<typeof createHandler>
 const here = dirname(fileURLToPath(import.meta.url))
 const dir = dataDir(process.env, dirname(here))
 
-/** The handler module to run: the dev build's while one runs, else the installed one. */
 async function handlerPath(): Promise<string> {
   const server = (await devBuild(dir))?.server
   const isBuilt = server
@@ -32,10 +29,8 @@ async function handlerPath(): Promise<string> {
 
 let current: { key: string; handle: Promise<Handler> } | null = null
 let lastLoaded: Handler | null = null
-// Why the newest handler file did not import, while an older handler keeps answering. Each view carries it.
 let loadError: string | null = null
 
-/** Imports a handler file, and records why it failed, if it did. */
 function load(url: string, path: string): Promise<Handler> {
   const handle = import(url).then((m: { createHandler: typeof createHandler }) => m.createHandler(dir, () => loadError))
   handle.then(
@@ -53,7 +48,7 @@ function load(url: string, path: string): Promise<Handler> {
 }
 
 /**
- * The handler for the module's current file. A file that changed is imported again under a new URL, since Node
+ * A file that changed is imported again under a new URL, since Node
  * keeps a module by its URL. Each import stays in memory until the process ends, which a reload per save allows.
  * A file that fails to import, as one caught mid-write, leaves the last handler in place. Node keeps the failure
  * under its URL too, so the import is tried again only once the file changes.
@@ -90,7 +85,6 @@ createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', line =
       handle(message as Parameters<Handler>[0]).then(r => {
         if (r) reply(r)
       }),
-    // With no handler loaded at all, a request gets an error instead of no answer.
     err => {
       if (message.id === undefined) return
       const why = err instanceof Error ? err.message : String(err)

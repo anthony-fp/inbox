@@ -16,10 +16,8 @@ export const EMPTY: Ledger = {
 
 const NL = '\n'
 const MAX_OPEN = 20
-/** Prompts after which an unanswered item is dropped as moot. */
 const STALE_AFTER = 12
 const MAX_CLOSED = 12
-/** The outcome of an item left unanswered until it went stale. */
 const EXPIRED = 'expired, unanswered'
 const MAX_HELPS = 3
 const MAX_FINDINGS = 30
@@ -54,7 +52,7 @@ export function upgradeLedger(ledger: Ledger): Ledger {
   }
 }
 
-/** An open item in the current shape. Also run on the copy a close record keeps, which reopenItem puts back. */
+/** Also run on the copy a close record keeps, which reopenItem puts back. */
 function upgradeItem(item: Item): Item {
   return { ...item, kind: readKind(item.kind), at: item.at ?? null, rec: recommendedOption(item.options, item.rec) }
 }
@@ -66,8 +64,7 @@ function words(text: string): string[] {
 /**
  * The option a recommendation names: the one whose words all appear in it,
  * the longest when several do. "Symlink into a PATH folder" names "Symlink
- * into PATH". Null when it names none, since a recommendation that is not one
- * of the answers came from the wrong field or from no recommendation at all.
+ * into PATH".
  */
 export function recommendedOption(options: string[], rec: string | null): string | null {
   if (!rec) return null
@@ -77,7 +74,6 @@ export function recommendedOption(options: string[], rec: string | null): string
     const w = words(option)
     if (w.length > words(best ?? '').length && w.every(x => named.has(x))) best = option
   }
-  // "A" names "A: Cancel button" by the letter or number the reply labeled it with.
   const label = (text: string) => text.match(/^\s*\(?([a-z]|\d{1,2})\s*[:.)]/i)?.[1]?.toLowerCase()
   const byLabel = /^\s*(?:option\s+)?([a-z]|\d{1,2})\s*[.!]?\s*$/i.exec(rec)?.[1]?.toLowerCase()
 
@@ -93,6 +89,7 @@ function howFromOutcome(outcome: string): Closed['how'] {
 
   return 'update'
 }
+
 /**
  * Commands that sign in or ask for a password. They need the person's own
  * terminal, so their button copies them instead of asking Claude to run them.
@@ -113,40 +110,29 @@ const PERSON_ONLY_REASON =
 export type Exchange = {
   /** What the person typed; null when something else started the turn. */
   person: string | null
-  /** What started the turn when the person didn't (a task notification, a peer). */
   trigger: string | null
   activity: string[]
   reply: string
   /** The person-prompt count when the reply was written. */
   turn: number
-  /** The item button the person pressed to send this turn's prompt, if any. */
   press: Press | null
-  /** What the person has on screen besides the conversation, from screenText. */
   screen: string
 }
 
-/** A prompt the mod sent for an item: an answer, an Explain, a Run, or the message for a Done. */
 export type Press = { id: string; action: 'answer' | 'explain' | 'run' | 'done' }
 
 export type Update = {
   card: Card
   closed: { id: string; outcome: string }[]
   added: (Omit<Item, 'id' | 'turn' | 'at' | 'helps'> & { helps: Help[] })[]
-  /** Helps for items already open. */
   helped: { id: string; help: Help }[]
   /** New options or a new recommendation for open questions. Null keeps what the question has. */
   updated: { id: string; options: string[] | null; rec: string | null }[]
   /** Findings an item now asks about: an open item's id, or the place of a NEW item in `added`. */
   asked: { id: string; item: string | number }[]
-  /** Work the person set aside for later, from TODO lines. Each becomes a question about starting it. */
   todos: string[]
 }
 
-/**
- * Checks one HELP line; null when it is unusable. A path, command, URL or line
- * of text must appear in `source`, the reply and activity, so the model cannot
- * invent one. A null source (a catch-up over the whole conversation) skips that.
- */
 function readHelp(
   kind: string,
   value: string,
@@ -155,13 +141,11 @@ function readHelp(
   source: string | null,
 ): Help | null {
   const isQuoted = (text: string) => source === null || source.includes(text)
-  // "block N" names a code block of the reply, already quoted; anything else is the value as written.
   const block = value.match(/^block\s+(\d+)$/i)
   const quoted = block ? (blocks[Number(block[1]) - 1] ?? '') : value.replace(/^`|`$/g, '')
   const isFromReply = (text: string) => block !== null || isQuoted(text)
   if (kind === 'open') {
     const path = value.replace(/^`|`$/g, '')
-    // A bare word such as "migrations" can appear in any reply, so a path needs a "/", "." or "~" and must stand alone.
     const isPath = /[/.~]/.test(path) && !/^[a-z]+:/i.test(path) && path.length <= 300
     const standsAlone = (text: string) => new RegExp(`(?<![\\w.~-])${escaped(path)}(?![\\w/-])`).test(text)
     return isPath && (source === null || standsAlone(source)) ? { kind, path } : null
@@ -188,10 +172,6 @@ function readHelp(
   return null
 }
 
-/**
- * A HELP line's value and name, from the fields after its kind. A command can hold "|" itself, so the whole tail
- * is the value when the reply quotes it so; otherwise the last field is the name and the fields before it the value.
- */
 function helpFields(tail: string[], source: string | null): { help: string; name: string | null } {
   const whole = tail.join('|').trim()
   if (tail.length <= 1 || (source !== null && source.includes(commandText(whole.replace(/^`|`$/g, '')))))
@@ -204,12 +184,10 @@ function escaped(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-/** A command as written, without surrounding space or a leading `!`. */
 function commandText(text: string): string {
   return text.trim().replace(/^!\s*/, '')
 }
 
-/** The command a help runs or copies, so a copy of a command yields to its command button. */
 function commandOf(help: Help): string | null {
   if (isCommand(help)) return help.command
   if (help.kind === 'copy') return commandText(help.text)
@@ -221,7 +199,6 @@ function isCommand(help: Help): help is Extract<Help, { kind: 'run' | 'terminal'
   return help.kind === 'run' || help.kind === 'terminal'
 }
 
-/** What a help acts on, without the name the model gave it, so one command under two names counts once. */
 function helpTarget(help: Help): string {
   if (help.kind === 'open') return `open ${help.path}`
   if (help.kind === 'link') return `link ${help.url}`
@@ -232,7 +209,6 @@ function helpTarget(help: Help): string {
 function withHelp(helps: Help[], help: Help): Help[] {
   const command = commandOf(help)
   const kept = isCommand(help) ? helps.filter(h => h.kind !== 'copy' || commandOf(h) !== command) : helps
-  // A copy and a run of one command share a target, so either covers the other.
   const isCovered = kept.some(h => helpTarget(h) === helpTarget(help))
 
   return isCovered || kept.length >= MAX_HELPS ? kept : [...kept, help]
@@ -280,7 +256,6 @@ export function parseReply(text: string, source: string | null = null): Update |
   // The model sometimes writes an answer, then a correction and a whole second answer. Each answer starts with
   // GOAL, so only the lines from the last GOAL on are the answer it settled on.
   const lastGoal = lines.findLastIndex(line => KEY_LINE.exec(line)?.[1] === 'GOAL')
-  // The item each NEW line made, by its place among the NEW lines, as HELP's "new N" counts them.
   const newLines: (Update['added'][number] | undefined)[] = []
 
   for (const raw of lines.slice(Math.max(lastGoal, 0))) {
@@ -288,24 +263,19 @@ export function parseReply(text: string, source: string | null = null): Update |
     if (!m) continue
     seen += 1
     const key = m[1]
-    // The model writes "-" for "nothing", for a whole value ("NOW: -") or one field ("NEW: do | - | - | - | -").
     const value = dash(m[2]) ?? ''
     if (key === 'GOAL') card.goal = value
     else if (key === 'NOW') card.now = value
     else if (key === 'DONE' && value) card.done.push(value)
     else if (key === 'RUNNING' && value) card.running.push(value)
     else if (key === 'CLOSED' || key === 'FIXED') {
-      // CLOSED closes items and FIXED closes findings, so a finding the person only put off stays open.
       const [id, outcome] = value.split('|').map(s => s.trim())
       if (id && /^f\d/.test(id) === (key === 'FIXED')) closed.push({ id, outcome: outcome ?? '' })
     } else if (key === 'ASKED') {
       const [id, target] = value.split('|').map(s => s.trim())
       if (id && /^f\d+$/.test(id) && target) asks.push({ id, target })
     } else if (key === 'NEW') {
-      // The recommendation is the last field. The model sometimes writes one answer after "|" instead of " / ".
       const fields = value.split('|')
-      // The model sometimes leaves out the label, as in "NEW: do | Run the migration | - | - | -". A label
-      // field holding a phrase, with no ask after it, is the ask.
       const isLabelSkipped = !dash(fields[2]) && /\s/.test((fields[1] ?? '').trim())
       const [kind, label, ask, ...rest] = (isLabelSkipped ? [fields[0], '-', ...fields.slice(1)] : fields).map(dash)
       const rec = rest.length > 1 ? rest.pop() : null
@@ -338,7 +308,6 @@ export function parseReply(text: string, source: string | null = null): Update |
       if (parsed && target) helps.push({ target: target.trim(), help: parsed })
     }
   }
-  // HELP lines name their item, and may come before or after its NEW line.
   for (const { target, help } of helps) {
     // Lenient about extra words: the model sometimes writes "open i9" for "i9".
     const n = target.match(/\bnew\s*(\d+)\b/i)
@@ -359,10 +328,6 @@ export function parseReply(text: string, source: string | null = null): Update |
     : { card: { ...card, done: card.done.slice(-4) }, closed, added, helped, updated, asked, todos }
 }
 
-/**
- * Whether the reply already names most of a todo's key words, as "Added --verbose" does for "add a --verbose flag".
- * The model writes TODO lines for work the reply just did.
- */
 function isTakenUp(work: string, reply: string | null): boolean {
   const key = [...keyWords(work)]
   const said = new Set(words(reply ?? ''))
@@ -370,7 +335,6 @@ function isTakenUp(work: string, reply: string | null): boolean {
   return key.length > 0 && key.filter(w => said.has(w)).length * 2 >= key.length
 }
 
-/** The question a todo the person set aside becomes. */
 export function todoAsk(work: string): string {
   return `Ready to start on ${work.replace(/[.?!\s]+$/, '')}?`
 }
@@ -393,16 +357,10 @@ const FILLER = new Set([
   'all',
 ])
 
-/** The words that carry an ask's meaning. Numbers stay whatever their length, since "PR #41" is not "PR #42". */
 function keyWords(text: string): Set<string> {
   return new Set(words(text).filter(w => /\p{N}/u.test(w) || (w.length > 2 && !FILLER.has(w))))
 }
 
-/**
- * Whether one ask rewords the other: most of the shorter one's key words
- * appear in the longer. Asks with one key word only match exactly, since
- * "Deploy?" and "Deploy now?" can be different questions.
- */
 function restates(a: string, b: string): boolean {
   const x = keyWords(a)
   const y = keyWords(b)
@@ -413,7 +371,6 @@ function restates(a: string, b: string): boolean {
       .filter(w => /\p{N}/u.test(w))
       .sort()
       .join(' ')
-  // Asks that name different numbers, such as two PRs, are different questions however alike their words.
   if (numbers(x) !== '' && numbers(y) !== '' && numbers(x) !== numbers(y)) return false
 
   return fewer >= 2 ? shared / fewer >= 0.7 : sameAsk(a, b)
@@ -425,17 +382,12 @@ function sameAsk(a: string, b: string): boolean {
   return norm(a) !== '' && norm(a) === norm(b)
 }
 
-/**
- * The open item a NEW line repeats, if any. The summary model often restates
- * an open item, labelled with its id or reworded, instead of leaving it alone.
- */
 function matchOpen(items: Pick<Item, 'id' | 'kind' | 'ask'>[], a: Update['added'][number]): number {
   return items.findIndex(
     i => i.id === a.label || sameAsk(i.ask, a.ask) || (i.kind === a.kind && restates(i.ask, a.ask)),
   )
 }
 
-/** Whether a NEW line repeats an item that closed at or after `since`, by matchOpen's rule or its label. */
 function repeatsRecentlyClosed(closed: Closed[], a: Update['added'][number], since: number): boolean {
   const recent = closed.filter(c => c.at >= since)
 
@@ -480,10 +432,8 @@ export function closeByAgent(
   return { ledger, closed: null }
 }
 
-/** How an item is closing: what the pane shows, and how it closed. */
 export type Closing = Pick<Closed, 'how' | 'outcome'>
 
-/** Closes one item, recording how it closed. */
 export function closeItem(ledger: Ledger, id: string, closing: Closing, now: number): Ledger {
   return {
     ...ledger,
@@ -494,7 +444,6 @@ export function closeItem(ledger: Ledger, id: string, closing: Closing, now: num
   }
 }
 
-/** Closes one finding, recording how it closed. */
 export function closeFinding(ledger: Ledger, id: string, closing: Closing, now: number): Ledger {
   const finding = ledger.findings.find(f => f.id === id)
   if (!finding) return ledger
@@ -506,14 +455,12 @@ export function closeFinding(ledger: Ledger, id: string, closing: Closing, now: 
   }
 }
 
-/** The number in an id, as 10 in "i10"; NaN for an id with none. */
 function idNumber(id: string): number {
   return Number(id.match(/\d+/)?.[0] ?? Number.NaN)
 }
 
 /**
- * Puts an entry back among open ones by its id's number, so "i2" goes before
- * "i10". Order matters: answerNote reads the batch by position, and expiry
+ * Order matters: answerNote reads the batch by position, and expiry
  * keeps the last MAX_OPEN items.
  */
 function inIdOrder<T extends { id: string }>(open: T[], entry: T): T[] {
@@ -576,7 +523,6 @@ export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number
     now: u.card.now || prev?.now || '',
     running: u.card.running,
   }
-  // An UPDATE says its question still waits, so it outweighs a CLOSED line for the same question.
   const stillAsked = new Set(u.updated.filter(c => c.options || c.rec).map(c => c.id))
   const closing = new Map(u.closed.filter(c => !stillAsked.has(c.id)).map(c => [c.id, c.outcome]))
   const closed = [...ledger.closed]
@@ -590,7 +536,6 @@ export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number
 
   let nextId = ledger.nextId
   let added = 0
-  // The open item each NEW line became, by its place in u.added; null for one dropped as recently closed.
   const addedIds: (string | null)[] = []
   const created = new Set<string>()
   for (const a of u.added) {
@@ -611,8 +556,6 @@ export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number
     nextId += 1
     added += 1
   }
-  // Every todo asks the same question, built here. The model sometimes reads work the person puts off as a todo,
-  // so a todo that rewords an open item or finding, or one closed while the model ran, adds nothing.
   for (const work of u.todos) {
     const todo = {
       kind: 'question' as const,
@@ -631,12 +574,9 @@ export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number
     added += 1
   }
 
-  // An item left unanswered too long, or pushed out by newer ones, closes as expired.
   const kept = items.filter(i => turn - i.turn <= STALE_AFTER).slice(-MAX_OPEN)
   for (const i of items) if (!kept.includes(i)) closed.push(closedRecord(i, { outcome: EXPIRED, how: 'expired' }, now))
 
-  // A finding an open item asks about closes into that item, so one thing shows in one list. The model names
-  // the pairs in ASKED lines; a new item that rewords a finding's title closes it without one.
   const askedBy = new Map<string, string>()
   for (const a of u.asked) {
     const id = typeof a.item === 'number' ? addedIds[a.item] : a.item
@@ -663,10 +603,6 @@ export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number
   }
 }
 
-/**
- * A question with the options and recommendation an UPDATE line gives it. A recommendation is kept only while it
- * is one of the options, so new options without a new recommendation drop one that no longer fits.
- */
 function withUpdate(item: Item, updated: Update['updated']): Item {
   const change = updated.findLast(c => c.id === item.id)
   if (!change || item.kind !== 'question') return item
@@ -699,7 +635,6 @@ export function addFinding(
   }
 }
 
-/** How an item or finding ended: handled, set aside by the person, or overtaken without anyone deciding it. */
 export type ClosedState = 'handled' | 'dismissed' | 'lapsed'
 
 export function closedState(d: Pick<Closed, 'how' | 'outcome'>): ClosedState {
@@ -712,7 +647,6 @@ export function closedState(d: Pick<Closed, 'how' | 'outcome'>): ClosedState {
   return (d.how === 'claude' || d.how === 'update') && isOvertaken ? 'lapsed' : 'handled'
 }
 
-/** An item that closed without being handled: dismissed, expired, or overtaken by the work. */
 export function isLapsed(d: Pick<Closed, 'how' | 'outcome'>): boolean {
   return closedState(d) !== 'handled'
 }

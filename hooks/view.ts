@@ -1,8 +1,3 @@
-// The inbox as every host draws it: the Needs you order and count, question
-// handles, which rows are handed off or just closed, and the item status. The band, the pane,
-// the sidebar line, row navigation and the Codex tab all read this, so they agree.
-// Pure: it reads only its arguments, and imports nothing from the engine.
-
 import type {
   Closed,
   ClosedFinding,
@@ -39,10 +34,8 @@ import {
 } from './presses'
 import type { HelpStep, RowPress } from './presses'
 
-/** A question with more options than this shows the first 4 and [All N options]. */
 const OPTIONS_FOLD_AT = 5
-// The keys of a question's options and a row's steps, lettered as a multiple-choice
-// question letters them. The digits switch tabs, and the letters left out are the
+// The digits switch tabs, and the letters left out are the
 // keys of a Needs you row's other actions and of moving the selection.
 export const CHOICE_KEYS = [...'abcfghilm']
 /**
@@ -51,25 +44,18 @@ export const CHOICE_KEYS = [...'abcfghilm']
  */
 export const DOT = '\u2007·\u2002'
 
-/** The Findings tab's groups, one per kind, in the order it lists them, and each kind's mark, drawn in its tone. */
 export const FINDING_GROUPS: Record<Finding['kind'], { title: string; mark: string; tone: 'issue' | 'done' }> = {
   issue: { title: 'Issues', mark: '▲', tone: 'issue' },
   opportunity: { title: 'Opportunities', mark: '✦', tone: 'done' },
 }
 
-/** The mark before a row in a Closed fold, by how it ended. */
 export const CLOSED_MARKS: Record<ClosedState, string> = { handled: '✓', dismissed: '✕', lapsed: '–' }
 
-/** How many closed items each Closed fold lists. */
 export const CLOSED_SHOWN = 3
-/** How long a row that just closed stays in its place, and a row's note shows. */
 export const SETTLED_MS = 5120
-/** How long a row's buttons ignore clicks after it opens, so a double-click cannot land on one that just drew. */
 export const PRESS_GUARD_MS = 400
-/** Milliseconds before a queued delivery is shown. */
 export const QUEUED_AFTER_MS = 1000
 
-/** Whether a press's message has waited on its way to the agent for QUEUED_AFTER_MS or more. */
 export function isQueuedAt(last: LastAction | undefined, now: number): boolean {
   return last?.delivery?.state === 'queued' && now - last.at >= QUEUED_AFTER_MS
 }
@@ -79,24 +65,19 @@ function pendingDeliveryAt(last: LastAction | undefined, now: number): 'queued' 
   return isQueuedAt(last, now) ? 'queued' : null
 }
 
-/** Whether a row opened at `openedAt` still ignores clicks. 0 means no click opened it, so nothing is guarded. */
+/** 0 means no click opened it, so nothing is guarded. */
 export function isGuarded(openedAt: number, now: number): boolean {
   return openedAt > 0 && now - openedAt < PRESS_GUARD_MS
 }
 
-/** Whether the per-turn update is running, and the error to show, if any. */
 export type ItemStatus = { isUpdating: boolean; error: string | null }
 
 export type ViewInput = {
   ledger: Ledger
-  /** Each row's last press, by row id. */
   lastActions: Record<string, LastAction>
-  /** Each row's latest note, by row id. Codex keeps its notes in the tab and passes {}. */
   notes: Record<string, RowNote>
   turns: Turns
-  /** Per item id, steps a host adds beyond the item's own helps: the mod's "Open PR #N". */
   extraSteps: Record<string, HelpStep[]>
-  /** How long after a close the view still lists the row as settled. The mod passes SETTLED_MS; Codex adds two polls. */
   settleWindowMs: number
   status: ItemStatus
   now: number
@@ -104,12 +85,6 @@ export type ViewInput = {
 
 export type ClosedDelivery = 'queued' | 'unconfirmed' | { error: string; canUndo: boolean } | null
 
-/**
- * A handed-off row stays in its place, folded, and leaves the count. A settled
- * row just closed: it stays in its place with its outcome, `label`, and leaves
- * the count. `canUndo` when the person's own Done or Dismiss closed it, or Fix handed a finding off.
- * `delivery` shows queued answers after QUEUED_AFTER_MS, and unconfirmed answers immediately.
- */
 export type RowState =
   | { is: 'open' }
   | { is: 'handedOff' }
@@ -122,13 +97,6 @@ export type RowState =
       isLapsed: boolean
     }
 
-/**
- * What a row says about its last press: "✓ Explained · 1m ago". A Talk press reads
- * "Explaining…" until the agent's reply, so its ✓ claims only an explanation there is to read. A row a hand-off left
- * open after the agent's reply reads "Still open".
- * A Local press's result shows while pending, for SETTLED_MS once done,
- * and until the next press once failed. A newer note shows in their place for SETTLED_MS.
- */
 export type Feedback =
   | { is: 'done'; label: string; at: number; isHandedStep?: true }
   | { is: 'working'; label: string; at: number }
@@ -139,12 +107,7 @@ export type Feedback =
   | { is: 'local'; result: LocalResult }
   | { is: 'note'; note: RowNote['note']; at: number }
 
-/**
- * How the inbox is drawn, which decides some of its words: the mod in the Claude Code terminal or the desktop
- * app's pane, or the Codex tab. GLOSSARY.md defines it.
- */
 export type Look = 'terminal' | 'desktop' | 'codex'
-/** The looks the mod draws. */
 export type ModLook = Exclude<Look, 'codex'>
 
 export type ActionEmphasis = 'primary' | 'normal' | 'quiet'
@@ -160,25 +123,19 @@ export const ROW_COPY = {
 
 export type ActionView = {
   press: RowPress
-  /** "Explain", or "Explain again" when the row's last action was this one. */
   label: string
   kind: PressKind
   emphasis: ActionEmphasis
   icon?: ActionIcon
-  /** The option Claude recommended. */
   isPrimary: boolean
-  /** An option behind [All N options]. */
   isFolded: boolean
-  /** Reply, Explain, Discuss or Dismiss: drawn after the row's answers and main action, as quieter text. */
   isFollowUp: boolean
-  /** The key that presses it, where the action has a fixed one. Answers and steps take letters in order instead. */
   hotkey?: string
 }
 
 export type RowView = {
   id: string
   type: 'question' | 'task' | 'finding'
-  /** "1)" for a question a typed number answers now, "•" for any other row. Codex's tool results quote it. */
   handle: string
   title: string
   at: number | null
@@ -187,11 +144,9 @@ export type RowView = {
   replyKind: 'answer' | 'reply'
   item: Item | null
   finding: Finding | null
-  /** The item's own steps, then the host's extra ones. */
   steps: HelpStep[]
   state: RowState
   feedback: Feedback | null
-  /** Every action the row offers, every option included, in the order `actionsOf` sets. Key letters are each renderer's. */
   actions: ActionView[]
 }
 
@@ -219,75 +174,56 @@ export function rowFeedbackText(row: RowView, look: Look): string | null {
 
 export type InboxView = {
   needsYou: {
-    /** Open questions, and open tasks that are not handed off. */
     count: number
     questions: RowView[]
     tasks: RowView[]
-    /** Every close the ledger keeps, newest first, settled rows included. */
     closed: { questions: ClosedView<Closed>[]; tasks: ClosedView<Closed>[] }
   }
-  /** Newest first. The count leaves out handed-off findings. `closed` is every close the ledger keeps, newest first. */
   findings: { count: number; rows: RowView[]; closed: ClosedView<ClosedFinding>[] }
   status: ItemStatus
 }
 
 export type ClosedView<T> = T & { delivery: ClosedDelivery }
 
-/** Every row a view lists: questions, tasks, then findings. */
 export function allRows(v: InboxView): RowView[] {
   return [...v.needsYou.questions, ...v.needsYou.tasks, ...v.findings.rows]
 }
 
-/** The ids of the rows among `rows` that just closed. */
 export function settledRowIds(rows: RowView[]): string[] {
   return rows.filter(r => r.state.is === 'settled').map(r => r.id)
 }
 
-/** What a Closed fold lists: its closes, without the rows drawn as settled right now, up to CLOSED_SHOWN. */
 export function closedShown<T extends { id: string }>(closed: T[], drawnSettled: ReadonlySet<string>): T[] {
   return closed.filter(d => !drawnSettled.has(d.id)).slice(0, CLOSED_SHOWN)
 }
 
-/** How many closes a Closed fold counts: all it keeps, without the rows drawn as settled right now. */
 export function closedTotal(closed: { id: string }[], drawnSettled: ReadonlySet<string>): number {
   return closed.filter(d => !drawnSettled.has(d.id)).length
 }
 
-/** A Closed fold's label, which counts every close, not only the ones it lists. */
 export function foldLabel(total: number): string {
   return `${total} closed`
 }
 
-/** The line under a Closed fold's list for the closes it leaves out, or null when it lists them all. */
 export function earlierLabel(total: number, shown: number): string | null {
   return total > shown ? `${total - shown} earlier` : null
 }
 
-/** An age for a side column: "12m", "3h", or "now". */
 export function shortAgo(ms: number): string {
   const age = ago(ms)
 
   return age === 'just now' ? 'now' : age.replace(/ ago$/, '')
 }
 
-/**
- * The line in place of a group's rows while it has none open, as "No open questions". A tab keeps every group, so
- * it keeps its shape whatever is open.
- */
 export function groupEmptyText(title: string): string {
   return `No open ${title.toLowerCase()}`
 }
 
-/** The line above a demo's rows. */
 export const DEMO_NOTICE = 'Sample entries. Presses send nothing.'
 
 const UPDATE_FAILED = 'Last update failed. Items from that reply may be missing.'
 const UPDATE_RETRIES = ' It retries after your next message.'
 
-/**
- * The open items in the order Needs you lists them: the newest reply's first, and each reply's in the order the
- * agent asked them, which is id order. Tasks follow the same rule, since a reply's tasks often depend on each other.
- */
 function needsYouOrder(ledger: Ledger): { questions: Item[]; tasks: Item[] } {
   const newestReplyFirst = (kind: Item['kind']) =>
     ledger.items.filter(i => i.kind === kind).sort((a, b) => b.turn - a.turn)
@@ -295,11 +231,6 @@ function needsYouOrder(ledger: Ledger): { questions: Item[]; tasks: Item[] } {
   return { questions: newestReplyFirst('question'), tasks: newestReplyFirst('task') }
 }
 
-/**
- * Row `id`'s feedback: its note while the note is newer than its last press and
- * younger than SETTLED_MS; else its Local result while that shows; else its
- * last Talk, Hand-off or Mark press, by where its message is.
- */
 export function feedbackOf(
   id: string,
   last: LastAction | undefined,
@@ -319,7 +250,6 @@ export function feedbackOf(
   const isAwaiting = isAwaitingReply(last, turns)
   const working = WORKING_LABELS[last.action]
   if (last.kind === 'talk' && working && isAwaiting) return { is: 'working', label: working, at: last.at }
-  // A review thread or check waits on GitHub instead, so only a question, task or finding row reads it.
   if (!isAwaiting && !isPrRowId(id) && isFoldingPress(id, last)) return { is: 'stillOpen', at: last.at }
 
   const isHandedStep = last.kind === 'handoff' && last.action.startsWith('step-')
@@ -332,10 +262,8 @@ export function feedbackOf(
   }
 }
 
-/** The Fix button's label for a finding, which its settled and closed rows read as the choice made. */
 const fixLabel = (f: Pick<Finding, 'kind'>) => (f.kind === 'opportunity' ? 'Do it' : 'Fix')
 
-/** What a Talk press reads while the agent's reply is still to come. */
 const WORKING_LABELS: Record<string, string> = {
   explain: 'Explaining…',
   discuss: 'Discussing…',
@@ -343,10 +271,6 @@ const WORKING_LABELS: Record<string, string> = {
   'thread-draft': 'Drafting a reply…',
 }
 
-/**
- * What a row reads after a ✓ once a press went through, in the past tense: "Addressed", not "Address". An answer
- * reads as the option chosen, and a step as its own label.
- */
 const DONE_LABELS: Record<string, (text: string) => string> = {
   address: () => 'Handed off',
   issue: () => 'Asked to file',
@@ -359,23 +283,19 @@ const DONE_LABELS: Record<string, (text: string) => string> = {
   'thread-draft': () => 'Drafted a reply',
   'pr-conflicts': () => 'Asked to resolve conflicts',
   'pr-merge': () => 'Asked to merge',
-  // "Address all 3 threads"
   'pr-address-all': text => text.replace(/^Address\b/, 'Addressed'),
 }
 
-/** Feedback that reports a failure, which a row draws in red. */
 export function isFailure(f: Feedback | null): boolean {
   return f?.is === 'notSent' || (f?.is === 'local' && f.result.state === 'failed')
 }
 
-/** Feedback that reads with its age, in its place on the row's top line: a press's ✓, or where its message is. */
 export function hasAge(
   f: Feedback,
 ): f is Extract<Feedback, { is: 'done' | 'working' | 'stillOpen' | 'queued' | 'unconfirmed' }> {
   return f.is === 'done' || f.is === 'working' || f.is === 'stillOpen' || f.is === 'queued' || f.is === 'unconfirmed'
 }
 
-// Where a copied command runs. The desktop app's composer is not known to take "!" for shell mode.
 const runIt = (look: Look) =>
   look === 'terminal' ? 'Run it in a terminal, or type ! and paste.' : 'Run it in Terminal.'
 const VERBS = {
@@ -383,11 +303,6 @@ const VERBS = {
   copy: { pending: 'Copying', done: 'Copied', failed: 'copy' },
 }
 
-/**
- * A Local result as its row reads it: "Opening .env…", "✓ Copied the key ·
- * Opened .env", or "Could not open .env: it no longer exists". Several PRs
- * one step opens read as one count, "✓ Opened 3 PRs".
- */
 function localText(r: LocalResult, look: Look): string {
   const isPrs =
     r.parts.length > 1 && r.parts.every(p => p.kind === 'open' && p.error === null && /^PR #\d+$/.test(p.name))
@@ -404,7 +319,6 @@ function localText(r: LocalResult, look: Look): string {
   return `✓ ${text}${isCommand ? `. ${runIt(look)}` : ''}`
 }
 
-/** Feedback as a row reads it, before any age. */
 export function feedbackText(f: Feedback, look: Look): string {
   switch (f.is) {
     case 'note':
@@ -418,8 +332,6 @@ export function feedbackText(f: Feedback, look: Look): string {
     case 'notSent':
       return `Not sent: ${f.reason}`
     case 'done':
-      // A step's own label is an instruction, as "Run load script": "✓ Run load script" would read as run. A row whose
-      // handle is the ✓ draws the label alone, as its ✓ already says the step went to the agent.
       return f.isHandedStep ? `✓ Handed off: ${f.label}` : `✓ ${f.label}`
     case 'working':
       return f.label
@@ -437,21 +349,17 @@ export function settledLabel(label: string, delivery: ClosedDelivery): string {
   return delivery === null ? label : deliveryLabel(delivery, label)
 }
 
-/** A step's kind: one that asks Claude to run a command hands the row off; the rest open or copy. */
 function stepKind(step: HelpStep): PressKind {
   return step.step.some(h => h.kind === 'run') ? 'handoff' : 'local'
 }
 
-/** The inbox's tabs in order, as every look names them and the keys that switch to them. */
 export const TABS: readonly { id: Tab; label: string; hotkey: string }[] = [
   { id: 'needsYou', label: 'Needs you', hotkey: '1' },
   { id: 'findings', label: 'Findings', hotkey: '2' },
   { id: 'prs', label: 'PRs', hotkey: '3' },
 ]
-/** The tabs whose rows come from the ledger. The PRs tab's rows come from GitHub. */
 export const ROW_TABS = TABS.filter((t): t is (typeof TABS)[number] & { id: 'needsYou' | 'findings' } => t.id !== 'prs')
 
-/** What an empty tab says, with the agent named, as "Claude" or "Codex". */
 export function emptyText(tab: 'needsYou' | 'findings', agent: string): { title: string; hint: string } {
   return tab === 'needsYou'
     ? { title: 'Nothing needs you.', hint: `${agent}'s questions and the tasks only you can do show up here.` }
@@ -469,11 +377,6 @@ const ACTION_KEYS: Partial<Record<RowPress['action'], string>> = {
   dismiss: 'x',
 }
 
-/**
- * A row's actions in the order the pane and the tab draw them, each labeled
- * "… again" when the row's last press, other than an open or copy, was that action.
- * A settled row offers only Undo, and only after the person's own Done or Dismiss, or a finding's Fix.
- */
 function actionsOf(
   row: { id: string; item: Item | null; finding: Finding | null; steps: HelpStep[] },
   last: LastAction | undefined,
@@ -487,8 +390,6 @@ function actionsOf(
     flags: Partial<Pick<ActionView, 'isPrimary' | 'isFolded'>> = {},
   ): ActionView => ({
     press,
-    // The type action opens a field for new words each time, an open or copy
-    // only shows its result, and a press whose message failed did nothing, so none reads "again".
     label:
       press.action !== 'type' &&
       last?.kind !== 'local' &&
@@ -517,7 +418,6 @@ function actionsOf(
   const stepActions = steps.map((s, n) => action({ action: 'step', id, step: n, label: s.label }, s.label, stepKind(s)))
   if (!item)
     return [
-      // Only the label names the kind. The press and the message it sends are Address's for both.
       action({ action: 'address', id }, row.finding ? fixLabel(row.finding) : 'Fix', 'handoff'),
       action({ action: 'issue', id }, ISSUE_LABEL, 'handoff'),
       action({ action: 'discuss', id }, 'Discuss', 'talk'),
@@ -532,7 +432,6 @@ function actionsOf(
       action({ action: 'explain', id }, 'Explain', 'talk'),
     ]
   const isFolding = item.options.length > OPTIONS_FOLD_AT
-  // The recommended answer leads, so it is the first one read and never folded away.
   const options =
     item.rec && item.options.includes(item.rec) ? [item.rec, ...item.options.filter(o => o !== item.rec)] : item.options
 
@@ -550,26 +449,16 @@ function actionsOf(
   ]
 }
 
-/**
- * A list's entry as a look draws it: an open row as its adapter builds it, or a row that just closed, which keeps
- * its place and cannot be selected.
- */
 export type DrawnEntry<R> = { row: R } | { settled: RowView; state: Extract<RowState, { is: 'settled' }> }
 
-/** The view's lists as a look draws them, and each tab's open rows in order, which the selection moves over. */
 export type DrawnLists<R> = {
   questions: DrawnEntry<R>[]
   tasks: DrawnEntry<R>[]
   findings: DrawnEntry<R>[]
-  /** `findings` split by kind, in `FINDING_GROUPS` order. Every kind has a group, empty or not. */
   findingGroups: { kind: Finding['kind']; title: string; entries: DrawnEntry<R>[] }[]
   byTab: { needsYou: R[]; findings: R[] }
 }
 
-/**
- * The view's lists as a look draws them. A row that just closed shows in place while `isSettledDrawn` says so,
- * and is left out after. `toRow` builds an open row, or returns null to leave it out.
- */
 export function drawnLists<R>(
   v: InboxView,
   isSettledDrawn: (id: string) => boolean,
@@ -603,10 +492,8 @@ export function entryId(x: DrawnEntry<{ id: string }>): string {
   return 'row' in x ? x.row.id : x.settled.id
 }
 
-/** A row in its tab's drawn order, and whether it still waits on the person. */
 export type RowWait = { id: string; isWaiting: boolean }
 
-/** The Needs you and Findings rows in drawn order. A row that just closed is among them, as not waiting. */
 export function listWaits(v: InboxView): { needsYou: RowWait[]; findings: RowWait[] } {
   const lists = drawnLists(
     v,
@@ -621,28 +508,14 @@ export function listWaits(v: InboxView): { needsYou: RowWait[]; findings: RowWai
   return { needsYou: waits([...lists.questions, ...lists.tasks]), findings: waits(lists.findings) }
 }
 
-/**
- * The row a tab draws open while no row is chosen there, as before any row was opened or after a press closed the last
- * waiting row: its first row that still waits on the person. A handed-off row stays collapsed until clicked, and with
- * none waiting no row is open.
- */
 export function firstWaiting(rows: RowWait[]): string | null {
   return rows.find(r => r.isWaiting)?.id ?? null
 }
 
-/**
- * The row a tab that drew its first waiting row open keeps open once the rows `added` arrive: its first waiting row
- * among the rest, so a row that arrives above does not close the one the person is reading. Null when none of the
- * rest waits, and the tab then opens a new row.
- */
 export function keptOpen(rows: RowWait[], added: readonly string[]): string | null {
   return firstWaiting(rows.filter(r => !added.includes(r.id)))
 }
 
-/**
- * The row to open once the open row `closedId` was answered, closed or handed off: the next row in `rows` that still
- * waits on the person, else the nearest one before it. Null when none waits, or when `rows` lacks `closedId`.
- */
 export function rowAfterClose(rows: RowWait[], closedId: string): string | null {
   const at = rows.findIndex(r => r.id === closedId)
   if (at < 0) return null
@@ -658,24 +531,16 @@ export function rowAfterClose(rows: RowWait[], closedId: string): string | null 
   )
 }
 
-/** A list's open rows in order. */
 export function rowsIn<R>(entries: DrawnEntry<R>[]): R[] {
   return entries.flatMap(x => ('row' in x ? [x.row] : []))
 }
 
-/** The ids of the rows that just closed a list draws, which its Closed fold leaves out. */
 export function settledIn(entries: DrawnEntry<unknown>[]): Set<string> {
   return new Set(entries.flatMap(x => ('settled' in x ? [x.settled.id] : [])))
 }
 
-/** A row action drawn as a key: `more` holds the follow-ups, and `keys` the rest. */
 export type ActionKey = { slot: 'action'; action: ActionView; hotkey: string }
 
-/**
- * A row's key, in the order every look draws them. `retry` repeats a press whose message failed to send, as the
- * kind of the action it repeats. `choice` is an option or a step, lettered in order while letters last.
- * `allOptions` shows a question's folded options.
- */
 export type PlannedKey =
   | { slot: 'retry'; press: RowPress; kind: PressKind; label: string; emphasis: 'normal'; icon: 'retry' }
   | {
@@ -686,12 +551,6 @@ export type PlannedKey =
   | { slot: 'allOptions'; count: number; label: string; emphasis: 'quiet' }
   | ActionKey
 
-/**
- * A row's actions as keys. `keys` finish the row: [Try again] first when a send failed, then options and steps,
- * the first 9 shown on letters, then Done for a task, and Address and File issue for a finding. `more` are the other ways to
- * respond: your own words, Explain, Discuss, and Dismiss. A question's folded options show only with `isAllShown`,
- * and until then [All N options] follows the last option shown.
- */
 export function rowKeyPlan(r: RowView, isAllShown: boolean): { keys: PlannedKey[]; more: ActionKey[] } {
   const shown = r.actions.filter(a => isAllShown || !a.isFolded)
   const folded = r.actions.length - shown.length
@@ -739,11 +598,9 @@ export function inboxView({
 }: ViewInput): InboxView {
   const isSettling = (at: number) => now - at < settleWindowMs
   const isOpen = (id: string) => ledger.items.some(i => i.id === id) || ledger.findings.some(f => f.id === id)
-  // A row that just closed is put back among the open ones, so it is ordered where it stood.
   const settledItems = new Map(
     ledger.closed.filter(d => d.item && isSettling(d.at) && !isOpen(d.id)).map(d => [d.id, d] as const),
   )
-  // A finding Fix sent already settled and moved to the Closed fold, so the agent's close does not list it again.
   const isFixSettled = (id: string) => {
     const last = lastActions[id]
 
@@ -756,7 +613,6 @@ export function inboxView({
   )
   const placed = [...settledFindings.keys()].reduce(reopenFinding, [...settledItems.keys()].reduce(reopenItem, ledger))
   const { questions, tasks } = needsYouOrder(placed)
-  // The number the person's next prompt answers each question by, which only open questions have.
   const numbers = questionNumbers(ledger, ledger.turn + 1)
   const stateOf = (id: string): RowState => {
     const closed = settledItems.get(id) ?? settledFindings.get(id)
@@ -769,7 +625,6 @@ export function inboxView({
         label: capitalized(closed.outcome),
         at,
         canUndo: isUndoable(closed),
-        // Dismissed, expired or closed by the agent: drawn muted, as the Closed fold draws it.
         isLapsed: isLapsed(closed),
         delivery:
           'doneNotification' in closed && closed.doneNotification?.error !== undefined
@@ -781,7 +636,6 @@ export function inboxView({
     }
 
     const last = lastActions[id]
-    // Fix settles the row as an answer does, though the finding stays open until the agent closes it.
     const sent = ledger.findings.find(f => f.id === id)
     if (sent && isFixSent(last))
       return {
@@ -811,7 +665,6 @@ export function inboxView({
     return rowOf({
       id: item.id,
       type: item.kind,
-      // A question no typed number reaches takes a task's bullet: a "?" reads as a missing number.
       handle: n === undefined ? '•' : `${n})`,
       title: item.ask,
       at: item.at,
@@ -826,11 +679,9 @@ export function inboxView({
   const questionRows = questions.map(itemRow)
   const taskRows = tasks.map(itemRow)
   const counted = [...questionRows, ...taskRows].filter(r => r.state.is === 'open')
-  // Newest first within each kind, in the order the Findings tab groups them.
   const kinds = Object.keys(FINDING_GROUPS) as Finding['kind'][]
   const byGroup = (a: Finding, b: Finding) => kinds.indexOf(a.kind) - kinds.indexOf(b.kind)
   const findingRows = [...placed.findings]
-    // A finding Fix sent leaves the list once it has settled, for the Closed fold.
     .filter(f => !isFixSettled(f.id))
     .reverse()
     .sort(byGroup)
@@ -860,8 +711,6 @@ export function inboxView({
           ? pendingDeliveryAt(lastActions[d.id], now)
           : null,
   }))
-  // Listed in the Closed fold as the person's choice, while the ledger keeps them open for the agent to close. Like a
-  // close, one counts from the press; each fold leaves out the rows it still draws settled.
   const fixesSent: ClosedView<ClosedFinding>[] = ledger.findings
     .filter(f => isFixSent(lastActions[f.id]))
     .map(f => ({
@@ -890,10 +739,6 @@ export function inboxView({
   }
 }
 
-/**
- * The per-turn update's status. A failure shows only once no update runs, since a running one may repair it. Its
- * text promises a retry only when the source retries a failed update.
- */
 export function perTurnStatus(update: { isUpdating: boolean; isFailed: boolean; retries: boolean }): ItemStatus {
   return {
     isUpdating: update.isUpdating,

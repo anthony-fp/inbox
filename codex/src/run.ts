@@ -1,5 +1,3 @@
-// Runs a command with Node's child_process, for `codex queue` and `codex exec`.
-
 import { execFile } from 'node:child_process'
 
 export type Run = (

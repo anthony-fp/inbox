@@ -1,7 +1,3 @@
-// Every hook runs this file. It reads the event from stdin, changes the
-// session's state, and prints what Codex reads back. A hook that fails prints
-// nothing and exits 0, so Codex goes on as if the plugin weren't installed.
-
 import { spawn } from 'node:child_process'
 import { resolve } from 'node:path'
 
@@ -29,17 +25,14 @@ export type HookDeps = {
   dir: string
   env: NodeJS.ProcessEnv
   now: () => number
-  /** Starts the per-reply update in a process that outlives the hook. */
   startUpdate: (sessionId: string) => void
 }
 
-/** What a hook prints, or null to print nothing. */
 export async function handleHook(input: HookInput, deps: HookDeps): Promise<Record<string, unknown> | null> {
   const id = input.session_id
   const { dir, env, now } = deps
   // INBOX_IN_EXEC lets a test drive a whole session through `codex exec`.
   if (!id || (!env.INBOX_IN_EXEC && (await isNonInteractiveRun(input.transcript_path)))) return null
-  // Every hook learns the codex binary the desktop app runs, for the server's `codex queue` and the update's `codex exec`.
   const cliPath = env.CODEX_CLI_PATH || null
   const withCli = (s: SessionState): SessionState => (cliPath && s.cliPath !== cliPath ? { ...s, cliPath } : s)
 
@@ -60,7 +53,6 @@ export async function handleHook(input: HookInput, deps: HookDeps): Promise<Reco
         const r = notePrompt(withCli(s), input.prompt ?? '', now())
         notes = r.notes
 
-        // A subagent's prompt is not a turn of this chat, so it says nothing about this chat's hooks.
         return input.agent_id ? r.state : noteHook(r.state, 'prompt', now(), input.turn_id)
       })
 

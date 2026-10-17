@@ -12,26 +12,19 @@
         --bg: var(--color-background-primary, #ffffff);
         --text: var(--color-text-primary, #1f1f1f);
         --muted: var(--color-text-secondary, #595959);
-        /* The status colors, which build.mjs writes from hooks/tones.ts. */
         /*TONES:light*/
         --needs-you: var(--amber);
         --issue: var(--amber);
         --sans: var(--font-sans, -apple-system, system-ui, sans-serif);
         --mono: var(--font-mono, ui-monospace, 'SF Mono', Menlo, monospace);
-        /* Surfaces are mixed from the host's colors, so they follow its theme. */
         --raised: color-mix(in srgb, var(--text) 9%, var(--bg));
-        /* The open row: a neutral surface one step above the page, in the family of the hover fill. */
         --selected: color-mix(in srgb, var(--text) 6%, var(--bg));
-        /* A closed row's age, dimmer than --muted and still 4.5:1 on the page. */
         --age: color-mix(in srgb, var(--muted) 90%, var(--bg));
         --hover: color-mix(in srgb, var(--key) 14%, transparent);
         --soft: color-mix(in oklab, var(--text) 8%, transparent);
         --soft-hover: color-mix(in oklab, var(--text) 10%, transparent);
-        /* A closed row under the pointer: half --soft, so a list swept by the pointer stays quiet. */
         --row-hover: color-mix(in oklab, var(--soft) 50%, transparent);
-        /* The Codex app's --transition-duration-basic with ease. The tab's script sets --move and --enter. */
         --quick: 150ms ease;
-        /* Where a row's mark sits, and where its text starts. */
         --mark-x: 18px;
         --text-x: 44px;
       }
@@ -124,7 +117,6 @@
         color: var(--text);
       }
 
-      /* Tabs: the shown one a raised panel, the others text on the background. */
       nav {
         display: flex;
         flex-wrap: wrap;
@@ -170,7 +162,6 @@
         flex-direction: column;
         padding: 8px 0 4px;
       }
-      /* Sections sit on the page. A hairline separates them, starting at the text column. */
       section {
         position: relative;
         padding: 10px 0;
@@ -195,7 +186,6 @@
         white-space: pre;
       }
 
-      /* A PR's block: its number, title and verdict, its actions, then its threads and checks. */
       .pr-head,
       .pr-status,
       .pr-actions,
@@ -219,7 +209,6 @@
       .pr-groups {
         margin-top: 12px;
       }
-      /* A PR's rows sit a step in from their group's title, as the PR's sections sit under its title. */
       .pr-groups .list {
         --mark-x: 41px;
         --text-x: 67px;
@@ -238,18 +227,14 @@
         text-decoration-color: currentColor;
       }
 
-      /* Rows. */
-      /* Three columns: the mark, the text, and the age. */
       .row {
         display: grid;
         grid-template-columns: calc(var(--text-x) - var(--mark-x)) minmax(0, 1fr) auto;
         padding: var(--row-pad) 14px var(--row-pad) var(--mark-x);
       }
-      /* An open row keeps a closed row's padding, so its line does not move as it opens. */
       .row.selected {
         background-color: var(--selected);
       }
-      /* Marks center in the mark column, so ✓, ▲, ✦, ✗ and ◦ line up. */
       .mark {
         align-self: start;
         padding-right: 8px;
@@ -272,7 +257,6 @@
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
       }
-      /* A closed row's last press reads before its age, cut short so a long step label cannot squeeze the title. */
       .side-label {
         display: inline-block;
         max-width: 11em;
@@ -289,8 +273,7 @@
         display: flex;
         flex-direction: column;
       }
-      /* Its space above is padding, not a gap, so the row's height grows smoothly when the panel mounts. Its 2px below,
-         with the row's padding, matches the space from the row's top edge to its title's text. */
+      /* Its space above is padding, not a gap, so the row's height grows smoothly when the panel mounts. */
       .panel {
         display: flex;
         flex-direction: column;
@@ -302,14 +285,12 @@
         flex-direction: column;
         gap: 0;
       }
-      /* A closed row's last action reads under its title, so it never squeezes the title. */
       .line {
         display: flex;
         flex-direction: column;
         width: 100%;
         min-width: 0;
       }
-      /* A closed row's title wraps to two lines, then clips. */
       .line .text {
         min-width: 0;
         overflow: hidden;
@@ -330,7 +311,6 @@
       .line .after.tone-error {
         color: var(--error);
       }
-      /* Open, and while closing, the title shows in full where it stood, with the age following its last word. */
       .row.selected .line,
       .row.closing .line {
         display: block;
@@ -345,7 +325,6 @@
         white-space: normal;
         font-weight: 400;
       }
-      /* A PR thread or check: where it is or which workflow ran it leads the title, muted. */
       .line .lead {
         color: var(--muted);
         font-weight: 400;
@@ -369,7 +348,6 @@
       .row.collapsed:hover {
         background-color: var(--row-hover);
       }
-      /* After a click, rows slide under a pointer that has not moved, so nothing they bring under it lights up. */
       .still .row.collapsed:not(:active):hover {
         background-color: transparent;
       }
@@ -394,11 +372,6 @@
         background: var(--soft);
         font-family: var(--mono);
       }
-      /*
-       * Actions are Codex's own pill buttons, size sm, in three levels: the one primary action is filled, the
-       * others are outlined, and the follow-ups are plain text, with Dismiss last. Keys are an
-       * extra, so no key text shows.
-       */
       .keys {
         display: flex;
         flex-wrap: wrap;
@@ -440,7 +413,6 @@
         width: 14px;
         height: 14px;
       }
-      /* A follow-up is plain text: muted, the text color under the pointer, with no fill, border or padding. */
       .key.ghost {
         padding: 0 4px;
         border-color: transparent;
@@ -461,7 +433,6 @@
         align-items: center;
         gap: 6px;
       }
-      /* Codex's own fields: its border color, a 10px radius, and a heavier gray border on focus, not a colored ring. */
       input {
         flex: 1;
         min-width: 0;
@@ -492,10 +463,6 @@
         border-radius: 10px;
       }
 
-      /*
-       * Holds a group's empty line and fold, so its height can move as one. Its content sits at its bottom, so while it
-       * grows, a fold already shown stays in view and the empty line slides in above it.
-       */
       .group-end {
         display: flex;
         flex-direction: column;
@@ -506,15 +473,10 @@
         display: flow-root;
         position: relative;
       }
-      /* A group's line in place of its rows while it has none open, where a row's text would start. */
       .group-empty {
         padding: var(--row-pad) 14px var(--row-pad) var(--text-x);
         color: var(--muted);
       }
-      /*
-       * A leaving empty line takes no height and stays where it was, above the fold, while the group's end shrinks
-       * and clips it from the top as rows grow in over it.
-       */
       .group-empty.leaving {
         position: absolute;
         inset: auto 0 100% 0;
@@ -526,7 +488,6 @@
           opacity: 0;
         }
       }
-      /* The chevron centers in the mark column and the label starts at the rows' text, as a group's rows do. */
       .fold {
         display: block;
         margin: 8px 0 0 calc(var(--mark-x) - 1px);
@@ -543,7 +504,6 @@
         margin-right: calc(var(--text-x) - var(--mark-x) - 15px);
         vertical-align: -1px;
       }
-      /* The closed items' marks sit under the fold's label. */
       .closed-list {
         --mark-x: 41px;
         --text-x: 67px;
@@ -558,7 +518,6 @@
         padding-top: calc(var(--row-pad) / 2);
         padding-bottom: calc(var(--row-pad) / 2);
       }
-      /* A closed item's outcome stays quieter than any open row. */
       .outcome {
         color: var(--age);
       }
@@ -567,14 +526,12 @@
         align-items: center;
         min-width: 0;
       }
-      /* A row that settles while open fades its fill out as its height shrinks over the panel. */
       .row.settled.was-open {
         transition: background-color var(--move);
         @starting-style {
           background-color: var(--selected);
         }
       }
-      /* The title and its outcome wrap, so neither is cut in the middle. */
       .settled-line {
         flex: 1;
         min-width: 0;
@@ -583,7 +540,7 @@
       .settled .outcome-label {
         color: var(--muted);
       }
-      /* Undo's fill is the time it has left. The pill keeps the line's height, so the row does not grow. */
+      /* The pill keeps the line's height, so the row does not grow. */
       .key.undo {
         flex: none;
         border-color: transparent;
@@ -593,7 +550,6 @@
         margin: -3px 0 -3px 12px;
         background: color-mix(in oklab, var(--soft) 45%, transparent);
       }
-      /* While an Undo press is out, its label and arrow dim and the arrow turns. The label stays, so the pill keeps its width and the line its wrap. */
       .key.undo.undoing {
         color: var(--muted);
       }
@@ -629,7 +585,6 @@
           transform: scaleX(0);
         }
       }
-      /* The page is at least the pane's height. The footer sits at its bottom, and an empty tab's text fills the space above it. */
       #app {
         display: flex;
         flex-direction: column;
@@ -665,7 +620,6 @@
         color: var(--text);
         background: var(--hover);
       }
-      /* One line: the notice, with Hide demo at the right. */
       .demo-note {
         display: flex;
         align-items: center;
@@ -688,14 +642,6 @@
       .earlier {
         padding: 2px 14px 2px var(--text-x);
       }
-      /*
-       * Motion, with the Codex app's own timing, only for what enters or leaves. Hover, press and
-       * selection fills change at once. What a draw mounts fades in from @starting-style, and heights
-       * move in the script, around each draw. A row's own parts do not fade: a row that settles or is
-       * undone swaps them in place, where a fade from nothing reads as a flicker.
-       */
-      /* A panel does not fade: it stays opaque, clipped by its row's height, so a row closing and the row
-         opening in its place move as one. */
       .status-line,
       .demo-note,
       .empty,
@@ -712,7 +658,6 @@
         *::after {
           transition-duration: 0s !important;
         }
-        /* With no motion, Undo stays full and does not count down, and its arrow does not turn. */
         .time-left,
         .key.undo.undoing .icon {
           animation: none;

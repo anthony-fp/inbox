@@ -1,6 +1,3 @@
-// What the person's presses send and how their buttons are labeled, the same
-// in every host: each message goes to the agent as the person's own words.
-
 import type { Closed, Delivery, Finding, Help, Item, LastAction, Ledger, LocalResult, RowNote, Turns } from '../types'
 import { closeFinding, closeItem, reopenFinding, reopenItem } from './ledger'
 import type { Press } from './ledger'
@@ -29,7 +26,6 @@ export function helpLabel(help: Help): string {
   return clipLabel(label, 32)
 }
 
-/** A path an item names, made absolute: `~/` from the home folder, a relative one from the session's folder. */
 export function localPath(raw: string, root: string, home: string): string {
   if (raw.startsWith('~/')) return home + raw.slice(1)
   if (raw.startsWith('/')) return raw
@@ -57,13 +53,8 @@ export function openCommands(
   return { argv: ['open', path], fallback: ['open', '-t', path] }
 }
 
-/** One button's helps, used in order by one press. */
 export type HelpStep = { label: string; step: Help[] }
 
-/**
- * The item's helps as buttons. A snippet to copy and a file to open become one
- * step, "Copy env line and open .env.local", since the snippet goes in that file.
- */
 export function steps(helps: Help[]): HelpStep[] {
   const copy = helps.find(h => h.kind === 'copy')
   const open = helps.find(h => h.kind === 'open')
@@ -79,15 +70,8 @@ export function steps(helps: Help[]): HelpStep[] {
     )
 }
 
-/** A PR the session tracks, which an item's ask can name as "#123". */
 type TrackedPr = { ref: string; url: string | null }
 
-/**
- * One step that opens the tracked PRs an item's ask names as "#123", as in
- * "Mark #12 ready for review". The reply that raised the item often names a PR
- * only by number, so the item has no link of its own. Several PRs share one
- * step, so a task naming five does not take five keys.
- */
 export function prSteps(item: Item, tracked: TrackedPr[]): HelpStep[] {
   const urls = new Map(tracked.map(pr => [pr.ref, pr.url]))
   const links = namedPrs(item.ask, [...urls.keys()])
@@ -103,16 +87,10 @@ export function prSteps(item: Item, tracked: TrackedPr[]): HelpStep[] {
     : [{ label: links.length === 1 ? helpLabel(links[0]!) : `Open ${links.length} PRs`, step: links }]
 }
 
-/** An item's steps: its own helps, then the steps a host adds, such as `prSteps`. */
 export function stepsOf(item: Item, extraSteps: HelpStep[]): HelpStep[] {
   return [...steps(item.helps), ...extraSteps]
 }
 
-/**
- * Whether a press's message still waits on the agent's reply: until the update for a turn started after the press
- * has applied. Counts lower than at the press were reset, so it no longer waits. A message that failed to send waits
- * on nothing.
- */
 export function isAwaitingReply(
   last: Pick<LastAction, 'turnsStarted' | 'delivery'> | undefined,
   turns: Turns,
@@ -122,10 +100,6 @@ export function isAwaitingReply(
   return pressed !== undefined && pressed <= turns.turnsStarted && turns.turnsApplied <= pressed
 }
 
-/**
- * A task or finding handed to the agent waits on the agent until its reply. Still open then, the reply did not
- * finish it, so it waits on the person again.
- */
 export function isHandedOff(
   last: Pick<LastAction, 'kind' | 'turnsStarted' | 'delivery'> | undefined,
   turns: Turns,
@@ -133,35 +107,24 @@ export function isHandedOff(
   return last?.kind === 'handoff' && isAwaitingReply(last, turns)
 }
 
-/** Whether a row id is the PR tab's: a PR block's `pr:` mark, or a review thread's or check's "<ref> thread <id>". */
 export function isPrRowId(id: string): boolean {
   return id.startsWith('pr:') || id.includes(' ')
 }
 
-/**
- * Whether a press handed its row to the agent, so the row closes to its one line and stays closed: a question, task,
- * finding, review thread or check. Fix settles its finding's row instead, and a PR block is always open.
- */
 export function isFoldingPress(id: string, last: Pick<LastAction, 'kind' | 'action'> | undefined): boolean {
   return !id.startsWith('pr:') && last?.kind === 'handoff' && last.action !== 'address'
 }
 
-/**
- * Whether Fix or Do it handed a finding to the agent: its row settles, then lists in the Closed fold, unless the
- * person pressed Undo or the message failed. The finding stays open in the ledger, so the agent can still close it.
- */
 export function isFixSent(last: LastAction | undefined): last is LastAction {
   return last?.action === 'address' && !last.isKept && last.delivery?.state !== 'failed'
 }
 
-/** A press on a question, task or finding row, in every host. An answer names its option by text. */
 export type RowPress =
   | { action: 'answer'; id: string; option: string }
   | { action: 'type'; id: string; text: string }
   | { action: 'explain' | 'done' | 'dismiss' | 'address' | 'issue' | 'discuss' | 'undo'; id: string }
   | { action: 'step'; id: string; step: number; label: string }
 
-/** The action ids of the mod's PR presses: on a review thread, on a PR block, and a check's Fix and Open log. */
 export type PrActionId =
   | 'thread-address'
   | 'thread-draft'
@@ -175,12 +138,10 @@ export type PrActionId =
   | 'check-fix'
   | 'log'
 
-/** The id a press's last action stores, the same in every host: `explain`, `step-2`, `thread-address`. */
 export function actionId(p: RowPress | { action: PrActionId }): string {
   return p.action === 'step' ? `step-${p.step}` : p.action
 }
 
-/** What a row reads after a ✓ once this press went through: "Explain", "Reply", or the step's own label. */
 function pressText(p: RowPress): string {
   switch (p.action) {
     case 'answer':
@@ -200,7 +161,6 @@ export function capitalized(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
-/** A step's icon kind: run when it asks the agent to run a command, else copy or open by its first help. */
 export function stepIconKind(step: HelpStep | undefined): 'run' | 'copy' | 'open' | undefined {
   if (!step) return undefined
   if (step.step.some(h => h.kind === 'run')) return 'run'
@@ -276,34 +236,22 @@ export function upgradeLastActions(saved: Record<string, LastAction>): Record<st
   )
 }
 
-/**
- * What a press asks its host to do outside saved state: send a message as the
- * person's own, open a path or URL, or copy text. `by` marks a send the
- * per-turn update reads as a press; `isCommand` marks a command only the person can run.
- */
 export type Effect =
   | { kind: 'send'; text: string; by: Press | null }
   | { kind: 'open'; target: string; name: string }
   | { kind: 'copy'; text: string; name: string; isCommand: boolean }
 
 /**
- * A press's outcome: the new ledger, the pressed row's new last action, and the
- * effects to perform. `last` null leaves the row's last action as it was.
+ * `last` null leaves the row's last action as it was.
  * `stale` when the row the press was drawn for is gone or changed under it.
  */
 export type PressResult =
   { ledger: Ledger; last: LastAction | null; effects: Effect[]; reopenedId?: string } | { stale: true }
 
-/** Whether a close can be undone: the person's own Done or Dismiss, while it has sent nothing. */
 export function isUndoable(c: Pick<Closed, 'how' | 'isSentToAgent'>): boolean {
   return (c.how === 'done' || c.how === 'dismissed') && !c.isSentToAgent
 }
 
-/**
- * The message that tells an idle agent the person did tasks it waits on, with their ids, or null when none should
- * go now. The agent waits on a task it raised in its latest reply, with no prompt since; a prompt since would have
- * carried the close. Each Done waits out `windowMs`, while its row offers Undo, so Done presses in a row go as one message.
- */
 export function doneWake(
   ledger: Ledger,
   ctx: { now: number; windowMs: number; isTurnRunning: boolean },
@@ -322,7 +270,6 @@ export function doneWake(
   return { text: messages.done(waited.map(c => c.ask)), ids: waited.map(c => c.id) }
 }
 
-/** Marks Done closes as sent to the agent, so Undo leaves them closed. */
 export function markSentToAgent(ledger: Ledger, ids: string[], notificationId?: string): Ledger {
   return {
     ...ledger,
@@ -345,15 +292,12 @@ export function refuseDoneNotification(ledger: Ledger, notificationId: string, r
   }
 }
 
-/** What a row reads after a press that found it gone or changed. */
 const STALE_TEXT = 'This changed before your press. Nothing was sent.'
 
-/** What a row's note reads: after a stale press, or after a press on a sample entry. */
 export function noteText(note: RowNote['note']): string {
   return note === 'sample' ? 'Sample entry: nothing was sent.' : STALE_TEXT
 }
 
-/** A help as the effect it asks for; a Run help asks the agent, as the person, to run its command. */
 function helpEffect(item: Item, help: Help): Effect {
   switch (help.kind) {
     case 'run':
@@ -369,12 +313,10 @@ function helpEffect(item: Item, help: Help): Effect {
   }
 }
 
-/** The effects one press of a step asks for, in the order its helps run. */
 export function stepEffects(item: Item, step: HelpStep): Effect[] {
   return step.step.map(h => helpEffect(item, h))
 }
 
-/** A Local press's opens and copies, each pending until its host has run it. */
 export function pendingResult(effects: Effect[], at: number, pressId?: string): LocalResult {
   return {
     state: 'pending',
@@ -388,7 +330,6 @@ export function pendingResult(effects: Effect[], at: number, pressId?: string): 
   }
 }
 
-/** A pending result once each part ran: `errors` gives each part's failure in order, or null where it worked. */
 export function finishedResult(pending: LocalResult, errors: (string | null)[], at: number): LocalResult {
   const parts = pending.parts.map((part, n) => ({ ...part, error: errors[n] ?? null }))
 
@@ -400,11 +341,6 @@ export function finishedResult(pending: LocalResult, errors: (string | null)[], 
   }
 }
 
-/**
- * The last action a Local press leaves. A row's Talk, Hand-off or Mark entry
- * keeps everything but its result, so a handed-off row stays folded and out of
- * the count. A row with no such entry gets a local one.
- */
 export function localLast(
   last: LastAction | undefined,
   pressed: Pick<LastAction, 'action' | 'text'>,
@@ -427,11 +363,7 @@ export function withResult(
 }
 
 /**
- * Applies a press on a question, task or finding row, the same in every host.
- * Pure: it reads only its arguments. `last` is the row's current last action,
- * which a Local press keeps. `ctx.extraSteps` are the steps the host drew
- * beyond the item's own helps, so a step press is checked against what was drawn.
- * A press that sends records its message as queued until its host sees it arrive.
+ * Pure: it reads only its arguments.
  */
 export function applyPress(
   ledger: Ledger,
@@ -444,7 +376,6 @@ export function applyPress(
   return 'stale' in r || !r.last ? r : { ...r, last: withQueued(r.last, r.effects) }
 }
 
-/** A press's last action with its message queued, when the press sends one. A press with several sends is matched by its first. */
 export function withQueued(last: LastAction, effects: Effect[]): LastAction {
   const send = effects.find(e => e.kind === 'send')
 
@@ -536,7 +467,6 @@ export function withAcceptedSend(
   )
 }
 
-/** Replaces the delivery of each row the press made at `at` that still waits and passes `matches`. */
 function withQueuedDelivery(
   lastActions: Record<string, LastAction>,
   rows: string[],
@@ -558,10 +488,6 @@ function withQueuedDelivery(
   return changed.length === 0 ? lastActions : { ...lastActions, ...Object.fromEntries(changed) }
 }
 
-/**
- * Last actions once a press's message failed to send: each row the press made
- * at `at` reads why. A row pressed again since keeps its newer press.
- */
 export function withFailure(
   lastActions: Record<string, LastAction>,
   rows: string[],
@@ -579,11 +505,6 @@ export function withFailure(
   )
 }
 
-/**
- * Last actions once a press's message entered as `entered`, which another
- * plugin rewrote it to: each row the press made at `at` that still waits for
- * `message` waits for `entered` instead, so its arrival matches.
- */
 export function withRewrite(
   lastActions: Record<string, LastAction>,
   rows: string[],
@@ -606,10 +527,6 @@ export function withRewrite(
   )
 }
 
-/**
- * The ledger once an answer's message failed to send: the question the answer
- * closed at `at` opens again, as it was. Any later close of it stands.
- */
 export function reopenOnFailure(ledger: Ledger, id: string, at: number): Ledger {
   if (ledger.items.some(i => i.id === id)) return ledger
   const closed = ledger.closed.findLast(c => c.id === id)
@@ -617,11 +534,6 @@ export function reopenOnFailure(ledger: Ledger, id: string, at: number): Ledger 
   return closed?.item && closed.how === 'answered' && closed.at === at ? reopenItem(ledger, id) : ledger
 }
 
-/**
- * What the demo's copy records for an applied press, by row. A sample message goes nowhere, so a last action keeps
- * no delivery, which nothing would ever clear. The demo opens and copies nothing, so a Local press records nothing.
- * `isSample` when the press would have acted, so its row shows the sample note.
- */
 export function demoRecord(
   lasts: Record<string, LastAction>,
   effects: Effect[],
@@ -634,17 +546,12 @@ export function demoRecord(
   }
 }
 
-/**
- * The demo's turn counts after a press. A sample message starts a sample turn, so its row reads "Explaining…" or
- * folds, and `isReplied` ends every sample turn, as a reply would, a few seconds later.
- */
 export function demoTurns(turns: Turns, effects: Effect[], isReplied = false): Turns {
   if (isReplied) return { ...turns, turnsApplied: turns.turnsStarted }
 
   return effects.some(e => e.kind === 'send') ? { ...turns, turnsStarted: turns.turnsStarted + 1 } : turns
 }
 
-/** What a host does for a press's effects: opens, copies and sends its own way, and saves state. */
 export type EffectHost = {
   now(): Promise<number> | number
   /** Opens or copies. Returns why it could not, or null. */
@@ -654,13 +561,12 @@ export type EffectHost = {
     deliveryId: string,
   ): Promise<{ state: 'accepted' } | { state: 'rejected'; reason: string } | { state: 'unconfirmed'; reason: string }>
   deliveryId(): string
-  /** Changes the saved last actions, and returns them as changed. */
   saveLasts(change: (a: Record<string, LastAction>) => Record<string, LastAction>): Promise<Record<string, LastAction>>
   saveLedger(change: (l: Ledger) => Ledger): Promise<void>
 }
 
 /**
- * Runs an applied press's opens and copies. When the press is a Local one, `pending` is the result it recorded on
+ * When the press is a Local one, `pending` is the result it recorded on
  * `rowId`, and the result of how they went replaces it. Returns that result, or null for a press with no pending one.
  */
 export async function runLocalEffects(
@@ -686,8 +592,7 @@ export async function runLocalEffects(
 }
 
 /**
- * Sends an applied press's messages in order. A rejected send marks its rows failed and reopens an answer it closed.
- * An unconfirmed send leaves its rows and ledger in place; later effects do not run.
+ * A rejected send marks its rows failed and reopens an answer it closed.
  */
 export async function runSends(
   host: EffectHost,
@@ -718,13 +623,8 @@ export async function runSends(
   return null
 }
 
-/** The File issue button's label. */
 export const ISSUE_LABEL = 'File issue'
 
-/**
- * The press [Try again] repeats on a row whose message failed to send, or null.
- * A typed reply has none: its words go back into the row's draft instead.
- */
 export function retryOf(id: string, last: LastAction): RowPress | null {
   if (!/^[if]\d+$/.test(id)) return null
   const step = /^step-(\d+)$/.exec(last.action)
@@ -742,7 +642,6 @@ export function retryOf(id: string, last: LastAction): RowPress | null {
   }
 }
 
-/** Last actions with a press's entries merged in and the ones it removes gone. */
 export function withLasts(
   lastActions: Record<string, LastAction>,
   lasts: Record<string, LastAction>,
@@ -763,7 +662,6 @@ export function withLasts(
   return merged
 }
 
-/** The last action a press records on its row. */
 export function recordPress(
   kind: LastAction['kind'],
   action: string,
@@ -784,10 +682,8 @@ function pressed(
   const unchanged = { ledger, last: null, effects: [] }
 
   if (p.action === 'undo') {
-    // Undo on a finding Fix handed off lists it again. Its message has gone, so it stays handed off.
     if (ledger.findings.some(f => f.id === p.id) && last?.action === 'address' && !last.isKept)
       return { ...unchanged, last: { ...last, isKept: true } }
-    // Only the person's own Done or Dismiss undoes, so an old drawing cannot reopen an answered, expired or agent-closed row.
     if (ledger.items.some(i => i.id === p.id) || ledger.findings.some(f => f.id === p.id)) return stale
     const closed = ledger.closed.findLast(c => c.id === p.id)
     if (closed?.item && isUndoable(closed)) return { ...unchanged, ledger: reopenItem(ledger, p.id), reopenedId: p.id }
@@ -799,7 +695,6 @@ function pressed(
 
   const finding = ledger.findings.find(f => f.id === p.id)
   if (finding) {
-    // A finding sent to the agent stays open until the agent closes it or the person dismisses it.
     const sendFinding = (kind: 'talk' | 'handoff', text: string) => ({
       ledger,
       last: record(kind),
@@ -840,8 +735,6 @@ function pressed(
     case 'type': {
       const words = p.text.trim()
       if (!words) return unchanged
-      // The item stays open: typed words can be an answer or a question back, so the agent closes it once the
-      // words settle it.
       const text = item.kind === 'question' ? messages.answer(item, words) : messages.taskReply(item, words)
       return { ledger, last: record('handoff'), effects: [{ kind: 'send', text, by: null }] }
     }
@@ -874,13 +767,11 @@ function pressed(
         effects,
       }
     }
-    // Address, File issue and Discuss are a finding's.
     default:
       return stale
   }
 }
 
-/** A finding as the agent reads it back: its kind and title, its detail, and its file. */
 function findingBody(finding: Finding): string[] {
   return [
     `${finding.kind === 'issue' ? 'Issue' : 'Opportunity'}: ${finding.title}`,
@@ -889,10 +780,8 @@ function findingBody(finding: Finding): string[] {
   ]
 }
 
-/** The message each press sends. */
 export const messages = {
   answer: (item: Item, answer: string) => `Re "${item.ask}": ${answer}`,
-  /** Asks what an item is about. The item stays open, since nothing was decided. */
   explain: (item: Item) => {
     const what =
       item.kind === 'task'
@@ -904,11 +793,9 @@ export const messages = {
   },
   run: (item: Item, command: string) => `For "${item.ask}", run this:\n\`\`\`\n${command}\n\`\`\``,
   taskReply: (item: Item, words: string) => `Re the task you left for me, "${item.ask}": ${words}`,
-  /** Tells the agent the person did tasks it was waiting on. */
   done: (asks: string[]) => (asks.length === 1 ? `Done: ${asks[0]}` : `Done:\n${asks.map(a => `- ${a}`).join('\n')}`),
   /**
-   * Sends a finding back to the agent: to fix it, to file it in the person's issue tracker, to talk it through first,
-   * or with the person's own words. A close reason is cut at 80 characters, so filing asks for the issue's key there.
+   * A close reason is cut at 80 characters, so filing asks for the issue's key there.
    */
   finding: (finding: Finding, how: 'address' | 'issue' | 'discuss' | 'typed', words = '') => {
     const opening =

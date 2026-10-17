@@ -1,7 +1,3 @@
-// The plugin's MCP server: Codex's record_finding, close and inbox tools, and
-// the Inbox tab with the app-only tools it calls. It speaks MCP over stdio by
-// hand, since it needs only a few message shapes.
-
 import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
@@ -55,26 +51,18 @@ import { CODEX, INBOX_DESCRIPTION, inboxToolText, VIEW_DESCRIPTION } from './tex
 import type { Run } from './run'
 import type { LastAction, PrViews, RowNote } from '../../types'
 
-/**
- * The tab's address for one build of its page. Codex keeps a tab's page by its address, even across server
- * restarts, so a new build needs a new address for a new chat to load it. An open tab learns of a new build
- * from `devPage` and swaps its page itself.
- */
+/** Codex keeps a tab's page by its address, even across server restarts, so a new build needs a new address for a new chat to load it. */
 export function tabUri(tabHtml: string): string {
   return `ui://inbox/tab-${createHash('sha256').update(tabHtml).digest('hex').slice(0, 12)}`
 }
 const TAB_MIME = 'text/html;profile=mcp-app'
 
 const APP_ONLY = { ui: { visibility: ['app'] } }
-/** How old a session's PRs may be before a view asks gh again. */
 const PRS_REFRESH_MS = 120_000
-/** How soon a PR linked since the last fetch, which has no view yet, is fetched. */
 const NEW_PR_FETCH_MS = 15_000
 
-/** A press as the server applies it: the ledger after it, the last actions it records and removes, and its effects. */
 type Pressed = Exclude<Applied, { stale: true }>
 
-/** The PR views a session still shows: those it tracks, and a PR dismissed moments ago, which draws settled. */
 function viewsStillShown(
   prs: PrViews,
   linked: string[],
@@ -120,7 +108,6 @@ const toolsFor = (uri: string) => [
   },
 ]
 
-/** The page with its own build's address stamped in, so a tab can tell when the dev build has a newer one. */
 function stamped(tabHtml: string): string {
   return tabHtml.replace(
     '</head>',
@@ -135,11 +122,8 @@ export type ServerDeps = {
   tabHtml: string
   /** The codex binary to run `queue` with when no hook has named one yet. */
   fallbackCli: () => Promise<string>
-  /** The tab page `npm --prefix codex run dev` keeps built, while it runs. */
   devPage?: () => Promise<string | null>
-  /** The fingerprint build.mjs stamped into this server, sent with each view. */
   build?: string
-  /** Why the loader could not load a newer build of the server, while this one keeps running. */
   loadError?: () => string | null
 }
 
@@ -177,7 +161,6 @@ export function turnOf(params: Record<string, unknown> | undefined): string | nu
 
 const text = (t: string) => ({ content: [{ type: 'text', text: t }] })
 
-/** What the tab hears back from a press: the view after it, text to copy, why it failed, or a note for its row. */
 export type PressReply = {
   view: TabView
   copy: { text: string; name: string } | null
@@ -191,7 +174,6 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
   const uri = tabUri(deps.tabHtml)
   const tools = toolsFor(uri)
   const findGh = ghFinder(deps.exec)
-  // Per session, in memory only: a server that restarts fetches again on its first view.
   const fetchingPrs = new Set<string>()
   const prsFetchedAt = new Map<string, number>()
   let isGhMissing = false
@@ -299,10 +281,8 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     })
   }
 
-  /** The tab page to show: the dev build's while it runs, else this handler's own, which a reinstall replaces. */
   const currentPage = async () => (await deps.devPage?.()) ?? deps.tabHtml
 
-  /** Applies a row press or a PR press to the session's state. Pure. */
   const pressOn = (
     s: SessionState,
     p: RowPress | PrPress,
@@ -327,10 +307,6 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     }
   }
 
-  /**
-   * Fetches the session's PRs through gh in the background. The result is saved for the tab's next poll. A PR
-   * dismissed while the fetch ran stays dismissed, and one dismissed moments ago keeps its last view.
-   */
   async function fetchPrs(id: string) {
     const s = await readState(dir, id)
     const bin = await findGh()
@@ -355,7 +331,6 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     })
   }
 
-  /** Starts a fetch when the session's PRs were never fetched, are old, or a linked PR has no view yet. */
   function fetchPrsWhenDue(id: string, s: SessionState) {
     if (fetchingPrs.has(id)) return
     const last = prsFetchedAt.get(id)
@@ -371,7 +346,6 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
       })
   }
 
-  /** The view for the tab, with the session it was read for and the page the server serves now. */
   const served = async (s: SessionState, id: string, isDemo = false): Promise<TabView> => {
     const loadError = deps.loadError?.()
     const current = !isDemo && s.presence.isUpdating ? await reconcileUpdateStatus(dir, id) : s
@@ -396,15 +370,12 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     let copy: PressReply['copy'] = null
     let error: string | null = null
     let note: PressReply['note'] = thread === id ? null : 'stale'
-    // The press as applied under the lock, read once the lock is released.
     const pressed: { r?: Pressed; deliveryId?: string } = {}
-    /** The press's effects, saving through `change`: the state a held lock writes, or a fresh lock each time. */
     const hostFor = (
       change: (f: (s: SessionState) => SessionState | Promise<SessionState>) => Promise<SessionState>,
     ): EffectHost => ({
       now,
       deliveryId: () => pressed.deliveryId ?? randomUUID(),
-      // The tab copies, and shows the text to copy by hand when its frame has no clipboard.
       perform: async e => {
         if (e.kind === 'copy') {
           copy = { text: e.text, name: e.name }
@@ -493,7 +464,6 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
         if (checkpointSaved) isUnconfirmed = true
         error = checkpointSaved ? null : `Not sent: ${err instanceof Error ? err.message : String(err)}`
       })
-    // A server restart loses the timer; the tab's next poll checks again.
     if (pressed.r && !('ref' in p) && p.action === 'done')
       setTimeout(() => void wakeForDone(id).catch(() => undefined), SETTLE_WINDOW_MS).unref()
     if (pressed.r && (appliedSaved || checkpointSaved))
@@ -537,7 +507,6 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     return retry.code === 0 ? null : failure(retry)
   }
 
-  // Each conversation's demo, kept in memory only: it starts over when the server does.
   const demos = new Map<string, SessionState>()
   const demoOf = (id: string) => {
     const s = demos.get(id) ?? demoState(now())
@@ -545,7 +514,6 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     return s
   }
 
-  /** A press in the demo changes only its copy and performs nothing: each send, open or copy gives its row the sample note. */
   async function onDemoPress(id: string, p: RowPress | PrPress, thread: unknown): Promise<PressReply> {
     const s = demoOf(id)
     const r = thread === id ? pressOn(s, p) : ({ stale: true } as const)
@@ -558,7 +526,6 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
       presence: { ...s.presence, ...demoTurns(s.presence, r.effects) },
     }
     demos.set(id, next)
-    // The sample reply, as the mod's demo gives it, once the sample note has shown.
     if (r.effects.some(e => e.kind === 'send'))
       setTimeout(() => {
         const d = demos.get(id)
@@ -575,7 +542,6 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     turn: string | null | undefined,
   ) {
     if (!id) return { ...text('Not done: this call carries no session id.'), isError: true }
-    // A call from Codex's model shows whether UserPromptSubmit recorded its turn. The tab's calls show nothing.
     const heard = (s: SessionState) => (turn === undefined ? s : noteToolCall(s, turn, now()))
     switch (name) {
       case 'record_finding':
@@ -595,7 +561,6 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
       case 'inbox_view': {
         if (args.demo === true) return { ...text('Inbox demo'), structuredContent: await served(demoOf(id), id, true) }
         await wakeForDone(id).catch(() => undefined)
-        // A dismissed PR's view leaves once its settled block has.
         const s = await updateState(dir, id, s => ({
           ...s,
           tabSeenAt: now(),

@@ -1,6 +1,3 @@
-// The state machine every row in the Inbox tab moves through, from the draw that first shows it to the draw that
-// removes it. Pure, so it is tested without a page. docs/plans/codex-row-states.md describes the states.
-
 /** The Codex app's enter, move and exit lengths, from its bundled styles, in ms. */
 export const ENTER_MS = 300
 export const MOVE_MS = 200
@@ -37,7 +34,6 @@ export const ROW_STATE_MS: Record<RowState, number> = {
   undoing: 0,
 }
 
-/** A target with Undo's press folded into the settled form: a resting state's name, or `gone`. */
 type Form = Exclude<RowTarget, 'undoing'>
 
 export function isMoving(state: RowState): boolean {
@@ -69,7 +65,6 @@ export function stepRow(
   return rest(next, form, target, now)
 }
 
-/** The form a track shows, or is moving toward. */
 function formOf({ state, hasPanel }: RowTrack): Form {
   switch (state) {
     case 'entering':
@@ -89,10 +84,6 @@ function formOf({ state, hasPanel }: RowTrack): Form {
   }
 }
 
-/**
- * The move from a track toward a new form. Closing, settling and leaving keep the panel the track drew, so the row
- * shrinks over it. A leaving row that is listed again closed grows back in.
- */
 function moveToward(track: RowTrack, form: Form, now: number): RowTrack {
   switch (form) {
     case 'open':
@@ -108,7 +99,6 @@ function moveToward(track: RowTrack, form: Form, now: number): RowTrack {
   }
 }
 
-/** The track at rest in `form`, kept as it is when it already rests there. Null for `gone`. */
 function rest(track: RowTrack | undefined, form: Form, target: RowTarget, now: number): RowTrack | null {
   if (form === 'gone') return null
   const state: RowState = target === 'undoing' ? 'undoing' : form

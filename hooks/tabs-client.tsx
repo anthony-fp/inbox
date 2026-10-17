@@ -1,26 +1,14 @@
 import type { ClientModule } from 'claude-code'
 
-/**
- * The desktop pane's tab bar. Only a Button takes a click on desktop, and a
- * Button is as small as its label, so the tabs are drawn here instead: this
- * region gets the pointer over every cell of every tab, draws the hover, and
- * posts the clicked tab's id to the hooks module, which shows that tab.
- */
-
-/** One tab, its width in cells set by the hooks module, which knows the font. */
 export type ClientTab = {
   id: string
   label: string
   count: number
-  /** The count's color, the tab's own tone, as in the terminal and Codex. */
   countColor: string
   width: number
 }
 
-/**
- * Only the shown tab has a fill, `raised`. A hovered tab takes `tab`, or `raised` where the palette
- * has no `tab`, and then the shown tab's bold label tells them apart. A null color is the theme's own.
- */
+/** A null color is the theme's own. */
 export type TabsProps = {
   tabs: ClientTab[]
   shown: string
@@ -30,15 +18,9 @@ export type TabsProps = {
 
 type State = { hover: string | null }
 
-/**
- * A tab's drawn height in lines. A fill comes out rounded only inside a border, which insets the label by
- * half a line on each side; 1.25 lines just fits the label, and 1.5 gives the tabs room around it.
- */
 export const TAB_HEIGHT = 1.5
-/** Between a tab's name and its count. The hooks module sizes each tab with it. */
 export const TAB_COUNT_GAP = '  '
 
-/** The tab under (`x`, `y`) in the region, or null over a gap or outside the tabs. */
 function tabAt(props: TabsProps, x: number, y: number): string | null {
   if (y < 0 || y >= TAB_HEIGHT) return null
   let left = 0
@@ -68,7 +50,6 @@ const Tabs: ClientModule<TabsProps, State> = (props, surface) => {
       const isShown = tab.id === props.shown
       const isHovered = !isShown && tab.id === hover
       const background = isShown ? colors.raised : isHovered ? (colors.tab ?? colors.raised) : null
-      // Text on `raised` takes `raisedText` where the palette sets one: there the muted gray can match the fill.
       const onRaised = background !== null && background === colors.raised ? colors.raisedText : null
       const labelColor = onRaised ?? (isShown || isHovered ? null : colors.muted)
       const count = Text({ color: tab.countColor, children: String(tab.count) })

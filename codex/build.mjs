@@ -1,16 +1,8 @@
-// Bundles the plugin's entry points, with the mod's shared modules, into
-// plugin/dist. The bundles are committed, since a Git marketplace install
-// copies the plugin folder and runs no build. The tab's script is bundled for
-// the browser first and inlined into tab.html, which the server carries as text.
+// The bundles are committed, since a Git marketplace install
+// copies the plugin folder and runs no build.
 //
-// Usage:
-//   node build.mjs          writes plugin/dist
-//   node build.mjs --check  exits 1 when plugin/dist differs from a fresh build
 //   node build.mjs --tests  bundles tests/*.spec.ts into test-dist for `node --test`. They aren't
 //                          *.test.ts, which `claude plugin test` would run as the mod's.
-//   node build.mjs --dev    rebuilds the tab's page and the server's handler into .dev on each save, and points
-//                          the installed plugin's server at them, so an open Inbox tab swaps to the page and the
-//                          server runs the handler, with no restart.
 //
 // The tab shows its Show demo button only in --dev builds, or when INBOX_DEMO_BUTTON=1 is set for a build to try in
 // another install. INBOX_DEMO_RECORDING=1 shows the button too, and the demo then leaves out the notices that mark its
@@ -28,11 +20,6 @@ import * as esbuild from 'esbuild'
 const here = dirname(fileURLToPath(import.meta.url))
 const mode = process.argv[2] ?? ''
 
-/**
- * A fingerprint of the sources the server's handler is built from, leaving out the tab page it carries. The server
- * sends it with each view and the tab page holds its own, so a page built from newer server sources than the
- * handler running can say so.
- */
 async function serverBuild() {
   const result = await esbuild.build({
     absWorkingDir: here,
@@ -57,7 +44,6 @@ async function serverBuild() {
 const isDemoRecording = process.env.INBOX_DEMO_RECORDING === '1'
 const isDemoButton = mode === '--dev' || process.env.INBOX_DEMO_BUTTON === '1' || isDemoRecording
 
-/** The tab's script, bundled for the browser, holding the fingerprint of the server sources it was built with. */
 async function buildTabScript(build) {
   const tab = await esbuild.build({
     absWorkingDir: here,
@@ -86,7 +72,6 @@ async function buildTabScript(build) {
   return script
 }
 
-/** The CSS variables for each appearance's status colors, read from the mod's hooks/tones.ts. */
 async function toneVars() {
   const out = await esbuild.build({
     absWorkingDir: here,
@@ -112,7 +97,6 @@ async function toneVars() {
   return { light: vars(tones.LIGHT_TONES), dark: vars(tones.DARK_TONES) }
 }
 
-/** tab.html with its status colors and its script inlined. */
 const tabPage = (html, script, tones) =>
   html
     .replaceAll('/*TONES:light*/', () => tones.light)
@@ -123,7 +107,6 @@ const build = await serverBuild()
 const tones = await toneVars()
 const tabScript = mode === '--dev' ? '' : await buildTabScript(build)
 
-/** Loads tab.html with `script` inlined. */
 const inlineTab = (script, pageTones = tones) => ({
   name: 'inline-tab',
   setup(build) {
@@ -168,11 +151,9 @@ if (mode === '--dev') {
     try {
       const build = await serverBuild()
       const script = await buildTabScript(build)
-      // The server reads the page when its time changes and keeps it, so it must never see it half written either.
       const pageTones = await toneVars()
       writeFileSync(`${page}.tmp`, tabPage(readFileSync(join(here, 'src', 'tab.html'), 'utf8'), script, pageTones))
       renameSync(`${page}.tmp`, page)
-      // A tab opened while this runs starts from the handler's own page, so that page carries the script too.
       const server = await esbuild.build({
         ...common,
         absWorkingDir: here,
@@ -192,7 +173,6 @@ if (mode === '--dev') {
   mkdirSync(dirname(page), { recursive: true })
   mkdirSync(dirname(pointer), { recursive: true })
   await write()
-  // The server ignores the file once this process is gone, as when it was killed before it could delete it.
   writeFileSync(pointer, JSON.stringify({ tab: page, server: handler, pid: process.pid }))
   const stop = () => {
     rmSync(pointer, { force: true })

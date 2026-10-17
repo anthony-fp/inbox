@@ -1,7 +1,3 @@
-// The plugin's session logic as pure functions on SessionState: what a prompt
-// tells Codex, what the tab shows, and how a turn ends.
-// Hooks and the MCP server do the I/O around them.
-
 import { EMPTY } from '../../hooks/ledger'
 import type { Exchange, Press } from '../../hooks/ledger'
 import {
@@ -23,7 +19,6 @@ import { PRESS_TIMEOUT_MS, SETTLE_WINDOW_MS } from './settle'
 import type { Heard, SessionState } from './state'
 import { CODEX } from './texts'
 
-/** The tab polls every few seconds; a poll this recent means it is open. */
 const TAB_OPEN_MS = 15_000
 
 export function isTabOpen(s: SessionState, now: number): boolean {
@@ -31,8 +26,7 @@ export function isTabOpen(s: SessionState, now: number): boolean {
 }
 
 /**
- * What SessionStart gives Codex: the guidance, and where the session stands
- * when it has a ledger. A resumed conversation still holds the guidance from
+ * A resumed conversation still holds the guidance from
  * its start, so it gets only where the session stands. Null when that is empty.
  */
 export function startContext(s: SessionState, source: string | undefined): string | null {
@@ -42,7 +36,6 @@ export function startContext(s: SessionState, source: string | undefined): strin
   return parts.length > 0 ? parts.join('\n\n') : null
 }
 
-/** A cleared conversation starts a new ledger; the rest of the state stays. */
 export function cleared(s: SessionState): SessionState {
   return {
     ...s,
@@ -119,19 +112,16 @@ export function noteActivity(s: SessionState, line: string | null): SessionState
   return { ...s, turn: { ...s.turn, activity } }
 }
 
-/** What the agent did with a tool, as an activity line: Codex's shell and MCP tools read as the mod's Bash and MCP tools. */
 export function activityOf(tool: string, input: Record<string, unknown>): string | null {
   return toolActivity(tool, input)
 }
 
-/** The files a patch adds, updates or deletes, as written in it. */
 export function patchFiles(patch: string): string[] {
   return [...patch.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)]
     .map(m => (m[1] ?? '').trim())
     .filter(Boolean)
 }
 
-/** Ends the turn: the exchange waits for the inbox model. */
 export function endTurn(s: SessionState, reply: string, now: number): SessionState {
   const refs = prRefs(reply)
   const base = {
@@ -153,10 +143,8 @@ export function endTurn(s: SessionState, reply: string, now: number): SessionSta
   return { ...base, pending: [...base.pending, { ex, turnsStarted: s.presence.turnsStarted }] }
 }
 
-/** How many of UserPromptSubmit's turn ids the session keeps. */
 const MAX_PROMPT_TURNS = 10
 
-/** Records that a hook ran: SessionStart, UserPromptSubmit with its turn id, or Stop. */
 export function noteHook(
   s: SessionState,
   hook: 'start' | 'prompt' | 'stop',
@@ -182,9 +170,8 @@ export function noteHook(
 }
 
 /**
- * Whether a model tool call came in a turn UserPromptSubmit did not record.
  * Another plugin's Stop hook can send Codex back within the same turn, so the
- * turn ids decide. Times decide only for a call with no turn id, or when no turn id was recorded.
+ * turn ids decide.
  */
 export function isPromptMissed(h: Heard, turnId: string | null): boolean {
   if (turnId !== null && (h.promptTurns.length > 0 || h.promptAt === null)) return !h.promptTurns.includes(turnId)
@@ -192,7 +179,6 @@ export function isPromptMissed(h: Heard, turnId: string | null): boolean {
   return h.promptAt === null || (h.stopAt !== null && h.promptAt < h.stopAt)
 }
 
-/** Records a model tool call: when its turn was not recorded, UserPromptSubmit is being skipped. */
 export function noteToolCall(s: SessionState, turnId: string | null, now: number): SessionState {
   return isPromptMissed(s.heard, turnId) ? { ...s, heard: { ...s.heard, promptMissedAt: now } } : s
 }
@@ -214,7 +200,6 @@ export function heardState(h: Heard): HeardState {
   return h.startAt === null || isMissed || (turns >= 2 && h.stops === 0) ? 'partial' : 'heard'
 }
 
-/** The PRs the tab draws, each with whether it is the settled block of a PR just dismissed. */
 export type PrTab = {
   drawn: { pr: PrView; isSettled: boolean }[]
   branchRef: string | null
@@ -224,7 +209,6 @@ export type PrTab = {
   olderText: string | null
 }
 
-/** What the tab draws: the shared inbox view, and what only the tab reads. */
 export type View = InboxView & {
   heard: HeardState
   /** Each row's last press, by row id, which the tab reads for its PR rows and blocks. */
@@ -232,13 +216,11 @@ export type View = InboxView & {
   /** The turn counts each row's feedback reads, as "Explaining…" until the reply to its press. */
   turns: Turns
   prs: PrTab
-  /** When the view was drawn, for the rows' ages. */
   at: number
 }
 
 /**
- * The view as the server sends it to the tab, with the session the call came
- * from. The tab sends `thread` back with each press, which reads as stale in any other session.
+ * The tab sends `thread` back with each press, which reads as stale in any other session.
  * `devPage` is the address of the page the server serves now. A tab showing another page replaces itself with it.
  * Tabs open from older builds read it by this name.
  * `serverBuild` is the fingerprint build.mjs stamped into the running server. `serverLoadError` says why a newer
@@ -249,17 +231,10 @@ export type TabView = View & {
   devPage: string
   serverBuild?: string
   serverLoadError?: string
-  /** A fetch of the session's PRs runs now. */
   isFetchingPrs: boolean
-  /** Neither `gh` nor the usual install folders hold a gh the server can start. */
   isGhMissing: boolean
 }
 
-/**
- * Each row's last press, without a Local result still pending after PRESS_TIMEOUT_MS. The server
- * runs a press's opens after saving it as pending, so a server that died between them left it pending.
- * The saved result stays, since a slow server may still record its outcome.
- */
 function withoutStalePending(lastActions: Record<string, LastAction>, now: number): Record<string, LastAction> {
   const isStale = (last: LastAction) => last.result?.state === 'pending' && now - last.result.at > PRESS_TIMEOUT_MS
 
@@ -272,7 +247,6 @@ function withoutStalePending(lastActions: Record<string, LastAction>, now: numbe
   )
 }
 
-/** What the tab draws. */
 export function viewOf(s: SessionState, now: number): View {
   const l = s.ledger
   const lastActions = withoutStalePending(s.lastActions, now)
@@ -287,11 +261,9 @@ export function viewOf(s: SessionState, now: number): View {
     ...inboxView({
       ledger: l,
       lastActions,
-      // The tab keeps its own row notes.
       notes: {},
       turns: s.presence,
       extraSteps: Object.fromEntries(l.items.map(item => [item.id, itemPrSteps(item, s.prViews, l.prs)])),
-      // The tab times each settled row from its first poll, so the server lists a close for longer.
       settleWindowMs: SETTLE_WINDOW_MS,
       status: perTurnStatus(update),
       now,

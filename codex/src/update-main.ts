@@ -1,6 +1,3 @@
-// The per-reply update's entry point, bundled as dist/update.mjs. The Stop
-// hook starts it with the session id and INBOX_DATA set.
-
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 

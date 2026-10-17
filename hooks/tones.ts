@@ -1,15 +1,8 @@
-/**
- * The status colors every inbox surface draws: the terminal's dark and light themes, the Codex tab's CSS, which
- * codex/build.mjs writes from these, and the Claude desktop pane's Svg marks. Each meets its contrast only on the
- * pane, cards, selected tab and selected row of the appearance it names.
- */
-
 export type ToneName = 'needsYou' | 'issue' | 'findings' | 'prs' | 'done' | 'error'
 
 export type ToneSet = Record<ToneName, string> & {
   /** A marker in the error color. A marker needs only 3:1, so in dark it takes a stronger red than text could. */
   errorMark: string
-  /** A key's letter, and the Codex tab's focus ring. */
   key: string
 }
 
@@ -37,7 +30,6 @@ export const LIGHT_TONES: ToneSet = {
   key: '#243bf5',
 }
 
-// Claude Code's daltonized themes, which only the terminal draws.
 const DARK_DALTONIZED_AMBER = '#ffcc00'
 export const DARK_DALTONIZED_TONES: ToneSet = {
   needsYou: DARK_DALTONIZED_AMBER,
@@ -62,7 +54,6 @@ export const LIGHT_DALTONIZED_TONES: ToneSet = {
   key: '#003ae8',
 }
 
-/** A tone's color in each appearance. */
 export function toneColors(tone: ToneName): { light: string; dark: string } {
   return { light: LIGHT_TONES[tone], dark: DARK_TONES[tone] }
 }

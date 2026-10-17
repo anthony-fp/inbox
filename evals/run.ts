@@ -1,9 +1,3 @@
-// Runs the inbox model on the cases in cases.json and checks the ledger each answer leaves. The model's answers
-// vary from run to run, so each case runs several times and passes when enough runs pass its checks.
-//
-// Usage: ./scripts/eval.sh [--agent claude|codex|both] [--runs N] [--case name,name] [--out answers.json]
-// scripts/eval.sh bundles this file and passes --cases, the path of cases.json.
-
 import { execFile } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -19,7 +13,7 @@ import { codexAsk } from '../codex/src/update'
 
 type Agent = 'claude' | 'codex'
 
-/** One check on the ledger after the update. Patterns are case-insensitive regular expressions. */
+/** Patterns are case-insensitive regular expressions. */
 type Check =
   | { open: string }
   | { closed: string; outcome?: string }
@@ -36,7 +30,6 @@ type Case = {
   ledger: Partial<Ledger>
   exchange: Partial<Exchange> & { reply: string }
   checks: Check[]
-  /** The share of runs that must pass, per agent, when it differs from MIN. */
   min?: Partial<Record<Agent, number>>
 }
 
@@ -69,12 +62,10 @@ function claude(prompt: string): Promise<string | null> {
   })
 }
 
-// The Codex app carries its own CLI, which is often the only one installed.
 const APP_CLI = '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex'
 const codexCli = process.env.CODEX_CLI_PATH || (existsSync(APP_CLI) ? APP_CLI : 'codex')
 const askCodex = codexAsk(run, codexCli, mkdtempSync(join(tmpdir(), 'inbox-eval-')))
 
-/** The checks the ledger fails, each as a short reason; empty when all pass. */
 function failures(before: Ledger, after: Ledger, checks: Check[]): string[] {
   const has = (pattern: string, text: string | null) => text !== null && new RegExp(pattern, 'i').test(text)
   const added = after.items.filter(i => !before.items.some(b => b.id === i.id))

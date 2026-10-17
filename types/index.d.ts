@@ -1,4 +1,3 @@
-/** Where the session stands, as the ledger model last summarized it. */
 export type Card = {
   goal: string
   done: string[]
@@ -6,7 +5,6 @@ export type Card = {
   running: string[]
 }
 
-/** Something the agent put to the person that is still unanswered. */
 export type Item = {
   id: string
   kind: 'question' | 'task'
@@ -16,7 +14,6 @@ export type Item = {
   options: string[]
   /** The option the agent recommended, exactly as `options` has it. */
   rec: string | null
-  /** Steps the agent's reply spelled out, one press each. */
   helps: Help[]
   /** The person-prompt count when the agent asked it. */
   turn: number
@@ -36,14 +33,11 @@ export type Help =
   | { kind: 'terminal'; command: string; name: string | null }
   | { kind: 'link'; url: string; name: string | null }
 
-/** An item that closed, and how. */
 export type Closed = {
   id: string
   kind: Item['kind']
   ask: string
-  /** The reply's own number for it, when it had one. */
   label?: string
-  /** What the pane shows for how it closed, such as the person's answer. */
   outcome: string
   /**
    * How it closed: the person answered it, marked a task done or ran its
@@ -67,12 +61,11 @@ export type Closed = {
  */
 export type PressKind = 'talk' | 'handoff' | 'local' | 'mark' | 'view'
 
-/** What a row's last action did, shown on the row so the person sees the press went through. */
 export type LastAction = {
   kind: Exclude<PressKind, 'view'>
   /** The action's id, as `actionId` makes it, so that action reads "… again". */
   action: string
-  /** The label of the action pressed, as in "Discuss". The row shows it after a ✓. */
+  /** The label of the action pressed, as in "Discuss". */
   text: string
   at: number
   /** Order of presses in the Claude host while their saves may overlap. */
@@ -100,7 +93,6 @@ export type Delivery =
 
 export type SentPrompt = { id: string; sessionId: string; text: string; pressedAt: number | null }
 
-/** One open or copy of a Local press, by the name the row shows for it, and why it failed. */
 export type LocalPart = {
   kind: 'open' | 'copy'
   name: string
@@ -110,7 +102,7 @@ export type LocalPart = {
   error: string | null
 }
 
-/** What a Local press did. The words are built per surface when the row is drawn. */
+/** The words are built per surface when the row is drawn. */
 export type LocalResult = { state: 'pending' | 'done' | 'failed'; parts: LocalPart[]; at: number; pressId?: string }
 
 /**
@@ -119,7 +111,6 @@ export type LocalResult = { state: 'pending' | 'done' | 'failed'; parts: LocalPa
  */
 export type RowNote = { note: 'stale' | 'sample'; at: number }
 
-/** Something Claude noticed outside the current task and recorded for the person. */
 export type Finding = {
   id: string
   kind: 'issue' | 'opportunity'
@@ -130,10 +121,8 @@ export type Finding = {
   at: number
 }
 
-/** A list with its own Closed fold: each Needs you group and each kind of finding. */
 export type FoldKind = Item['kind'] | Finding['kind']
 
-/** A finding that closed, and how, as `Closed` says it for an item. */
 export type ClosedFinding = Finding & Pick<Closed, 'how' | 'outcome'> & { closedAt: number }
 
 export type PrCheck = {
@@ -147,7 +136,6 @@ export type PrCheck = {
   finishedAt?: number
 }
 
-/** An unresolved review thread, told by its first comment. */
 export type PrThread = {
   id: string
   author: string
@@ -169,7 +157,6 @@ export type PrThread = {
   at: number | null
 }
 
-/** A PR as gh last reported it. */
 export type PrView = {
   /** "owner/repo#123" */
   ref: string
@@ -213,7 +200,6 @@ export type Stop = {
   at: number
 }
 
-/** A permission prompt or question dialog in the session that waits on the person. */
 export type Dialog = {
   kind: 'permission' | 'question'
   text: string
@@ -250,10 +236,8 @@ export type Tab = 'needsYou' | 'findings' | 'prs'
  */
 export type Cursor = { id: string | null; index: number; openedAt: number }
 
-/** The PR tab's data: each PR's latest view, the current branch's PR, and whether a fetch runs. */
 export type PrViews = { views: Record<string, PrView>; branchRef: string | null; isFetching: boolean }
 
-/** The turn counts a handed-off row folds by. */
 export type Turns = Pick<Presence, 'turnsStarted' | 'turnsApplied'>
 
 /**
@@ -267,7 +251,6 @@ export type DemoCopy = {
   lastActions: Record<string, LastAction>
   /** Each sample row's latest note, by the row's id. */
   notes: Record<string, RowNote>
-  /** The turn counts a sample row handed to Claude folds by. */
   turns: Turns
 }
 
@@ -297,11 +280,9 @@ declare module 'claude-code' {
       untrackedSent: { sessionId: string; text: string }[]
       /** The Needs you groups and the kinds of finding whose closed items show. Each starts folded. */
       unfolded: FoldKind[]
-      /** The desktop Closed fold under the pointer, whose chevron draws in the hover color. */
       foldHover: FoldKind | null
-      /** The questions whose every option shows, by the row's id. Until then, one with more than 5 options shows 4. */
+      /** The questions whose every option shows, by the row's id. */
       optionsShown: string[]
-      /** The pane's list of the keys no row shows is unfolded. */
       isKeyListShown: boolean
       /** The sample entries the band and pane show instead of the session's own, while `/inbox demo` is on. */
       demo: DemoCopy | null

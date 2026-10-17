@@ -1,17 +1,9 @@
-// Sample entries for every section of the band and the /inbox pane, shown by
-// `/inbox demo` for work on the layout and in the launch video. They describe
-// work on an app for AR glasses, so a viewer who has never seen this repo can
-// follow them. Nothing here reaches the session's real inbox, its store, or Claude.
-
 import type { DemoCopy } from '../types'
 
 const MIN = 60_000
 const REPO = 'https://github.com/acme/visor'
 
-/**
- * Whether a saved demo has the shape this build draws. The demo's atom outlives
- * a hot reload, so a copy an earlier build seeded may lack a field.
- */
+/** The demo's atom outlives a hot reload, so a copy an earlier build seeded may lack a field. */
 export function isDemoCopy(saved: unknown): saved is DemoCopy {
   if (!saved || typeof saved !== 'object') return false
   const d = saved as Record<string, unknown>
@@ -166,7 +158,6 @@ export function demoView(now: number): DemoCopy {
           outcome: 'Yes, fade it',
           how: 'answered',
           at: now,
-          // Closed as the demo starts, so it shows settled in its place first.
           item: {
             id: 'd10',
             kind: 'question',

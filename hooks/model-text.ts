@@ -176,7 +176,6 @@ export type Host = {
   surface: string
   /** Where the person always sees how many items and findings are open, besides the surface; null when only the surface shows them. */
   band: string | null
-  /** Where the person sees the findings, within the surface. */
   findingsIn: string
   /** The first paragraph of `guidanceText`: what the inbox shows the person, and where. */
   intro: string

@@ -1,5 +1,3 @@
-// Inline markdown in text a model wrote, as styled spans each client draws its own way.
-
 export type Span = {
   text: string
   bold?: true
@@ -10,7 +8,7 @@ export type Span = {
   link?: string
 }
 
-// Code first, so markers inside it stay literal. Each marker needs a closing one on the same text; one without stays text.
+// Code first, so markers inside it stay literal.
 const INLINE =
   /`([^`\n]+)`|\*\*(?=\S)(.+?)(?<=\S)\*\*(?!\*)|~~(?=\S)(.+?)(?<=\S)~~|(?<![\w*])\*(?=\S)([^*\n]+?)(?<=\S)\*(?![\w*])|(?<!\w)_(?=\S)([^_\n]+?)(?<=\S)_(?!\w)|\[([^\]\n]+)\]\((https:\/\/[^\s)]+)\)/g
 

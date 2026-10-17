@@ -1,7 +1,3 @@
-// The per-reply update: the inbox model reads each finished exchange and
-// updates the ledger. It runs in a process the Stop hook starts and leaves
-// running, one at a time per session.
-
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -17,11 +13,7 @@ import type { Run } from './run'
 export const MODEL = 'gpt-6.1-sol'
 const TIMEOUT_MS = 120_000
 
-/**
- * Everything `codex exec` can leave out for a one-shot text answer. A
- * release that drops one of these rejects it by name, so askModel drops any
- * name rejected and tries again.
- */
+/** A release that drops one of these rejects it by name, so askModel drops any name rejected and tries again. */
 const OFF = [
   'shell_tool',
   'unified_exec',
@@ -43,11 +35,7 @@ const OFF = [
 
 export type Ask = (prompt: string) => Promise<string | null>
 
-/**
- * Asks the inbox model through the desktop app's own `codex exec`, with
- * systemText as its only instructions, in an empty folder, with no saved session,
- * user config, hooks or tools. Null when it fails.
- */
+/** Null when it fails. */
 export function codexAsk(exec: Run, cli: string, dir: string): Ask {
   return async prompt => {
     const work = join(dir, 'exec')
@@ -126,8 +114,6 @@ export function applied(s: SessionState, reply: string | null, now: number, prom
     presence: {
       ...s.presence,
       ledgerState: parsed ? 'current' : 'failed',
-      // A turn that failed twice counts as summarized too: with no catch-up yet, a task
-      // handed to Codex would otherwise stay folded for good.
       turnsApplied: Math.max(s.presence.turnsApplied, next.turnsStarted),
     },
   }
@@ -173,12 +159,10 @@ export async function runUpdates(dir: string, sessionId: string, ask: Ask, now: 
           const promptAt = now()
           const reply = await ask(buildPrompt(s.ledger, next.ex)).catch(() => null)
           const after = await updateState(dir, sessionId, x =>
-            // A cleared conversation dropped the exchange while the model ran.
             x.pending[0]?.turnsStarted === next.turnsStarted && x.pending[0].ex.turn === next.ex.turn
               ? applied(x, reply, now(), promptAt)
               : x,
           )
-          // An exchange kept for another try waits for the next update, rather than failing twice in a row now.
           if (after.pending[0]?.failed && !next.failed) return 'retry' as const
         }
       } finally {

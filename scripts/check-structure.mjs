@@ -197,7 +197,6 @@ function checkImports() {
   }
 }
 
-/** The markdown files whose links and paths must resolve. */
 function docFiles() {
   const files = ['README.md', 'AGENTS.md', 'GLOSSARY.md', 'ROADMAP.md', 'codex/README.md'].filter(exists)
   const walk = dir => {
@@ -212,11 +211,8 @@ function docFiles() {
   return files
 }
 
-// Only a path that starts in one of this repo's top-level entries is checked, so paths in other repos,
-// in the home folder or in a host's install folder are left alone.
 const TOP_LEVEL = new Set(readdirSync(ROOT).filter(entry => entry !== 'node_modules'))
 
-/** Whether Git ignores the path, as it does build output such as the dev build's, which exists only while it runs. */
 function isIgnored(path) {
   try {
     execFileSync('git', ['-C', ROOT, 'check-ignore', '-q', '--no-index', path])
@@ -236,8 +232,6 @@ function checkDocs() {
       if (!target || /^[a-z]+:/.test(target)) continue
       if (!existsSync(join(ROOT, dirname(doc), target))) errors.push(`${doc} links to ${target}, which does not exist.`)
     }
-    // A reference doc's paths name files in the product it describes, and a plan not yet built names files it
-    // will add, so only their links are checked.
     const isUnbuilt = /^Status: (proposed|building)/m.test(text)
     if (doc.startsWith('docs/reference/') || (doc.startsWith('docs/plans/') && isUnbuilt)) continue
     for (const m of text.matchAll(/`([\w.-]+\/[\w./-]+\.[a-z]+)(?::[\w.]+)?`/g)) {

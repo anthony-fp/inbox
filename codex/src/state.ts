@@ -1,7 +1,3 @@
-// Each session's state, one JSON file per session in the plugin's data
-// folder. Hooks and MCP server processes are short-lived and run at once, so
-// every change reads, changes and writes the file under a lock.
-
 import { execFileSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import {
@@ -30,7 +26,6 @@ import type { LastAction, Ledger, PrViews } from '../../types'
 export type SessionState = {
   version: 1
   sessionId: string
-  /** The folder the session started in. */
   root: string
   home: string
   /** The codex binary the desktop app runs, from the hooks' CODEX_CLI_PATH. */
@@ -75,13 +70,12 @@ export type SessionState = {
   lastActions: Record<string, LastAction>
   /** The PRs tab's data: each PR's latest view and the current branch's PR. `isFetching` is always false here; the server knows what runs. */
   prViews: PrViews
-  /** When the tab last asked for its view, so the inbox texts can say whether it is open. */
   tabSeenAt: number
   heard: Heard
 }
 
 /**
- * Which of the plugin's hooks have run in this session. Codex skips a hook
+ * Codex skips a hook
  * until the person trusts it, so a hook that never ran means items are missing.
  * Times are null until the hook first runs.
  */
@@ -166,7 +160,6 @@ export async function devBuild(dir: string): Promise<{ tab: string; server?: str
   }
 }
 
-/** Session ids name files, so only the characters Codex's ids use pass. */
 function fileName(sessionId: string): string {
   if (!/^[\w-]{1,100}$/.test(sessionId)) throw new Error(`Not a session id: ${sessionId}`)
 

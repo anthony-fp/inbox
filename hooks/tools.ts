@@ -1,6 +1,3 @@
-// The record_finding and close tools the agent calls, the same in every host
-// except for where the texts say the person sees the result.
-
 import { addFinding, closeByAgent } from './ledger'
 import type { Host } from './model-text'
 import type { Ledger } from '../types'
@@ -46,7 +43,7 @@ function cut(value: unknown, max: number): string {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
 }
 
-/** Adds the finding a record_finding call describes. `result` is the text the agent reads back. */
+/** `result` is the text the agent reads back. */
 export function recordFinding(
   host: Host,
   ledger: Ledger,
@@ -74,7 +71,7 @@ export function recordFinding(
   }
 }
 
-/** Closes the item or finding a close call names. `result` is the text the agent reads back. */
+/** `result` is the text the agent reads back. */
 export function recordClose(
   host: Host,
   ledger: Ledger,

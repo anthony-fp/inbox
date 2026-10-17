@@ -1,5 +1,3 @@
-// The hooks' entry point, bundled as dist/hook.mjs.
-
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 

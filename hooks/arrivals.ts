@@ -1,6 +1,5 @@
 import type { RowView } from './view'
 
-/** Each tab's row ids as last recorded. A tab with no record yet has none. */
 export type RowRecord<T extends string> = Partial<Record<T, ReadonlySet<string>>>
 
 /**
@@ -44,7 +43,7 @@ export function isTabEmpty({
 
 /**
  * The tab to move to for `rows`, the rows that just appeared, or as a look opens, the rows each tab lists: while the
- * shown tab shows only its empty text, the first other tab in `tabs` with rows. Null when the look stays. The look then opens that tab's first waiting row.
+ * shown tab shows only its empty text, the first other tab in `tabs` with rows. Null when the look stays.
  */
 export function followTo<T extends string>(
   tabs: readonly T[],

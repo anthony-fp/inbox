@@ -1,5 +1,3 @@
-// Reading GitHub PR data into a `PrView`, and the PR status and wording rules. A shared module.
-
 import type { PrCheck, PrThread, PrView } from '../types'
 import { clip } from './text'
 
@@ -25,7 +23,6 @@ export function namedPrs(text: string, refs: string[]): string[] {
   })
 }
 
-/** "owner/repo#123" as its parts. */
 export function parseRef(ref: string): { repo: string; owner: string; name: string; number: string } {
   const [repo = '', number = ''] = ref.split('#')
   const [owner = '', name = ''] = repo.split('/')
@@ -33,14 +30,8 @@ export function parseRef(ref: string): { repo: string; owner: string; name: stri
   return { repo, owner, name, number }
 }
 
-/** The fields `gh pr view --json` returns that the tab uses. */
 export const VIEW_FIELDS = 'number,title,url,isDraft,state,baseRefName,mergeable,reviewDecision,statusCheckRollup'
 
-/**
- * Unresolved review threads: the first comment, which states the finding, and
- * who wrote the last one, which says whose turn it is. The latest commit's
- * time tells a reply that came after the lines changed from one before.
- */
 export const THREADS_QUERY = `query($owner: String!, $repo: String!, $number: Int!) {
   viewer { login }
   repository(owner: $owner, name: $repo) {
@@ -171,7 +162,6 @@ export function readThreads(json: string): PrThread[] {
             }
           : null
 
-        // With either time unknown, someone else's reply keeps the thread waiting.
         const isAnsweredSince =
           reply !== null && reply.author !== viewer && (headAt === null || reply.at === null || reply.at > headAt)
 
@@ -194,20 +184,16 @@ export function readThreads(json: string): PrThread[] {
   }
 }
 
-/** Open threads whose last comment someone else wrote: the PRs tab lists these. */
 export function waitingThreads(pr: PrView): PrThread[] {
   return pr.threads.filter(t => t.isWaiting)
 }
 
-/** Whether the person handed a thread to Claude. */
 export type IsThreadSent = (pr: PrView, t: PrThread) => boolean
 
-/** Waiting threads still on the person: not sent to Claude, and not on lines a later commit changed. */
 export function threadsOnYou(pr: PrView, isSent: IsThreadSent): PrThread[] {
   return waitingThreads(pr).filter(t => !t.isLinesChanged && !isSent(pr, t))
 }
 
-/** Whether an open PR waits on the person: a merge conflict, a failing check, requested changes or a thread on them. */
 export function prNeedsYou(pr: PrView, isSent: IsThreadSent): boolean {
   return (
     pr.state === 'OPEN' &&
@@ -225,12 +211,10 @@ export function checkCounts(pr: PrView): Record<PrCheck['bucket'], number> {
   return counts
 }
 
-/** "1 thread waiting on you", "3 threads waiting on you". */
 function threadsWaiting(count: number): string {
   return `${count} ${count === 1 ? 'thread' : 'threads'} waiting on you`
 }
 
-/** Where a PR stands. A draft is open and not ready, whatever else blocks it. */
 export type PrStatus = 'ready' | 'blocked' | 'waiting' | 'draft' | 'merged' | 'closed'
 
 function plural(count: number, one: string, many: string): string {
@@ -238,7 +222,7 @@ function plural(count: number, one: string, many: string): string {
 }
 
 /**
- * What stands between the PR and merging, or that it is ready. "Blocked" names only what waits on the person,
+ * "Blocked" names only what waits on the person,
  * since the rows under the block list each check and thread. Once nothing does, "Waiting" names what waits on
  * others: a thread sent to Claude or on changed lines, which is still open on GitHub, an approval, a running check.
  * `text` is the whole line. `head` is its status words, as "Blocked". `unlisted` is the reasons no row below the block lists.
@@ -249,7 +233,6 @@ export function readiness(
 ): { status: PrStatus; text: string; head: string; unlisted: string[] } {
   const result = (status: PrStatus, head: string, reasonList: string[] = [], joint = ': ') => {
     const reasons = reasonList.join(', ')
-    // The PR tab lists failing checks and waiting threads as rows, so its status line names only the rest.
     const unlisted = status === 'ready' ? [] : reasonList.filter(r => !listed.includes(r))
     return { status, text: reasons ? `${head}${joint}${reasons}` : head, head, unlisted }
   }
@@ -276,7 +259,6 @@ export function readiness(
     pending > 0 ? `${pending} ${pending === 1 ? 'check' : 'checks'} running` : null,
   ].filter(isPresent)
 
-  // A draft waits on its author whatever else it has, so it reads as a draft, with its other reasons.
   if (pr.isDraft) return result('draft', 'Draft', [...onYou, ...onOthers])
   if (onYou.length > 0) return result('blocked', 'Blocked', onYou)
   if (onOthers.length > 0) return result('waiting', 'Waiting', onOthers)
@@ -290,11 +272,10 @@ export function readiness(
   )
 }
 
-/** Where each status sorts: what waits on the person first, then what waits on others, then what is finished. */
 const STATUS_ORDER: Record<PrStatus, number> = { blocked: 0, ready: 1, draft: 2, waiting: 3, merged: 4, closed: 5 }
 
 /**
- * The PR section's order: by status, then the newest PR first. The status is read without sent threads, so
+ * The status is read without sent threads, so
  * sending a thread to the agent does not move its PR while the press shows; only a fetch from GitHub can.
  */
 export function inPrOrder(prs: PrView[]): PrView[] {
@@ -304,7 +285,6 @@ export function inPrOrder(prs: PrView[]): PrView[] {
 }
 
 /**
- * The HTML tags review bots write in comments, such as `<sub>` and `<details>`.
  * Lowercase only, so a type parameter such as `Props<P>` stays.
  */
 const HTML_TAG =
@@ -323,7 +303,6 @@ export function readableComment(body: string): string {
     .trim()
 }
 
-/** A review comment as one line of plain text, for a row that shows only its start. */
 export function commentLine(body: string): string {
   return readableComment(body)
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
@@ -332,7 +311,6 @@ export function commentLine(body: string): string {
     .replace(/\s+/g, ' ')
 }
 
-/** How much of a thread's first comment its row's title shows. An open row shows the rest under it. */
 export const THREAD_TITLE_CHARS = 120
 
 /**
@@ -348,12 +326,10 @@ export function commentParts(body: string): { head: string; rest: string } {
   return { head, rest: head.length > THREAD_TITLE_CHARS ? text : more.join('\n').trim() }
 }
 
-/** Where a thread sits in the diff: "path:line", or the path alone. */
 export function threadWhere(t: PrThread, path = t.path): string {
   return `${path}${t.line ? `:${t.line}` : ''}`
 }
 
-/** How long something ran: "41s", "3m 52s". */
 export function took(ms: number): string {
   const secs = Math.max(0, Math.round(ms / 1000))
   return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`
@@ -363,13 +339,8 @@ export function failingChecks(pr: PrView): PrCheck[] {
   return pr.checks.filter(c => c.bucket === 'fail')
 }
 
-/** The longest comment body a press sends, in characters. */
 const COMMENT_MAX = 2000
 
-/**
- * A review thread as a press sends it. Each comment body is quoted, as a reviewer's words rather than
- * the person's, and clipped, since the message reads as the person's own prompt.
- */
 function threadText(t: PrThread): string {
   const where = threadWhere(t)
   const quoted = (body: string) =>
@@ -383,7 +354,6 @@ function threadText(t: PrThread): string {
   return [...opening, ...reply].join(NL)
 }
 
-/** The message each PR button sends to Claude. */
 export const prompts = {
   resolve: (pr: PrView) =>
     [

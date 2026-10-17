@@ -1,31 +1,14 @@
 import type { ClientModule } from 'claude-code'
 
-/**
- * A closed row in the desktop pane. A Button takes a click only on its label,
- * so the row is drawn here instead: this region gets the pointer over every
- * cell of the row, draws the hover and the press, and posts to the hooks
- * module, which opens the row. The hooks module reads the row from this
- * Client's key, so a post carries nothing.
- *
- * It draws the pane's row frame: a rounded Box with a transparent border, then
- * the mark, the text and the side columns, as the hooks module's own frames do.
- */
-
 export type RowProps = {
-  /** The mark column's width, in columns. It stays empty: the hooks module draws the mark. */
   markCells: number
-  /** The side column's width, in columns. */
   sideCells: number
-  /** Muted, before the title, such as a review thread's path. */
   before: string
   title: string
-  /** The row's last action, muted on its own line under the title. */
   after: string
-  /** The age, at the side. */
   side: string
-  /** Lines of padding above and below the text. The hover covers it. */
+  /** Lines of padding above and below the text. */
   padY: number
-  /** How many lines the title and `after` may take before they are cut. */
   maxLines: number
   /** How many characters fit in a cell, counted low, so a clipped line does not wrap. */
   charsPerCell: number
@@ -35,9 +18,7 @@ export type RowProps = {
   colors: {
     muted: string | null
     after: string | null
-    /** `after` on a row under the pointer or pressed. */
     afterHover: string | null
-    /** The age at the side. */
     side: string | null
     hover: string | null
     hoverText: string | null
@@ -47,12 +28,9 @@ export type RowProps = {
 
 type State = { hover: boolean; pressed: boolean }
 
-/** A title clipped shorter than this reads as nothing, so a title keeps at least this many characters. */
 const MIN_TITLE = 12
-/** The columns a frame's border takes from its content, both sides together. */
 const FRAME_CELLS = 4
 
-/** `text` cut to `max` characters at a space, ending "…". */
 function clipAtSpace(text: string, max: number): string {
   if (text.length <= max) return text
   const space = text.lastIndexOf(' ', max - 1)
@@ -61,7 +39,6 @@ function clipAtSpace(text: string, max: number): string {
   return `${head.trimEnd()}…`
 }
 
-/** The title cut to what fits in `budget` characters beside `before`. */
 function fitTitle(budget: number, before: string, title: string): string {
   return clipAtSpace(title, Math.max(MIN_TITLE, budget - before.length - 1))
 }
@@ -93,7 +70,6 @@ const Row: ClientModule<RowProps, State> = (props, surface) => {
   const title = fitTitle(perLine * props.maxLines, props.before, props.title)
   const after = clipAtSpace(props.after, perLine)
   const background = pressed ? props.colors.pressed : hover ? props.colors.hover : null
-  // A raised background can share its color with muted text, so on it all text takes the palette's text for it.
   const isRaised = background !== null && background === props.colors.hover
   const color = (own: string | null) => (isRaised && props.colors.hoverText ? props.colors.hoverText : own)
   const ageColor = background ? props.colors.afterHover : props.colors.after

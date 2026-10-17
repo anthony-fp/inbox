@@ -1,6 +1,3 @@
-// The tab's demo: the mod's `/inbox demo` samples as a session, kept in the
-// server's memory. Presses change only this copy and send nothing to Codex.
-
 import { demoView } from '../../hooks/demo'
 import { emptyState } from './state'
 import type { SessionState } from './state'
@@ -16,7 +13,6 @@ export function demoState(now: number): SessionState {
     lastActions: d.lastActions,
     prViews: d.prViews,
     presence: { ...s.presence, ...d.turns },
-    // The samples show no not-heard text: their hooks count as run.
     heard: { ...s.heard, startAt: now },
   }
 }

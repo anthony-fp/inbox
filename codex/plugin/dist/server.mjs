@@ -98,7 +98,6 @@ createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line)
     (handle) => handle(message).then((r) => {
       if (r) reply(r);
     }),
-    // With no handler loaded at all, a request gets an error instead of no answer.
     (err) => {
       if (message.id === void 0) return;
       const why = err instanceof Error ? err.message : String(err);

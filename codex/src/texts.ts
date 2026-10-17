@@ -1,12 +1,6 @@
-// What Codex and the tab read that differs from the mod's texts. Each one
-// keeps the mod's wording except where the surface differs: Codex shows the
-// inbox in a tab beside the conversation, with no band above the prompt.
-// The shared texts in ../../hooks/model-text.ts and ../../hooks/tools.ts name Codex and the tab through CODEX.
-
 import type { Host } from '../../hooks/model-text'
 import type { InboxView, RowView } from '../../hooks/view'
 
-/** How the shared texts name Codex and the tab. */
 export const CODEX: Host = {
   agent: 'Codex',
   surface: 'the Inbox tab',
@@ -22,7 +16,6 @@ export const INBOX_DESCRIPTION =
 export const VIEW_DESCRIPTION =
   'For the Inbox tab only: what the tab shows for this conversation, or its demo. Do not call it; to tell the user what waits on them, call inbox.'
 
-/** What the `inbox` tool tells Codex: the count, one line per row that counts, and where to act on them. */
 export function inboxToolText(v: InboxView): string {
   const isOpen = (r: RowView) => r.state.is === 'open'
   const groups: [string, RowView[]][] = [
