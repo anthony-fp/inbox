@@ -13,6 +13,43 @@ export function dialogLine(answer: string, isTimedOut: boolean): string {
   return `asked the user in a dialog; ${how}: ${answer.slice(0, 400)}`
 }
 
+/**
+ * The tool the Claude desktop app gives the agent to end a turn. With a question, the app draws a box under the
+ * reply: the recap, the question, and up to two buttons. The agent writes nothing after it, so the question is
+ * often in the box alone.
+ */
+export const TURN_BOX_TOOL = 'mcp__ccd_turn__wrap_up'
+
+const BOX_BUTTONS = 2
+
+/**
+ * What the app's box shows the person, as text that ends the reply, or null when it shows no question. It reads the
+ * fields the app reads: `recap`, `ask` and `actions`, or their `next_` forms. An action names an app button, such as
+ * `create_pr`, or has its own `label`.
+ */
+export function turnBoxText(input: Record<string, unknown>): string | null {
+  const field = (...keys: string[]) =>
+    keys
+      .map(k => input[k])
+      .find((v): v is string => typeof v === 'string' && v.trim() !== '')
+      ?.trim()
+  const ask = field('ask', 'next_ask', 'next_brief')
+  if (!ask) return null
+  const actions = input.actions ?? input.next_actions
+  const buttons = (Array.isArray(actions) ? actions : [])
+    .map(a => {
+      const action = (a ?? {}) as Record<string, unknown>
+      if (typeof action.action === 'string') return action.action.replaceAll('_', ' ')
+
+      return typeof action.label === 'string' ? action.label.trim() : ''
+    })
+    .filter(Boolean)
+    .slice(0, BOX_BUTTONS)
+  const recap = field('recap', 'next_recap', 'outcome')
+
+  return [recap, buttons.length > 0 ? `${ask}${NL}Options: ${buttons.join(' / ')}` : ask].filter(Boolean).join(NL + NL)
+}
+
 const TRANSCRIPT_MAX = 80_000
 
 const MESSAGE_MAX = 6000

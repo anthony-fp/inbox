@@ -297,6 +297,29 @@ test('a reply becomes a card and open items, and "1. yes" carries the question',
   expect(prompts.at(-1)).toContain('Re "Use Node or Python?": Node\n</person>')
 })
 
+test('a question the desktop app’s box shows reaches the update, even when the turn ends with no text', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  const prompts: string[] = []
+  world($, on, prompts)
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'desktop', isInteractive: true })
+  await $.prompt.submit({ text: 'file this finding', wait: false, origin: { kind: 'composer' } })
+  await $.turn.start({ text: 'file this finding', turnId: 't1' })
+  await $.tool.call({
+    tool: 'mcp__ccd_turn__wrap_up',
+    recap: 'No issue tracker is connected.',
+    ask: 'Which tracker should I file it in?',
+    actions: [{ label: 'Retry GitHub' }, { label: 'Use another tracker' }],
+  } as never)
+  await $.turn.complete({ answer: '', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.settle()
+
+  expect(prompts.length).toBe(1)
+  expect(prompts[0]).toContain(
+    '<reply>\nNo issue tracker is connected.\n\nWhich tracker should I file it in?\nOptions: Retry GitHub / Use another tracker\n</reply>',
+  )
+})
+
 test('a question’s handle is the number a typed answer reaches, and the band counts what the tab counts', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [], { HERDR_PANE_ID: 'p1' })

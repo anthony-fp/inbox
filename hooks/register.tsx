@@ -118,6 +118,8 @@ import {
   stopKindOf,
   stopText,
   transcriptText,
+  TURN_BOX_TOOL,
+  turnBoxText,
 } from './claude'
 import { ago } from './text'
 import {
@@ -656,6 +658,8 @@ let turningOn: Promise<void> | null = null
 let press: Press | null = null
 // Replies a Stop hook sent Claude back from this turn, before the final one.
 let sentBack: string[] = []
+// The question the desktop app's box shows under this turn's reply, if any.
+let turnBox: string | null = null
 // Set in session.start, which a hot reload runs again.
 let sessionId = ''
 let root = ''
@@ -782,6 +786,7 @@ function resetTurn() {
   trigger = null
   press = null
   sentBack = []
+  turnBox = null
 }
 
 /** Adds a message or a command of the person's to what they sent this turn. */
@@ -3125,6 +3130,7 @@ export const register: Register = on => {
     if (e.agentId) return run()
     const line = toolActivity(String(e.tool), input)
     if (line) noteActivity(line)
+    if (String(e.tool) === TURN_BOX_TOOL) turnBox = turnBoxText(input) ?? turnBox
     if (e.tool === 'Bash') {
       const ran = await run()
       if (activity.length < 40)
@@ -3197,10 +3203,10 @@ export const register: Register = on => {
     // A Done pressed during the turn waited for it to end.
     void wakeForDone($).catch(() => undefined)
     void followNewRows($).catch(() => undefined)
-    if (e.reason !== 'answer' || e.answer.trim() === '') return r
+    if (e.reason !== 'answer' || (e.answer.trim() === '' && turnBox === null)) return r
 
     const [ledger, shown, now] = await Promise.all([read($, LEDGER), screen($), $.clock.now()])
-    const reply = [...sentBack, e.answer].join('\n\n')
+    const reply = [...sentBack, e.answer, turnBox ?? ''].filter(text => text.trim() !== '').join('\n\n')
     const ex: Exchange = {
       person,
       trigger,
