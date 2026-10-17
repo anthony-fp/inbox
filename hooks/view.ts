@@ -352,7 +352,7 @@ const WORKING_LABELS: Record<string, string> = {
 
 const DONE_LABELS: Record<string, (text: string) => string> = {
   address: () => 'Handed off',
-  issue: () => 'Handed off to file',
+  issue: () => 'Asked to file',
   discuss: () => 'Discussed',
   explain: () => 'Explained',
   dismiss: () => 'Dismissed',
