@@ -496,7 +496,7 @@ test('the tab reports active work separately from pending exchanges and failed u
   assert.equal(viewOf(s, 60).status.error, 'Last update failed. Items from that reply may be missing.')
 })
 
-test('Fix hands a finding off: it settles as the choice made, then lists in the Closed fold though an applied turn leaves it open; Discuss keeps it open; a close moves it to Closed', () => {
+test('Fix and File issue hand a finding off: each settles as the choice made, then lists in the Closed fold though an applied turn leaves it open; Discuss keeps it open; a close moves it to Closed', () => {
   const w = withItems()
   const s = {
     ...w,
@@ -528,6 +528,25 @@ test('Fix hands a finding off: it settles as the choice made, then lists in the 
   assert.deepEqual(
     moved.closed.map(f => [f.id, f.outcome]),
     [['f3', 'Fix']],
+  )
+  const filing = pressed(s, { action: 'issue', id: 'f3' })
+  assert.ok(!('stale' in filing))
+  assert.equal(filing.effects.length, 1)
+  const filingText = filing.effects[0]?.kind === 'send' ? filing.effects[0].text : ''
+  assert.match(filingText, /^Please file an issue for this finding you recorded/)
+  assert.ok(filingText.endsWith('\nIssue: No lint script\nOnly tests run.'))
+  const filed = after(s, { action: 'issue', id: 'f3' })
+  const filedRows = viewOf(filed, 60).findings
+  assert.equal(filedRows.count, 0)
+  assert.equal(filedRows.rows[0]?.state.is === 'settled' && filedRows.rows[0].state.label, 'File issue')
+  const filedStarted = notePrompt(filed, 'Please file an issue for this finding you recorded', 70).state
+  const filedApplied = {
+    ...filedStarted,
+    presence: { ...filedStarted.presence, turnsApplied: filedStarted.presence.turnsStarted },
+  }
+  assert.deepEqual(
+    viewOf(filedApplied, 80 + SETTLE_WINDOW_MS).findings.closed.map(f => [f.id, f.outcome]),
+    [['f3', 'File issue']],
   )
   const discussed = viewOf(after(s, { action: 'discuss', id: 'f3' }), 60).findings
   assert.deepEqual(

@@ -140,25 +140,31 @@ export function isPrRowId(id: string): boolean {
 
 /**
  * Whether a press handed its row to the agent, so the row closes to its one line and stays closed: a question, task,
- * finding, review thread or check. Fix settles its finding's row instead, and a PR block is always open.
+ * finding, review thread or check. Fix and File issue settle their finding's row instead, and a PR block is always open.
  */
 export function isFoldingPress(id: string, last: Pick<LastAction, 'kind' | 'action'> | undefined): boolean {
-  return !id.startsWith('pr:') && last?.kind === 'handoff' && last.action !== 'address'
+  return !id.startsWith('pr:') && last?.kind === 'handoff' && !isSettlingAction(last.action)
+}
+
+/** Fix, Do it and File issue hand a finding to the agent for good, so its row settles rather than folds. */
+export function isSettlingAction(action: string | undefined): boolean {
+  return action === 'address' || action === 'issue'
 }
 
 /**
- * Whether Fix or Do it handed a finding to the agent: its row settles, then lists in the Closed fold, unless the
- * person pressed Undo or the message failed. The finding stays open in the ledger, so the agent can still close it.
+ * Whether Fix, Do it or File issue handed a finding to the agent: its row settles, then lists in the Closed fold,
+ * unless the person pressed Undo or the message failed. The finding stays open in the ledger, so the agent can still
+ * close it.
  */
-export function isFixSent(last: LastAction | undefined): last is LastAction {
-  return last?.action === 'address' && !last.isKept && last.delivery?.state !== 'failed'
+export function isSettlingSent(last: LastAction | undefined): last is LastAction {
+  return isSettlingAction(last?.action) && !last?.isKept && last?.delivery?.state !== 'failed'
 }
 
 /** A press on a question, task or finding row, in every host. An answer names its option by text. */
 export type RowPress =
   | { action: 'answer'; id: string; option: string }
   | { action: 'type'; id: string; text: string }
-  | { action: 'explain' | 'done' | 'dismiss' | 'address' | 'discuss' | 'undo'; id: string }
+  | { action: 'explain' | 'done' | 'dismiss' | 'address' | 'issue' | 'discuss' | 'undo'; id: string }
   | { action: 'step'; id: string; step: number; label: string }
 
 /** The action ids of the mod's PR presses: on a review thread, on a PR block, and a check's Fix and Open log. */
@@ -187,6 +193,8 @@ function pressText(p: RowPress): string {
       return p.option
     case 'type':
       return 'Reply'
+    case 'issue':
+      return ISSUE_LABEL
     case 'step':
       return p.label
     default:
@@ -716,6 +724,9 @@ export async function runSends(
   return null
 }
 
+/** The File issue button's label, which its settled and closed rows read as the choice made. */
+export const ISSUE_LABEL = 'File issue'
+
 /**
  * The press [Try again] repeats on a row whose message failed to send, or null.
  * A typed reply has none: its words go back into the row's draft instead.
@@ -729,6 +740,7 @@ export function retryOf(id: string, last: LastAction): RowPress | null {
       return { action: 'answer', id, option: last.text }
     case 'explain':
     case 'address':
+    case 'issue':
     case 'discuss':
       return { action: last.action, id }
     default:
@@ -778,8 +790,8 @@ function pressed(
   const unchanged = { ledger, last: null, effects: [] }
 
   if (p.action === 'undo') {
-    // Undo on a finding Fix handed off lists it again. Its message has gone, so it stays handed off.
-    if (ledger.findings.some(f => f.id === p.id) && last?.action === 'address' && !last.isKept)
+    // Undo on a finding Fix or File issue handed off lists it again. Its message has gone, so it stays handed off.
+    if (ledger.findings.some(f => f.id === p.id) && last && isSettlingAction(last.action) && !last.isKept)
       return { ...unchanged, last: { ...last, isKept: true } }
     // Only the person's own Done or Dismiss undoes, so an old drawing cannot reopen an answered, expired or agent-closed row.
     if (ledger.items.some(i => i.id === p.id) || ledger.findings.some(f => f.id === p.id)) return stale
@@ -802,6 +814,8 @@ function pressed(
     switch (p.action) {
       case 'address':
         return sendFinding('handoff', messages.finding(finding, 'address'))
+      case 'issue':
+        return sendFinding('handoff', messages.finding(finding, 'issue'))
       case 'discuss':
         return sendFinding('talk', messages.finding(finding, 'discuss'))
       case 'type': {
@@ -898,14 +912,19 @@ export const messages = {
   taskReply: (item: Item, words: string) => `Re the task you left for me, "${item.ask}": ${words}`,
   /** Tells the agent the person did tasks it was waiting on. */
   done: (asks: string[]) => (asks.length === 1 ? `Done: ${asks[0]}` : `Done:\n${asks.map(a => `- ${a}`).join('\n')}`),
-  /** Sends a finding back to the agent: to fix it, to talk it through first, or with the person's own words. */
-  finding: (finding: Finding, how: 'address' | 'discuss' | 'typed', words = '') => {
+  /**
+   * Sends a finding back to the agent: to fix it, to file it in the person's issue tracker, to talk it through first,
+   * or with the person's own words. A close reason is cut at 80 characters, so filing asks for the issue's key there.
+   */
+  finding: (finding: Finding, how: 'address' | 'issue' | 'discuss' | 'typed', words = '') => {
     const opening =
       how === 'address'
         ? 'Please address this finding you recorded:'
-        : how === 'discuss'
-          ? "Let's talk through this finding you recorded before changing anything:"
-          : 'About this finding you recorded:'
+        : how === 'issue'
+          ? "Please file an issue for this finding you recorded, in the issue tracker you have tools for. First check whether one already exists, and if it does, use it instead of filing a duplicate. Then close the finding with the issue's key or number as the reason, and give me its link. If you have no tools for an issue tracker, say so and leave the finding open."
+          : how === 'discuss'
+            ? "Let's talk through this finding you recorded before changing anything:"
+            : 'About this finding you recorded:'
 
     return [opening, ...findingBody(finding), ...(how === 'typed' ? ['', words] : [])].join('\n')
   },

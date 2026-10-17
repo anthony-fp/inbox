@@ -16,6 +16,7 @@ Test a change to text a model reads before keeping it. Small rewordings change b
 
 - Claude and Codex read the guidance `guidanceText` builds, and the `inbox:` texts that `inboxText`, `closedText`, `carryText` and `answerNote` build, all in `hooks/model-text.ts`. Each host's `Host` supplies its names and the guidance's first paragraph, so a change there reaches both agents.
 - Claude reads the tool descriptions and results from `hooks/tools.ts`. Codex reads those too, and its own tool texts in `codex/src/texts.ts`.
+- Both agents read the message each press sends, from `messages` in `hooks/presses.ts` and `prompts` in `hooks/prs.ts`.
 - The inbox model reads `systemText` and the blocks from `buildPrompt` in `hooks/model-text.ts`. In the mod it is a Sonnet call after each reply. In Codex it is `codex exec` with the model in `MODEL` in `codex/src/update.ts`.
 - To compare two versions, print each one's prompt for the same sample exchange. Run each several times with `claude -p --model sonnet --tools "" --system-prompt …`, and for text Codex reads, with `codex exec` and the Codex model. Count the outcomes.
 - After a change to `systemText` or `buildPrompt`, run `./scripts/eval.sh`. It runs the inbox model on the cases in `evals/cases.json`, on Sonnet and on Codex, and fails a case that passes in too few runs. Add a case for each behavior a change sets out to fix. `check.sh` leaves the evals out, since each run calls a model.
@@ -35,7 +36,7 @@ Every action shows what it did as soon as it is pressed. When Discuss showed not
 - In `tests/hooks.test.ts`, `world()` answers every engine event the mod uses, and the test harness takes one handler per event. A test changes an answer through the variables `world()` resets, such as `ledgerReply`, `stopBlock` and `ghAnswers`.
 - The plugin store is keyed by the mod's name, so a session that loads a copy under your own config writes to your real inbox's state. Check the UI live in a session with its own `CLAUDE_CONFIG_DIR`. `mods/scripts/live.sh` in petekp/claude-code-setup starts one in tmux.
 - To try a change with real model turns, run `claude -p` on a copy of the mod. Patch the copy to turn on, since the mod does nothing under `-p`, and to skip its `$.store` writes, since the run signs in with your own config and would save the trial's sessions to your real inbox.
-- To test whether the agent calls `record_finding` or `close`, give `claude -p` a stand-in MCP server through `--strict-mcp-config --mcp-config`. Name the server anything but `inbox`. A server named `inbox` lets the real mod answer the calls and save them to your real inbox.
+- To test whether the agent calls `record_finding` or `close`, give `claude -p` a stand-in MCP server through `--strict-mcp-config --mcp-config`. Name the server anything but `inbox`. A server named `inbox` lets the real mod answer the calls and save them to your real inbox. For `codex exec`, also set `CODEX_HOME` to a temporary folder that holds only a link to your `auth.json`. Otherwise Codex loads your installed inbox plugin, and the agent calls it instead of the stand-in.
 
 ## Drawing in each look
 

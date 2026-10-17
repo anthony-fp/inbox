@@ -27,7 +27,8 @@ import {
   capitalized,
   clipLabel,
   isAwaitingReply,
-  isFixSent,
+  isSettlingSent,
+  ISSUE_LABEL,
   isFoldingPress,
   isHandedOff,
   isPrRowId,
@@ -338,6 +339,9 @@ export function feedbackOf(
 /** The Fix button's label for a finding, which its settled and closed rows read as the choice made. */
 const fixLabel = (f: Pick<Finding, 'kind'>) => (f.kind === 'opportunity' ? 'Do it' : 'Fix')
 
+/** The label of the button that settled a finding's row, Fix or File issue, as its settled and closed rows read it. */
+const sentLabel = (f: Pick<Finding, 'kind'>, last: LastAction) => (last.action === 'issue' ? ISSUE_LABEL : fixLabel(f))
+
 /** What a Talk press reads while the agent's reply is still to come. */
 const WORKING_LABELS: Record<string, string> = {
   explain: 'Explaining…',
@@ -348,6 +352,7 @@ const WORKING_LABELS: Record<string, string> = {
 
 const DONE_LABELS: Record<string, (text: string) => string> = {
   address: () => 'Handed off',
+  issue: () => 'Handed off to file',
   discuss: () => 'Discussed',
   explain: () => 'Explained',
   dismiss: () => 'Dismissed',
@@ -460,6 +465,7 @@ const FOLLOW_UPS: ReadonlySet<RowPress['action']> = new Set(['type', 'explain', 
 const ACTION_KEYS: Partial<Record<RowPress['action'], string>> = {
   done: 'd',
   address: 'a',
+  issue: 'i',
   type: 't',
   explain: 'e',
   discuss: 'e',
@@ -516,6 +522,7 @@ function actionsOf(
     return [
       // Only the label names the kind. The press and the message it sends are Address's for both.
       action({ action: 'address', id }, row.finding ? fixLabel(row.finding) : 'Fix', 'handoff'),
+      action({ action: 'issue', id }, ISSUE_LABEL, 'handoff'),
       action({ action: 'discuss', id }, 'Discuss', 'talk'),
       action({ action: 'type', id, text: '' }, 'Reply', 'handoff'),
       action({ action: 'dismiss', id }, 'Dismiss', 'mark'),
@@ -739,15 +746,15 @@ export function inboxView({
   const settledItems = new Map(
     ledger.closed.filter(d => d.item && isSettling(d.at) && !isOpen(d.id)).map(d => [d.id, d] as const),
   )
-  // A finding Fix sent already settled and moved to the Closed fold, so the agent's close does not list it again.
-  const isFixSettled = (id: string) => {
+  // A finding Fix or File issue sent already settled and moved to the Closed fold, so the agent's close does not list it again.
+  const isSentSettled = (id: string) => {
     const last = lastActions[id]
 
-    return isFixSent(last) && !isSettling(last.at)
+    return isSettlingSent(last) && !isSettling(last.at)
   }
   const settledFindings = new Map(
     ledger.closedFindings
-      .filter(f => isSettling(f.closedAt) && !isOpen(f.id) && !isFixSettled(f.id))
+      .filter(f => isSettling(f.closedAt) && !isOpen(f.id) && !isSentSettled(f.id))
       .map(f => [f.id, f] as const),
   )
   const placed = [...settledFindings.keys()].reduce(reopenFinding, [...settledItems.keys()].reduce(reopenItem, ledger))
@@ -777,12 +784,12 @@ export function inboxView({
     }
 
     const last = lastActions[id]
-    // Fix settles the row as an answer does, though the finding stays open until the agent closes it.
+    // Fix and File issue settle the row as an answer does, though the finding stays open until the agent closes it.
     const sent = ledger.findings.find(f => f.id === id)
-    if (sent && isFixSent(last))
+    if (sent && isSettlingSent(last))
       return {
         is: 'settled',
-        label: fixLabel(sent),
+        label: sentLabel(sent, last),
         at: last.at,
         canUndo: true,
         delivery: pendingDeliveryAt(last, now),
@@ -826,8 +833,8 @@ export function inboxView({
   const kinds = Object.keys(FINDING_GROUPS) as Finding['kind'][]
   const byGroup = (a: Finding, b: Finding) => kinds.indexOf(a.kind) - kinds.indexOf(b.kind)
   const findingRows = [...placed.findings]
-    // A finding Fix sent leaves the list once it has settled, for the Closed fold.
-    .filter(f => !isFixSettled(f.id))
+    // A finding Fix or File issue sent leaves the list once it has settled, for the Closed fold.
+    .filter(f => !isSentSettled(f.id))
     .reverse()
     .sort(byGroup)
     .map(finding =>
@@ -858,12 +865,12 @@ export function inboxView({
   }))
   // Listed in the Closed fold as the person's choice, while the ledger keeps them open for the agent to close. Like a
   // close, one counts from the press; each fold leaves out the rows it still draws settled.
-  const fixesSent: ClosedView<ClosedFinding>[] = ledger.findings
-    .filter(f => isFixSent(lastActions[f.id]))
+  const findingsSent: ClosedView<ClosedFinding>[] = ledger.findings
+    .filter(f => isSettlingSent(lastActions[f.id]))
     .map(f => ({
       ...f,
       how: 'answered',
-      outcome: fixLabel(f),
+      outcome: sentLabel(f, lastActions[f.id]!),
       closedAt: lastActions[f.id]!.at,
       delivery: pendingDeliveryAt(lastActions[f.id], now),
     }))
@@ -878,7 +885,7 @@ export function inboxView({
     findings: {
       count: findingRows.filter(r => r.state.is === 'open').length,
       rows: findingRows,
-      closed: [...ledger.closedFindings.map(f => ({ ...f, delivery: null as null })), ...fixesSent].sort(
+      closed: [...ledger.closedFindings.map(f => ({ ...f, delivery: null as null })), ...findingsSent].sort(
         (a, b) => b.closedAt - a.closedAt,
       ),
     },

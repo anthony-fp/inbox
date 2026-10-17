@@ -128,6 +128,7 @@ import {
   demoRecord,
   demoTurns,
   doneWake,
+  isSettlingAction,
   localPath,
   markSentToAgent,
   refuseDoneNotification,
@@ -1121,7 +1122,7 @@ async function redrawAfterReload($: EngineInterface) {
     ...ledger.closedFindings.map(f => f.closedAt),
     ...Object.values(lastActions).flatMap(a => [
       ...(a.result ? [a.result.at] : []),
-      ...(a.action === 'pr-dismiss' || a.action === 'address' ? [a.at] : []),
+      ...(a.action === 'pr-dismiss' || isSettlingAction(a.action) ? [a.at] : []),
     ]),
     ...Object.values(notes).map(n => n.at),
   ]
@@ -2322,8 +2323,8 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
   const { isMoved, undoBlock } = await openAfterClose($, rowId, wasWaiting, canRevealUndo)
   if (canRevealUndo) await keepUndoVisible($, undoKey, undoBlock, now, undoRevision)
   if (!('ref' in p) && p.action === 'done') later($, SETTLED_MS, () => wakeForDone($))
-  // Fix settles its finding's row as a close does, so it leaves once SETTLED_MS ends.
-  if (!('ref' in p) && p.action === 'address') redrawWhileLeaving($, now + SETTLED_MS)
+  // Fix and File issue settle their finding's row as a close does, so it leaves once SETTLED_MS ends.
+  if (!('ref' in p) && isSettlingAction(p.action)) redrawWhileLeaving($, now + SETTLED_MS)
   if ('ref' in p && p.action === 'pr-dismiss') {
     redrawWhileLeaving($, now + SETTLED_MS)
     leavePr($, p.ref, now)
@@ -2525,7 +2526,7 @@ async function runDemoPress(
     applied = r
     const { [rowId]: _replaced, ...notes } = d.notes
     if ('stale' in r) return { ...d, notes: { ...notes, [rowId]: { note: 'stale' as const, at: now } } }
-    isClosing = hasNewClose(d.ledger, r.ledger) || ('ref' in p ? p.action === 'pr-dismiss' : p.action === 'address')
+    isClosing = hasNewClose(d.ledger, r.ledger) || ('ref' in p ? p.action === 'pr-dismiss' : isSettlingAction(p.action))
     const { lasts, isSample } = demoRecord(r.lasts, r.effects)
 
     return {
