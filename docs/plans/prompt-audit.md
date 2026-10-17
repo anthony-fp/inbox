@@ -41,7 +41,7 @@ The saved records do not say whether an answer came from a press or from the age
 
 ### 1. The agent does not know its reply makes the items
 
-- **Where:** `guidanceText` in `hooks/ledger.ts`. Five of the six reviewers found this one independently.
+- **Where:** `guidanceText` in `hooks/model-text.ts`. Five of the six reviewers found this one independently.
 - **What is wrong:** the inbox model builds every question, its options, its recommendation and its one-press steps from the agent's reply. It may copy a recommendation only when the reply states one, and a command only when the reply contains it. The guidance never tells the agent any of this. A reply that asks "How should I handle X?" gives the inbox model little to work with, and the row ends with no recommendation and no step.
 - **Proposed wording,** one paragraph after the first:
 
@@ -58,7 +58,7 @@ The saved records do not say whether an answer came from a press or from the age
 ### 2. An open item cannot change
 
 - **Where:**
-  - `applyUpdate` and `ledgerBlocks` in `hooks/ledger.ts`;
+  - `applyUpdate` in `hooks/ledger.ts` and `ledgerBlocks` in `hooks/model-text.ts`;
   - the sentence in `systemText` that begins "When the reply restates, rewords or narrows an item";
   - `messages.explain` in `hooks/presses.ts`.
 - **What is wrong:**
@@ -75,7 +75,7 @@ The saved records do not say whether an answer came from a press or from the age
 
 ### 3. Dismissed findings vanish
 
-- **Where:** `addFinding`, `closedText` and `promptNotes` in `hooks/ledger.ts`, and `recordFinding` in `hooks/tools.ts`.
+- **Where:** `addFinding` in `hooks/ledger.ts`, `closedText` and `promptNotes` in `hooks/model-text.ts`, and `recordFinding` in `hooks/tools.ts`.
 - **What is wrong:**
   - Closed findings are saved, but no text tells either model about them. When the person dismisses a finding, the agent sees it gone from the inbox line with no reason given.
   - `addFinding` checks a new finding only against open findings, and only by exact title. A reworded finding the person dismissed is recorded again, and `recordFinding` answers "Recorded as fN".
@@ -143,13 +143,13 @@ The saved records do not say whether an answer came from a press or from the age
 
 | Text | Where | Reader | Result |
 | --- | --- | --- | --- |
-| The guidance | `hooks/ledger.ts:guidanceText` | Claude, Codex | Themes 1, 6, 7 |
+| The guidance | `hooks/model-text.ts:guidanceText` | Claude, Codex | Themes 1, 6, 7 |
 | `record_finding` and `close`, their fields and results | `hooks/tools.ts` | Claude, Codex | Themes 3, 6 |
-| The inbox model's instructions and input | `hooks/ledger.ts:systemText`, `hooks/ledger.ts:buildPrompt` | Inbox model | Themes 2, 4, 5, 7 |
-| The catch-up prompts | `hooks/ledger.ts:catchUpPrompt`, `hooks/ledger.ts:transcriptCatchUpPrompt` | Inbox model or a fork | Theme 5 |
-| `inbox:` texts beside a prompt | `hooks/ledger.ts:inboxText`, `hooks/ledger.ts:closedText`, `hooks/ledger.ts:answerNote` | Claude, Codex | Themes 3, 6 |
-| The start and compaction block | `hooks/ledger.ts:carryText` | Claude, Codex | No issue |
-| Activity and screen lines | `hooks/ledger.ts:toolActivity`, `hooks/ledger.ts:dialogLine`, `hooks/ledger.ts:screenText` | Inbox model | No issue |
+| The inbox model's instructions and input | `hooks/model-text.ts:systemText`, `hooks/model-text.ts:buildPrompt` | Inbox model | Themes 2, 4, 5, 7 |
+| The catch-up prompts | `hooks/model-text.ts:catchUpPrompt`, `hooks/model-text.ts:transcriptCatchUpPrompt` | Inbox model or a fork | Theme 5 |
+| `inbox:` texts beside a prompt | `hooks/model-text.ts:inboxText`, `hooks/model-text.ts:closedText`, `hooks/model-text.ts:answerNote` | Claude, Codex | Themes 3, 6 |
+| The start and compaction block | `hooks/model-text.ts:carryText` | Claude, Codex | No issue |
+| Activity and screen lines | `hooks/model-text.ts:toolActivity`, `hooks/claude.ts:dialogLine`, `hooks/model-text.ts:screenText` | Inbox model | No issue |
 | Row press messages | `hooks/presses.ts:messages` | Claude, Codex | Themes 2, 6 |
 | PR press messages | `hooks/prs.ts:prompts` | Claude | Read, no issue found |
 | Codex tool texts | `codex/src/texts.ts` | Codex | Theme 8 |

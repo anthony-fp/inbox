@@ -43,7 +43,8 @@ you, Findings and PRs tabs. Codex shows the same tabs in its Inbox tab.
 **Card**:
 The short summary of where the session stands: its goal, what's done, and
 what's happening now. The inbox model writes it, and the agent reads it in
-the `inbox:` text beside each prompt. No look draws it.
+the text the inbox adds at the start of a session and after compaction. No
+look draws it.
 
 **New row**:
 A row a look lists for the first time since it last recorded its rows. A

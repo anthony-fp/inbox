@@ -13,7 +13,7 @@ that updates the inbox after each reply, reads two.
 
 | Text | Read by | When | Role |
 | --- | --- | --- | --- |
-| `GUIDANCE`, the "# Inbox" system prompt section | Claude | Every turn | What the inbox shows; when to record a finding; the latest inbox line is the current state; when to close |
+| `guidanceText`, the "# Inbox" system prompt section | Claude | Every turn | What the inbox shows; when to record a finding; the latest inbox line is the current state; when to close |
 | `record_finding` description and fields | Claude | Every turn | What happens to a finding; the bar; the fields |
 | `close` description and fields | Claude | Every turn | Where the id comes from; answer or reason |
 | Inbox line (`inboxText`, `closedText`) | Claude | Beside a prompt, when the inbox changed | Open items and findings with ids; what closed since, with when to ask again |
@@ -26,7 +26,7 @@ that updates the inbox after each reply, reads two.
 
 ## Done
 
-- Each rule is written once. `GUIDANCE` holds when to record and when to
+- Each rule is written once. `guidanceText` holds when to record and when to
   close. The tool descriptions hold only what a call needs.
 - The mention rule: a workaround or an untested part goes in the reply as well
   as in a finding. Other findings are mentioned only when they bear on what

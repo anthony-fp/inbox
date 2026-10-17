@@ -155,13 +155,6 @@ Finding details preserve explicit newlines in all three looks. The Codex
 adapter uses `pre-line` whitespace for the detail paragraph; its ordinary
 spacing and inline formatting stay intact.
 
-Codex reload ownership passes browser and native checks. The repaired native
-page retains attachment, reply focus and the exact draft across two page
-replacements in one tab. Show demo, Hide demo, Cancel/reopen, Dismiss and Undo
-also pass. Startup has a bounded connection retry. The
-[implementation record](plans/platform-architecture-audit.md) separates native
-sample checks from controlled transport failures and earlier clipboard checks.
-
 ## After you change X, check Y
 
 State in your change, for each look, whether it applies and what you checked.

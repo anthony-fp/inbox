@@ -175,6 +175,7 @@ The shared `rowKeyPlan` puts retry first, then options or help steps, then Done 
 | | Reply | A text field draws | Hand-off |
 | | Explain | Always | Talk |
 | Finding | Fix for an issue, Do it for an opportunity | Always | Hand-off |
+| | File issue | Always | Hand-off |
 | | Discuss | Always | Talk |
 | | Reply | A text field draws | Hand-off |
 | | Dismiss | Always | Mark |
@@ -254,7 +255,6 @@ An expired item closes as `Expired`. The rule behind it, 12 prompts or more than
 - The counts change at once.
 - A new row arrives with no mark of its own. In the Codex tab it grows in. A row arriving above the open one arrives closed.
 - The view jumps to another tab only when the tab on screen shows nothing but its empty text.
-- The 200 ms tab draw-in stays in the terminal only. At desktop's 10 redraws a second it drops most of its frames.
 
 ### 2.9 Keys
 
@@ -368,10 +368,9 @@ A desktop row Client reserves a side column for the age at narrow widths too. Th
 | Reply | A labeled action with its key | A follow-up in a Client region | Native Buttons fill and pad only their labels. The Client preserves follow-up hit areas and spacing. The shared action retains normal emphasis and order. |
 | Closed row | Handle Button and title Button, two when the title wraps | One Client per row. A click anywhere on it opens the row. The title is cut to one line with "…". | A Button takes a click only on its label. |
 | Keys drawer, "1 2 3", "j k", "ctrl+x tab" | Shown | Not drawn | Nothing to press. |
-| Tab draw-in | Kept | Not drawn | It drops most frames at 10 redraws a second. |
 | Closing the pane | Esc | The app's own ✕ on the pane's title bar | The app draws it, so a [Close] in the pane would be a second close. |
 | Tree lines and dividers | `│ ├─ └─` and a `─` rule between rows | None. Closed rows sit flush, each padded a quarter line above and below. A PR's status block starts at the title's column, so only its check and thread rows are indented. | Desktop text is proportional and its lines differ in height, so stacked glyphs break into bars and a rule sized in columns wraps. A rail drawn as a Box is a full cell wide and makes the separator too heavy. |
-| Title cut | By columns | By about 1.25 characters per column | A column of `bodyColumns` holds more than one character of desktop text. |
+| Title cut | By columns | By a measured characters-per-column estimate, `DESKTOP_CLIP_CHARS_PER_CELL` | A column of `bodyColumns` holds more than one character of desktop text. |
 | Links | `Link` | `Link` for https. A button that runs `open` for local files and folders. | `Link` is live only for https. `$.process` works on desktop. |
 
 **Typing.** The engine types list `Input` for desktop, so `$.ui.resolve(e)` returns it there. The pane drops the Reply field's key when `Input` does not resolve. Typing, Enter and focus need current-build native verification. The person can then type in the composer, and Claude already holds the item through carry text. The inbox cannot prefill the composer, because `$.prompt.fill` does nothing in a headless session.
