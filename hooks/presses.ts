@@ -140,24 +140,18 @@ export function isPrRowId(id: string): boolean {
 
 /**
  * Whether a press handed its row to the agent, so the row closes to its one line and stays closed: a question, task,
- * finding, review thread or check. Fix and File issue settle their finding's row instead, and a PR block is always open.
+ * finding, review thread or check. Fix settles its finding's row instead, and a PR block is always open.
  */
 export function isFoldingPress(id: string, last: Pick<LastAction, 'kind' | 'action'> | undefined): boolean {
-  return !id.startsWith('pr:') && last?.kind === 'handoff' && !isSettlingAction(last.action)
-}
-
-/** Fix, Do it and File issue hand a finding to the agent for good, so its row settles rather than folds. */
-export function isSettlingAction(action: string | undefined): boolean {
-  return action === 'address' || action === 'issue'
+  return !id.startsWith('pr:') && last?.kind === 'handoff' && last.action !== 'address'
 }
 
 /**
- * Whether Fix, Do it or File issue handed a finding to the agent: its row settles, then lists in the Closed fold,
- * unless the person pressed Undo or the message failed. The finding stays open in the ledger, so the agent can still
- * close it.
+ * Whether Fix or Do it handed a finding to the agent: its row settles, then lists in the Closed fold, unless the
+ * person pressed Undo or the message failed. The finding stays open in the ledger, so the agent can still close it.
  */
-export function isSettlingSent(last: LastAction | undefined): last is LastAction {
-  return isSettlingAction(last?.action) && !last?.isKept && last?.delivery?.state !== 'failed'
+export function isFixSent(last: LastAction | undefined): last is LastAction {
+  return last?.action === 'address' && !last.isKept && last.delivery?.state !== 'failed'
 }
 
 /** A press on a question, task or finding row, in every host. An answer names its option by text. */
@@ -724,7 +718,7 @@ export async function runSends(
   return null
 }
 
-/** The File issue button's label, which its settled and closed rows read as the choice made. */
+/** The File issue button's label. */
 export const ISSUE_LABEL = 'File issue'
 
 /**
@@ -790,8 +784,8 @@ function pressed(
   const unchanged = { ledger, last: null, effects: [] }
 
   if (p.action === 'undo') {
-    // Undo on a finding Fix or File issue handed off lists it again. Its message has gone, so it stays handed off.
-    if (ledger.findings.some(f => f.id === p.id) && last && isSettlingAction(last.action) && !last.isKept)
+    // Undo on a finding Fix handed off lists it again. Its message has gone, so it stays handed off.
+    if (ledger.findings.some(f => f.id === p.id) && last?.action === 'address' && !last.isKept)
       return { ...unchanged, last: { ...last, isKept: true } }
     // Only the person's own Done or Dismiss undoes, so an old drawing cannot reopen an answered, expired or agent-closed row.
     if (ledger.items.some(i => i.id === p.id) || ledger.findings.some(f => f.id === p.id)) return stale

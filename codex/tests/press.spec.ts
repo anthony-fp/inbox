@@ -496,7 +496,7 @@ test('the tab reports active work separately from pending exchanges and failed u
   assert.equal(viewOf(s, 60).status.error, 'Last update failed. Items from that reply may be missing.')
 })
 
-test('Fix and File issue hand a finding off: each settles as the choice made, then lists in the Closed fold though an applied turn leaves it open; Discuss keeps it open; a close moves it to Closed', () => {
+test('Fix hands a finding off and settles it as the choice made, then lists it in the Closed fold though an applied turn leaves it open; File issue folds it until the reply, which leaves it Still open or closes it with the issue; Discuss keeps it open; a close moves it to Closed', () => {
   const w = withItems()
   const s = {
     ...w,
@@ -537,16 +537,34 @@ test('Fix and File issue hand a finding off: each settles as the choice made, th
   assert.ok(filingText.endsWith('\nIssue: No lint script\nOnly tests run.'))
   const filed = after(s, { action: 'issue', id: 'f3' })
   const filedRows = viewOf(filed, 60).findings
+  assert.deepEqual(
+    filedRows.rows.map(r => [r.id, r.state.is, r.feedback && feedbackText(r.feedback, 'codex')]),
+    [['f3', 'handedOff', '✓ Asked to file']],
+  )
   assert.equal(filedRows.count, 0)
-  assert.equal(filedRows.rows[0]?.state.is === 'settled' && filedRows.rows[0].state.label, 'File issue')
   const filedStarted = notePrompt(filed, 'Please file an issue for this finding you recorded', 70).state
-  const filedApplied = {
+  const leftOpen: SessionState = {
     ...filedStarted,
     presence: { ...filedStarted.presence, turnsApplied: filedStarted.presence.turnsStarted },
+    lastActions: {
+      ...filedStarted.lastActions,
+      f3: { ...filedStarted.lastActions.f3!, delivery: { state: 'arrived' } },
+    },
+  }
+  const stillOpen = viewOf(leftOpen, 80 + SETTLE_WINDOW_MS).findings
+  assert.deepEqual(
+    stillOpen.rows.map(r => [r.id, r.state.is, r.feedback && feedbackText(r.feedback, 'codex')]),
+    [['f3', 'open', 'Still open']],
+  )
+  assert.equal(stillOpen.count, 1)
+  assert.deepEqual(stillOpen.closed, [])
+  const filedAndClosed = {
+    ...leftOpen,
+    ledger: recordClose(CODEX, leftOpen.ledger, { id: 'f3', reason: 'LIN-12' }, 90).ledger,
   }
   assert.deepEqual(
-    viewOf(filedApplied, 80 + SETTLE_WINDOW_MS).findings.closed.map(f => [f.id, f.outcome]),
-    [['f3', 'File issue']],
+    viewOf(filedAndClosed, 90 + SETTLE_WINDOW_MS).findings.closed.map(f => [f.id, f.outcome]),
+    [['f3', 'closed by Codex: LIN-12']],
   )
   const discussed = viewOf(after(s, { action: 'discuss', id: 'f3' }), 60).findings
   assert.deepEqual(
