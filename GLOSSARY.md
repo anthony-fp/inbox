@@ -25,6 +25,14 @@ A question or task that is no longer open: answered, done, dismissed, expired,
 or closed by the agent.
 _Avoid_: decided
 
+**Held row**:
+A closed item or finding that stays in place while the person replies to it.
+A row is held when its reply field is open or its draft holds unsent words,
+and the reply began before the close. It shows why it closed, does not count
+toward Needs you, and offers Reply and Discard. After its reply sends, it
+shows its settled form, then folds into the Closed fold. After Discard, it
+folds at once.
+
 **Finding**:
 An issue or opportunity the agent noticed outside the current task.
 _Avoid_: note

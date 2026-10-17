@@ -16,6 +16,7 @@ import type {
   Closed,
   DemoCopy,
   Dialog,
+  Draft,
   FoldKind,
   Item,
   Ledger,
@@ -147,9 +148,12 @@ import {
   foldLabel,
   feedbackOf,
   feedbackText,
+  fieldExit,
   hasAge,
+  heldReplies,
   inboxView,
   isFailure,
+  isWaitingRow,
   isGuarded,
   perTurnStatus,
   PRESS_GUARD_MS,
@@ -219,7 +223,8 @@ const PR_VIEWS = atom(
 const STOP = atom({ plugin: 'inbox', key: 'stop' } as const, null as Stop | null)
 const DIALOGS = atom({ plugin: 'inbox', key: 'dialogs' } as const, [] as Dialog[])
 const TYPING = atom({ plugin: 'inbox', key: 'typing' } as const, null as string | null)
-const DRAFTS = atom({ plugin: 'inbox', key: 'drafts' } as const, {} as Record<string, string>)
+const DRAFTS = atom({ plugin: 'inbox', key: 'drafts' } as const, {} as Record<string, Draft>)
+const DISCARDED = atom({ plugin: 'inbox', key: 'discarded' } as const, {} as Record<string, number>)
 const NOTES = atom({ plugin: 'inbox', key: 'notes' } as const, {} as Record<string, RowNote>)
 const LAST_ACTIONS = atom({ plugin: 'inbox', key: 'lastActions' } as const, {} as Record<string, LastAction>)
 const SENT = atom({ plugin: 'inbox', key: 'sent' } as const, [] as SentPrompt[])
@@ -872,6 +877,10 @@ function commitLedger(
   return task
 }
 
+function isOpenIn(ledger: Ledger, id: string): boolean {
+  return ledger.items.some(i => i.id === id) || ledger.findings.some(f => f.id === id)
+}
+
 function hasNewClose(before: Ledger, after: Ledger): boolean {
   const closes = (l: Ledger) => [
     ...l.closed.map(d => `${d.id} ${d.at}`),
@@ -890,10 +899,14 @@ function viewOf(
     turns,
     prViews,
     now,
+    replies = {},
+    discarded = {},
   }: Pick<DemoCopy, 'ledger' | 'lastActions' | 'turns'> & {
     notes: Record<string, RowNote>
     prViews?: PrViews
     now: number
+    replies?: Record<string, number>
+    discarded?: Record<string, number>
   },
   presence: Presence,
 ): InboxView {
@@ -903,6 +916,8 @@ function viewOf(
     notes,
     turns,
     now,
+    replies,
+    discarded,
     extraSteps: prViews ? Object.fromEntries(ledger.items.map(i => [i.id, itemPrSteps(i, prViews, ledger.prs)])) : {},
     settleWindowMs: SETTLED_MS,
     status: perTurnStatus({
@@ -1133,10 +1148,10 @@ async function openPath($: EngineInterface, raw: string): Promise<string | null>
  * A reload keeps $.state, so a running session can still hold findings
  * under `notes`, and `notes` as its tab, and the Needs you tab as `waiting`,
  * with item kinds `decide` and `do`, PR threads without a time or
- * `isLinesChanged`, and last actions saved by button key without a kind.
+ * `isLinesChanged`, last actions saved by button key without a kind, and drafts saved as bare text.
  */
 async function upgradeState($: EngineInterface): Promise<Ledger> {
-  const upgradingSession = await $.session.id()
+  const [upgradingSession, now] = await Promise.all([$.session.id(), $.clock.now()])
   const [ledger] = await Promise.all([
     update($, LEDGER, upgradeLedger),
     update($, TAB, t => ((t as string) === 'notes' ? 'findings' : (t as string) === 'waiting' ? 'needsYou' : t)),
@@ -1160,6 +1175,12 @@ async function upgradeState($: EngineInterface): Promise<Ledger> {
     update($, LAST_ACTIONS, upgradeLastActions),
     update($, SENT, pending => pending ?? []),
     update($, UNTRACKED_SENT, texts => texts ?? []),
+    // A draft saved as bare text began before now, so a row that closed before this load stays closed.
+    update($, DRAFTS, (d: Record<string, Draft | string>) =>
+      Object.fromEntries(
+        Object.entries(d).map(([id, draft]) => [id, typeof draft === 'string' ? { text: draft, since: now } : draft]),
+      ),
+    ),
     // Presence from before the turn counts existed cannot say whether the last
     // turn's update landed, so that load catches up once.
     update($, PRESENCE, p => ({ ...p, turnsStarted: p.turnsStarted ?? 1, turnsApplied: p.turnsApplied ?? 0 })),
@@ -1260,7 +1281,7 @@ async function openInbox($: EngineInterface) {
 }
 
 async function sendDraft($: EngineInterface, id: string, surface: UiPressArgument['surface']) {
-  await sendTyped($, id, (await read($, DRAFTS))[id] ?? '', surface)
+  await sendTyped($, id, (await read($, DRAFTS))[id]?.text ?? '', surface)
 }
 
 async function sendTyped($: EngineInterface, id: string, text: string, surface: UiPressArgument['surface']) {
@@ -1269,10 +1290,26 @@ async function sendTyped($: EngineInterface, id: string, text: string, surface: 
 }
 
 async function startTyping($: EngineInterface, id: string) {
-  fieldSeeds.set(id, (await read($, DRAFTS))[id] ?? '')
+  const now = await $.clock.now()
+  const drafts = await update($, DRAFTS, d => (d[id] ? d : { ...d, [id]: { text: '', since: now } }))
+  fieldSeeds.set(id, drafts[id]?.text ?? '')
   await keepPressedOpen($, id)
   await update($, TYPING, () => id)
   await focusField($, id)
+}
+
+async function discardReply($: EngineInterface, id: string) {
+  fieldSeeds.delete(id)
+  const now = await $.clock.now()
+  await update($, DISCARDED, d => ({
+    ...Object.fromEntries(Object.entries(d).filter(([, at]) => now - at < SETTLED_MS)),
+    [id]: now,
+  }))
+  await Promise.all([
+    update($, TYPING, t => (t === id ? null : t)),
+    update($, DRAFTS, ({ [id]: _discarded, ...rest }) => rest),
+  ])
+  await openLeftRows($)
 }
 
 async function focusField($: EngineInterface, id: string) {
@@ -1945,13 +1982,23 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
     read($, PR_VIEWS),
   ])
   const ctx = { now, turnsStarted: presence.turnsStarted, localPressId: crypto.randomUUID() }
+  const draft = !('ref' in p) && p.action === 'type' ? (await read($, DRAFTS))[p.id] : undefined
+  let isReplyToClosed = false
   let applied = { stale: true } as Applied
   if ('ref' in p && p.action !== 'pr-dismiss' && p.action !== 'pr-undo') {
     applied = applyAnyPress(await read($, LEDGER), prState, lastActions, p, ctx)
   } else {
-    if (!('ref' in p) && p.action === 'type') await update($, TYPING, t => (t === p.id ? null : t))
+    if (!('ref' in p) && p.action === 'type') {
+      // A held row stays drawn by its draft's words once its field closes, until the press records its reply.
+      await update($, DRAFTS, d => {
+        const typed = d[p.id]
+        return typed ? { ...d, [p.id]: { ...typed, text: p.text } } : d
+      })
+      await update($, TYPING, t => (t === p.id ? null : t))
+    }
     await commitLedger($, l => {
       applied = applyAnyPress(l, prState, lastActions, p, ctx)
+      isReplyToClosed = !('ref' in p) && p.action === 'type' && !isOpenIn(l, p.id)
       return 'stale' in applied ? l : applied.ledger
     })
   }
@@ -1961,7 +2008,9 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
   if ('stale' in pressed) {
     await Promise.all([
       update($, NOTES, n => ({ ...n, [rowId]: { note: 'stale' as const, at: now } })),
-      'id' in p && p.action === 'type' ? update($, DRAFTS, d => ({ ...d, [p.id]: p.text })) : undefined,
+      'id' in p && p.action === 'type'
+        ? update($, DRAFTS, d => ({ ...d, [p.id]: { text: p.text, since: d[p.id]?.since ?? now } }))
+        : undefined,
     ])
     later($, SETTLED_MS, () =>
       update($, NOTES, n => {
@@ -2005,6 +2054,7 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
   if (canRevealUndo) await keepUndoVisible($, undoKey, undoBlock, now, undoRevision)
   if (!('ref' in p) && p.action === 'done') later($, SETTLED_MS, () => wakeForDone($))
   if (!('ref' in p) && p.action === 'address') redrawWhileLeaving($, now + SETTLED_MS)
+  if (isReplyToClosed && pressed.effects.length > 0) redrawWhileLeaving($, now + SETTLED_MS)
   if ('ref' in p && p.action === 'pr-dismiss') {
     redrawWhileLeaving($, now + SETTLED_MS)
     leavePr($, p.ref, now)
@@ -2034,7 +2084,7 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
   const failed = await runSends(host, pressed.effects, rowId, rows, now)
   if (!failed || failed.state === 'unconfirmed') return
   if (failed.isRowFailed && !('ref' in p) && p.action === 'type')
-    await update($, DRAFTS, d => (d[p.id] ? d : { ...d, [p.id]: p.text }))
+    await update($, DRAFTS, d => (d[p.id] ? d : { ...d, [p.id]: { text: p.text, since: draft?.since ?? now } }))
   if (failed.isRowFailed && isMoved) {
     cancelUndoScroll()
     await reopenPressed($, rowId)
@@ -2182,7 +2232,10 @@ async function runDemoPress(
     applied = r
     const { [rowId]: _replaced, ...notes } = d.notes
     if ('stale' in r) return { ...d, notes: { ...notes, [rowId]: { note: 'stale' as const, at: now } } }
-    isClosing = hasNewClose(d.ledger, r.ledger) || ('ref' in p ? p.action === 'pr-dismiss' : p.action === 'address')
+    isClosing =
+      hasNewClose(d.ledger, r.ledger) ||
+      ('ref' in p ? p.action === 'pr-dismiss' : p.action === 'address') ||
+      (!('ref' in p) && p.action === 'type' && !isOpenIn(d.ledger, p.id))
     const { lasts, isSample } = demoRecord(r.lasts, r.effects)
 
     return {
@@ -2196,7 +2249,7 @@ async function runDemoPress(
   const pressed = applied
   if (!('ref' in p) && p.action === 'type')
     await update($, DRAFTS, d => {
-      if ('stale' in pressed) return { ...d, [p.id]: p.text }
+      if ('stale' in pressed) return { ...d, [p.id]: { text: p.text, since: d[p.id]?.since ?? now } }
       const { [p.id]: _sent, ...rest } = d
       return rest
     })
@@ -2298,6 +2351,15 @@ function rowKeyActions($: EngineInterface, r: RowView, isAllShown: boolean): { k
             ...presentation,
             onPress: () => void startTyping($, id),
           }
+        if (p.action === 'discard')
+          return {
+            label: a.label,
+            kind: a.kind,
+            key: `discard-${id}`,
+            hotkey,
+            ...presentation,
+            onPress: () => void discardReply($, id),
+          }
         return {
           label: a.label,
           kind: a.kind,
@@ -2353,19 +2415,35 @@ function desktopTabSizes(
 async function drawnState(
   $: EngineInterface,
 ): Promise<DemoCopy & { view: InboxView; isDemo: boolean; showsDemoNotices: boolean; isUnread: boolean; now: number }> {
-  const [ledger, stop, prViews, lastActions, notes, presence, demo, isDemoRecording, unreadable, now] =
-    await Promise.all([
-      read($, LEDGER),
-      read($, STOP),
-      read($, PR_VIEWS),
-      read($, LAST_ACTIONS),
-      read($, NOTES),
-      read($, PRESENCE),
-      read($, DEMO),
-      read($, DEMO_RECORDING),
-      read($, UNREADABLE),
-      $.clock.now(),
-    ])
+  const [
+    ledger,
+    stop,
+    prViews,
+    lastActions,
+    notes,
+    presence,
+    demo,
+    isDemoRecording,
+    unreadable,
+    typing,
+    drafts,
+    discarded,
+    now,
+  ] = await Promise.all([
+    read($, LEDGER),
+    read($, STOP),
+    read($, PR_VIEWS),
+    read($, LAST_ACTIONS),
+    read($, NOTES),
+    read($, PRESENCE),
+    read($, DEMO),
+    read($, DEMO_RECORDING),
+    read($, UNREADABLE),
+    read($, TYPING),
+    read($, DRAFTS),
+    read($, DISCARDED),
+    $.clock.now(),
+  ])
   const turns = { turnsStarted: presence.turnsStarted, turnsApplied: presence.turnsApplied }
   const drawn = demo ?? { ledger, stop, prViews, lastActions, notes, turns }
 
@@ -2373,7 +2451,7 @@ async function drawnState(
 
   return {
     ...drawn,
-    view: viewOf({ ...drawn, now }, presence),
+    view: viewOf({ ...drawn, now, replies: heldReplies(typing, drafts), discarded }, presence),
     isDemo: demo !== null,
     showsDemoNotices: demo !== null && !isDemoRecording,
     isUnread,
@@ -2561,6 +2639,7 @@ async function forgetRowState($: EngineInterface) {
     update($, UNFOLDED, () => []),
     update($, OPTIONS_SHOWN, () => []),
     update($, DRAFTS, () => ({})),
+    update($, DISCARDED, () => ({})),
     update($, NOTES, () => ({})),
     update($, LAST_ACTIONS, a => Object.fromEntries(Object.entries(a).filter(([k]) => !/^[if]\d+$/.test(k)))),
   ])
@@ -3088,7 +3167,7 @@ export const register: Register = on => {
       $.env.get('TERM_PROGRAM'),
     ])
     // A hot reload keeps TYPING but empties fieldSeeds, so an open field takes its seed again here.
-    if (typing !== null && !fieldSeeds.has(typing)) fieldSeeds.set(typing, (await read($, DRAFTS))[typing] ?? '')
+    if (typing !== null && !fieldSeeds.has(typing)) fieldSeeds.set(typing, (await read($, DRAFTS))[typing]?.text ?? '')
     const size = isInline ? `${e.props.bodyColumns}x${e.props.scroll.bodyRows}` : null
     if (e.surface === 'terminal') terminalInlineSize = size
     if (size !== null && inlineSize !== null && size !== inlineSize) {
@@ -3488,12 +3567,19 @@ export const register: Register = on => {
         kind: 'handoff',
         onPress: press => sendDraft($, row.id, press.surface),
       },
-      {
-        key: `cancel-${row.id}`,
-        label: ROW_COPY.cancel,
-        kind: 'view',
-        onPress: () => void update($, TYPING, t => (t === row.id ? null : t)),
-      },
+      row.view && fieldExit(row.view) === 'discard'
+        ? {
+            key: `discard-${row.id}`,
+            label: ROW_COPY.discard,
+            kind: 'view',
+            onPress: () => void discardReply($, row.id),
+          }
+        : {
+            key: `cancel-${row.id}`,
+            label: ROW_COPY.cancel,
+            kind: 'view',
+            onPress: () => void update($, TYPING, t => (t === row.id ? null : t)),
+          },
     ]
     const feedbackLabel = (id: string, row?: Row) => {
       const f = row?.view ? row.view.feedback : feedbackOf(id, lastActions[id], notes[id], turns, now)
@@ -3808,7 +3894,9 @@ export const register: Register = on => {
             submitLabel={look === 'desktop' ? ROW_COPY.send : 'send'}
             autoFocus
             {...(look === 'terminal' ? { rows: REPLY_ROWS } : {})}
-            onInput={(value: string) => void update($, DRAFTS, d => ({ ...d, [row.id]: value }))}
+            onInput={(value: string) =>
+              void update($, DRAFTS, d => ({ ...d, [row.id]: { text: value, since: d[row.id]?.since ?? now } }))
+            }
             onSubmit={(value: string, submit) => sendTyped($, row.id, value, submit.surface)}
           />
         ) : null
@@ -4637,7 +4725,7 @@ export const register: Register = on => {
 
         return [
           section([
-            groupTitle(g.title, g.rows.filter(r => !r.fold).length),
+            groupTitle(g.title, g.rows.filter(r => r.view && isWaitingRow(r.view)).length),
             ...titleGap(),
             ...(open.length > 0 ? open : [groupEmpty(g.title)]),
             ...tail,
@@ -4719,7 +4807,7 @@ export const register: Register = on => {
           delivery: f.delivery,
         }))
         return section([
-          groupTitle(g.title, rowsIn(g.entries).filter(r => !r.fold).length),
+          groupTitle(g.title, rowsIn(g.entries).filter(r => r.view && isWaitingRow(r.view)).length),
           ...titleGap(),
           ...(g.entries.length === 0 ? [groupEmpty(g.title)] : []),
           ...divided(

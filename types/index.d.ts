@@ -111,6 +111,12 @@ export type LocalResult = { state: 'pending' | 'done' | 'failed'; parts: LocalPa
  */
 export type RowNote = { note: 'stale' | 'sample'; at: number }
 
+/**
+ * A reply the person began in a row's field and has not sent. `since` is when they began it, as the time of the
+ * view that showed the row open, so a close the person could not have seen then holds the row in place.
+ */
+export type Draft = { text: string; since: number }
+
 export type Finding = {
   id: string
   kind: 'issue' | 'opportunity'
@@ -269,7 +275,9 @@ declare module 'claude-code' {
       /** The row whose free-text field is open, if any. */
       typing: string | null
       /** Each row's unsent typed words, by the row's id, kept while the field closes or another row opens. */
-      drafts: Record<string, string>
+      drafts: Record<string, Draft>
+      /** When the person discarded each held row's reply, by the row's id, so the row folds without settling. */
+      discarded: Record<string, number>
       /** Each row's latest note, by the row's id. */
       notes: Record<string, RowNote>
       /** Each row's last action, by the row's id. */

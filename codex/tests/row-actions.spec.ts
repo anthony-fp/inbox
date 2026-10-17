@@ -8,9 +8,10 @@ import { EMPTY } from '../../hooks/ledger'
 import type { Ledger } from '../../types'
 import { applyPress } from '../../hooks/presses'
 import type { PressResult, RowPress } from '../../hooks/presses'
-import { inboxView } from '../../hooks/view'
+import { inboxView, PRESS_GUARD_MS } from '../../hooks/view'
+import type { ReplyHolds } from '../../hooks/view'
 import { ledgerActions, RowActions } from '../src/row-actions'
-import { recordFinding } from '../../hooks/tools'
+import { recordClose, recordFinding } from '../../hooks/tools'
 import { CODEX } from '../src/texts'
 import { emptyState, updateState } from '../src/state'
 import { viewOf } from '../src/core'
@@ -50,6 +51,8 @@ function task() {
     settleWindowMs: 5120,
     status: { isUpdating: false, error: null },
     now: 10,
+    replies: {},
+    discarded: {},
   })
   return { ledger, row: view.needsYou.tasks[0]! }
 }
@@ -86,6 +89,7 @@ test('the Codex renderer preserves retry, folded-option and finding action order
         state = result.ledger
       },
       reply: () => {},
+      discard: () => {},
       showOptions: () => {},
     },
   )
@@ -131,6 +135,8 @@ test('the Codex renderer preserves retry, folded-option and finding action order
     settleWindowMs: 5120,
     status: { isUpdating: false, error: null },
     now: 10,
+    replies: {},
+    discarded: {},
   }).needsYou.questions[0]!
   let allOptions = false
   let answer: PressResult | null = null
@@ -140,6 +146,7 @@ test('the Codex renderer preserves retry, folded-option and finding action order
         answer = applyPress(questionLedger, undefined, p, { now: 20, turnsStarted: 1, extraSteps: [] })
       },
       reply: () => {},
+      discard: () => {},
       showOptions: () => {
         allOptions = true
         drawQuestion()
@@ -173,6 +180,8 @@ test('the Codex renderer preserves retry, folded-option and finding action order
     settleWindowMs: 5120,
     status: { isUpdating: false, error: null },
     now: 10,
+    replies: {},
+    discarded: {},
   }).findings.rows[0]!
   let discussion: PressResult | null = null
   const followUps = ledgerActions(finding, false, {
@@ -180,6 +189,7 @@ test('the Codex renderer preserves retry, folded-option and finding action order
       discussion = applyPress(findingLedger, undefined, p, { now: 20, turnsStarted: 1, extraSteps: [] })
     },
     reply: () => {},
+    discard: () => {},
     showOptions: () => {},
   })
   await act(() =>
@@ -222,13 +232,14 @@ test('the actual Codex tab replaces actions and shortcuts while replying, restor
     setTimeout: window.setTimeout.bind(window),
     clearTimeout: window.clearTimeout.bind(window),
     DEMO_BUTTON: false,
+    DEMO_RECORDING: false,
   }
   const previous = new Map(Object.keys(globals).map(k => [k, Object.getOwnPropertyDescriptor(globalThis, k)]))
   for (const [key, value] of Object.entries(globals))
     Object.defineProperty(globalThis, key, { value, writable: true, configurable: true })
   const presses: RowPress[] = []
-  const tabView = (): TabView => ({
-    ...viewOf(state, Date.now()),
+  const tabView = (holds?: Partial<ReplyHolds>): TabView => ({
+    ...viewOf(state, Date.now(), { replies: holds?.replies ?? {}, discarded: holds?.discarded ?? {} }),
     thread: state.sessionId,
     devPage: 'renderer-page',
     serverBuild: SERVER_BUILD,
@@ -239,12 +250,12 @@ test('the actual Codex tab replaces actions and shortcuts while replying, restor
     const request = message as {
       id?: number
       method: string
-      params?: { name?: string; arguments?: { press?: RowPress } }
+      params?: { name?: string; arguments?: { press?: RowPress } & Partial<ReplyHolds> }
     }
     if (request.id === undefined) return
     let result: unknown
     if (request.method === 'ui/initialize') result = {}
-    else if (request.params?.name === 'inbox_view') result = { structuredContent: tabView() }
+    else if (request.params?.name === 'inbox_view') result = { structuredContent: tabView(request.params.arguments) }
     else if (request.params?.name === 'inbox_press') {
       const press = request.params.arguments?.press
       assert.ok(press)
@@ -257,7 +268,7 @@ test('the actual Codex tab replaces actions and shortcuts while replying, restor
       assert.ok(!('stale' in applied))
       state.ledger = applied.ledger
       if (applied.last) state.lastActions[press.id] = applied.last
-      result = { structuredContent: { view: tabView() } }
+      result = { structuredContent: { view: tabView(request.params.arguments) } }
     } else throw new Error(`Unexpected request: ${request.method} ${request.params?.name ?? ''}`)
     queueMicrotask(() =>
       window.dispatchEvent(new window.MessageEvent('message', { data: { jsonrpc: '2.0', id: request.id, result } })),
@@ -308,6 +319,34 @@ test('the actual Codex tab replaces actions and shortcuts while replying, restor
     ])
     assert.equal(state.ledger.items[0]?.id, 'i1')
     assert.equal(root.querySelector('input'), null)
+
+    const pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
+    await until(() => root.querySelector('.row.selected') === null)
+    root.querySelector<HTMLElement>('.row .line')!.click()
+    await pause(PRESS_GUARD_MS + 50)
+    named(root, 'Reply').click()
+    const held = root.querySelector('input')!
+    held.value = 'Still blocked'
+    held.dispatchEvent(new Event('input', { bubbles: true }))
+    state.ledger = recordClose(CODEX, state.ledger, { id: 'i1', reason: 'the build passed' }, Date.now()).ledger
+    await pause(POLL_MS + 100)
+    assert.equal(root.querySelector('input'), held)
+    assert.equal(held.value, 'Still blocked')
+    assert.equal(document.activeElement, held)
+    assert.match(root.textContent ?? '', /Closed by Codex: the build passed/)
+    assert.deepEqual(
+      buttons(root)
+        .map(b => b.textContent)
+        .filter(label => label === 'Cancel' || label === 'Discard'),
+      ['Discard'],
+    )
+    named(root, 'Discard').click()
+    assert.equal(root.querySelector('input'), null)
+    await until(() => !buttons(root).some(b => b.textContent === 'Reply' || b.textContent === 'Discard'))
+    assert.doesNotMatch(root.textContent ?? '', /the build passed/)
+    await pause(POLL_MS + 100)
+    assert.doesNotMatch(root.textContent ?? '', /the build passed/)
+    assert.equal(presses.length, 2)
   } finally {
     await window.happyDOM.abort()
     for (const [key, descriptor] of previous) {

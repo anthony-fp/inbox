@@ -672,6 +672,117 @@ test('the tab draws a settled row for SETTLED_MS from its first poll, then lists
   assert.deepEqual(fold(later), ['i1'])
 })
 
+test('a row Codex closes while the person types a reply stays held in place, out of the count and the Closed fold, Discard folds it at once, and its reply sends and settles it as Replied', () => {
+  const s = withItems()
+  const closed = { ...s, ledger: recordClose(CODEX, s.ledger, { id: 'i1', reason: 'settled in chat' }, 50).ledger }
+  const held = viewOf(closed, 50 + SETTLE_WINDOW_MS + 1, { replies: { i1: 40 }, discarded: {} }).needsYou
+  assert.deepEqual(
+    held.questions.map(r => [r.id, r.state, r.feedback, r.actions.map(a => [a.label, a.kind])]),
+    [
+      [
+        'i1',
+        { is: 'held', label: 'Closed by Codex: settled in chat', at: 50 },
+        { is: 'closed', label: 'Closed by Codex: settled in chat', at: 50 },
+        [
+          ['Reply', 'handoff'],
+          ['Discard', 'view'],
+        ],
+      ],
+    ],
+  )
+  assert.equal(held.count, 1)
+  assert.deepEqual(held.closed.questions, [])
+  assert.equal(firstWaiting(listWaits(viewOf(closed, 60, { replies: { i1: 40 }, discarded: {} })).needsYou), 'i2')
+  assert.deepEqual(
+    viewOf(closed, 50 + SETTLE_WINDOW_MS + 1, { replies: { i1: 51 }, discarded: {} }).needsYou.questions,
+    [],
+  )
+  const discarded = viewOf(closed, 60, { replies: {}, discarded: { i1: 55 } }).needsYou
+  assert.deepEqual(discarded.questions, [])
+  assert.deepEqual(
+    discarded.closed.questions.map(d => d.id),
+    ['i1'],
+  )
+
+  const r = applyPress(
+    closed.ledger,
+    undefined,
+    { action: 'type', id: 'i1', text: ' Fix add.js after all ' },
+    {
+      now: 70,
+      turnsStarted: 1,
+      extraSteps: [],
+    },
+  )
+  assert.ok(!('stale' in r))
+  assert.equal(r.ledger, closed.ledger)
+  assert.deepEqual(r.effects, [{ kind: 'send', text: 'Re "Fix add.js or the test?": Fix add.js after all', by: null }])
+  const replied = { ...closed, lastActions: { i1: r.last! } }
+  assert.deepEqual(
+    viewOf(replied, 70 + QUEUED_AFTER_MS, { replies: { i1: 40 }, discarded: {} }).needsYou.questions[0]?.state,
+    {
+      is: 'settled',
+      label: 'Replied',
+      at: 70,
+      canUndo: false,
+      delivery: 'queued',
+      isLapsed: false,
+    },
+  )
+  const later = 70 + SETTLE_WINDOW_MS
+  assert.deepEqual(viewOf(replied, later).needsYou.questions, [])
+  assert.deepEqual(
+    viewOf(replied, later).needsYou.closed.questions.map(d => d.id),
+    ['i1'],
+  )
+})
+
+test('a held finding’s reply sends what a reply to the open finding sends, and a row the person closed holds nothing', () => {
+  const s = withItems()
+  const recorded = recordFinding(
+    CODEX,
+    s.ledger,
+    { kind: 'issue', title: 'No lint script', detail: 'Only tests run.' },
+    10,
+  ).ledger
+  const closed = recordClose(CODEX, recorded, { id: 'f3', reason: 'added one' }, 50).ledger
+  const r = applyPress(
+    closed,
+    undefined,
+    { action: 'type', id: 'f3', text: 'Use eslint' },
+    {
+      now: 70,
+      turnsStarted: 1,
+      extraSteps: [],
+    },
+  )
+  assert.ok(!('stale' in r))
+  assert.deepEqual(
+    r.effects.map(e => e.kind === 'send' && e.text),
+    ['About this finding you recorded:\nIssue: No lint script\nOnly tests run.\n\nUse eslint'],
+  )
+  assert.deepEqual(
+    viewOf({ ...s, ledger: closed }, 50 + SETTLE_WINDOW_MS + 1, {
+      replies: { f3: 40 },
+      discarded: {},
+    }).findings.rows.map(row => [row.id, row.state.is]),
+    [['f3', 'held']],
+  )
+
+  const dismissed = after({ ...s, ledger: recorded }, { action: 'dismiss', id: 'f3' })
+  assert.deepEqual(
+    viewOf(dismissed, 50 + SETTLE_WINDOW_MS + 1, { replies: { f3: 40 }, discarded: {} }).findings.rows,
+    [],
+  )
+  const answered = after(s, { action: 'answer', id: 'i1', option: 'Fix add.js' })
+  assert.deepEqual(
+    viewOf(answered, 50 + SETTLE_WINDOW_MS + 1, { replies: { i1: 40 }, discarded: {} }).needsYou.questions.map(
+      row => row.id,
+    ),
+    [],
+  )
+})
+
 test('Codex closing an item reads as Codex in its outcome', () => {
   const r = recordClose(CODEX, withItems().ledger, { id: 'i1', reason: 'no longer applies' }, 50)
   assert.equal(r.ledger.closed[0]?.outcome, 'closed by Codex: no longer applies')

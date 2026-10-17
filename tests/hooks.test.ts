@@ -1039,15 +1039,10 @@ test('t opens a field for the person’s own words: a question’s words go to C
   expect(await pane.find({ text: /README is stale/ })).toBeDefined()
 })
 
-test('a press on a question Claude closed since the draw sends nothing and says so, and a typed answer keeps its words', async ($, on) => {
+test('a press on a question Claude closed since the draw sends nothing and says so', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])
   on('ui.focus', () => ({}))
-  let drafts: unknown = null
-  on('state.set', { plugin: 'inbox', key: 'drafts' } as const, ($, e, next) => {
-    drafts = e.value
-    return next(e)
-  })
 
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   await $.prompt.submit({ text: 'add a greeting cli', wait: false, origin: { kind: 'composer' } })
@@ -1069,14 +1064,99 @@ test('a press on a question Claude closed since the draw sends nothing and says 
   expect(await pane.find({ text: stale })).toBeDefined()
   await clock.advance(9000)
   expect(await pane.find({ text: stale })).toBeUndefined()
+})
 
+test('a question Claude closes while the person types an answer stays in place with its field and words, out of the count, until its answer sends and it folds into Closed', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  on('ui.focus', () => ({}))
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'add a greeting cli', wait: false, origin: { kind: 'composer' } })
+  await $.turn.complete({
+    answer: 'Plan ready. 1. Node or Python? 2. Call it greet?',
+    durationMs: 5,
+    isAborted: false,
+    turnId: 't1',
+    reason: 'answer',
+  })
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  const band = await $.ui.mount({ plugin: 'inbox', surface: 'terminal', ...BAND })
+  await pane.press({ key: 'select-i2' })
   await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'typekey-i2' })
-  beforeAct = close('i2')
-  await pane.input({ key: 'type-i2', text: 'Call it hello' })
+  await pane.input({ key: 'type-i2', text: 'Call it hello', kind: 'change' })
+  await $.tool.call({ tool: 'mcp__inbox__close', id: 'i2', reason: 'settled in chat' } as never)
+  await clock.settle()
+  await clock.advance(9000)
+
+  expect(await pane.find({ key: 'type-i2' })).toBeDefined()
+  expect((await pane.find({ key: 'row-i2' }))?.text).toMatch(/Closed\sby\sClaude:\ssettled\sin\schat/)
+  expect(await pane.find({ key: 'discard-i2' })).toBeDefined()
+  expect(await pane.find({ key: 'cancel-i2' })).toBeUndefined()
+  expect(await band.find({ text: /Needs you 1/ })).toBeDefined()
+  expect(await pane.find({ text: /closed/ })).toBeUndefined()
+
+  await pane.press({ key: 'send-i2' })
+  await clock.settle()
+  expect(sent.at(-1)).toBe('Re "Name the command greet?": Call it hello')
+  expect(await pane.find({ key: 'type-i2' })).toBeUndefined()
+  expect(await pane.find({ key: 'settled-i2' })).toBeDefined()
+  expect(await pane.find({ text: /^Replied$/ })).toBeDefined()
+  await clock.advance(9000)
+  expect(await pane.find({ key: 'row-i2' })).toBeUndefined()
+  expect(await pane.find({ key: 'settled-i2' })).toBeUndefined()
+  expect(await pane.find({ text: /1 closed/ })).toBeDefined()
+})
+
+test('Discard ends a held row’s reply and folds it into Closed at once, and a row the person dismisses with a draft settles with Undo instead of holding', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  on('ui.focus', () => ({}))
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'add a greeting cli', wait: false, origin: { kind: 'composer' } })
+  await $.turn.complete({
+    answer: 'Plan ready. 1. Node or Python? 2. Call it greet?',
+    durationMs: 5,
+    isAborted: false,
+    turnId: 't1',
+    reason: 'answer',
+  })
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  await pane.press({ key: 'typekey-i1' })
+  await pane.input({ key: 'type-i1', text: 'Deno, actually', kind: 'change' })
+  await pane.press({ key: 'cancel-i1' })
+  await pane.press({ key: 'select-i2' })
+  await clock.advance(PRESS_GUARD_MS)
+  await pane.press({ key: 'typekey-i2' })
+  await pane.input({ key: 'type-i2', text: 'Call it hello', kind: 'change' })
+  await pane.press({ key: 'cancel-i2' })
+  await $.tool.call({ tool: 'mcp__inbox__close', id: 'i2', reason: 'settled in chat' } as never)
+  await clock.settle()
+  await clock.advance(1000)
+
+  expect(await pane.find({ key: 'type-i2' })).toBeUndefined()
+  expect((await pane.find({ key: 'row-i2' }))?.text).toMatch(/Closed\sby\sClaude:\ssettled\sin\schat/)
+  await pane.press({ key: 'discard-i2' })
+  await clock.settle()
+  expect(await pane.find({ key: 'row-i2' })).toBeUndefined()
+  expect(await pane.find({ key: 'settled-i2' })).toBeUndefined()
+  expect(await pane.find({ text: /settled\sin\schat/ })).toBeUndefined()
+  expect(await pane.find({ text: /1 closed/ })).toBeDefined()
   expect(sent).toEqual([])
-  expect(await pane.find({ text: stale })).toBeDefined()
-  expect(drafts).toEqual({ i2: 'Call it hello' })
+
+  await pane.press({ key: 'select-i1' })
+  await clock.advance(PRESS_GUARD_MS)
+  await pane.press({ key: 'dismiss-i1' })
+  await clock.settle()
+  expect(await pane.find({ key: 'undo-i1' })).toBeDefined()
+  await clock.advance(9000)
+  expect(await pane.find({ key: 'row-i1' })).toBeUndefined()
+  expect(await pane.find({ key: 'settled-i1' })).toBeUndefined()
+  expect(await pane.find({ text: /2 closed/ })).toBeDefined()
 })
 
 test('a press during a turn reads Queued until its prompt enters, and one that will not enter is undone with Not sent and [Try again]', async ($, on) => {
@@ -1130,7 +1210,7 @@ test('a press during a turn reads Queued until its prompt enters, and one that w
   await clock.settle()
   expect(sent.at(-1)).toBe('Re "Use Node or Python?": Deno, actually')
   expect(await pane.find({ key: 'row-i1' })).toBeDefined()
-  expect(drafts).toEqual({ i1: 'Deno, actually' })
+  expect(drafts).toEqual({ i1: { text: 'Deno, actually', since: expect.any(Number) } })
   await pane.press({ key: 'answer-i1-0' })
   await clock.settle()
   expect(sent.at(-1)).toBe('Re "Use Node or Python?": Node')
@@ -2766,6 +2846,8 @@ test('no two buttons on a row share a hotkey, for every row kind in the demo', a
     extraSteps: {},
     settleWindowMs: SETTLED_MS,
     status: perTurnStatus({ isUpdating: false, isFailed: false, retries: true }),
+    replies: {},
+    discarded: {},
     now: 1_000_000,
   })
   const itemRows = [...view.needsYou.questions, ...view.needsYou.tasks, ...view.findings.rows].map(row => {
@@ -2807,6 +2889,8 @@ test('every row in the demo, on every tab, draws its plan’s buttons in the pla
     settleWindowMs: SETTLED_MS,
     status: perTurnStatus({ isUpdating: false, isFailed: false, retries: true }),
     now: 1_000_000,
+    replies: {},
+    discarded: {},
   })
   const TITLE_START = 20
   const expectedLabels = (row: (typeof view.findings.rows)[number]) => {

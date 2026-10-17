@@ -1,6 +1,7 @@
 import type {
   Closed,
   ClosedFinding,
+  Draft,
   Finding,
   Item,
   LastAction,
@@ -81,6 +82,21 @@ export type ViewInput = {
   settleWindowMs: number
   status: ItemStatus
   now: number
+  /** The rows a reply in progress holds, from `heldReplies`: each row's id, and when its reply began. */
+  replies: Record<string, number>
+  /** The held rows whose reply the person discarded: each row's id, and when. */
+  discarded: Record<string, number>
+}
+
+export type ReplyHolds = Pick<ViewInput, 'replies' | 'discarded'>
+
+export const NO_HOLDS: ReplyHolds = { replies: {}, discarded: {} }
+
+/** The row whose field is open and each row whose draft holds words. Opening a field gives its row a draft. */
+export function heldReplies(typing: string | null, drafts: Record<string, Draft>): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(drafts).flatMap(([id, d]) => (id === typing || d.text.trim() !== '' ? [[id, d.since]] : [])),
+  )
 }
 
 export type ClosedDelivery = 'queued' | 'unconfirmed' | { error: string; canUndo: boolean } | null
@@ -88,6 +104,7 @@ export type ClosedDelivery = 'queued' | 'unconfirmed' | { error: string; canUndo
 export type RowState =
   | { is: 'open' }
   | { is: 'handedOff' }
+  | { is: 'held'; label: string; at: number }
   | {
       is: 'settled'
       label: string
@@ -106,6 +123,7 @@ export type Feedback =
   | { is: 'notSent'; reason: string; retry: RowPress | null }
   | { is: 'local'; result: LocalResult }
   | { is: 'note'; note: RowNote['note']; at: number }
+  | { is: 'closed'; label: string; at: number }
 
 export type Look = 'terminal' | 'desktop' | 'codex'
 export type ModLook = Exclude<Look, 'codex'>
@@ -117,6 +135,7 @@ export const ROW_COPY = {
   retry: 'Try again',
   send: 'Send',
   cancel: 'Cancel',
+  discard: 'Discard',
   relevantFile: 'Relevant file: ',
   allOptions: (count: number) => `All ${count} options`,
 } as const
@@ -165,6 +184,14 @@ export function replyHint(row: RowView, agent: string): string {
 
 export function actionLabel(action: Pick<ActionView, 'label' | 'isPrimary'>): string {
   return action.isPrimary ? `${action.label} (recommended)` : action.label
+}
+
+export function fieldExit(row: RowView): 'cancel' | 'discard' {
+  return row.state.is === 'held' ? 'discard' : 'cancel'
+}
+
+export function isWaitingRow(row: RowView): boolean {
+  return row.state.is === 'open'
 }
 
 export function rowFeedbackText(row: RowView, look: Look): string | null {
@@ -292,8 +319,15 @@ export function isFailure(f: Feedback | null): boolean {
 
 export function hasAge(
   f: Feedback,
-): f is Extract<Feedback, { is: 'done' | 'working' | 'stillOpen' | 'queued' | 'unconfirmed' }> {
-  return f.is === 'done' || f.is === 'working' || f.is === 'stillOpen' || f.is === 'queued' || f.is === 'unconfirmed'
+): f is Extract<Feedback, { is: 'done' | 'working' | 'stillOpen' | 'queued' | 'unconfirmed' | 'closed' }> {
+  return (
+    f.is === 'done' ||
+    f.is === 'working' ||
+    f.is === 'stillOpen' ||
+    f.is === 'queued' ||
+    f.is === 'unconfirmed' ||
+    f.is === 'closed'
+  )
 }
 
 const runIt = (look: Look) =>
@@ -337,6 +371,8 @@ export function feedbackText(f: Feedback, look: Look): string {
       return f.label
     case 'stillOpen':
       return 'Still open'
+    case 'closed':
+      return f.label
   }
 }
 
@@ -366,7 +402,7 @@ export function emptyText(tab: 'needsYou' | 'findings', agent: string): { title:
     : { title: 'No findings yet', hint: `${agent} flags issues and opportunities it spots beyond your task.` }
 }
 
-const FOLLOW_UPS: ReadonlySet<RowPress['action']> = new Set(['type', 'explain', 'discuss', 'dismiss'])
+const FOLLOW_UPS: ReadonlySet<RowPress['action']> = new Set(['type', 'explain', 'discuss', 'dismiss', 'discard'])
 const ACTION_KEYS: Partial<Record<RowPress['action'], string>> = {
   done: 'd',
   address: 'a',
@@ -375,6 +411,7 @@ const ACTION_KEYS: Partial<Record<RowPress['action'], string>> = {
   explain: 'e',
   discuss: 'd',
   dismiss: 'x',
+  discard: 'x',
 }
 
 function actionsOf(
@@ -401,7 +438,10 @@ function actionsOf(
     emphasis:
       flags.isPrimary || press.action === 'done' || press.action === 'address'
         ? 'primary'
-        : press.action === 'discuss' || press.action === 'explain' || press.action === 'dismiss'
+        : press.action === 'discuss' ||
+            press.action === 'explain' ||
+            press.action === 'dismiss' ||
+            press.action === 'discard'
           ? 'quiet'
           : 'normal',
     ...(press.action === 'done'
@@ -415,6 +455,11 @@ function actionsOf(
     ...(ACTION_KEYS[press.action] ? { hotkey: ACTION_KEYS[press.action] } : {}),
   })
   if (state.is === 'settled') return state.canUndo ? [action({ action: 'undo', id }, 'Undo', 'view')] : []
+  if (state.is === 'held')
+    return [
+      action({ action: 'type', id, text: '' }, 'Reply', 'handoff'),
+      action({ action: 'discard', id }, ROW_COPY.discard, 'view'),
+    ]
   const stepActions = steps.map((s, n) => action({ action: 'step', id, step: n, label: s.label }, s.label, stepKind(s)))
   if (!item)
     return [
@@ -503,7 +548,7 @@ export function listWaits(v: InboxView): { needsYou: RowWait[]; findings: RowWai
   )
   const waits = (entries: DrawnEntry<RowView>[]) =>
     entries.map(x =>
-      'row' in x ? { id: x.row.id, isWaiting: x.row.state.is === 'open' } : { id: x.settled.id, isWaiting: false },
+      'row' in x ? { id: x.row.id, isWaiting: isWaitingRow(x.row) } : { id: x.settled.id, isWaiting: false },
     )
 
   return { needsYou: waits([...lists.questions, ...lists.tasks]), findings: waits(lists.findings) }
@@ -596,30 +641,61 @@ export function inboxView({
   settleWindowMs,
   status,
   now,
+  replies,
+  discarded,
 }: ViewInput): InboxView {
   const isSettling = (at: number) => now - at < settleWindowMs
   const isOpen = (id: string) => ledger.items.some(i => i.id === id) || ledger.findings.some(f => f.id === id)
-  const settledItems = new Map(
-    ledger.closed.filter(d => d.item && isSettling(d.at) && !isOpen(d.id)).map(d => [d.id, d] as const),
+  const closedAt = (c: Closed | ClosedFinding) => ('closedAt' in c ? c.closedAt : c.at)
+  const replyAfter = (c: Closed | ClosedFinding) => {
+    const last = lastActions[c.id]
+
+    return last?.action === 'type' && last.at >= closedAt(c) && last.delivery?.state !== 'failed' && isSettling(last.at)
+      ? last
+      : null
+  }
+  const isOwnClose = (c: Closed | ClosedFinding) =>
+    c.how === 'done' ||
+    c.how === 'dismissed' ||
+    (c.how === 'answered' && lastActions[c.id]?.kind === 'mark' && lastActions[c.id]?.at === closedAt(c))
+  const isHeld = (c: Closed | ClosedFinding) => {
+    const since = replies[c.id]
+
+    return since !== undefined && since <= closedAt(c) && !isOwnClose(c)
+  }
+  const isDiscarded = (c: Closed | ClosedFinding) => (discarded[c.id] ?? -Infinity) >= closedAt(c)
+  const isPlaced = (c: Closed | ClosedFinding) =>
+    replyAfter(c) !== null || (!isDiscarded(c) && (isHeld(c) || isSettling(closedAt(c))))
+  const placedItems = new Map(
+    ledger.closed.filter(d => d.item && !isOpen(d.id) && isPlaced(d)).map(d => [d.id, d] as const),
   )
   const isFixSettled = (id: string) => {
     const last = lastActions[id]
 
     return isFixSent(last) && !isSettling(last.at)
   }
-  const settledFindings = new Map(
-    ledger.closedFindings
-      .filter(f => isSettling(f.closedAt) && !isOpen(f.id) && !isFixSettled(f.id))
-      .map(f => [f.id, f] as const),
+  const placedFindings = new Map(
+    ledger.closedFindings.filter(f => !isOpen(f.id) && !isFixSettled(f.id) && isPlaced(f)).map(f => [f.id, f] as const),
   )
-  const placed = [...settledFindings.keys()].reduce(reopenFinding, [...settledItems.keys()].reduce(reopenItem, ledger))
+  const placed = [...placedFindings.keys()].reduce(reopenFinding, [...placedItems.keys()].reduce(reopenItem, ledger))
   const { questions, tasks } = needsYouOrder(placed)
   const numbers = questionNumbers(ledger, ledger.turn + 1)
   const stateOf = (id: string): RowState => {
-    const closed = settledItems.get(id) ?? settledFindings.get(id)
+    const closed = placedItems.get(id) ?? placedFindings.get(id)
     if (closed) {
-      const at = 'closedAt' in closed ? closed.closedAt : closed.at
+      const at = closedAt(closed)
       const last = lastActions[id]
+      const reply = replyAfter(closed)
+      if (reply)
+        return {
+          is: 'settled',
+          label: DONE_LABELS[reply.action]?.(reply.text) ?? reply.text,
+          at: reply.at,
+          canUndo: false,
+          delivery: pendingDeliveryAt(reply, now),
+          isLapsed: false,
+        }
+      if (isHeld(closed)) return { is: 'held', label: heldLabel(closed), at }
 
       return {
         is: 'settled',
@@ -650,13 +726,21 @@ export function inboxView({
 
     return isHandedOff(last, turns) ? { is: 'handedOff' } : { is: 'open' }
   }
+  const feedbackIn = (id: string, state: RowState): Feedback | null => {
+    if (state.is === 'settled') return null
+    const f = feedbackOf(id, lastActions[id], notes[id], turns, now)
+    if (state.is !== 'held') return f
+    const isFailedReply = f?.is === 'notSent' && lastActions[id]?.action === 'type' && lastActions[id].at >= state.at
+
+    return f?.is === 'note' || isFailedReply ? f : { is: 'closed', label: state.label, at: state.at }
+  }
   const rowOf = (row: Omit<RowView, 'state' | 'feedback' | 'actions'>): RowView => {
     const state = stateOf(row.id)
 
     return {
       ...row,
       state,
-      feedback: state.is === 'settled' ? null : feedbackOf(row.id, lastActions[row.id], notes[row.id], turns, now),
+      feedback: feedbackIn(row.id, state),
       actions: actionsOf(row, lastActions[row.id], state),
     }
   }
@@ -679,7 +763,7 @@ export function inboxView({
   }
   const questionRows = questions.map(itemRow)
   const taskRows = tasks.map(itemRow)
-  const counted = [...questionRows, ...taskRows].filter(r => r.state.is === 'open')
+  const counted = [...questionRows, ...taskRows].filter(isWaitingRow)
   const kinds = Object.keys(FINDING_GROUPS) as Finding['kind'][]
   const byGroup = (a: Finding, b: Finding) => kinds.indexOf(a.kind) - kinds.indexOf(b.kind)
   const findingRows = [...placed.findings]
@@ -701,17 +785,21 @@ export function inboxView({
         steps: [],
       }),
     )
-  const closed: ClosedView<Closed>[] = [...ledger.closed].reverse().map(d => ({
-    ...d,
-    delivery:
-      d.doneNotification?.error !== undefined
-        ? { error: d.doneNotification.error, canUndo: isUndoable(d) }
-        : (d.how === 'answered' || d.how === 'done') &&
-            lastActions[d.id]?.kind === 'mark' &&
-            lastActions[d.id]?.at === d.at
-          ? pendingDeliveryAt(lastActions[d.id], now)
-          : null,
-  }))
+  const held = new Set([...questionRows, ...taskRows, ...findingRows].filter(r => r.state.is === 'held').map(r => r.id))
+  const closed: ClosedView<Closed>[] = [...ledger.closed]
+    .filter(d => !held.has(d.id))
+    .reverse()
+    .map(d => ({
+      ...d,
+      delivery:
+        d.doneNotification?.error !== undefined
+          ? { error: d.doneNotification.error, canUndo: isUndoable(d) }
+          : (d.how === 'answered' || d.how === 'done') &&
+              lastActions[d.id]?.kind === 'mark' &&
+              lastActions[d.id]?.at === d.at
+            ? pendingDeliveryAt(lastActions[d.id], now)
+            : null,
+    }))
   const fixesSent: ClosedView<ClosedFinding>[] = ledger.findings
     .filter(f => isFixSent(lastActions[f.id]))
     .map(f => ({
@@ -730,14 +818,21 @@ export function inboxView({
       closed: { questions: closed.filter(d => d.kind === 'question'), tasks: closed.filter(d => d.kind === 'task') },
     },
     findings: {
-      count: findingRows.filter(r => r.state.is === 'open').length,
+      count: findingRows.filter(isWaitingRow).length,
       rows: findingRows,
-      closed: [...ledger.closedFindings.map(f => ({ ...f, delivery: null as null })), ...fixesSent].sort(
-        (a, b) => b.closedAt - a.closedAt,
-      ),
+      closed: [
+        ...ledger.closedFindings.filter(f => !held.has(f.id)).map(f => ({ ...f, delivery: null as null })),
+        ...fixesSent,
+      ].sort((a, b) => b.closedAt - a.closedAt),
     },
     status,
   }
+}
+
+function heldLabel(c: Pick<Closed, 'how' | 'outcome'>): string {
+  if (c.how === 'answered') return `Answered: ${c.outcome}`
+
+  return c.how === 'claude' ? capitalized(c.outcome) : `Closed: ${c.outcome}`
 }
 
 export function perTurnStatus(update: { isUpdating: boolean; isFailed: boolean; retries: boolean }): ItemStatus {

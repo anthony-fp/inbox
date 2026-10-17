@@ -62,6 +62,7 @@ Change a rule in its owner. Do not change it in a reader.
 | Finding groups and handles | `hooks/view.ts:FINDING_GROUPS`, `hooks/view.ts:drawnLists` | All three looks. Each lists findings under an Issues and an Opportunities title and draws the kind's mark as the handle. A handed-off finding draws ✓ instead. |
 | Row state | `hooks/view.ts:RowState`, `hooks/presses.ts:isHandedOff` | All three looks |
 | Which row opens: by default, when rows arrive above it, and after a press closes the open row | `hooks/view.ts:firstWaiting`, `hooks/view.ts:keptOpen`, `hooks/view.ts:rowAfterClose` | All three looks |
+| Held rows: which closed rows stay in place while the person replies, and what their reply sends | `hooks/view.ts:heldReplies`, `hooks/view.ts:inboxView`, `hooks/view.ts:fieldExit`, `hooks/presses.ts:applyPress` | All three looks. The mod passes its open field, drafts and discarded replies. The Codex tab sends its replies and discarded replies with each view and press. |
 | Feedback text | `hooks/view.ts:feedbackText`, `hooks/view.ts:feedbackOf` | Terminal and desktop through the pane, Codex through the tab |
 | Done labels | `hooks/view.ts:DONE_LABELS` | All three looks |
 | Row content and reply intent | `hooks/view.ts:RowView`, `hooks/view.ts:rowMark`, `hooks/view.ts:replyHint`, `hooks/view.ts:rowFeedbackText` | All three looks |

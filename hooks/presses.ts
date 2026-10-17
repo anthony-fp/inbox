@@ -122,7 +122,7 @@ export function isFixSent(last: LastAction | undefined): last is LastAction {
 export type RowPress =
   | { action: 'answer'; id: string; option: string }
   | { action: 'type'; id: string; text: string }
-  | { action: 'explain' | 'done' | 'dismiss' | 'address' | 'issue' | 'discuss' | 'undo'; id: string }
+  | { action: 'explain' | 'done' | 'dismiss' | 'address' | 'issue' | 'discuss' | 'undo' | 'discard'; id: string }
   | { action: 'step'; id: string; step: number; label: string }
 
 export type PrActionId =
@@ -725,7 +725,7 @@ function pressed(
   }
 
   const item = ledger.items.find(i => i.id === p.id)
-  if (!item) return stale
+  if (!item) return p.action === 'type' ? replyToClosed(ledger, p, record('handoff')) : stale
   const answered = (answer: string): PressResult => ({
     ledger: closeItem(ledger, item.id, { how: 'answered', outcome: answer }, ctx.now),
     last: record('mark'),
@@ -772,6 +772,24 @@ function pressed(
     default:
       return stale
   }
+}
+
+/** Only a held row's field sends a typed reply to a closed row. The ledger stays as it is. */
+function replyToClosed(ledger: Ledger, p: Extract<RowPress, { action: 'type' }>, last: LastAction): PressResult {
+  const words = p.text.trim()
+  const closed = ledger.closed.findLast(c => c.id === p.id)?.item
+  const record = ledger.closedFindings.findLast(f => f.id === p.id)
+  const text = closed
+    ? closed.kind === 'question'
+      ? messages.answer(closed, words)
+      : messages.taskReply(closed, words)
+    : record
+      ? messages.finding(record, 'typed', words)
+      : null
+  if (text === null) return { stale: true }
+  if (!words) return { ledger, last: null, effects: [] }
+
+  return { ledger, last, effects: [{ kind: 'send', text, by: null }] }
 }
 
 function findingBody(finding: Finding): string[] {

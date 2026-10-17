@@ -23,10 +23,13 @@ import {
   TABS,
   feedbackOf,
   feedbackText,
+  fieldExit,
   foldLabel,
   hasAge,
+  heldReplies,
   isFailure,
   isGuarded,
+  isWaitingRow,
   firstWaiting,
   keptOpen,
   listWaits,
@@ -42,7 +45,7 @@ import {
   shortAgo,
 } from '../../hooks/view'
 import { ROW_PAD_PT } from '../../hooks/layout'
-import type { ActionEmphasis, DrawnEntry, DrawnLists, Feedback, RowView, RowWait } from '../../hooks/view'
+import type { ActionEmphasis, DrawnEntry, DrawnLists, Feedback, ReplyHolds, RowView, RowWait } from '../../hooks/view'
 import {
   checkActions,
   PR_TONES,
@@ -67,7 +70,7 @@ import {
   took,
   waitingThreads,
 } from '../../hooks/prs'
-import type { Finding, PrCheck, PrThread, PrView } from '../../types'
+import type { Draft, Finding, PrCheck, PrThread, PrView } from '../../types'
 import { followTo } from '../../hooks/arrivals'
 import { parseInline } from '../../hooks/inline'
 import { isShownEmpty, newRows, openRows, TAB_IDS, TAB_OF } from './arrivals'
@@ -134,7 +137,8 @@ const selection: Record<ShownTab, { id: string; openedAt: number; index?: number
 }
 let typing: string | null = null
 let focusTyping = false
-const drafts = new Map<string, { text: string }>()
+const drafts = new Map<string, Draft>()
+const discarded = new Map<string, number>()
 const optionsShown = new Set<string>()
 const unfolded = new Set<FoldGroup>()
 const sending = new Map<string, string>()
@@ -162,7 +166,8 @@ type Kept = {
   tab: ShownTab
   selection: Record<ShownTab, string | null>
   typing: string | null
-  drafts: [string, string][]
+  /** An earlier page kept each draft as its text alone. */
+  drafts: [string, Draft | string][]
   optionsShown: string[]
   /** An earlier page kept 'finding' for the one fold Findings had. */
   unfolded: (FoldGroup | 'finding')[]
@@ -242,7 +247,7 @@ function capturedState(): Kept {
       prs: selection.prs?.id ?? null,
     },
     typing,
-    drafts: [...drafts].map(([id, draft]) => [id, draft.text]),
+    drafts: [...drafts],
     optionsShown: [...optionsShown],
     unfolded: [...unfolded],
   }
@@ -267,7 +272,9 @@ function restoreState(incoming?: Kept) {
   }
   typing = kept.typing
   focusTyping = typing !== null
-  for (const [id, text] of kept.drafts) drafts.set(id, { text })
+  // A draft an earlier page kept as text began before now, so a row that closed before this page stays closed.
+  for (const [id, draft] of kept.drafts)
+    drafts.set(id, typeof draft === 'string' ? { text: draft, since: Date.now() } : draft)
   for (const id of kept.optionsShown) optionsShown.add(id)
   for (const g of kept.unfolded)
     for (const fold of g === 'finding' ? (['issue', 'opportunity'] as const) : [g]) unfolded.add(fold)
@@ -383,7 +390,7 @@ async function read() {
   const generation = viewGeneration
   const seq = ++requested
   try {
-    const next = await callTool<View>('inbox_view', { demo: isDemo }, READ_TIMEOUT_MS)
+    const next = await callTool<View>('inbox_view', { demo: isDemo, ...holds() }, READ_TIMEOUT_MS)
     if (generation !== viewGeneration || seq < shown) return
     requestedPage = next.devPage
     if (updateError?.page !== requestedPage) updateError = null
@@ -578,7 +585,11 @@ async function act(rowId: string, press: RowPress | PrPress, onSent?: () => void
   draw()
   activePresses++
   try {
-    const r = await callTool<PressReply>('inbox_press', { press, thread: view?.thread, demo: isDemo }, PRESS_TIMEOUT_MS)
+    const r = await callTool<PressReply>(
+      'inbox_press',
+      { press, thread: view?.thread, demo: isDemo, ...holds() },
+      PRESS_TIMEOUT_MS,
+    )
     if (isDisposed || generation !== viewGeneration) return
     if (r.copy) await copy(rowId, r.copy, isLatest)
     if (isDisposed || generation !== viewGeneration || !isLatest()) return
@@ -645,6 +656,17 @@ async function copy(rowId: string, c: { text: string; name: string }, isLatest: 
   }
 }
 
+function replies(): Record<string, number> {
+  return heldReplies(typing, Object.fromEntries(drafts))
+}
+
+function holds(): ReplyHolds {
+  const now = Date.now()
+  for (const [id, at] of discarded) if (now - at >= SETTLED_MS) discarded.delete(id)
+
+  return { replies: replies(), discarded: Object.fromEntries(discarded) }
+}
+
 function sendReply(id: string, text: string) {
   const draft = drafts.get(id)
   void act(id, { action: 'type', id, text }, () => {
@@ -654,9 +676,23 @@ function sendReply(id: string, text: string) {
 
 function startTyping(id: string) {
   keepPressedOpen(id)
+  const wasHeld = id in replies()
+  if (!drafts.has(id)) drafts.set(id, { text: '', since: view?.at ?? Date.now() })
   typing = id
   focusTyping = true
   draw()
+  if (wasHeld) return
+  // A view requested before this did not carry this row's reply, so it would draw the row's close as final.
+  shown = ++requested
+  void read()
+}
+
+function discardReply(id: string) {
+  discarded.set(id, Date.now())
+  drafts.delete(id)
+  if (typing === id) typing = null
+  draw()
+  void read()
 }
 
 function rowKeys(r: RowView): { keys: Key[]; more: Key[] } {
@@ -671,6 +707,7 @@ function rowKeys(r: RowView): { keys: Key[]; more: Key[] } {
       void act(r.id, p, undefined, pending)
     },
     reply: () => startTyping(r.id),
+    discard: () => discardReply(r.id),
     showOptions: () => {
       optionsShown.add(r.id)
       draw()
@@ -862,10 +899,19 @@ function tabRows(v: View, t: ShownTab): Row[] {
 type Lists = DrawnLists<Row>
 
 function listsOf(v: View, drawn: ReadonlySet<string>): Lists {
+  const held = replies()
+
   return drawnLists(
     v,
     id => drawn.has(id),
-    r => (r.item ? itemRow(v, r) : r.finding ? findingRow(v, r, r.finding) : null),
+    r =>
+      r.state.is === 'held' && !(r.id in held)
+        ? null
+        : r.item
+          ? itemRow(v, r)
+          : r.finding
+            ? findingRow(v, r, r.finding)
+            : null,
   )
 }
 
@@ -957,6 +1003,7 @@ function selectedIndex(rows: Row[], t: ShownTab, v: View): number {
 
 function open(t: ShownTab, id: string, index?: number) {
   selection[t] = { id, openedAt: Date.now(), ...(index === undefined ? {} : { index }) }
+  if (typing !== id) typing = null
   drawIn(PRESS_GUARD_MS)
 }
 
@@ -1080,14 +1127,19 @@ function Panel({ row, isClosing }: { row: Row; isClosing: boolean }) {
                 id: row.id,
                 hint: row.typing!.hint,
                 draft: () => drafts.get(row.id)?.text ?? '',
-                onDraft: text => drafts.set(row.id, { text }),
+                onDraft: text =>
+                  drafts.set(row.id, { text, since: drafts.get(row.id)?.since ?? view?.at ?? Date.now() }),
                 send: text => {
                   typing = null
                   row.typing!.send(text)
                 },
-                cancel: () => {
-                  typing = null
-                  draw()
+                exit: row.view ? fieldExit(row.view) : 'cancel',
+                onExit: () => {
+                  if (row.view && fieldExit(row.view) === 'discard') discardReply(row.id)
+                  else {
+                    typing = null
+                    draw()
+                  }
                 },
               }
             : null
@@ -1236,7 +1288,7 @@ function ItemGroup({
 
   return (
     <section>
-      <GroupTitle title={title} count={rows.filter(r => !r.fold).length} />
+      <GroupTitle title={title} count={rows.filter(r => r.view && isWaitingRow(r.view)).length} />
       <Entries entries={entries} group={kind} all={all} now={now} />
       <GroupEnd
         group={kind}
@@ -1426,7 +1478,7 @@ function Findings({ v, lists, now }: { v: View; lists: Lists; now: number }) {
         const rows = rest.flatMap(x => ('row' in x ? [x.row] : []))
         return (
           <section>
-            <GroupTitle title={g.title} count={rows.filter(r => !r.fold).length} />
+            <GroupTitle title={g.title} count={rows.filter(r => r.view && isWaitingRow(r.view)).length} />
             <Entries entries={g.entries} group="finding" all={lists.byTab.findings} now={now} />
             <GroupEnd
               group={g.kind}

@@ -54,6 +54,7 @@ export function ledgerActions(
   on: {
     press: (press: RowPress) => void
     reply: () => void
+    discard: () => void
     showOptions: () => void
   },
 ): { keys: LedgerAction[]; more: LedgerAction[] } {
@@ -68,7 +69,7 @@ export function ledgerActions(
       ...(k.hotkey ? { hotkey: k.hotkey } : {}),
       ...(a.icon ? { icon: ACTION_ICONS[a.icon] } : {}),
       ...(a.press.action === 'dismiss' ? { isDismiss: true } : {}),
-      run: a.press.action === 'type' ? on.reply : () => on.press(a.press),
+      run: a.press.action === 'type' ? on.reply : a.press.action === 'discard' ? on.discard : () => on.press(a.press),
     }
   }
   return { keys: planned.keys.map(draw), more: planned.more.map(draw) }
@@ -80,7 +81,8 @@ export type Reply = {
   draft: () => string
   onDraft: (text: string) => void
   send: (text: string) => void
-  cancel: () => void
+  exit: 'cancel' | 'discard'
+  onExit: () => void
 }
 
 export function ActionButton({ action, isBlocked }: { action: RowAction; isBlocked: () => boolean }) {
@@ -128,8 +130,8 @@ export function RowActions({
           <button type="submit" class="key primary">
             {ROW_COPY.send}
           </button>
-          <button type="button" class="key ghost" onClick={reply.cancel}>
-            {ROW_COPY.cancel}
+          <button type="button" class="key ghost" onClick={reply.onExit}>
+            {ROW_COPY[reply.exit]}
           </button>
         </form>
       </div>

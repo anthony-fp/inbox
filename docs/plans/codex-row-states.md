@@ -33,11 +33,13 @@ At each draw the tab works out the form each row should have now, its target:
 
 | Target | When |
 | --- | --- |
-| `open` | The view lists the row open, and it is the tab's open row |
-| `closed` | The view lists the row open, and another row is open |
+| `open` | The view lists the row open or held, and it is the tab's open row |
+| `closed` | The view lists the row open or held, and another row is open |
 | `settled` | The view lists the row settled, and its time to show in place has not run out |
 | `undoing` | As `settled`, while its Undo press is out |
-| `gone` | The view no longer lists the row, or its settled time ran out |
+| `gone` | The view no longer lists the row, its settled time ran out, or the tab no longer holds it |
+
+A held row is drawn as an open row, so it needs no state of its own. When its reply sends, it moves through `settling`. After Discard, it moves through `leaving`.
 
 `stepRow` takes a row's track and its target and returns the next track. A track is the row's state, when it entered it, and whether it draws the open row's panel. When the target changes, the row starts moving toward it from where it is drawn: `opening` toward open, `closing` toward closed, `settling` toward settled, `leaving` toward gone. This holds for a row still growing in, too. A leaving row that is listed again grows back in. When a moving state's time has passed, it comes to rest.
 

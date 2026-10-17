@@ -9,8 +9,8 @@ import {
   START_TITLE,
   toolActivity,
 } from '../../hooks/model-text'
-import { inboxView, perTurnStatus } from '../../hooks/view'
-import type { InboxView } from '../../hooks/view'
+import { inboxView, NO_HOLDS, perTurnStatus } from '../../hooks/view'
+import type { InboxView, ReplyHolds } from '../../hooks/view'
 import { drawnPrs, itemPrSteps, linkedPrs, olderPrsText, threadSentIn } from '../../hooks/pr-tab'
 import { withArrival, withUnconfirmed } from '../../hooks/presses'
 import { prNeedsYou, prRefs } from '../../hooks/prs'
@@ -247,7 +247,7 @@ function withoutStalePending(lastActions: Record<string, LastAction>, now: numbe
   )
 }
 
-export function viewOf(s: SessionState, now: number): View {
+export function viewOf(s: SessionState, now: number, holds: ReplyHolds = NO_HOLDS): View {
   const l = s.ledger
   const lastActions = withoutStalePending(s.lastActions, now)
   const awaitsRetry = s.pending.length > 0 && (s.pending[0]?.failed === true || s.presence.ledgerState === 'failed')
@@ -267,6 +267,7 @@ export function viewOf(s: SessionState, now: number): View {
       settleWindowMs: SETTLE_WINDOW_MS,
       status: perTurnStatus(update),
       now,
+      ...holds,
     }),
     heard: heardState(s.heard),
     lastActions,

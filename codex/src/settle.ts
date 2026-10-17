@@ -18,7 +18,7 @@ export function settledSeen(seen: ReadonlyMap<string, number>, listed: string[],
 export function drawnSettled(
   seen: ReadonlyMap<string, number>,
   now: number,
-  held: ReadonlySet<string> = new Set(),
+  undoing: ReadonlySet<string> = new Set(),
 ): Set<string> {
-  return new Set([...seen].filter(([id, at]) => held.has(id) || now - at < SETTLED_MS).map(([id]) => id))
+  return new Set([...seen].filter(([id, at]) => undoing.has(id) || now - at < SETTLED_MS).map(([id]) => id))
 }

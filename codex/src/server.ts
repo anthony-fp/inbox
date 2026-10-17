@@ -42,7 +42,8 @@ import { noteToolCall, viewOf } from './core'
 import type { TabView } from './core'
 import { demoState } from './demo'
 import { ghFinder, ghIn } from './gh'
-import { SETTLED_MS } from '../../hooks/view'
+import { NO_HOLDS, SETTLED_MS } from '../../hooks/view'
+import type { ReplyHolds } from '../../hooks/view'
 import { SETTLE_WINDOW_MS } from './settle'
 import { readState, updateState } from './state'
 import { reconcileUpdateStatus } from './update'
@@ -84,7 +85,10 @@ const toolsFor = (uri: string) => [
     name: 'inbox_view',
     title: 'Inbox',
     description: VIEW_DESCRIPTION,
-    inputSchema: { type: 'object', properties: { demo: { type: 'boolean' } } },
+    inputSchema: {
+      type: 'object',
+      properties: { demo: { type: 'boolean' }, replies: { type: 'object' }, discarded: { type: 'object' } },
+    },
     _meta: {
       ui: { resourceUri: uri, visibility: ['app'] },
       'openai/ui': { entrypoints: [{ type: 'thread' }] },
@@ -95,7 +99,13 @@ const toolsFor = (uri: string) => [
     description: 'A press in the Inbox tab.',
     inputSchema: {
       type: 'object',
-      properties: { press: { type: 'object' }, thread: { type: 'string' }, demo: { type: 'boolean' } },
+      properties: {
+        press: { type: 'object' },
+        thread: { type: 'string' },
+        demo: { type: 'boolean' },
+        replies: { type: 'object' },
+        discarded: { type: 'object' },
+      },
       required: ['press'],
     },
     _meta: APP_ONLY,
@@ -107,6 +117,18 @@ const toolsFor = (uri: string) => [
     _meta: APP_ONLY,
   },
 ]
+
+/** The tab's replies in progress and discarded holds, each a time by row id. Anything else in the arguments is dropped. */
+function holdsOf(args: Record<string, unknown>): ReplyHolds {
+  const times = (raw: unknown): Record<string, number> =>
+    typeof raw !== 'object' || raw === null
+      ? {}
+      : Object.fromEntries(
+          Object.entries(raw).filter((e): e is [string, number] => typeof e[1] === 'number' && Number.isFinite(e[1])),
+        )
+
+  return { replies: times(args.replies), discarded: times(args.discarded) }
+}
 
 function stamped(tabHtml: string): string {
   return tabHtml.replace(
@@ -346,12 +368,17 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
       })
   }
 
-  const served = async (s: SessionState, id: string, isDemo = false): Promise<TabView> => {
+  const served = async (
+    s: SessionState,
+    id: string,
+    isDemo = false,
+    holds: ReplyHolds = NO_HOLDS,
+  ): Promise<TabView> => {
     const loadError = deps.loadError?.()
     const current = !isDemo && s.presence.isUpdating ? await reconcileUpdateStatus(dir, id) : s
 
     return {
-      ...viewOf(current, now()),
+      ...viewOf(current, now(), holds),
       thread: id,
       isFetchingPrs: !isDemo && fetchingPrs.has(id),
       isGhMissing: !isDemo && isGhMissing,
@@ -361,7 +388,7 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     }
   }
 
-  async function onPress(id: string, p: RowPress | PrPress, thread: unknown): Promise<PressReply> {
+  async function onPress(id: string, p: RowPress | PrPress, thread: unknown, holds: ReplyHolds): Promise<PressReply> {
     const rowId = 'ref' in p ? prRowId(p) : p.id
     const localPressId = randomUUID()
     let checkpointSaved = false
@@ -475,7 +502,7 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
       )
 
     return {
-      view: await served(await readState(dir, id), id),
+      view: await served(await readState(dir, id), id, false, holds),
       copy,
       error,
       note,
@@ -514,10 +541,15 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     return s
   }
 
-  async function onDemoPress(id: string, p: RowPress | PrPress, thread: unknown): Promise<PressReply> {
+  async function onDemoPress(
+    id: string,
+    p: RowPress | PrPress,
+    thread: unknown,
+    holds: ReplyHolds,
+  ): Promise<PressReply> {
     const s = demoOf(id)
     const r = thread === id ? pressOn(s, p) : ({ stale: true } as const)
-    if ('stale' in r) return { view: await served(s, id, true), copy: null, error: null, note: 'stale' }
+    if ('stale' in r) return { view: await served(s, id, true, holds), copy: null, error: null, note: 'stale' }
     const { lasts, isSample } = demoRecord(r.lasts, r.effects)
     const next: SessionState = {
       ...s,
@@ -532,7 +564,12 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
         if (d) demos.set(id, { ...d, presence: { ...d.presence, ...demoTurns(d.presence, [], true) } })
       }, SETTLED_MS).unref()
 
-    return { view: await served(next, id, true), copy: null, error: null, note: isSample ? 'sample' : null }
+    return {
+      view: await served(next, id, true, holds),
+      copy: null,
+      error: null,
+      note: isSample ? 'sample' : null,
+    }
   }
 
   async function callTool(
@@ -559,7 +596,9 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
         return text(inboxToolText(viewOf(s, now())))
       }
       case 'inbox_view': {
-        if (args.demo === true) return { ...text('Inbox demo'), structuredContent: await served(demoOf(id), id, true) }
+        const holds = holdsOf(args)
+        if (args.demo === true)
+          return { ...text('Inbox demo'), structuredContent: await served(demoOf(id), id, true, holds) }
         await wakeForDone(id).catch(() => undefined)
         const s = await updateState(dir, id, s => ({
           ...s,
@@ -567,13 +606,16 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
           prViews: { ...s.prViews, views: viewsStillShown(s.prViews, s.ledger.prs, s.lastActions, now()) },
         }))
         fetchPrsWhenDue(id, s)
-        return { ...text('Inbox view'), structuredContent: await served(s, id) }
+        return { ...text('Inbox view'), structuredContent: await served(s, id, false, holds) }
       }
       case 'inbox_tab_page':
         return { ...text('Tab page'), structuredContent: { html: stamped(await currentPage()) } }
       case 'inbox_press': {
         const p = args.press as RowPress | PrPress
-        const r = await (args.demo === true ? onDemoPress(id, p, args.thread) : onPress(id, p, args.thread))
+        const holds = holdsOf(args)
+        const r = await (args.demo === true
+          ? onDemoPress(id, p, args.thread, holds)
+          : onPress(id, p, args.thread, holds))
         return { ...text(r.error ?? (r.note ? noteText(r.note) : 'Done')), structuredContent: r }
       }
     }
