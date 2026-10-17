@@ -5,7 +5,7 @@
 //
 // Find a section by searching for:
 //   atoms and constants: `const LEDGER`; palettes: `const PALETTES`; the look of a surface: `function lookOf`
-//   model-read guidance: `guidanceText` in hooks/ledger.ts; per-reply update: `function runUpdate`, `function queueUpdate`
+//   model-read guidance: `guidanceText` in hooks/model-text.ts; per-reply update: `function runUpdate`, `function queueUpdate`
 //   stop and dialogs: `function setStop`, `function openDialog`; PR fetches: `function fetchPrs`
 //   PR presses: `applyPrPress` in pr-tab.ts; press runner: `async function runPress`; demo: `runDemoPress`
 //   engine hooks: `export const register`; band: `component: 'AbovePrompt'`; pane: `component: 'Pane'`
@@ -223,7 +223,7 @@ const TAB = atom({ plugin: 'inbox', key: 'tab' } as const, 'needsYou' as Tab)
 const NO_CURSOR: Cursor = { id: null, index: 0, openedAt: 0 }
 const NO_SELECTION: Record<Tab, Cursor> = { needsYou: NO_CURSOR, findings: NO_CURSOR, prs: NO_CURSOR }
 const SELECTION = atom({ plugin: 'inbox', key: 'selection' } as const, NO_SELECTION)
-// Whether Claude Code uses its `dark` theme, which picks the selected row's tint.
+// The name of Claude Code's theme, which picks the terminal palette.
 const THEME = atom({ plugin: 'inbox', key: 'theme' } as const, '')
 const PR_VIEWS = atom(
   { plugin: 'inbox', key: 'prViews' } as const,
@@ -270,8 +270,7 @@ const DESKTOP_CHARS_PER_CELL = 1.25
 // letters such as "n" runs about 1.03.
 const DESKTOP_CLIP_CHARS_PER_CELL = 1.1
 const DESKTOP_TAB_PAD = '\u00a0'.repeat(3)
-// A text line in the Claude app pane, in points: a one-line row padded by half a line above and below
-// is 37.8 pt.
+// A text line in the Claude app pane, in points.
 const DESKTOP_LINE_PT = 19
 // One column of `bodyColumns` in the Claude app pane, in points: 15.8 px at 2x.
 const DESKTOP_CELL_PT = 7.9
@@ -443,7 +442,7 @@ type Tone = Tab | 'issue' | 'done' | 'error'
  * 4.5:1, on every background the pane draws it on, and each marker meets 3:1.
  * The terminal draws Button labels in its own text color, and the theme's dim
  * gray for `dimColor`, so the pane gives Buttons no dimColor. The footer's Keys
- * toggle and the Closed and Details folds are the exceptions: secondary
+ * toggle and the Closed folds are the exceptions: secondary
  * controls, they brighten under the pointer. So are a just-opened row's
  * buttons, dim while they ignore clicks.
  */
@@ -2674,8 +2673,8 @@ function outcomeText(d: Pick<Closed, 'outcome'>): string {
 
 /**
  * The desktop tab bar's sizes for `columns`: each tab's width, the gap between tabs, and whether the counts
- * show. A label is sized as bold text at DESKTOP_CHARS_PER_CELL plus 1 cell of slack. While the tabs do not
- * fit, the padding drops from 2 to 1, then the gap, then the counts.
+ * show. A label is sized as bold text at DESKTOP_CHARS_PER_CELL plus the tab frame's inset on each side. While
+ * the tabs do not fit, the padding drops from 1 to 0, then the gap from 1 to 0, then the counts go.
  */
 function desktopTabSizes(
   tabs: { label: string; count: number }[],
@@ -3471,7 +3470,7 @@ export const register: Register = on => {
     // character, a space becomes a no-break space and an en space a figure space, about as wide and unbreakable.
     const unbroken = (after: string) => after.replace(/(?<=.)[ \u2002]/gs, c => (c === ' ' ? '\u00a0' : '\u2007'))
     // Inline above the prompt, the pane takes its room from the conversation, so
-    // it drops the section cards, the tab panels and the blank lines between parts.
+    // it drops the blank lines between parts.
     const isInline = e.props.placement === 'inline'
     isInlinePane = isInline
     if (e.surface === 'terminal') {
@@ -3601,7 +3600,6 @@ export const register: Register = on => {
       moreKeys?: () => KeyAction[]
       /** For a row that takes the person's own words: what its field says while empty. */
       typeHint?: string
-      /** What sending those words does: closes a question, or hands a task or finding off. */
       /** The row no longer waits on the person, so its group's count leaves it out. Selected, it also shows `note`. */
       fold?: { note?: string }
     }
@@ -3836,8 +3834,8 @@ export const register: Register = on => {
 
     // A Button draws its hotkey in the theme's accent, which Claude Code's light
     // theme draws at 2.9:1 on the selected row. So a key's letter is Text in the
-    // palette's color, its label a Button, and the key itself a hidden Button.
-    // Both invert while the pointer is over either, so the letter lights with its label.
+    // palette's color, inside the Button that holds its label, and the key itself is a hidden Button.
+    // The letter and the label invert together under the pointer.
     // A hover cannot name the terminal's default color, which a Button's label
     // inverts, so the letter and the label both invert the muted color to match.
     // An action past the lettered ones, or one that only changes the view, has no key and draws its label alone.
@@ -4035,8 +4033,6 @@ export const register: Register = on => {
           <Text color={color}>{treeText(pos, lead)}</Text>
         </Box>
       )
-    // A row with no marker, such as a group's empty line, starts its text right after the tree.
-    // A row at depth 1 hangs from a tree under the marker column, as a group's closed items do.
     // The columns a row draws at: one set on desktop, the tree's in the terminal.
     const columnsFor = (extra = 0) => {
       const base = look === 'desktop' ? ROW_COLUMNS.desktop : ROW_COLUMNS.tree
@@ -4051,6 +4047,8 @@ export const register: Register = on => {
     // A tree row's mark column, which a nested row's lead also steps by.
     const markColumns = look === 'desktop' ? ROW_COLUMNS.desktop : ROW_COLUMNS.tree
     const markWidth = markColumns.textAt - markColumns.handleAt
+    // A row with no marker, such as a group's empty line, starts its text right after the tree.
+    // A row at depth 1 hangs from a tree under the marker column, as a group's closed items do.
     const treeRow = (
       pos: TreePos | null,
       marker: JSX.Element | null,
@@ -4074,12 +4072,12 @@ export const register: Register = on => {
       </Box>
     )
     const childPos = (n: number, count: number): TreePos => (n === count - 1 ? 'last' : 'mid')
-    // A list's rows with a divider between each two. It starts where the rows'
-    // text starts and runs to the pane's edge; in a section, the tree's │ passes it.
     // A divider line from `inset` columns in to the pane's edge.
     const rule = (inset: number) => (
       <Text color={pal.divider}>{'─'.repeat(Math.max(0, e.props.bodyColumns - inset))}</Text>
     )
+    // A list's rows with a divider between each two. It starts where the rows'
+    // text starts and runs to the pane's edge; in a section, the tree's │ passes it.
     // Desktop draws text in a proportional font, where a run of ─ sized in cells overflows the
     // row and wraps into a second line, so there the rows sit flush and each pads itself.
     // `isBarred(n)` says element n draws a just-closed row's draining bar, which stands in for the rule after it:
@@ -4190,8 +4188,6 @@ export const register: Register = on => {
         </Box>
       )
     }
-    // A closed desktop row drawn by its Client, at the columns listRow draws an open row's handle and text.
-    // The desktop side column's age: the row's last action's, or when it was asked or found.
     // On desktop a row's toned mark draws as an Svg in the shared tones. Without Svg, it stays Text in the palette's
     // theme keys.
     const ToneSvg = look === 'desktop' && 'Svg' in elements ? elements.Svg : null
@@ -4208,6 +4204,7 @@ export const register: Register = on => {
         </Box>
       )
     }
+    // The desktop side column's age: the row's last action's, or when it was asked or found.
     const sideAge = (row: Row) => {
       const f = row.view ? row.view.feedback : feedbackOf(row.id, lastActions[row.id], notes[row.id], turns, now)
       const at = f && hasAge(f) ? f.at : row.at
@@ -4306,8 +4303,6 @@ export const register: Register = on => {
         </Box>
       </Box>
     )
-    // `tree` places the row as a section's child; without it, as in Findings, the
-    // handle sits in the 4 columns after the bar.
     // A selected terminal row's first line, with its age at the right. Its keys below take the full width.
     const withSideAge = (row: Row, line: JSX.Element) =>
       isAgeInSide ? (
@@ -4801,7 +4796,6 @@ export const register: Register = on => {
     )
     // Desktop draws dimColor as plain text, so the status takes the ages' dimmer gray there.
     const statusText = look === 'desktop' ? <Text color={pal.age}>{status}</Text> : <Text dimColor>{status}</Text>
-    // Each takes its own line under the tab row.
     // Each tab is one line of the column, padded to the column's width. Every cell of it is a Button, so a click
     // anywhere on the line shows the tab. The shown tab is filled and bold, as the docked tabs draw it.
     const rail = (
@@ -4972,11 +4966,11 @@ export const register: Register = on => {
                 <Text color={pal.line}>{hasChildren ? '│' : ' '}</Text>
               </Box>,
             ]
-    // A closed item or finding under the open ones: what was asked, then how it closed and when.
     const refusedUndo = (d: ClosedLine) =>
       d.delivery && typeof d.delivery === 'object' && d.delivery.canUndo
         ? undoButton({ id: d.id, action: 'undo' }, null)
         : null
+    // A closed item or finding under the open ones: what was asked, then how it closed and when.
     const closedRow = (d: ClosedLine, pos: TreePos) =>
       look === 'desktop'
         ? // Nested under its fold line, with its mark under the fold's label and half a row's padding, so the
@@ -5113,11 +5107,6 @@ export const register: Register = on => {
               : []),
           ]
     }
-    // A row that just closed stays where it was, with a ✓ and its outcome, and
-    // [Undo] after the person's own Done or Dismiss, until it joins its list's
-    // closed items. It cannot be selected. `undo` is that press. An answer
-    // whose message has not reached Claude reads "Queued: <answer>" instead. A
-    // lapsed close, such as Dismissed, Expired or one by Claude, reads muted.
     // Undo on a row that just closed, with a fill that drains as its time runs out, as the Codex tab's does. The
     // terminal redraws it on the steps the leave bar already takes. Desktop's native button draws no fill, so there
     // it is an Svg pill whose fill animates on its own, under a Client that takes its clicks.
@@ -5159,6 +5148,11 @@ export const register: Register = on => {
         </Button>
       )
     }
+    // A row that just closed stays where it was, with a ✓ and its outcome, and
+    // [Undo] after the person's own Done or Dismiss, until it joins its list's
+    // closed items. It cannot be selected. `undo` is that press. An answer
+    // whose message has not reached Claude reads "Queued: <answer>" instead. A
+    // lapsed close, such as Dismissed, Expired or one by Claude, reads muted.
     const settledContent = (
       what: string,
       outcome: string,
@@ -5242,7 +5236,7 @@ export const register: Register = on => {
       const content = settledContent(r.title, state.label, state.at, undo, state.delivery, state.isLapsed)
       // The ✓ waits for the answer to reach Claude; the blank keeps the row's text in line.
       const mark = state.delivery !== null ? <Text> </Text> : <Text color={pal.muted}>✓</Text>
-      // In a group's tree, or flat as Findings lists its rows. On desktop it pads itself as a closed row does.
+      // On desktop it pads itself as a closed row does.
       return (
         <Box key={`settled-${r.id}`} flexDirection="column" paddingY={space.settledPad}>
           {treeRow(pos, mark, content, undefined, 0, undefined, markExtra(r.id))}
