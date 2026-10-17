@@ -76,6 +76,7 @@ import {
   closeItem,
   parseReply,
   closedState,
+  pruneClosed,
   readKind,
   tasksRunBy,
   upgradeLedger,
@@ -836,7 +837,9 @@ function commitLedger(
 ): Promise<void> {
   if (!ownsConversation(owner)) return Promise.resolve()
   const task = (async () => {
-    const canSave = (await read($, UNREADABLE)) !== owner.id
+    const [unreadable, typing, drafts] = await Promise.all([read($, UNREADABLE), read($, TYPING), read($, DRAFTS)])
+    const canSave = unreadable !== owner.id
+    const held = new Set(Object.keys(heldReplies(typing, drafts)))
     if (!ownsConversation(owner)) return
     let before: Ledger = EMPTY
     let applied = false
@@ -848,7 +851,7 @@ function commitLedger(
       }
       // A tool call can land after a hot reload and before turnOn converts the ledger an older build saved.
       before = upgradeLedger(l)
-      const changed = change(before)
+      const changed = pruneClosed(change(before), held)
       revision = ++ledgerRevision
       applied = true
       return changed
@@ -2225,7 +2228,8 @@ async function runDemoPress(
   if (!('ref' in p) && p.action === 'type') await update($, TYPING, t => (t === p.id ? null : t))
   let applied = { stale: true } as Applied
   let isClosing = false
-  const isRecording = await read($, DEMO_RECORDING)
+  const [isRecording, typing, drafts] = await Promise.all([read($, DEMO_RECORDING), read($, TYPING), read($, DRAFTS)])
+  const held = new Set(Object.keys(heldReplies(typing, drafts)))
   await update($, DEMO, d => {
     if (!d) return d
     const r = applyAnyPress(d.ledger, d.prViews, d.lastActions, p, { now, turnsStarted: d.turns.turnsStarted })
@@ -2240,7 +2244,7 @@ async function runDemoPress(
 
     return {
       ...d,
-      ledger: r.ledger,
+      ledger: pruneClosed(r.ledger, held),
       lastActions: withLasts(d.lastActions, lasts, r.drop),
       notes: isSample && !isRecording ? { ...notes, [rowId]: { note: 'sample' as const, at: now } } : notes,
       turns: demoTurns(d.turns, r.effects),

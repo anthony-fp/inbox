@@ -438,9 +438,7 @@ export function closeItem(ledger: Ledger, id: string, closing: Closing, now: num
   return {
     ...ledger,
     items: ledger.items.filter(i => i.id !== id),
-    closed: [...ledger.closed, ...ledger.items.filter(i => i.id === id).map(i => closedRecord(i, closing, now))].slice(
-      -MAX_CLOSED,
-    ),
+    closed: [...ledger.closed, ...ledger.items.filter(i => i.id === id).map(i => closedRecord(i, closing, now))],
   }
 }
 
@@ -451,8 +449,19 @@ export function closeFinding(ledger: Ledger, id: string, closing: Closing, now: 
   return {
     ...ledger,
     findings: ledger.findings.filter(f => f.id !== id),
-    closedFindings: [...ledger.closedFindings, closedFindingRecord(finding, closing, now)].slice(-MAX_CLOSED),
+    closedFindings: [...ledger.closedFindings, closedFindingRecord(finding, closing, now)],
   }
+}
+
+/**
+ * Cuts each closed list to its newest MAX_CLOSED records, and keeps every older record whose id is in `keep`.
+ * closeItem, closeFinding and applyUpdate do not cut, so each host runs this on every ledger it commits.
+ */
+export function pruneClosed(ledger: Ledger, keep: ReadonlySet<string>): Ledger {
+  const pruned = <T extends { id: string }>(records: T[]) =>
+    records.filter((r, n) => n >= records.length - MAX_CLOSED || keep.has(r.id))
+
+  return { ...ledger, closed: pruned(ledger.closed), closedFindings: pruned(ledger.closedFindings) }
 }
 
 function idNumber(id: string): number {
@@ -595,7 +604,7 @@ export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number
     ...ledger,
     card,
     items: kept,
-    closed: closed.slice(-MAX_CLOSED),
+    closed,
     findings,
     closedFindings,
     nextId,

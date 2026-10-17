@@ -311,8 +311,12 @@ function closeFinding(ledger, id, closing, now) {
   return {
     ...ledger,
     findings: ledger.findings.filter((f) => f.id !== id),
-    closedFindings: [...ledger.closedFindings, closedFindingRecord(finding, closing, now)].slice(-MAX_CLOSED)
+    closedFindings: [...ledger.closedFindings, closedFindingRecord(finding, closing, now)]
   };
+}
+function pruneClosed(ledger, keep) {
+  const pruned = (records) => records.filter((r, n) => n >= records.length - MAX_CLOSED || keep.has(r.id));
+  return { ...ledger, closed: pruned(ledger.closed), closedFindings: pruned(ledger.closedFindings) };
 }
 function applyExchangeUpdate(ledger, update, exchange, now, promptAt) {
   const explainedId = exchange.press?.action === "explain" ? exchange.press.id : null;
@@ -396,7 +400,7 @@ function applyUpdate(ledger, u, now, turn, promptAt = now) {
     ...ledger,
     card,
     items: kept,
-    closed: closed.slice(-MAX_CLOSED),
+    closed,
     findings,
     closedFindings,
     nextId,
@@ -573,6 +577,7 @@ function emptyState(sessionId) {
     pending: [],
     sent: [],
     lastActions: {},
+    heldRows: [],
     prViews: NO_PRS,
     tabSeenAt: 0,
     heard: NOTHING_HEARD
@@ -781,12 +786,16 @@ async function updateState(dir, sessionId, change) {
   const path = statePath(dir, sessionId);
   return withLock(`${path}.lock`, async () => {
     const current = await readState(dir, sessionId);
+    const pruned = (state) => ({
+      ...state,
+      ledger: pruneClosed(state.ledger, new Set(state.heldRows))
+    });
     const checkpoint = async (state) => {
       const tmp = `${path}.${process.pid}.tmp`;
-      await writeFile(tmp, JSON.stringify(state));
+      await writeFile(tmp, JSON.stringify(pruned(state)));
       await rename(tmp, path);
     };
-    const next = await change(current, checkpoint);
+    const next = pruned(await change(current, checkpoint));
     await checkpoint(next);
     return next;
   });

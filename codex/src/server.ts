@@ -42,6 +42,7 @@ import { noteToolCall, viewOf } from './core'
 import type { TabView } from './core'
 import { demoState } from './demo'
 import { ghFinder, ghIn } from './gh'
+import { pruneClosed } from '../../hooks/ledger'
 import { NO_HOLDS, SETTLED_MS } from '../../hooks/view'
 import type { ReplyHolds } from '../../hooks/view'
 import { SETTLE_WINDOW_MS } from './settle'
@@ -435,7 +436,8 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
         await change(s => ({ ...s, ledger: f(s.ledger) }))
       },
     })
-    await updateState(dir, id, async (s, checkpoint) => {
+    await updateState(dir, id, async (saved, checkpoint) => {
+      const s: SessionState = { ...saved, heldRows: Object.keys(holds.replies) }
       if (note) return s
       // Read under the lock, so the press is timed after every write that landed before it.
       const at = now()
@@ -553,7 +555,7 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     const { lasts, isSample } = demoRecord(r.lasts, r.effects)
     const next: SessionState = {
       ...s,
-      ledger: r.ledger,
+      ledger: pruneClosed(r.ledger, new Set(Object.keys(holds.replies))),
       lastActions: withLasts(s.lastActions, lasts, r.drop),
       presence: { ...s.presence, ...demoTurns(s.presence, r.effects) },
     }
@@ -602,6 +604,7 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
         await wakeForDone(id).catch(() => undefined)
         const s = await updateState(dir, id, s => ({
           ...s,
+          heldRows: Object.keys(holds.replies),
           tabSeenAt: now(),
           prViews: { ...s.prViews, views: viewsStillShown(s.prViews, s.ledger.prs, s.lastActions, now()) },
         }))

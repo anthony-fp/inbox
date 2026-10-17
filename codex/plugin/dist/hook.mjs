@@ -20,6 +20,7 @@ var EMPTY = {
   turn: 0,
   batchTurn: 0
 };
+var MAX_CLOSED = 12;
 var EXPIRED = "expired, unanswered";
 function readKind(kind) {
   return kind === "task" || kind === "do" ? "task" : "question";
@@ -66,6 +67,10 @@ function howFromOutcome(outcome) {
   return "update";
 }
 var CLOSED_BY_CLAUDE = "closed by Claude";
+function pruneClosed(ledger, keep) {
+  const pruned = (records) => records.filter((r, n) => n >= records.length - MAX_CLOSED || keep.has(r.id));
+  return { ...ledger, closed: pruned(ledger.closed), closedFindings: pruned(ledger.closedFindings) };
+}
 
 // ../hooks/model-text.ts
 var NL = "\n";
@@ -489,6 +494,7 @@ function emptyState(sessionId) {
     pending: [],
     sent: [],
     lastActions: {},
+    heldRows: [],
     prViews: NO_PRS,
     tabSeenAt: 0,
     heard: NOTHING_HEARD
@@ -678,12 +684,16 @@ async function updateState(dir, sessionId, change) {
   const path = statePath(dir, sessionId);
   return withLock(`${path}.lock`, async () => {
     const current = await readState(dir, sessionId);
+    const pruned = (state) => ({
+      ...state,
+      ledger: pruneClosed(state.ledger, new Set(state.heldRows))
+    });
     const checkpoint = async (state) => {
       const tmp = `${path}.${process.pid}.tmp`;
-      await writeFile(tmp, JSON.stringify(state));
+      await writeFile(tmp, JSON.stringify(pruned(state)));
       await rename(tmp, path);
     };
-    const next = await change(current, checkpoint);
+    const next = pruned(await change(current, checkpoint));
     await checkpoint(next);
     return next;
   });

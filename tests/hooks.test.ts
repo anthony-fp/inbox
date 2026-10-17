@@ -1110,6 +1110,67 @@ test('a question Claude closes while the person types an answer stays in place w
   expect(await pane.find({ text: /1 closed/ })).toBeDefined()
 })
 
+test('a held row stays in place, and its reply still sends, after more items close than the Closed list keeps', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  on('ui.focus', () => ({}))
+  const reply = async (text: string, turnId: string) => {
+    await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
+    await $.turn.start({ text, turnId })
+    await $.turn.complete({ answer: 'Noted.', durationMs: 5, isAborted: false, turnId, reason: 'answer' })
+    await clock.settle()
+  }
+  const tasks = [
+    'Water the plants',
+    'Feed the cat',
+    'Rotate the signing key',
+    'Approve the deploy',
+    'Pin the Node version',
+    'Update the README',
+    'Tag the release',
+    'Clear the build cache',
+    'Rename the branch',
+    'Archive old logs',
+    'Book the venue',
+    'Order more paper',
+    'Renew the domain',
+  ]
+  const others = tasks.map((_, n) => `i${n + 3}`)
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'add a greeting cli', wait: false, origin: { kind: 'composer' } })
+  await $.turn.complete({
+    answer: 'Plan ready. 1. Node or Python? 2. Call it greet?',
+    durationMs: 5,
+    isAborted: false,
+    turnId: 't1',
+    reason: 'answer',
+  })
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  await pane.press({ key: 'select-i2' })
+  await clock.advance(PRESS_GUARD_MS)
+  await pane.press({ key: 'typekey-i2' })
+  await pane.input({ key: 'type-i2', text: 'Call it hello', kind: 'change' })
+  await $.tool.call({ tool: 'mcp__inbox__close', id: 'i2', reason: 'settled in chat' } as never)
+  await clock.settle()
+  ledgerReply = tasks.map(t => `NEW: do | - | ${t} | - | -`).join('\n')
+  await reply('keep going', 't2')
+  expect(await pane.find({ text: /Renew the domain/ })).toBeDefined()
+  ledgerReply = others.map(id => `CLOSED: ${id} | done`).join('\n')
+  await reply('all done', 't3')
+  await clock.advance(9000)
+
+  expect(await pane.find({ text: /Renew the domain/ })).toBeUndefined()
+  expect(await pane.find({ key: 'type-i2' })).toBeDefined()
+  expect((await pane.find({ key: 'row-i2' }))?.text).toMatch(/Closed\sby\sClaude:\ssettled\sin\schat/)
+
+  await pane.press({ key: 'send-i2' })
+  await clock.settle()
+  expect(sent.at(-1)).toBe('Re "Name the command greet?": Call it hello')
+  expect(await pane.find({ key: 'settled-i2' })).toBeDefined()
+})
+
 test('Discard ends a held row’s reply and folds it into Closed at once, and a row the person dismisses with a draft settles with Undo instead of holding', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])

@@ -16,7 +16,7 @@ import {
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 
-import { EMPTY, upgradeLedger } from '../../hooks/ledger'
+import { EMPTY, pruneClosed, upgradeLedger } from '../../hooks/ledger'
 import type { Exchange, Press } from '../../hooks/ledger'
 import { TOLD_NOTHING } from '../../hooks/model-text'
 import type { Told } from '../../hooks/model-text'
@@ -68,6 +68,8 @@ export type SessionState = {
     phase?: 'attempting' | 'accepted' | 'uncertain'
   }[]
   lastActions: Record<string, LastAction>
+  /** The rows the tab's replies in progress held at its latest request. Every write keeps their closed records. */
+  heldRows: string[]
   /** The PRs tab's data: each PR's latest view and the current branch's PR. `isFetching` is always false here; the server knows what runs. */
   prViews: PrViews
   tabSeenAt: number
@@ -117,6 +119,7 @@ export function emptyState(sessionId: string): SessionState {
     pending: [],
     sent: [],
     lastActions: {},
+    heldRows: [],
     prViews: NO_PRS,
     tabSeenAt: 0,
     heard: NOTHING_HEARD,
@@ -394,7 +397,10 @@ export async function tryWithLock<T>(
   }
 }
 
-/** Changes a session under its lock. `checkpoint` can save an intermediate state before an external effect. */
+/**
+ * Changes a session under its lock. `checkpoint` can save an intermediate state before an external effect. Every
+ * save prunes the closed lists and keeps the records of `heldRows`.
+ */
 export async function updateState(
   dir: string,
   sessionId: string,
@@ -404,12 +410,16 @@ export async function updateState(
 
   return withLock(`${path}.lock`, async () => {
     const current = await readState(dir, sessionId)
+    const pruned = (state: SessionState): SessionState => ({
+      ...state,
+      ledger: pruneClosed(state.ledger, new Set(state.heldRows)),
+    })
     const checkpoint = async (state: SessionState) => {
       const tmp = `${path}.${process.pid}.tmp`
-      await writeFile(tmp, JSON.stringify(state))
+      await writeFile(tmp, JSON.stringify(pruned(state)))
       await rename(tmp, path)
     }
-    const next = await change(current, checkpoint)
+    const next = pruned(await change(current, checkpoint))
     await checkpoint(next)
 
     return next

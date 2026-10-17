@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 
 import { demoView } from '../../hooks/demo'
+import { applyUpdate, parseReply } from '../../hooks/ledger'
 import { feedbackOf, QUEUED_AFTER_MS } from '../../hooks/view'
 import type { Feedback } from '../../hooks/view'
 import { noteHook, notePrompt, viewOf } from '../src/core'
@@ -84,6 +85,46 @@ test('a press sends its message into the tab’s thread with the codex binary th
   assert.deepEqual(prompt.state.turn.press, { id: 'i1', action: 'answer' })
   assert.deepEqual(prompt.state.sent, [])
   assert.match(prompt.notes.join('\n'), /Closed since you last read the inbox:\n- "Ship it\?" → Yes/)
+})
+
+test('a row the tab holds keeps its closed record through more closes than the Closed list keeps, from the agent’s tools and the per-reply update, and its reply still sends', async () => {
+  const { dir, calls, call } = await setup(0)
+  const others = Array.from({ length: 13 }, (_, n) => `i${n + 2}`)
+  await updateState(dir, 's1', s => ({
+    ...s,
+    ledger: {
+      ...s.ledger,
+      nextId: 15,
+      items: [...s.ledger.items, ...others.map(id => ({ ...s.ledger.items[0]!, id, ask: `Ship ${id}?` }))],
+    },
+  }))
+  const holds = { replies: { i1: 50 }, discarded: {} }
+  const agent = { 'x-codex-turn-metadata': { session_id: 's1', turn_id: 't1' } }
+  await call('inbox_view', holds, { thread_id: 's1' })
+  await call('close', { id: 'i1', reason: 'settled in chat' }, agent)
+  for (const id of others.slice(0, 7)) await call('close', { id, reason: 'done' }, agent)
+  const update = parseReply(
+    others
+      .slice(7)
+      .map(id => `CLOSED: ${id} | done`)
+      .join('\n'),
+  )!
+  await updateState(dir, 's1', s => ({ ...s, ledger: applyUpdate(s.ledger, update, 100, 1) }))
+
+  assert.deepEqual(
+    (await readState(dir, 's1')).ledger.closed.map(c => c.id),
+    ['i1', ...others.slice(1)],
+  )
+  const r = await call(
+    'inbox_press',
+    { press: { action: 'type', id: 'i1', text: 'Ship it anyway' }, thread: 's1', ...holds },
+    { thread_id: 's1' },
+  )
+  assert.equal(r.result.structuredContent.note, null)
+  assert.deepEqual(
+    calls.filter(c => c[1] === 'queue'),
+    [['/apps/codex', 'queue', '--thread', 's1', '--message', 'Re "Ship it?": Ship it anyway']],
+  )
 })
 
 test('a press drawn in another thread, or on a row that changed, reads stale and sends and saves nothing', async () => {
