@@ -1,6 +1,6 @@
 # Inbox instructions: review and plan
 
-Status: building. Closed findings and findings kept open until Claude closes them are built. The decisions under "Still open" are not settled.
+Status: building. The decisions below are not settled.
 
 Goal: each instruction the mod gives has one role, each rule is written in one
 place, and findings reach the Findings tab at the right time and leave it with
@@ -8,7 +8,7 @@ a record.
 
 ## What each instruction is for
 
-Claude reads eight kinds of text from the mod. The inbox model, the Sonnet call
+Claude reads seven kinds of text from the mod. The inbox model, the Sonnet call
 that updates the inbox after each reply, reads two.
 
 | Text | Read by | When | Role |
@@ -19,7 +19,6 @@ that updates the inbox after each reply, reads two.
 | Inbox line (`inboxText`, `closedText`) | Claude | Beside a prompt, when the inbox changed | Open items and findings with ids; what closed since, with when to ask again |
 | Answer line (`answerNote`) | Claude | Beside a prompt that answers numbered items | Which items the numbers mean |
 | Start-of-context block (`carryText`) | Claude | At session start and after compaction | Goal, done, now, open items, findings, recently closed; a later inbox line replaces it |
-| Previous-session text (`carryText`) | Claude | First prompt after "Continue from it" | Where the last session stood, its findings marked as that session's |
 | Button messages | Claude, as your message | When you press | One action on one item, finding or PR row |
 | `systemText` | Inbox model | After each reply | Card, new items, closing items and findings |
 | `catchUpPrompt` | A fork of the conversation | After a failed update, or a mid-conversation load | Same as `systemText`, over the whole conversation |
@@ -41,35 +40,23 @@ that updates the inbox after each reply, reads two.
   again.
 - A dismissed question carries "Ask it again only if the user brings it up" on
   its own line.
-- The previous session's findings are labeled "Findings that session
-  recorded", so Claude does not take them for its own.
 - `record_finding` answers with the new finding's id, so Claude can close it
   in the same turn.
+- Every way a finding leaves goes to Closed with its outcome, and the inbox
+  line tells Claude, so a dismissed finding is not recorded again.
+- Fix, File issue, Discuss and Reply keep the finding open until Claude
+  closes it. Dismiss closes it.
+- The inbox model closes a finding only with a `FIXED` line, when the
+  conversation shows a change fixed it. A `CLOSED` line no longer closes one.
+  The measurements are in `docs/plans/prompt-audit.md`.
 
 ## Still open
 
-1. **A finding leaves without a record.** Every way out deletes it: Claude's
-   `close`, the inbox model's `CLOSED` line, and your Address it, Discuss,
-   Type a reply and Dismiss. Items move to Closed with their outcome. Findings
-   do not. You cannot see who closed a finding. Claude cannot tell a dismissed
-   finding from one never recorded, so a dismissed finding can come back. And
-   Address it and Discuss remove the finding when you press, so it is gone if
-   the work stops partway.
-2. **The inbox model closes findings nobody acted on.** Its rule closes a
-   finding the person "dealt with or set aside". Measured with Sonnet: when
-   the person wrote "don't worry about the README thing for now", it closed
-   that finding in 3 of 3 runs. Rewording the rule kept the finding open, but
-   also made the model re-add questions the person had dismissed: 5 of 23 runs
-   across three rewordings, against 0 of 21 with the current text. So the fix
-   is decision 3, not another rewording.
-3. **Continuing from a previous session leaves its findings behind.** Claude
-   sees them, without ids. They never reach this session's tab, and Claude
-   cannot close them.
-4. **The roadmap would replace Findings.** ROADMAP.md plans "Claude's calls
+1. **The roadmap would replace Findings.** ROADMAP.md plans "Claude's calls
    replace Findings": the tab becomes a list of calls Claude made, shown as
    "question → choice, not alternative". That is a different purpose from the
    one agreed for Findings.
-5. **Nothing measures misses.** A finding Claude never records leaves no
+2. **Nothing measures misses.** A finding Claude never records leaves no
    trace.
 
 The inbox model's input still calls closed items `<decided>`, "items the
@@ -78,23 +65,11 @@ model re-added a dismissed question in 4 of 5 runs.
 
 ## Proposed changes
 
-1. Every way a finding leaves goes to Closed with its outcome: dismissed,
-   fixed, or no longer applies. The inbox line tells Claude, as it does for
-   items, so a dismissed finding is not recorded again.
-2. Claude closes findings, and you close them from the tab. The inbox model
-   does not.
-3. Address it and Discuss keep the finding open, marked as sent, until Claude
-   closes it.
-4. "Continue from it" moves the previous session's open findings into this
-   session's tab, with new ids.
-5. Optional: at turn end, a reply that says it left something untested or
+1. Optional: at turn end, a reply that says it left something untested or
    unfixed, with no finding recorded that turn, is sent back once. It catches
    misses, at the cost of some false alarms.
 
 ## Decisions
 
 1. Roadmap: drop "Claude's calls replace Findings", or keep it?
-2. Address it and Discuss: keep the finding open until Claude closes it, or
-   remove it on press as now?
-3. Inbox model: decided. It closes a finding only with a `FIXED` line, when the conversation shows the finding was fixed, and a `CLOSED` line no longer closes one. The measurements are in `docs/plans/prompt-audit.md`.
-4. Turn-end check for unrecorded findings: build it, or leave it out?
+2. Turn-end check for unrecorded findings: build it, or leave it out?
