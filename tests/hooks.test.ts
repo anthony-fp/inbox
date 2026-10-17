@@ -97,7 +97,6 @@ let storeSetRefusal: string | undefined
 let toolRefusal: string | undefined
 let commandRefusal: string | undefined
 let panesOpened: string[] = []
-let panesClosed: string[] = []
 
 async function runBeforeAct() {
   const act = beforeAct
@@ -143,7 +142,6 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   toolRefusal = undefined
   commandRefusal = undefined
   panesOpened = []
-  panesClosed = []
   on('store.get', async ($, e) => {
     if (e.key.startsWith('s:')) await storeHold?.()
     if (storeRefusal && e.key.startsWith('s:')) return { deny: storeRefusal }
@@ -187,10 +185,7 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
     panesOpened.push(e.id)
     return { value: { isPlaced: true as const } }
   })
-  on('ui.close', ($, e) => {
-    panesClosed.push(e.id)
-    return { value: undefined }
-  })
+  on('ui.close', () => ({ value: undefined }))
   on('ui.toast', ($, e) => {
     toasts.push(e.text)
     return { value: undefined }
