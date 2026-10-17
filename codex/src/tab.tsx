@@ -142,6 +142,7 @@ const discarded = new Map<string, number>()
 const optionsShown = new Set<string>()
 const unfolded = new Set<FoldGroup>()
 const sending = new Map<string, string>()
+const SENDING = 'Sending…'
 const latestPress = new Map<string, number>()
 const errors = new Map<string, string>()
 const notes = new Map<string, { text: string; at: number }>()
@@ -570,7 +571,7 @@ function isNotSent(v: View, id: string): boolean {
   )
 }
 
-async function act(rowId: string, press: RowPress | PrPress, onSent?: () => void, pending = 'Sending…') {
+async function act(rowId: string, press: RowPress | PrPress, onSent?: () => void, pending = SENDING) {
   if (isDisposed) return
   const generation = viewGeneration
   const seq = ++requested
@@ -1059,12 +1060,13 @@ function ListRow({ row, track, onSelect, now }: { row: Row; track: RowTrack; onS
   const handle = <span class={`mark ${row.handleTone ?? ''}`}>{row.handle}</span>
 
   const pending = sending.get(row.id)
+  const isSending = pending === SENDING
   const f = isFeedbackShown(row) ? row.feedback : null
-  const label = pending ?? (f ? feedbackLabel(row) : null)
+  const label = isSending ? null : (pending ?? (f ? feedbackLabel(row) : null))
   const ageAt = !pending && f && hasAge(f) ? f.at : null
   const isInSide = ageAt !== null && !isSelected && !isClosing && f?.is !== 'queued' && f?.is !== 'unconfirmed'
   const last = isInSide ? null : label
-  const side = ageAt !== null ? shortAgo(now - ageAt) : last ? null : row.age
+  const side = isSending ? SENDING : ageAt !== null ? shortAgo(now - ageAt) : last ? null : row.age
   const afterTone = !pending && isFailure(row.feedback) ? 'error' : undefined
 
   return (
@@ -1094,12 +1096,12 @@ function ListRow({ row, track, onSelect, now }: { row: Row; track: RowTrack; onS
             </span>
           ) : null}
         </button>
-        {isSelected || isClosing ? <Panel row={row} isClosing={isClosing} /> : null}
       </div>
-      <span class="side">
+      <span class="side" data-room={SENDING}>
         {isInSide ? <span class="side-label">{label}</span> : null}
         {side}
       </span>
+      {isSelected || isClosing ? <Panel row={row} isClosing={isClosing} /> : null}
     </div>
   )
 }

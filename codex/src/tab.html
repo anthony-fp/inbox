@@ -256,6 +256,14 @@
         color: var(--age);
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
+        text-align: right;
+      }
+      .side[data-room]::after {
+        content: attr(data-room);
+        display: block;
+        height: 0;
+        overflow: hidden;
+        visibility: hidden;
       }
       .side-label {
         display: inline-block;
@@ -279,6 +287,9 @@
         flex-direction: column;
         gap: 8px;
         padding: 8px 0 2px;
+      }
+      .row > .panel {
+        grid-column: 2 / -1;
       }
       .content.tight {
         display: flex;
