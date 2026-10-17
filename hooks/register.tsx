@@ -3,6 +3,7 @@ import type {
   EngineInterface,
   Register,
   SessionAppendMessage,
+  Timer,
   UiCopyResult,
   RenderSurface,
   UiPressArgument,
@@ -541,6 +542,7 @@ let trigger: string | null = null
 let isTurnRunning = false
 let isOn = false
 let turningOn: Promise<void> | null = null
+let intervals: Timer[] = []
 let press: Press | null = null
 let sentBack: string[] = []
 let turnBox: string | null = null
@@ -2428,12 +2430,15 @@ async function initializeInbox($: EngineInterface) {
   ])
   // A pane kept across a hot reload is already drawn.
   if (toolsRefused) await redrawPane($)
-  $.clock.every(60_000, () => {
-    void tick($)
-  })
-  $.clock.every(PR_POLL_MS, () => {
-    void pollPrs($)
-  })
+  for (const interval of intervals) interval.cancel()
+  intervals = [
+    $.clock.every(60_000, () => {
+      void tick($)
+    }),
+    $.clock.every(PR_POLL_MS, () => {
+      void pollPrs($)
+    }),
+  ]
   await loadConversation($, await $.session.id())
   // After loadConversation, which brings saved state up to date.
   await redrawAfterReload($)

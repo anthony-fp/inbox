@@ -171,7 +171,7 @@ on('session.attach', { surface: 'desktop' }, async ($, e, next) => {
 ```
 
 - `session.start` is at `hooks/register.tsx:on('session.start')`, the gate inside it, `session.attach` at `hooks/register.tsx:on('session.attach')`. Commit `05c3548` added the desktop gate.
-- It handles the attach arriving before or after the start. `hooks/register.tsx:turnOn` shares one `turningOn` promise, so two calls that overlap run `hooks/register.tsx:initializeInbox` once. `initializeInbox` sets `isOn`. `hooks/register.tsx:ensureOn` returns early when `isOn` is set or `turningOn` is pending. The start path calls `turnOn` without that check, so a start that follows a finished attach runs `initializeInbox` again. Not verified.
+- It handles the attach arriving before or after the start. `hooks/register.tsx:turnOn` shares one `turningOn` promise, so two calls that overlap run `hooks/register.tsx:initializeInbox` once. `initializeInbox` sets `isOn`. `hooks/register.tsx:ensureOn` returns early when `isOn` is set or `turningOn` is pending. The start path calls `turnOn` without that check, so a start that follows a finished attach runs `initializeInbox` again. That run cancels the intervals the first one started before it starts its own. Whether a start can follow an attach is not verified.
 - Tests: `tests/hooks.test.ts` test "a headless run stays inactive when ${origin.kind} invokes the inbox command" checks that a headless start does nothing. The tests `tests/hooks.test.ts` "the desktop app turns the mod on when it attaches before the start" and "… after the start" check a desktop attach in both orders and mount the band with `surface: 'desktop'`.
 
 ## The desktop app
