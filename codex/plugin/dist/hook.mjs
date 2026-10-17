@@ -171,13 +171,13 @@ function answerNote(ledger, text) {
   }
   return lines.length === 0 ? null : ["inbox: the user's message answers these open items from your earlier replies:", ...lines].join(NL);
 }
-function itemLine(item, withId) {
-  return `- ${withId ? `[${item.id}] ` : ""}${item.label ? `(${item.label}) ` : ""}${describe(item)}`;
+function itemLine(item) {
+  return `- [${item.id}] ${item.label ? `(${item.label}) ` : ""}${describe(item)}`;
 }
-function findingLine(finding, withId) {
-  return `- ${withId ? `[${finding.id}] ` : ""}${finding.kind}: ${finding.title}`;
+function findingLine(finding) {
+  return `- [${finding.id}] ${finding.kind}: ${finding.title}`;
 }
-function carryText(ledger, title, isOwn = false) {
+function carryText(ledger, title) {
   const findings = ledger.findings;
   if (!ledger.card && ledger.items.length === 0 && findings.length === 0) return null;
   const out = [title];
@@ -189,11 +189,11 @@ function carryText(ledger, title, isOwn = false) {
   }
   if (ledger.items.length > 0) {
     out.push("Waiting on the user:");
-    for (const item of ledger.items) out.push(itemLine(item, isOwn));
+    for (const item of ledger.items) out.push(itemLine(item));
   }
   if (findings.length > 0) {
-    out.push(isOwn ? "Findings you recorded, still open:" : "Findings that session recorded, still open:");
-    for (const f of findings) out.push(findingLine(f, isOwn));
+    out.push("Findings you recorded, still open:");
+    for (const f of findings) out.push(findingLine(f));
   }
   if (ledger.closed.length > 0) {
     out.push("Recently closed:");
@@ -205,13 +205,13 @@ function inboxText(host, ledger, isOpen) {
   const out = ["inbox: what waits on the user, as of your last reply. Anything not listed here is closed."];
   if (ledger.items.length > 0) {
     out.push("Waiting on the user:");
-    for (const item of ledger.items) out.push(itemLine(item, true));
+    for (const item of ledger.items) out.push(itemLine(item));
   } else {
     out.push("Nothing is waiting on the user.");
   }
   if (ledger.findings.length > 0) {
     out.push("Findings you recorded, still open:");
-    for (const f of ledger.findings) out.push(findingLine(f, true));
+    for (const f of ledger.findings) out.push(findingLine(f));
   }
   out.push(isOpen ? `The user has ${host.surface} open beside the conversation.` : `${surfaceAtStart(host)} is closed.`);
   return out.join(NL);
@@ -354,7 +354,7 @@ function isTabOpen(s, now) {
   return now - s.tabSeenAt < TAB_OPEN_MS;
 }
 function startContext(s, source) {
-  const carried = carryText(s.ledger, START_TITLE, true);
+  const carried = carryText(s.ledger, START_TITLE);
   const parts = [source === "resume" ? null : guidanceText(CODEX), carried].filter((x) => x !== null);
   return parts.length > 0 ? parts.join("\n\n") : null;
 }

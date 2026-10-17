@@ -2808,7 +2808,7 @@ export const register: Register = on => {
   on('prompt.context', async ($, e, next) => {
     const r = await next(e)
     if (!isOn) return r
-    const text = carryText(await read($, LEDGER), START_TITLE, true)
+    const text = carryText(await read($, LEDGER), START_TITLE)
 
     return text ? { ...r, blocks: [...r.blocks, { name: 'inbox', text }] } : r
   })

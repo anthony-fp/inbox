@@ -282,15 +282,15 @@ export function answerNote(ledger: Ledger, text: string): string | null {
     : ["inbox: the user's message answers these open items from your earlier replies:", ...lines].join(NL)
 }
 
-function itemLine(item: Item, withId: boolean): string {
-  return `- ${withId ? `[${item.id}] ` : ''}${item.label ? `(${item.label}) ` : ''}${describe(item)}`
+function itemLine(item: Item): string {
+  return `- [${item.id}] ${item.label ? `(${item.label}) ` : ''}${describe(item)}`
 }
 
-function findingLine(finding: Finding, withId: boolean): string {
-  return `- ${withId ? `[${finding.id}] ` : ''}${finding.kind}: ${finding.title}`
+function findingLine(finding: Finding): string {
+  return `- [${finding.id}] ${finding.kind}: ${finding.title}`
 }
 
-export function carryText(ledger: Ledger, title: string, isOwn = false): string | null {
+export function carryText(ledger: Ledger, title: string): string | null {
   const findings = ledger.findings
   if (!ledger.card && ledger.items.length === 0 && findings.length === 0) return null
   const out = [title]
@@ -302,11 +302,11 @@ export function carryText(ledger: Ledger, title: string, isOwn = false): string 
   }
   if (ledger.items.length > 0) {
     out.push('Waiting on the user:')
-    for (const item of ledger.items) out.push(itemLine(item, isOwn))
+    for (const item of ledger.items) out.push(itemLine(item))
   }
   if (findings.length > 0) {
-    out.push(isOwn ? 'Findings you recorded, still open:' : 'Findings that session recorded, still open:')
-    for (const f of findings) out.push(findingLine(f, isOwn))
+    out.push('Findings you recorded, still open:')
+    for (const f of findings) out.push(findingLine(f))
   }
   if (ledger.closed.length > 0) {
     out.push('Recently closed:')
@@ -320,13 +320,13 @@ export function inboxText(host: Host, ledger: Ledger, isOpen: boolean): string {
   const out = ['inbox: what waits on the user, as of your last reply. Anything not listed here is closed.']
   if (ledger.items.length > 0) {
     out.push('Waiting on the user:')
-    for (const item of ledger.items) out.push(itemLine(item, true))
+    for (const item of ledger.items) out.push(itemLine(item))
   } else {
     out.push('Nothing is waiting on the user.')
   }
   if (ledger.findings.length > 0) {
     out.push('Findings you recorded, still open:')
-    for (const f of ledger.findings) out.push(findingLine(f, true))
+    for (const f of ledger.findings) out.push(findingLine(f))
   }
   out.push(isOpen ? `The user has ${host.surface} open beside the conversation.` : `${surfaceAtStart(host)} is closed.`)
 

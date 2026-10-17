@@ -30,7 +30,7 @@ export function isTabOpen(s: SessionState, now: number): boolean {
  * its start, so it gets only where the session stands. Null when that is empty.
  */
 export function startContext(s: SessionState, source: string | undefined): string | null {
-  const carried = carryText(s.ledger, START_TITLE, true)
+  const carried = carryText(s.ledger, START_TITLE)
   const parts = [source === 'resume' ? null : guidanceText(CODEX), carried].filter((x): x is string => x !== null)
 
   return parts.length > 0 ? parts.join('\n\n') : null
