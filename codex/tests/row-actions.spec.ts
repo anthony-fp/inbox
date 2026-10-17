@@ -190,7 +190,7 @@ test('the Codex renderer preserves retry, folded-option and finding action order
   )
   assert.deepEqual(
     buttons(root).map(b => b.textContent),
-    ['Fix', 'File issue', 'Discuss', 'Reply', 'Dismiss'],
+    ['Fix', 'File issue', 'Reply', 'Explain', 'Discuss', 'Dismiss'],
   )
   await act(() => named(root, 'Discuss').click())
   const discussed = discussion as PressResult | null

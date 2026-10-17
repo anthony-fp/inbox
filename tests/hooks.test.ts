@@ -2756,6 +2756,41 @@ const inOrder = (drawn: string[], plan: string[]) => {
   return true
 }
 
+test('no two buttons on a row share a hotkey, for every row kind in the demo', async () => {
+  const { ledger, lastActions, notes, turns, prViews } = demoView(1_000_000)
+  const view = inboxView({
+    ledger,
+    lastActions,
+    notes,
+    turns,
+    extraSteps: {},
+    settleWindowMs: SETTLED_MS,
+    status: perTurnStatus({ isUpdating: false, isFailed: false, retries: true }),
+    now: 1_000_000,
+  })
+  const itemRows = [...view.needsYou.questions, ...view.needsYou.tasks, ...view.findings.rows].map(row => {
+    const { keys, more } = rowKeyPlan(row, true)
+    return {
+      id: row.id,
+      type: row.type,
+      hotkeys: [...keys, ...more].flatMap(k => ('hotkey' in k && k.hotkey !== undefined ? [k.hotkey] : [])),
+    }
+  })
+  const isSent = threadSentIn(lastActions)
+  const prRows = Object.values(prViews.views).flatMap(pr => [
+    { id: `PR #${pr.number}`, actions: prBlockActions(pr, isSent, prViews.branchRef, lastActions) },
+    ...waitingThreads(pr).map(t => ({ id: prThreadId(pr, t), actions: threadActions(pr, t, lastActions) })),
+    ...failingChecks(pr).map(c => ({ id: prCheckId(pr, c), actions: checkActions(pr, c, lastActions) })),
+  ])
+  const rows = [
+    ...itemRows,
+    ...prRows.map(r => ({ id: r.id, hotkeys: r.actions.flatMap(a => (a.hotkey ? [a.hotkey] : [])) })),
+  ]
+  expect(new Set(itemRows.map(r => r.type))).toEqual(new Set(['question', 'task', 'finding']))
+  expect(prRows.length).toBeGreaterThan(1)
+  for (const row of rows) expect(row.hotkeys, row.id).toEqual([...new Set(row.hotkeys)])
+})
+
 test('every row in the demo, on every tab, draws its plan’s buttons in the plan’s order in the terminal and desktop looks', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])

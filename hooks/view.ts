@@ -373,7 +373,7 @@ const ACTION_KEYS: Partial<Record<RowPress['action'], string>> = {
   issue: 'i',
   type: 't',
   explain: 'e',
-  discuss: 'e',
+  discuss: 'd',
   dismiss: 'x',
 }
 
@@ -420,8 +420,9 @@ function actionsOf(
     return [
       action({ action: 'address', id }, row.finding ? fixLabel(row.finding) : 'Fix', 'handoff'),
       action({ action: 'issue', id }, ISSUE_LABEL, 'handoff'),
-      action({ action: 'discuss', id }, 'Discuss', 'talk'),
       action({ action: 'type', id, text: '' }, 'Reply', 'handoff'),
+      action({ action: 'explain', id }, 'Explain', 'talk'),
+      action({ action: 'discuss', id }, 'Discuss', 'talk'),
       action({ action: 'dismiss', id }, 'Dismiss', 'mark'),
     ]
   if (item.kind === 'task')

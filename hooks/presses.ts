@@ -705,6 +705,8 @@ function pressed(
         return sendFinding('handoff', messages.finding(finding, 'address'))
       case 'issue':
         return sendFinding('handoff', messages.finding(finding, 'issue'))
+      case 'explain':
+        return sendFinding('talk', messages.finding(finding, 'explain'))
       case 'discuss':
         return sendFinding('talk', messages.finding(finding, 'discuss'))
       case 'type': {
@@ -797,15 +799,17 @@ export const messages = {
   /**
    * A close reason is cut at 80 characters, so filing asks for the issue's key there.
    */
-  finding: (finding: Finding, how: 'address' | 'issue' | 'discuss' | 'typed', words = '') => {
+  finding: (finding: Finding, how: 'address' | 'issue' | 'explain' | 'discuss' | 'typed', words = '') => {
     const opening =
       how === 'address'
         ? 'Please address this finding you recorded:'
         : how === 'issue'
           ? "Please file an issue for this finding you recorded, in the issue tracker you have tools for. First check whether one already exists, and if it does, use it instead of filing a duplicate. Then close the finding with the issue's key or number as the reason, and give me its link. If you have no tools for an issue tracker, say so and leave the finding open."
-          : how === 'discuss'
-            ? "Let's talk through this finding you recorded before changing anything:"
-            : 'About this finding you recorded:'
+          : how === 'explain'
+            ? "Remind me what this finding you recorded is about: why it matters, what fixing it would involve, and whether you would fix it now. Don't act on it yet."
+            : how === 'discuss'
+              ? "Let's talk through this finding you recorded before changing anything:"
+              : 'About this finding you recorded:'
 
     return [opening, ...findingBody(finding), ...(how === 'typed' ? ['', words] : [])].join('\n')
   },

@@ -111,8 +111,9 @@ Bugs, risks and ideas the agent noticed outside the task it's working on. The
 agent records them and carries on with its task, and you decide later which
 ones to act on. Fix on an issue, or Do it on an idea, hands it to the agent.
 File issue has the agent file it in your issue tracker, such as Linear or
-GitHub, or link the issue that already covers it. Discuss talks it through,
-and Dismiss drops it.
+GitHub, or link the issue that already covers it. Reply sends your own words
+about it. Explain has the agent say why it matters and what fixing it would
+involve, without acting. Discuss talks it through, and Dismiss drops it.
 
 ### PRs
 

@@ -313,7 +313,7 @@ export function threadActions(pr: PrView, t: PrThread, lastActions: Record<strin
       label: again(lastActions, id, 'thread-discuss', 'Discuss'),
       kind: 'talk',
       emphasis: 'quiet',
-      hotkey: 'e',
+      hotkey: 'd',
       isFollowUp: true,
     },
   ]
