@@ -1110,10 +1110,7 @@ function rowActions(row: Row): { keys: Key[]; more: Key[] } {
 
 // ── Drawing ─────────────────────────────────────────────────────────────────
 
-/**
- * One of the open row's actions. A click right after the row opened does
- * nothing; its key works at once. Keys are an extra, so no key text shows.
- */
+/** One of a PR block's actions. Keys are an extra, so no key text shows. */
 function KeyButton({ k }: { k: Key }) {
   return <ActionButton action={k} isBlocked={() => false} />
 }

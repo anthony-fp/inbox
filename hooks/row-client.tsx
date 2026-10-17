@@ -47,7 +47,7 @@ export type RowProps = {
 
 type State = { hover: boolean; pressed: boolean }
 
-/** A title clipped shorter than this reads as nothing, so `after` is cut instead. */
+/** A title clipped shorter than this reads as nothing, so a title keeps at least this many characters. */
 const MIN_TITLE = 12
 /** The columns a frame's border takes from its content, both sides together. */
 const FRAME_CELLS = 4
