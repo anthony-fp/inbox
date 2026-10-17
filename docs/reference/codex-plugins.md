@@ -512,8 +512,9 @@ is ever listed publicly.
     (codex/src/server.ts:toolsFor).
   - "Do not request the full conversation history … Your MCP server must not
     pull, reconstruct, or infer the full chat log from the client or
-    elsewhere." [inference] The per-reply update reads the transcript, which
-    would fail review.
+    elsewhere." The per-reply update reads the Stop hook's `last_assistant_message`
+    and the tool activity the hooks noted, not the transcript
+    (codex/src/hook.ts:handleHook).
   - Responses must not include "session IDs, trace IDs, request IDs,
     timestamps" unless needed.
   - "Do not use discovery, operation selection, or schema fetching with a
@@ -648,7 +649,7 @@ Notes per event:
   request", including mid-turn. "If the hook returns `continue: false`, Codex
   ends the turn without sending another model request." (L/hooks#sessionstart)
   The inbox's SessionStart hook has no matcher, so it fires on compact
-  (codex/plugin/hooks/hooks.json:3-7).
+  (the `SessionStart` block of codex/plugin/hooks/hooks.json).
 - **SessionStart `fork`.** The schema on `main` adds a fifth source, `fork`
   [source] (GH/codex-rs/hooks/schema/generated/session-start.command.input.schema.json).
   The docs list four. The hooks page warns that "main branch schemas may
@@ -707,7 +708,7 @@ Notes per event:
   (docs/plans/codex-plugin.md:373-378). The exit code is in the transcript
   instead (see "Transcripts").
 - **The repo's matcher** is `Bash|apply_patch|mcp__.*` on PreToolUse
-  (codex/plugin/hooks/hooks.json:13-17).
+  (the `PreToolUse` block of codex/plugin/hooks/hooks.json).
 
 ### Input
 
@@ -792,7 +793,7 @@ Notes per event:
   limited to one through three seconds" (L/hooks#interrupt). "`SessionEnd`
   hooks always run synchronously, even when `async` is `true`."
   (L/hooks#sessionend) The repo's Stop hook sets `timeout: 60` and no `async`
-  (codex/plugin/hooks/hooks.json:19-29).
+  (the `Stop` block of codex/plugin/hooks/hooks.json).
 - **Handlers.** "`command` and `mcp_tool` handlers are supported. `prompt` and
   `agent` handlers are parsed but skipped." "Commands run with the session cwd
   as their working directory." Other fields: `statusMessage`,
@@ -1169,9 +1170,10 @@ without the model calling it. The Inbox tab is a thread entrypoint.
 - "Treat `_meta` as hidden from the model, not as a substitute for
   authorization or secure storage." (D/build/mcp-server#return-useful-results-without-ui)
 - [inference] If Codex follows D/reference, every tab open puts the whole
-  inbox view into the transcript, because the `inbox` tool returns it in
-  `structuredContent` (codex/src/server.ts:170-172). What Codex actually does
-  is [unknown].
+  inbox view into the transcript, because the `inbox_view` tool returns it in
+  `structuredContent` (codex/src/server.ts:callTool). The `inbox` tool, which
+  the model calls, returns plain text (codex/src/texts.ts:inboxToolText).
+  What Codex actually does is [unknown].
 - **Split render and data tools.** "Only the render tool should include
   `_meta.ui.resourceUri`." "Let the UI call data tools directly for local
   interactions … without remounting the widget." (D/build/chatgpt-ui#decoupled-pattern)
@@ -1747,8 +1749,8 @@ These overlap with what the inbox shows.
 
 `transcript_path` points to a JSONL file of the thread. "the transcript
 format isn't a stable interface for hooks and may change over time."
-(L/hooks#common-input-fields) The inbox reads it for check results and to
-detect `exec` runs.
+(L/hooks#common-input-fields) The inbox reads it only to detect
+`exec` runs.
 
 - **Command ends.** Every command's end is an `event_msg` / `item_completed`
   with `item.type: "CommandExecution"`; its `id` equals the hook's
@@ -1757,8 +1759,9 @@ detect `exec` runs.
 - **Item fields** [live 2026-10-08, 1,525 items]: `aggregated_output`,
   `command` (always an argv list), `cwd` (always a `file://` URL), `duration`,
   `exit_code`, `formatted_output`, `id`, `parsed_cmd`, `process_id`, `source`,
-  `status`, `stderr`, `stdout`, `type`. The code reads `aggregated_output`,
-  unwraps `sh -c`, and converts `file://` (codex/src/transcript.ts:44-62, :81).
+  `status`, `stderr`, `stdout`, `type`. The code reads none of them.
+  `isNonInteractiveRun` reads only the first line of the file, `session_meta`
+  (codex/src/transcript.ts:isNonInteractiveRun).
 - **Row types** [live 2026-10-08]: `session_meta`, `response_item`,
   `event_msg`, `world_state`, `turn_context`, `token_usage_record`,
   `compacted`, `inter_agent_communication_metadata`. All 60 recent threads have
@@ -1999,7 +2002,7 @@ repo, and a probe client speaking app-server JSON-RPC over stdio.
 | `session_meta.source` (repo) | codex-plugin.md:331: desktop transcripts have `source: "vscode"`. Live: 8 of 58 desktop transcripts do; the rest are subagent threads. Whether this and the 60-transcript count in "Session, thread and turn ids" (9 top-level) are the same sample is not recorded [unknown] | Both | True for top-level threads only. |
 | Mode switcher copy | L/sandboxing (IDE-extension tab) still shows "Chat / Agent / Agent (full access)". The mode pickers on L/sandboxing and L/permission-modes show a "Do anything" label that is not in their mode list | n/a | Leftover UI copy. |
 | Listing translations | D/deploy/submission#translate-listing-text: importing translations "doesn't yet change the text shown in the Plugins Directory or listing API responses" | n/a | A documented feature that is not live yet. |
-| Transcript item fields (repo) | codex-plugin.md:325 lists five fields. Live and code use `aggregated_output` and argv lists | Live | The plan's list is incomplete. |
+| Transcript item fields (repo) | codex-plugin.md:325 lists five fields. Live uses `aggregated_output` and argv lists | Live | The plan's list is incomplete. |
 
 ## Unknown, and how to check
 

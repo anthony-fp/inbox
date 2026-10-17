@@ -159,18 +159,19 @@ The inbox's gate (`hooks/register.tsx`, live 2026-10-08):
 
 ```ts
 on('session.start', async ($, e, next) => {
+  await registerInboxCommand($)
   const r = await next(e)
   if (e.isInteractive || (await $.session.surfaces()).includes('desktop')) await turnOn($)
   return r
 })
 on('session.attach', { surface: 'desktop' }, async ($, e, next) => {
-  if (!isOn) await turnOn($)
+  await ensureOn($)
   return next(e)
 })
 ```
 
 - `session.start` is at `hooks/register.tsx:on('session.start')`, the gate inside it, `session.attach` at `hooks/register.tsx:on('session.attach')`. Commit `05c3548` added the desktop gate.
-- It handles the attach arriving before or after the start. Inference: if both paths see `desktop` before `isOn` is set, `turnOn` could run twice. `turnOn` sets `isOn` at `:1878`, but the start path does not check `isOn` first. Not verified.
+- It handles the attach arriving before or after the start. `hooks/register.tsx:turnOn` shares one `turningOn` promise, so two calls that overlap run `hooks/register.tsx:initializeInbox` once. `initializeInbox` sets `isOn`. `hooks/register.tsx:ensureOn` returns early when `isOn` is set or `turningOn` is pending. The start path calls `turnOn` without that check, so a start that follows a finished attach runs `initializeInbox` again. Not verified.
 - Tests: `tests/hooks.test.ts` test "a headless run stays inactive when ${origin.kind} invokes the inbox command" checks that a headless start does nothing. The tests `tests/hooks.test.ts` "the desktop app turns the mod on when it attaches before the start" and "… after the start" check a desktop attach in both orders and mount the band with `surface: 'desktop'`.
 
 ## The desktop app
@@ -424,7 +425,7 @@ What survives what:
 
 - To reload after a switch, hook `classic.SessionStart` with `source: ['clear','resume','fork']`. [IF#load-a-saved-value-again-after-clear]
 - The inbox does this at `hooks/register.tsx:on('classic.SessionStart')`. `$.session.id()` still names the previous conversation there, so the inbox reads the new id from `e.session_id` (commit `f23d9ad`; see the comment in that handler). Live on 2.1.295: a `--debug-file` log of an in-session `/resume` showed `$.session.id()` returning the old id, even after `next(e)`.
-- The inbox's `session.end` (`hooks/register.tsx:on('session.end')`) runs seven `$.state` updates plus `publishStatus($, true)`. `publishStatus` runs `herdr pane report-metadata` through `$.process.run` with `timeoutMs: 5000`, only when `HERDR_PANE_ID` is set (`hooks/register.tsx:publishStatus`). Inference: that 5 s timeout exceeds the 1.5 s bound, so the call can be cut off at session end.
+- The inbox's `session.end` (`hooks/register.tsx:on('session.end')`) runs four `$.state` updates plus `publishStatus($, true)`. `publishStatus` runs `herdr pane report-metadata` through `$.process.run` with `timeoutMs: 5000`, only when `HERDR_PANE_ID` is set (`hooks/register.tsx:publishStatus`). Inference: that 5 s timeout exceeds the 1.5 s bound, so the call can be cut off at session end.
 - A worker crash ×3 unloads every non-built-in mod until `/reload-plugins`. [A]
 
 ## The hook function
@@ -464,7 +465,7 @@ From [R#events] unless marked.
 - `prompt.submit` notes: "If your hook returns a `drop` after its `next(e)` call let the prompt through, the turn still runs, and the hook fails". "Text from these hooks that changes between requests invalidates the prompt cache." [E#rewrite-or-add-to-a-prompt]
 - `PromptSubmitInput` is `{ text, attachments?, context?, turnId?, wait, origin }`. `origin` is set by the engine, and "no hook may set one". Context "past 100,000 characters (200,000 together)" is cut to a head and a path. [T: `PromptSubmitInput`]
 - `session.append`: `door` is one of prompt, command, response, tool-result, tool-message, delivery, attachment, hook-context, note, compaction, notice. A hook may rewrite `message.content` only. [T: `session.append`]
-- The inbox hooks (live grep): `command.run`, `config.set`, `prompt.compose`, `prompt.context`, `prompt.submit`, `session.append`, `session.attach`, `session.end`, `session.start`, `classic.SessionStart`, `classic.PermissionRequest`, `classic.Stop`, `tool.call` ×4, `tool.check` ×4, `tool.describe` ×3, `turn.complete`, `turn.start`, `ui.close`, `ui.render` ×2.
+- The inbox hooks (live grep): `command.run`, `config.set`, `prompt.compose`, `prompt.context`, `prompt.submit`, `session.append`, `session.attach`, `session.end`, `session.start`, `classic.SessionStart`, `classic.PermissionRequest`, `classic.Stop`, `classic.StopFailure`, `tool.call` ×3, `tool.describe` ×2, `turn.complete`, `turn.start`, `ui.close`, `ui.message`, `ui.press`, `ui.render` ×2, `ui.scroll`.
 
 ### Prompt origin (who sent a prompt)
 
@@ -507,7 +508,7 @@ Namespaces and methods. [R#mods-api-methods; T]
 - `status`: "One line under the prompt that stays until you change it. It starts with `⚠` and the mod's name". One per plugin. [A]
 - `log`: "A dim line in the transcript that Claude doesn't read". "a `-p` or SDK host receives it as `ui_log`". `{ to: 'debug' }` sends it to the debug log only. [A; T: `ui.log`]
 - `ask`: 2-4 options. Adds a free-text row and a **Chat about this** row. "resolves to the label the user picks", or typed text. Rejects "when the user dismisses the question or picks **Chat about this**, and in a `claude -p` run". Its wait doesn't count against the hook's time limit. [E#hold-a-tool-call-until-the-user-decides]
-- `copy`: "The terminal writes as `/copy` does; a remote surface has no path yet." Returns `{ isCopied: false, reason }` there. [T: `ui.copy`] The inbox copies with `surface: press.surface` (`hooks/register.tsx:perform`) and toasts "Could not copy to the clipboard" on failure. Inference: copy fails on desktop. Not verified.
+- `copy`: "The terminal writes as `/copy` does; a remote surface has no path yet." Returns `{ isCopied: false, reason }` there. [T: `ui.copy`] The inbox copies with `surface: press.surface` (`hooks/register.tsx:perform`) and `perform` returns `COPY_FAILURES[reason]` on failure, which the row shows in red. It raises no toast. Inference: copy fails on desktop. Not verified.
 - `selection`: "what the person last selected with the mouse … `undefined` … where none is seen: fullscreen off, -p, a surface that answers none". [T: `ui.selection`]
 - `panes`: "The engine's record, not the module's". [T]
 - `notify(text, { title })` (2.1.295 types only): a native notification through the user's `preferredNotifChannel`; resolves `{ isSent, channel }` or `{ isSent: false, reason }`. [T 2.1.295]
@@ -543,7 +544,7 @@ Namespaces and methods. [R#mods-api-methods; T]
 - `set` round-trips through JSON (a Date becomes a string, a Map becomes `{}`). It "Rejects a function, a cycle, or a store over 4 MiB". [T: `store`]
 - Live, file names only: store files are `~/.claude/plugins/store/<name>_<source>-<hash>.json`, where `<hash>` is the first 12 hex characters of sha256 of `<name>@<source>`. Verified for `inbox@inline` → `7e8589075f50`. So the store is keyed by plugin id, not name. Every folder copy named `inbox` shares `inbox@inline`. Inference: a marketplace install would be `inbox@<marketplace>` with a separate store, so a move to marketplace installs needs a store migration. The file was about 70 KB on 2026-10-08.
 - Inference: "every session on the machine" holds only for one `CLAUDE_CONFIG_DIR`.
-- The inbox saves per session under `s:${sessionId}` (`hooks/register.tsx:save`) and prunes to `KEPT_SESSIONS = 40` (`hooks/register.tsx:KEPT_SESSIONS`, used in `hooks/register.tsx:save`).
+- The inbox saves per session under `s:${owner.id}` (`hooks/register.tsx:save`) and prunes to `KEPT_SESSIONS = 40` (`hooks/register.tsx:KEPT_SESSIONS`, used in `hooks/register.tsx:save`).
 - `$.state`: "Named values held by the host for the session, each with a version: plain data that survives a hot reload of the plugin's code." A `get` in `ui.render` subscribes that render. "Any plugin reads any value; its owner alone writes it. Persist through `$.store`." `set` is refused during render and takes `ifVersion`. `plugin` and `key` must be literals. [T: `state`]
 
 ### `$.process`, `$.fs`, `$.http`, `$.session`
@@ -671,8 +672,8 @@ Sources: [R#render-sites; IF#change-what-claude-code-already-draws; T: render-si
   - `hover?`: "Refused outside a keyed Box unless it names a `scope`."
   - `plain`: "A desktop draws its native button either way."
   - 2.1.295 only: "Children of strings and `Text` (a chip, a dim part) are drawn in its place". `key` defaults to "the `label`, or the one string child". 2.1.294 allowed only "the one string child".
-- The inbox draws each pane key as a `Text` letter plus a `plain` Button labeled `": Label"` with no hotkey (`hooks/register.tsx:2856-2863`). The Buttons that carry the hotkeys sit in a `<Box display="none">` (`:2873-2874`, `:3728-3731`). `display` is in the types, not the docs.
-  - Inference: on desktop, which draws "its native button either way", the visible buttons may read ": Done" beside a stray letter. Whether desktop honors hotkeys on hidden Buttons is unknown.
+- In the terminal, the inbox draws each pane key as a `plain` Button that holds a `Text` letter and the label `": Label"`, with no hotkey (`hooks/register.tsx:keyedButton`). The Buttons that carry the hotkeys sit in a `<Box display="none">` (`hooks/register.tsx:keyBindings`). `display` is in the types, not the docs.
+  - On desktop, `hooks/register.tsx:keyedButton` draws only a native Button per action, with no letter and no hidden Box. Whether desktop honors hotkeys on hidden Buttons is unknown.
 
 ### Input and Select
 
@@ -831,7 +832,7 @@ A **settings hook** is a hook defined in a settings file or a plugin's `hooks/ho
 | `$.session.send` | Messages another session |
 
 - Hooks reviewers should look for: `tool.call` and `prompt.submit` (see and change every call and prompt), `session.append` ("can rewrite each row of the conversation before it's stored"), `ui.render{component=AskUserQuestion}`, and `tool.check` ("can approve or deny a tool call before a permission prompt appears"). [A#review-what-a-mod-can-do]
-- The inbox uses almost all of these (live grep, 2026-10-08): `$.process.run` at 9 sites in `hooks/register.tsx`, `$.model.complete`, `$.model.fork`, `$.prompt.submit`, `$.env.get`, `$.fs.write`, `$.store.*`, `$.tool.register`, `$.command.register`. It hooks `tool.check`, `session.append` and `prompt.submit`. It does not call `$.http.fetch`.
+- The inbox uses almost all of these (live grep, 2026-10-08): `$.process.run` at 9 sites in `hooks/register.tsx`, `$.model.complete`, `$.model.fork`, `$.prompt.submit`, `$.env.get`, `$.fs.write`, `$.store.*`, `$.tool.register`, `$.command.register`. It hooks `session.append` and `prompt.submit`. It does not call `$.http.fetch`.
   - Inference: the admin page's example policy mod refuses any user mod that calls `$.process.run` or `$.process.spawn` [A#enforce-a-policy-with-a-mod-of-your-own]. The inbox would fail that policy.
 
 ## Admin policy that can stop the mod
@@ -922,7 +923,7 @@ This section covers only the settings that touch plugins, hooks and mods. "Secur
 | Project `enabledPlugins: {"inbox@inbox": false}` | "Project settings take precedence over user settings". | [SETR#enabledplugins] |
 | Untrusted folder, interactive terminal | "no mod loads until they answer the trust prompt" | [A#know-which-controls-still-apply] |
 | `--safe-mode`, `--bare`, `CLAUDE_CODE_SIMPLE` | Installed mods off | [A; ENVV] |
-| A deny rule `mcp__*` or `mcp__inbox__*` | "A tool matched by a bare-name glob deny rule is removed from Claude's context." The inbox's `tool.check` allow never runs. | [P#manage-permissions] |
+| A deny rule `mcp__*` or `mcp__inbox__*` | "A tool matched by a bare-name glob deny rule is removed from Claude's context." | [P#manage-permissions] |
 | The mod worker crashes three times | "Claude Code unloads every mod that isn't built in … until the user runs `/reload-plugins` or starts a new session." | [A] |
 | Managed `disableSideloadFlags` | Rejects `--plugin-dir` and `CLAUDE_CODE_PLUGIN_DIRS`, so this machine's development setup fails on a managed machine. | [SETR#disablesideloadflags] |
 
@@ -1434,7 +1435,7 @@ The **status line** is "a customizable bar at the bottom of Claude Code that run
 - Input includes `session_id`, `transcript_path`, `cost`, `context_window`, `rate_limits`, `pr`. `cost.total_cost_usd` "Resets to $0 when `/clear` starts a new session." No field names the surface or client. [SL#available-data]
 - The page is written for the terminal. Whether it renders in the desktop app, the VS Code panel or mobile is not stated.
 - The mod equivalent is `$.ui.status(text)`: "Pins `text` as this plugin's status line under the prompt … One per plugin". It draws the "first 2000 characters … (10000 remotely)". [T: `ui.status`] `$.session.usage()` returns "the context window's fill, the rate-limit windows and the cost as the status line has them". [T: `session.usage`]
-- Repo naming: `statusLine` in `hooks/ledger.ts` and `hooks/register.tsx` builds the Herdr sidebar text. It is not Claude Code's `statusLine` setting.
+- Repo naming: `statusLine` in `hooks/claude.ts`, called from `hooks/register.tsx:publishStatus`, builds the Herdr sidebar text. It is not Claude Code's `statusLine` setting.
 
 ### Artifacts
 
@@ -1528,7 +1529,7 @@ The changelog page "is generated from the CHANGELOG.md on GitHub". On 2026-10-08
 
 ### Checks
 
-- `scripts/check.sh` runs Prettier pinned to `prettier@3.9.9`, then `claude plugin validate`, then `tsc --noEmit` when `.claude-plugin/types/tsconfig.json` exists, then `claude plugin test`. The Codex checks are skipped when `codex/node_modules` is missing. Since commit `813a036` it fails when it cannot check the types or the Codex plugin.
+- `scripts/check.sh` runs Prettier pinned to `prettier@3.9.9`, then `claude plugin validate`, then `node scripts/check-structure.mjs`, then `tsc --noEmit` when `.claude-plugin/types/tsconfig.json` exists, then `claude plugin test`. When `codex/node_modules` exists, it then checks the Codex bundles, the Codex types and the Codex tests. It fails when it cannot check the types or the Codex plugin.
 - The type check runs against whichever engine last wrote the gitignored types. On 2026-10-08 the header read 2.1.293, 2.1.294 and 2.1.295 at different times. The local types can lag the newest release, and can lead the desktop app's engine. Inference: an API added after the desktop app's engine passes `check.sh` and fails in Code mode.
 - `claude plugin update --help` says "(restart required to apply)". `README.md:22-23` and the mods overview say to run `/reload-plugins`. [O#install-or-update-a-mod]
 
