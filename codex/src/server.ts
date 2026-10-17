@@ -338,7 +338,6 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     if (bin === null) return
     const { views: fetched, branchRef } = await fetchTracked(
       ghIn(deps.exec, bin, s.root),
-      now,
       s.prViews,
       s.ledger.prs,
       true,

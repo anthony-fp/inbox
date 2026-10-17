@@ -89,7 +89,7 @@ function bucket(e: RollupEntry): PrCheck['bucket'] {
 }
 
 /** Reads `gh pr view --json VIEW_FIELDS` output; null when it is not that. */
-export function readView(ref: string, json: string): Omit<PrView, 'threads' | 'fetchedAt' | 'error'> | null {
+export function readView(ref: string, json: string): Omit<PrView, 'threads' | 'error'> | null {
   try {
     const v = JSON.parse(json) as Record<string, unknown>
     if (typeof v.number !== 'number') return null

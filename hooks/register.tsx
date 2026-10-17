@@ -2031,13 +2031,6 @@ async function gh($: EngineInterface, args: string[]) {
   return $.process.run(['gh', ...args], { cwd: root, timeoutMs: 20_000 })
 }
 
-/** gh as the shared PR fetch runs it, and the clock it stamps fetches with. */
-async function ghFor($: EngineInterface): Promise<{ run: GhRun; now: () => number }> {
-  const at = await $.clock.now()
-
-  return { run: args => gh($, args), now: () => at }
-}
-
 /** Remembers PRs this session created or linked, newest last. */
 async function linkPrs($: EngineInterface, refs: string[]) {
   if (refs.length === 0) return
@@ -2074,8 +2067,8 @@ async function fetchPrsNow($: EngineInterface, findsBranchPr: boolean) {
   const state = await update($, PR_VIEWS, v => ({ ...v, isFetching: true }))
   try {
     const linked = (await read($, LEDGER)).prs
-    const { run, now: fetchedAt } = await ghFor($)
-    const { views: fetched, branchRef } = await fetchTracked(run, fetchedAt, state, linked, findsBranchPr)
+    const run: GhRun = args => gh($, args)
+    const { views: fetched, branchRef } = await fetchTracked(run, state, linked, findsBranchPr)
     // A PR dismissed while the fetch ran stays dismissed.
     const [stillLinked, lastActions, now] = await Promise.all([
       read($, LEDGER).then(l => l.prs),

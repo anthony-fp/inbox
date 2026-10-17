@@ -23,7 +23,6 @@ export type HookInput = {
   tool_name?: string
   tool_input?: Record<string, unknown>
   last_assistant_message?: string | null
-  stop_hook_active?: boolean
 }
 
 export type HookDeps = {

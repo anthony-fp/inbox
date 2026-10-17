@@ -183,7 +183,6 @@ export type PrView = {
   reviewDecision: string
   checks: PrCheck[]
   threads: PrThread[]
-  fetchedAt: number
   /** Why the last fetch failed; the rest is from the fetch before. */
   error: string | null
 }

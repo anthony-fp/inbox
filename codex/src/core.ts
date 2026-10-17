@@ -227,8 +227,6 @@ export type PrTab = {
 /** What the tab draws: the shared inbox view, and what only the tab reads. */
 export type View = InboxView & {
   heard: HeardState
-  done: string[]
-  running: string[]
   /** Each row's last press, by row id, which the tab reads for its PR rows and blocks. */
   lastActions: Record<string, LastAction>
   /** The turn counts each row's feedback reads, as "Explaining…" until the reply to its press. */
@@ -299,8 +297,6 @@ export function viewOf(s: SessionState, now: number): View {
       now,
     }),
     heard: heardState(s.heard),
-    done: l.card?.done ?? [],
-    running: l.card?.running ?? [],
     lastActions,
     turns: { turnsStarted: s.presence.turnsStarted, turnsApplied: s.presence.turnsApplied },
     prs: prTabOf(s, lastActions, now),

@@ -62,7 +62,6 @@ export function olderPrsText(linked: string[]): string | null {
  */
 export async function fetchTracked(
   gh: GhRun,
-  now: () => number,
   state: PrViews,
   linked: string[],
   findsBranchPr: boolean,
@@ -72,10 +71,8 @@ export async function fetchTracked(
   // The branch's PR, when it is also linked, is fetched once, with the linked ones.
   const isBranchLinked = branchTarget !== null && tracked.includes(branchTarget)
   const [branch, ...rest] = await Promise.all([
-    findsBranchPr || (branchTarget && !isBranchLinked)
-      ? fetchPr(gh, now, branchTarget, state.views, state.branchRef)
-      : null,
-    ...tracked.map(ref => fetchPr(gh, now, ref, state.views, null)),
+    findsBranchPr || (branchTarget && !isBranchLinked) ? fetchPr(gh, branchTarget, state.views, state.branchRef) : null,
+    ...tracked.map(ref => fetchPr(gh, ref, state.views, null)),
   ])
   const views: Record<string, PrView> = {}
   for (const v of [...rest, branch]) if (v) views[v.ref] = v
@@ -91,7 +88,6 @@ export async function fetchTracked(
  */
 export async function fetchPr(
   gh: GhRun,
-  now: () => number,
   target: string | null,
   views: Record<string, PrView>,
   knownBranchRef: string | null,
@@ -129,7 +125,6 @@ export async function fetchPr(
   return {
     ...base,
     threads: threads.exitCode === 0 ? readThreads(threads.stdout) : (previous?.threads ?? []),
-    fetchedAt: now(),
     error: threads.exitCode === 0 ? null : 'could not read review threads',
   }
 }

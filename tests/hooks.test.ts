@@ -238,7 +238,6 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   on('classic.Stop', () => (stopBlock ? { block: stopBlock } : {}))
   on('classic.SessionStart', () => ({}))
   on('tool.call', () => ({ result: 'ok', text: 'ok' }))
-  on('tool.check', () => ({ decision: 'ask' as const }))
   on('ui.render', ($, e) => $.ui.resolve(e).Box({}))
   on('ui.press', async ($, e, next) => {
     await runBeforeAct()
