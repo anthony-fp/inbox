@@ -48,7 +48,7 @@ export type Ask = (prompt: string) => Promise<string | null>
  * systemText as its only instructions, in an empty folder, with no saved session,
  * user config, hooks or tools. Null when it fails.
  */
-export function codexAsk(exec: Run, cli: string, dir: string, model = MODEL): Ask {
+export function codexAsk(exec: Run, cli: string, dir: string): Ask {
   return async prompt => {
     const work = join(dir, 'exec')
     const system = join(dir, 'inbox-system.md')
@@ -72,7 +72,7 @@ export function codexAsk(exec: Run, cli: string, dir: string, model = MODEL): As
           '-C',
           work,
           '-m',
-          model,
+          MODEL,
           '-c',
           'model_reasoning_effort="low"',
           '-c',

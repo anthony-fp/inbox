@@ -246,12 +246,12 @@ function plural(count: number, one: string, many: string): string {
 export function readiness(
   pr: PrView,
   isSent: IsThreadSent = () => false,
-): { status: PrStatus; text: string; head: string; reasons: string; reasonList: string[]; unlisted: string[] } {
+): { status: PrStatus; text: string; head: string; unlisted: string[] } {
   const result = (status: PrStatus, head: string, reasonList: string[] = [], joint = ': ') => {
     const reasons = reasonList.join(', ')
     // The PR tab lists failing checks and waiting threads as rows, so its status line names only the rest.
     const unlisted = status === 'ready' ? [] : reasonList.filter(r => !listed.includes(r))
-    return { status, text: reasons ? `${head}${joint}${reasons}` : head, head, reasons, reasonList, unlisted }
+    return { status, text: reasons ? `${head}${joint}${reasons}` : head, head, unlisted }
   }
   const listed: string[] = []
   if (pr.state === 'MERGED') return result('merged', 'Merged')

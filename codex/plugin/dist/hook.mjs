@@ -411,7 +411,7 @@ function noteActivity(s, line) {
   return { ...s, turn: { ...s.turn, activity } };
 }
 function activityOf(tool, input) {
-  return toolActivity(tool === "Bash" ? "Bash" : tool, input);
+  return toolActivity(tool, input);
 }
 function patchFiles(patch) {
   return [...patch.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)].map((m) => (m[1] ?? "").trim()).filter(Boolean);

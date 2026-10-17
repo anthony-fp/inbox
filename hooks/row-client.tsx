@@ -61,13 +61,9 @@ function clipAtSpace(text: string, max: number): string {
   return `${head.trimEnd()}…`
 }
 
-/** The title and `after` cut to what fits in `budget` characters beside `before`. The title gives up room first. */
-function fitLine(budget: number, before: string, title: string, after: string): { title: string; after: string } {
-  const fitted = clipAtSpace(title, Math.max(MIN_TITLE, budget - before.length - after.length - 1))
-  const room = budget - before.length - fitted.length - 1
-  if (after.length <= room) return { title: fitted, after }
-
-  return { title: fitted, after: room >= 2 ? `${after.slice(0, room - 1)}…` : '' }
+/** The title cut to what fits in `budget` characters beside `before`. */
+function fitTitle(budget: number, before: string, title: string): string {
+  return clipAtSpace(title, Math.max(MIN_TITLE, budget - before.length - 1))
 }
 
 const Row: ClientModule<RowProps, State> = (props, surface) => {
@@ -94,7 +90,7 @@ const Row: ClientModule<RowProps, State> = (props, surface) => {
   const columns = surface.columns || props.fallbackColumns
   const textCells = columns - FRAME_CELLS - props.markCells - props.sideCells
   const perLine = Math.floor(textCells * props.charsPerCell)
-  const line = fitLine(perLine * props.maxLines, props.before, props.title, '')
+  const title = fitTitle(perLine * props.maxLines, props.before, props.title)
   const after = clipAtSpace(props.after, perLine)
   const background = pressed ? props.colors.pressed : hover ? props.colors.hover : null
   // A raised background can share its color with muted text, so on it all text takes the palette's text for it.
@@ -126,7 +122,7 @@ const Row: ClientModule<RowProps, State> = (props, surface) => {
             ...colored(null),
             children: [
               ...(props.before ? [Text({ ...colored(props.colors.muted), children: props.before })] : []),
-              line.title,
+              title,
             ],
           }),
           ...(after ? [Text({ wrap: 'truncate-end', ...colored(ageColor), children: after })] : []),

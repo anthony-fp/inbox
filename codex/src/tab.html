@@ -262,9 +262,6 @@
       .mark.issue {
         color: var(--issue);
       }
-      .mark.opportunity {
-        color: var(--done);
-      }
       .mark.error {
         color: var(--error-mark);
       }
@@ -300,7 +297,6 @@
         gap: 8px;
         padding: 8px 0 2px;
       }
-      .content > .tight,
       .content.tight {
         display: flex;
         flex-direction: column;
@@ -382,10 +378,6 @@
       }
       .title {
         font-weight: 600;
-      }
-      .title .after {
-        font-weight: 400;
-        color: var(--muted);
       }
       .body {
         overflow-wrap: anywhere;
@@ -702,10 +694,6 @@
        * move in the script, around each draw. A row's own parts do not fade: a row that settles or is
        * undone swaps them in place, where a fade from nothing reads as a flicker.
        */
-      /* The new-row bar fades out. */
-      .row {
-        transition: box-shadow var(--enter);
-      }
       /* A panel does not fade: it stays opaque, clipped by its row's height, so a row closing and the row
          opening in its place move as one. */
       .status-line,

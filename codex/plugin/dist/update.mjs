@@ -794,7 +794,7 @@ async function updateState(dir, sessionId, change) {
 
 // src/run.ts
 import { execFile } from "node:child_process";
-var run = (args, { cwd, stdin, timeoutMs }) => new Promise((resolve2) => {
+var run = (args, { cwd, timeoutMs }) => new Promise((resolve2) => {
   const [file = "", ...rest] = args;
   const child = execFile(
     file,
@@ -805,8 +805,7 @@ var run = (args, { cwd, stdin, timeoutMs }) => new Promise((resolve2) => {
       resolve2({ code, stdout: String(stdout), stderr: String(stderr) });
     }
   );
-  if (stdin !== void 0) child.stdin?.end(stdin);
-  else child.stdin?.end();
+  child.stdin?.end();
 });
 
 // src/update.ts
@@ -844,7 +843,7 @@ var OFF = [
   "sleep_tool",
   "personality"
 ];
-function codexAsk(exec, cli, dir, model = MODEL) {
+function codexAsk(exec, cli, dir) {
   return async (prompt) => {
     const work = join2(dir, "exec");
     const system = join2(dir, "inbox-system.md");
@@ -868,7 +867,7 @@ function codexAsk(exec, cli, dir, model = MODEL) {
           "-C",
           work,
           "-m",
-          model,
+          MODEL,
           "-c",
           'model_reasoning_effort="low"',
           "-c",

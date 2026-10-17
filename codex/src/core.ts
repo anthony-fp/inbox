@@ -121,7 +121,7 @@ export function noteActivity(s: SessionState, line: string | null): SessionState
 
 /** What the agent did with a tool, as an activity line: Codex's shell and MCP tools read as the mod's Bash and MCP tools. */
 export function activityOf(tool: string, input: Record<string, unknown>): string | null {
-  return toolActivity(tool === 'Bash' ? 'Bash' : tool, input)
+  return toolActivity(tool, input)
 }
 
 /** The files a patch adds, updates or deletes, as written in it. */

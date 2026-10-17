@@ -4,11 +4,11 @@ import { execFile } from 'node:child_process'
 
 export type Run = (
   args: string[],
-  opts: { cwd: string; stdin?: string; timeoutMs: number },
+  opts: { cwd: string; timeoutMs: number },
 ) => Promise<{ code: number; stdout: string; stderr: string }>
 
 /** Runs a command, never throwing: a command that can't start ends with code -1. */
-export const run: Run = (args, { cwd, stdin, timeoutMs }) =>
+export const run: Run = (args, { cwd, timeoutMs }) =>
   new Promise(resolve => {
     const [file = '', ...rest] = args
     const child = execFile(
@@ -20,6 +20,5 @@ export const run: Run = (args, { cwd, stdin, timeoutMs }) =>
         resolve({ code, stdout: String(stdout), stderr: String(stderr) })
       },
     )
-    if (stdin !== undefined) child.stdin?.end(stdin)
-    else child.stdin?.end()
+    child.stdin?.end()
   })

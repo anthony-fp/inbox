@@ -1114,8 +1114,8 @@ function rowActions(row: Row): { keys: Key[]; more: Key[] } {
  * One of the open row's actions. A click right after the row opened does
  * nothing; its key works at once. Keys are an extra, so no key text shows.
  */
-function KeyButton({ k, isGuarded = true }: { k: Key; isGuarded?: boolean }) {
-  return <ActionButton action={k} isBlocked={() => isGuarded && isOpenGuarded()} />
+function KeyButton({ k }: { k: Key }) {
+  return <ActionButton action={k} isBlocked={() => false} />
 }
 
 /** A row's last press, "✓ Explain" or "Queued: Explain". A row whose own mark is a ✓ leaves out the second one. */
@@ -1146,7 +1146,7 @@ function ListRow({ row, track, onSelect, now }: { row: Row; track: RowTrack; onS
   // A closing or leaving row keeps its panel, inert, while its height shrinks over it.
   const isClosing = track.hasPanel && (track.state === 'closing' || track.state === 'leaving')
   const isSelected = track.hasPanel && !isClosing
-  const handle = <span class={`mark ${row.handleTone ?? row.kind ?? ''}`}>{row.handle}</span>
+  const handle = <span class={`mark ${row.handleTone ?? ''}`}>{row.handle}</span>
 
   // A row's last press that reads with an age, as "✓ Explained", takes the age's place: in the side column while the
   // row is closed, so the row keeps its one line, and after the title while it is open, its age in the side column.
@@ -1216,7 +1216,7 @@ function Panel({ row, isClosing }: { row: Row; isClosing: boolean }) {
   return (
     <div class={isClosing ? 'panel closing' : 'panel'} inert={isClosing}>
       {row.body ? <div class="body">{row.body}</div> : null}
-      {notes.length > 0 ? <div class="tight">{notes}</div> : null}
+      {notes.length > 0 ? <div>{notes}</div> : null}
       <RowActions
         actions={[...keys, ...more]}
         reply={
@@ -1715,7 +1715,7 @@ function PrBlock({
       {pr.error ? <div class="pr-status tone-error">Last refresh failed: {pr.error}</div> : null}
       <div class="pr-actions keys">
         {keys.map(k => (
-          <KeyButton k={k} isGuarded={false} />
+          <KeyButton k={k} />
         ))}
       </div>
       {last ? <div class={last.isError ? 'pr-last tone-error' : 'pr-last muted'}>{last.text}</div> : null}
