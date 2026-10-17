@@ -21,7 +21,7 @@ Terms used below:
 3. Mods run and draw in local Code-mode sessions. WSL sessions get no plugins. A cloud session runs a mod's hooks only for a plugin that reaches it, and draws nothing (https://code.claude.com/docs/en/plugins/mods/overview#where-mods-run).
 4. Mods need engine 2.1.286 on Desktop (overview page). The inbox "was built and tested with Claude Code 2.1.292" (`README.md:20`). Whether it works on the app's 2.1.289 copy is unknown.
 5. `ToolProgress`, `TurnDuration`, `InfoNotice`, `Raster` and `Image` do not draw on the desktop (https://code.claude.com/docs/en/plugins/mods/reference#render-sites, #elements). Live: `$.ui.copy` works on the desktop, although a types comment says "a remote surface has no path yet".
-6. Live: a prompt typed in Code mode arrives with `origin.kind` `composer`, so the inbox counts it as the person's words (`hooks/register.tsx:2025`).
+6. Live: a prompt typed in Code mode arrives with `origin.kind` `composer`, so the inbox counts it as the person's words (`hooks/register.tsx:isPersonsWords`).
 7. The app and the CLI share `~/.claude/settings.json`, `~/.claude.json`, CLAUDE.md, hooks and skills (https://code.claude.com/docs/en/desktop#shared-configuration).
 8. The repo owner reported the mod loading in a local Code-mode session after commit 05c3548. Commit f7536d0 fixed `/clear`, `/resume` and `/branch`.
 9. There is no in-app way to confirm the mod loaded. `/plugin` does not run in Code mode (see "Plugins and Customize"). For an installed mod, refusal and `hook skipped` lines go to the debug log only (https://code.claude.com/docs/en/plugins/mods/troubleshoot#find-out-why-a-mod-does-nothing).
@@ -334,7 +334,7 @@ Read this before designing any desktop UI for the inbox. It lists what a mod can
 - `desktopSessionCleanupPeriodDays` sets an age limit for transcripts of sessions started or last continued in Claude Desktop or Cowork. Its default is `0`, "which sets no age limit". A transcript is deleted only once it is older than both this limit and `cleanupPeriodDays`. Needs 2.1.248 (https://code.claude.com/docs/en/settings-reference#desktopsessioncleanupperioddays).
 - The guard loads when "The machine has managed settings" or "The user is signed in to Claude Code with a Team or Enterprise plan" (https://code.claude.com/docs/en/plugins/mods/admin#know-what-happens-by-default, Markdown lines 58-63). There, a user's mod "can't change … the system prompt" or managed instructions (same page, line 64).
 - The guard's public source goes further than the docs. It skips every user-tier hook on `prompt.compose`, `prompt.context`, `prompt.section`, `skill.prompt`, `attribution.text`, `settings.read` and `classic.*` (anthropics/claude-code `mods/sec-default/hooks/register.ts` L24-32, main at commit 684800b, 2026-09-29). It also refuses a user mod's `$.tool.register` while managed settings set `allowedMcpServers` (same source, L39-50). Whether the shipped engine's guard matches this source is unknown.
-- Inference for the inbox where the guard loads: Claude would not get the inbox's guidance (`prompt.compose`, `hooks/register.tsx:2047`) or carry block (`prompt.context`, `:2228`). The reload after `/clear` and `/resume` (`classic.SessionStart`, `:1977`) and the `classic.PermissionRequest` hook (`:2150`) would not run. The band, pane and per-turn update would still run. Not verified live.
+- Inference for the inbox where the guard loads: Claude would not get the inbox's guidance (`hooks/register.tsx:on('prompt.compose')`) or carry block (`hooks/register.tsx:on('prompt.context')`). The reload after `/clear` and `/resume` (`hooks/register.tsx:on('classic.SessionStart')`) and the `hooks/register.tsx:on('classic.PermissionRequest')` hook would not run. The band, pane and per-turn update would still run. Not verified live.
 - Inference: the app's parent settings may count as managed settings and so seat the guard. Unverified.
 
 ## /resume, moving sessions and Remote Control
@@ -361,7 +361,7 @@ Source: https://code.claude.com/docs/en/desktop unless noted.
 
 ## Costs
 
-- The inbox's per-turn update (a Sonnet call through `$.model.complete`, `MODEL` at `hooks/register.tsx:405`) uses "the user's plan or API key" (https://code.claude.com/docs/en/plugins/mods/api).
+- The inbox's per-turn update (a Sonnet call through `$.model.complete`, `hooks/register.tsx:MODEL`) uses "the user's plan or API key" (https://code.claude.com/docs/en/plugins/mods/api).
 - Scheduled tasks and Dispatch run sessions with no one watching. If the app attaches to them, the inbox would spend usage there. Unknown.
 
 ## Where sources disagree
@@ -372,7 +372,7 @@ Source: https://code.claude.com/docs/en/desktop unless noted.
 | Whether Claude mode runs Claude Code | The repo owner: Claude mode runs no Claude Code session. Gateway docs: Cowork, Code and optionally Chat run "on embedded Claude Code sessions". | The gateway docs, until a live check. | The gateway docs are a direct statement. The owner's claim cites no source. |
 | Minimum engine for mods | Overview: Desktop from 2.1.286. Changelog: mods first at 2.1.287. | The overview for Desktop, as a floor. | The inbox was tested with 2.1.292 anyway. |
 | Copy on desktop | Types: "a remote surface has no path yet". A live probe returned `isCopied: true`. | The live probe. | It ran against the desktop app. |
-| Tested engine | `README.md:20`: tested with 2.1.292. App copy: 2.1.289. | Treat 2.1.292 as the minimum until tested. | Inference: the inbox sends `$.model.complete` cache blocks (`hooks/register.tsx:735`). Which engine added them was not found in the changelog. |
+| Tested engine | `README.md:20`: tested with 2.1.292. App copy: 2.1.289. | Treat 2.1.292 as the minimum until tested. | Inference: the inbox sends `$.model.complete` cache blocks (`hooks/register.tsx:askLedgerModel`). Which engine added them was not found in the changelog. |
 | Store key | `AGENTS.md`: the store is "keyed by the mod's name". | Live: name plus where it was loaded from (`inbox@inline`). | The file name hashes `inbox@inline`. |
 | Link schemes | Interface docs: `https:` or `http://localhost`. Types: `https:` only. | Unknown. Test `http://localhost` live. | Two engine-side sources disagree. |
 | Desktop is interactive | Desktop docs: "Desktop is interactive only." Types: `isInteractive` is false under the SDK. | Both, for different things. | The docs mean the experience. The types mean the engine flag. |

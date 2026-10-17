@@ -13,14 +13,14 @@ Versions on 2026-10-08:
 | Mods reference | "as of v2.1.290" | [R] |
 | Local engine types | Header read 2.1.293, 2.1.294 and 2.1.295 at different times that day | Live, `.claude-plugin/types/claude-code/index.d.ts:1` |
 | Minimum for mods | Terminal 2.1.287, desktop 2.1.286 | [O#turn-mods-on-or-off] |
-| Minimum for the inbox's code | 2.1.292 (`cache` blocks in `$.model.complete`) | [CL#2-1-292]; `hooks/register.tsx:735` |
+| Minimum for the inbox's code | 2.1.292 (`cache` blocks in `$.model.complete`) | [CL#2-1-292]; `hooks/register.tsx:askLedgerModel` |
 | Repo | `main` at `55ab122` | Live `git log` |
 
 ### Key constraints
 
 1. **Only the terminal and desktop Code mode draw.** "A mod's hooks run in every kind of session that loads the plugin. Drawing is narrower: only the terminal and the Desktop app show a mod's panes, bands, and replaced rows." [O#where-mods-run] `-p`, the Agent SDK and the VS Code chat panel run hooks and draw nothing. Under Remote Control, hooks run on the host machine and the phone or browser shows nothing a mod draws. A cloud session runs hooks only for a plugin that reaches it.
-2. **Desktop Code mode starts headless.** The app is an SDK host that runs the engine as a stream-json child process (live `ps`; changelog 2.1.208, 2.1.260, 2.1.282). The types say a remote client joins through `session.attach` "(… the desktop app connected)". [T: `SessionAttachInput`] No public doc says this. Live: `session.start` has `isInteractive: false` and no surfaces, and the attach follows about 0.1 s later ([desktop](claude-desktop-app.md#live-probe-of-a-code-mode-session)). The inbox turns on at `session.start` or `session.attach` (`hooks/register.tsx:1962-1974`, commit `05c3548`).
-3. **A prompt typed in Code mode counts as the person's words.** It arrives with `origin.kind` `composer`, as in the terminal (live probe, [desktop](claude-desktop-app.md#live-probe-of-a-code-mode-session)). The inbox counts `composer`, `bridge` and `plugin` with `asUser` (`hooks/register.tsx:2024-2025`).
+2. **Desktop Code mode starts headless.** The app is an SDK host that runs the engine as a stream-json child process (live `ps`; changelog 2.1.208, 2.1.260, 2.1.282). The types say a remote client joins through `session.attach` "(… the desktop app connected)". [T: `SessionAttachInput`] No public doc says this. Live: `session.start` has `isInteractive: false` and no surfaces, and the attach follows about 0.1 s later ([desktop](claude-desktop-app.md#live-probe-of-a-code-mode-session)). The inbox turns on at `session.start` or `session.attach` (`hooks/register.tsx:on('session.start')` and `hooks/register.tsx:on('session.attach')`, commit `05c3548`).
+3. **A prompt typed in Code mode counts as the person's words.** It arrives with `origin.kind` `composer`, as in the terminal (live probe, [desktop](claude-desktop-app.md#live-probe-of-a-code-mode-session)). The inbox counts `composer`, `bridge` and `plugin` with `asUser` (`hooks/register.tsx:isPersonsWords`).
 4. **`/clear`, `/resume` and `/branch` change the conversation without a new `session.start`.** On `/clear` "the conversation ends, the process goes on under a new session id, and no `session.start` fires for it." [T: `SessionEndInput.reason`] `classic.SessionStart` with source `clear`, `resume` or `fork` is the reload point. [IF] All `session.end` work shares one 1.5-second bound, `$` waits included. [T; H#sessionend]
 5. **On Team and Enterprise sign-ins and managed machines, a built-in guard limits the inbox.** The inbox installs from GitHub, so it "counts as a user's" mod. [A#apply-your-plugin-controls-to-mods] The guard's public source skips user-tier hooks on `prompt.compose`, `prompt.context` and `classic.*`. [G] Inference: the inbox's guidance and carry text would not reach Claude there. Not verified live.
 6. **The per-turn model call bills the person, and `sonnet` is not one model.** `$.model.complete` uses "the session's own API client". [T] `sonnet` means Sonnet 5.5 on the Anthropic API, 4.6 on Claude Platform on AWS, and 4.5 on Bedrock, Agent Platform and Foundry. [MC#model-aliases] No public doc covers how mod calls are billed.
@@ -169,9 +169,9 @@ on('session.attach', { surface: 'desktop' }, async ($, e, next) => {
 })
 ```
 
-- `session.start` is at `hooks/register.tsx:1962`, the gate at `:1966`, `session.attach` at `:1971`. Commit `05c3548` added the desktop gate.
+- `session.start` is at `hooks/register.tsx:on('session.start')`, the gate inside it, `session.attach` at `hooks/register.tsx:on('session.attach')`. Commit `05c3548` added the desktop gate.
 - It handles the attach arriving before or after the start. Inference: if both paths see `desktop` before `isOn` is set, `turnOn` could run twice. `turnOn` sets `isOn` at `:1878`, but the start path does not check `isOn` first. Not verified.
-- Tests: `tests/hooks.test.ts:1032` checks that a headless start does nothing. `:1047-1064` checks a desktop attach in both orders and mounts the band with `surface: 'desktop'`.
+- Tests: `tests/hooks.test.ts` test "a headless run stays inactive when ${origin.kind} invokes the inbox command" checks that a headless start does nothing. The tests `tests/hooks.test.ts` "the desktop app turns the mod on when it attaches before the start" and "… after the start" check a desktop attach in both orders and mount the band with `surface: 'desktop'`.
 
 ## The desktop app
 
@@ -329,7 +329,7 @@ The public docs describe "three tabs: **Chat** for conversations, **Cowork** for
 - The types have more than the docs list: `describe`, `findAll`, `drawn`, `key`, `pointer`, `post`, `advance`, `resize`, `test(name, { options })` for `userConfig`, and about 15 more matchers. [T: testing types]
 - After `/clear`: fire `$.classic.SessionStart({ source: 'clear' })`, not `session.start`. [TT#test-a-drawing-after-clear]
 - Policy mods: `tier('prepend'|'append'|'builtin')` and `test(name, { plugins: [...] }, body)`. A refusal throws `<mod>: refused by <policy-mod>: <reason>`. [TT#test-a-mod-that-judges-other-mods]
-- Repo: most band tests mount only `terminal`. `tests/hooks.test.ts:1047-1064` fires a desktop attach in both orders and mounts the band with `surface: 'desktop'`. `:89` stubs `session.attach`.
+- Repo: most band tests mount only `terminal`. `tests/hooks.test.ts` tests "the desktop app turns the mod on when it attaches before the start" and "… after the start" fire a desktop attach in both orders and mount the band with `surface: 'desktop'`. `world()` stubs `session.attach`.
 
 ## Troubleshooting and the debug log
 
@@ -423,8 +423,8 @@ What survives what:
 | `$.store` | Kept | Kept | Kept, shared by every session | [IF#keep-state] |
 
 - To reload after a switch, hook `classic.SessionStart` with `source: ['clear','resume','fork']`. [IF#load-a-saved-value-again-after-clear]
-- The inbox does this at `hooks/register.tsx:1977`. `$.session.id()` still names the previous conversation there, so the inbox reads the new id from `e.session_id` (commit `f23d9ad`; comment at `:1979-1981`). Live on 2.1.295: a `--debug-file` log of an in-session `/resume` showed `$.session.id()` returning the old id, even after `next(e)`.
-- The inbox's `session.end` (`hooks/register.tsx:1987`) runs seven `$.state` updates plus `publishStatus($, true)`. `publishStatus` runs `herdr pane report-metadata` through `$.process.run` with `timeoutMs: 5000`, only when `HERDR_PANE_ID` is set (`:522-546`). Inference: that 5 s timeout exceeds the 1.5 s bound, so the call can be cut off at session end.
+- The inbox does this at `hooks/register.tsx:on('classic.SessionStart')`. `$.session.id()` still names the previous conversation there, so the inbox reads the new id from `e.session_id` (commit `f23d9ad`; see the comment in that handler). Live on 2.1.295: a `--debug-file` log of an in-session `/resume` showed `$.session.id()` returning the old id, even after `next(e)`.
+- The inbox's `session.end` (`hooks/register.tsx:on('session.end')`) runs seven `$.state` updates plus `publishStatus($, true)`. `publishStatus` runs `herdr pane report-metadata` through `$.process.run` with `timeoutMs: 5000`, only when `HERDR_PANE_ID` is set (`hooks/register.tsx:publishStatus`). Inference: that 5 s timeout exceeds the 1.5 s bound, so the call can be cut off at session end.
 - A worker crash ×3 unloads every non-built-in mod until `/reload-plugins`. [A]
 
 ## The hook function
@@ -464,11 +464,11 @@ From [R#events] unless marked.
 - `prompt.submit` notes: "If your hook returns a `drop` after its `next(e)` call let the prompt through, the turn still runs, and the hook fails". "Text from these hooks that changes between requests invalidates the prompt cache." [E#rewrite-or-add-to-a-prompt]
 - `PromptSubmitInput` is `{ text, attachments?, context?, turnId?, wait, origin }`. `origin` is set by the engine, and "no hook may set one". Context "past 100,000 characters (200,000 together)" is cut to a head and a path. [T: `PromptSubmitInput`]
 - `session.append`: `door` is one of prompt, command, response, tool-result, tool-message, delivery, attachment, hook-context, note, compaction, notice. A hook may rewrite `message.content` only. [T: `session.append`]
-- The inbox hooks (live grep): `command.run`, `config.set`, `prompt.compose`, `prompt.context`, `prompt.submit`, `session.append`, `session.attach`, `session.end`, `session.start`, `classic.SessionStart`, `classic.PermissionRequest` (`:2150`), `classic.Stop` (`:2179`), `tool.call` ×4, `tool.check` ×4, `tool.describe` ×3, `turn.complete`, `turn.start`, `ui.close` (`:2290`), `ui.render` ×2.
+- The inbox hooks (live grep): `command.run`, `config.set`, `prompt.compose`, `prompt.context`, `prompt.submit`, `session.append`, `session.attach`, `session.end`, `session.start`, `classic.SessionStart`, `classic.PermissionRequest`, `classic.Stop`, `tool.call` ×4, `tool.check` ×4, `tool.describe` ×3, `turn.complete`, `turn.start`, `ui.close`, `ui.render` ×2.
 
 ### Prompt origin (who sent a prompt)
 
-- `prompt.submit`'s `origin.kind` says where a prompt came from. The inbox treats a prompt as the person's own words only for `composer`, `bridge`, or `plugin` with `asUser` (`hooks/register.tsx:2025`), and skips prompts its own plugin sent (`:2022`).
+- `prompt.submit`'s `origin.kind` says where a prompt came from. The inbox treats a prompt as the person's own words only for `composer`, `bridge`, or `plugin` with `asUser` (`hooks/register.tsx:isPersonsWords`), and skips prompts its own plugin sent (`hooks/register.tsx:on('prompt.submit')`).
 - Which `origin.kind` a desktop Code-mode prompt has is unknown. Inference: an SDK host may send prompts as `sdk`. If so, the inbox would not treat desktop prompts as the person's words. This is the largest open risk for desktop.
 
 ## The `$` API
@@ -507,14 +507,14 @@ Namespaces and methods. [R#mods-api-methods; T]
 - `status`: "One line under the prompt that stays until you change it. It starts with `⚠` and the mod's name". One per plugin. [A]
 - `log`: "A dim line in the transcript that Claude doesn't read". "a `-p` or SDK host receives it as `ui_log`". `{ to: 'debug' }` sends it to the debug log only. [A; T: `ui.log`]
 - `ask`: 2-4 options. Adds a free-text row and a **Chat about this** row. "resolves to the label the user picks", or typed text. Rejects "when the user dismisses the question or picks **Chat about this**, and in a `claude -p` run". Its wait doesn't count against the hook's time limit. [E#hold-a-tool-call-until-the-user-decides]
-- `copy`: "The terminal writes as `/copy` does; a remote surface has no path yet." Returns `{ isCopied: false, reason }` there. [T: `ui.copy`] The inbox copies with `surface: press.surface` (`hooks/register.tsx:905`, `:911`) and toasts "Could not copy to the clipboard" on failure. Inference: copy fails on desktop. Not verified.
+- `copy`: "The terminal writes as `/copy` does; a remote surface has no path yet." Returns `{ isCopied: false, reason }` there. [T: `ui.copy`] The inbox copies with `surface: press.surface` (`hooks/register.tsx:perform`) and toasts "Could not copy to the clipboard" on failure. Inference: copy fails on desktop. Not verified.
 - `selection`: "what the person last selected with the mouse … `undefined` … where none is seen: fullscreen off, -p, a surface that answers none". [T: `ui.selection`]
 - `panes`: "The engine's record, not the module's". [T]
 - `notify(text, { title })` (2.1.295 types only): a native notification through the user's `preferredNotifChannel`; resolves `{ isSent, channel }` or `{ isSent: false, reason }`. [T 2.1.295]
 
 ### `$.prompt`
 
-- `submit({ text })` "waits until the session is idle and then starts a new turn. It resolves when that turn starts, so don't `await` it in a handler that runs while Claude is working." Claude reads it "after a sentence that names your mod as the sender"; `asUser: true` drops that sentence. [A] The inbox uses `asUser: true` at `hooks/register.tsx:828`.
+- `submit({ text })` "waits until the session is idle and then starts a new turn. It resolves when that turn starts, so don't `await` it in a handler that runs while Claude is working." Claude reads it "after a sentence that names your mod as the sender"; `asUser: true` drops that sentence. [A] The inbox uses `asUser: true` at `hooks/register.tsx:send`.
 - Headless behavior: `read` returns `{ text: '', cursor: 0 }` "where the session draws no box (a -p run, an SDK host)"; `fill` returns `isFilled: false` "under a dialog or headless"; `suggest` returns `isShown: false` "while the box holds text, a turn runs, or headless". [T] Inference: these may be inert in desktop Code mode, which runs headless. Not verified.
 
 ### `$.tool.register` and `$.command.register`
@@ -522,7 +522,7 @@ Namespaces and methods. [R#mods-api-methods; T]
 - "Register both in a `session.start` hook. Claude Code waits for that hook before the first prompt, so what you register is available from the first turn." [A#add-a-command-or-a-tool]
   - Inference: on desktop the inbox may first register at `session.attach`. If the attach comes after the first prompt, `/inbox` and the tools are missing for that turn. Unknown.
 - `register` "Rejects until the session binds, at `session.start`". "a name registered again is replaced". With `isDeferred` left out, "the engine's rule places it: behind ToolSearch … A `tool.describe` hook's answer is read first." [T: `ToolSpec`]
-- `$.tool.register({ isDeferred: false })` "requires Claude Code v2.1.293 or later, and earlier versions ignore it". [A#add-a-tool] `tool.describe` returning `isDeferred: false` has no stated version gate. [R#tools] The inbox registers with `name`, `description` and `inputSchema` only (`hooks/register.tsx:1882-1888`) and sets `isDeferred: false` through `tool.describe`.
+- `$.tool.register({ isDeferred: false })` "requires Claude Code v2.1.293 or later, and earlier versions ignore it". [A#add-a-tool] `tool.describe` returning `isDeferred: false` has no stated version gate. [R#tools] The inbox registers with `name`, `description` and `inputSchema` only (`hooks/register.tsx:initializeInbox`) and sets `isDeferred: false` through `tool.describe`.
 - A command hook that throws is skipped, "so the rest of your `session.start` hook doesn't run either. Register commands last … or wrap the call in `try` and `catch`." `immediate: true` lets the command run mid-turn. The returned `{ text }` "prints in the transcript and Claude reads it", "after the plugin's name". [A#add-a-command]
 
 ### `$.model`
@@ -535,7 +535,7 @@ Namespaces and methods. [R#mods-api-methods; T]
 - Caching: "Put the text every call repeats first and mark its last block (`cache`); whatever follows the last mark is paid for whole on every call." "a call within five minutes that opens with the same text reads it there". Both cache counts at zero means "text under the model's minimum, or caching switched off". "On Bedrock, Vertex, Foundry or behind a gateway the text is found again only while `prompt` opens the same way." "Marks go uncounted: one too many is the API's own `api-error` (status 400)." [T: `ModelTextBlock`]
 - `fork` "asks one question over the current conversation instead, with the same model and system prompt, so the Claude API serves most of it from the prompt cache". Types: "every tool denied … the prefix billed afresh once the entry lapsed or after `/model`". `nothing-to-fork` covers "before the first response and after `/clear`". [A#call-a-model; T: `model.fork`]
 - `classify` defaults to "the engine's small fast model". [T]
-- The inbox: `MODEL = 'sonnet'` (`hooks/register.tsx:405`); `askLedgerModel` sends a `cache: true` system block with `maxTokens: 1600`, `effort: 'low'` (`:735-737`) and a 45 s timeout (`:743`); `$.model.fork` at `:759`. See "What the inbox's model calls cost".
+- The inbox: `MODEL = 'sonnet'` (`hooks/register.tsx:MODEL`); `askLedgerModel` sends a `cache: true` system block with `maxTokens: 1600`, `effort: 'low'` (`hooks/register.tsx:askLedgerModel`) and a 45 s timeout (`hooks/register.tsx:runUpdate`); `$.model.fork` in `hooks/register.tsx:catchUp`. See "What the inbox's model calls cost".
 
 ### `$.store` and `$.state`
 
@@ -543,7 +543,7 @@ Namespaces and methods. [R#mods-api-methods; T]
 - `set` round-trips through JSON (a Date becomes a string, a Map becomes `{}`). It "Rejects a function, a cycle, or a store over 4 MiB". [T: `store`]
 - Live, file names only: store files are `~/.claude/plugins/store/<name>_<source>-<hash>.json`, where `<hash>` is the first 12 hex characters of sha256 of `<name>@<source>`. Verified for `inbox@inline` → `7e8589075f50`. So the store is keyed by plugin id, not name. Every folder copy named `inbox` shares `inbox@inline`. Inference: a marketplace install would be `inbox@<marketplace>` with a separate store, so a move to marketplace installs needs a store migration. The file was about 70 KB on 2026-10-08.
 - Inference: "every session on the machine" holds only for one `CLAUDE_CONFIG_DIR`.
-- The inbox saves per session under `s:${sessionId}` (`hooks/register.tsx:501`) and prunes to `KEPT_SESSIONS = 40` (`:408`, `:512-513`).
+- The inbox saves per session under `s:${sessionId}` (`hooks/register.tsx:save`) and prunes to `KEPT_SESSIONS = 40` (`hooks/register.tsx:KEPT_SESSIONS`, used in `hooks/register.tsx:save`).
 - `$.state`: "Named values held by the host for the session, each with a version: plain data that survives a hot reload of the plugin's code." A `get` in `ui.render` subscribes that render. "Any plugin reads any value; its owner alone writes it. Persist through `$.store`." `set` is refused during render and takes `ifVersion`. `plugin` and `key` must be literals. [T: `state`]
 
 ### `$.process`, `$.fs`, `$.http`, `$.session`
@@ -591,7 +591,7 @@ From [R#limits] unless marked. "Claude Code skips a hook that exceeds a time lim
 - **Pane**: "a sidebar beside the transcript in a wide fullscreen terminal, or a framed region above the prompt otherwise. With several panes open, each gets a tab that shows its title." [IF#pick-where-to-draw]
 - **Band** (site `AbovePrompt`): "a strip directly above the prompt input. It's always there, and every mod shares it." [IF#pick-where-to-draw]
 - Sharing the band: "A tree replaces what the mods after yours draw there. To keep theirs, put the result of `await next(e)` among the children of a `Box`." [IF#pick-where-to-draw]
-  - The inbox's band hook (`hooks/register.tsx:2297`) yields while a survey holds the band (`if (!isOn || e.props.hasSurvey) return next(e)`, `:2298`). Its trees (`:2449`, `:2452-2466`) never include `await next(e)`, so when it draws, it hides band content from mods that run after it.
+  - The inbox's band hook (`hooks/register.tsx:on('ui.render', AbovePrompt)`) yields while a survey holds the band (`if (!isOn || e.props.hasSurvey) return next(e)`). Its trees never include `await next(e)`, so when it draws, it hides band content from mods that run after it.
 
 ### Sites by surface
 
@@ -624,7 +624,7 @@ Sources: [R#render-sites; IF#change-what-claude-code-already-draws; T: render-si
   - `Pane.title`: with one pane open, "the engine draws no title". `Pane.view` and `AbovePrompt.view` name the transcript on screen (main or one agent's); a switch re-runs the hook. [T: `Pane`]
   - On a remote surface such as desktop, a cell is "the pane's width and height over the advance and line height of its code font". "a change of height alone re-draws nothing". [T: `RenderViewport`]
   - `isFullscreen`: "A remote surface that reports it places panes (`$.ui.open` is placed there); the mobile app reports `false`." It is false "on the main screen (`CLAUDE_CODE_NO_FLICKER=0`, tmux by default) and headless". [T: `RenderViewport`; `CommandPresentation`]
-- The repo already sizes to `bodyColumns` and `maxRows` (`hooks/register.tsx:2449`, `:2985`, `:3027`, `:3116`, `:3179`, `:3723`).
+- The repo already sizes to `bodyColumns` and `maxRows` (`hooks/register.tsx:on('ui.render', AbovePrompt)` and `hooks/register.tsx:on('ui.render', Pane)`).
 - No doc shows where the desktop app puts the band or a pane, or whether it docks. Unknown.
 
 ### Opening a pane
@@ -650,7 +650,7 @@ Sources: [R#render-sites; IF#change-what-claude-code-already-draws; T: render-si
 
 - Element the surface lacks. The interface page: "If a tree uses an element the app doesn't have, a prop an element doesn't take, or a child where none goes, Claude Code draws its own version of the site." [IF#build-a-tree-from-elements] The gallery: "In the terminal, a pane that returns only an `Svg` opens empty." [GA#svg] The types: "an omitted one draws a fragment". These conflict; see "Where sources disagree".
 - Draw with `$.ui.resolve(e)` and branch on `e.surface` or on which elements exist. JSX works in `.tsx` after destructuring the elements. `$.ui.resolve(e)` is "A read, not a dispatch". [IF#build-a-tree-from-elements; T: `ui.resolve`]
-- The inbox checks for a field with `'Input' in elements` (`hooks/register.tsx:2479`).
+- The inbox checks for a field with `'Input' in elements` (`hooks/register.tsx:on('ui.render', Pane)`).
 
 ### Button
 
@@ -666,7 +666,7 @@ Sources: [R#render-sites; IF#change-what-claude-code-already-draws; T: render-si
 - `hotkey` is "one digit or one lowercase letter". Shift+w counts as `"w"`. "When two buttons in one drawing name the same `hotkey`, the later one gets it." "A digit `hotkey` on a button in the band also fires when the user types that digit alone into an empty prompt and pauses." [IF; R#elements; T: `ButtonProps.hotkey`]
 - `action` "names one of Claude Code's own keybinding actions". Types: it applies "on the terminal while mounted". [R#elements; T: `ButtonProps.action`]
 - Types only:
-  - `variant?: 'primary' | 'secondary'`. Desktop draws "its own primary button". "`plain` wins". The inbox uses `variant="primary"` (`hooks/register.tsx:2343`).
+  - `variant?: 'primary' | 'secondary'`. Desktop draws "its own primary button". "`plain` wins". The inbox uses `variant="primary"` (`hooks/register.tsx:keyedButton`).
   - `role?: 'dismiss'`: desktop draws "its native close control at the site's trailing edge"; the terminal ignores it.
   - `hover?`: "Refused outside a keyed Box unless it names a `scope`."
   - `plain`: "A desktop draws its native button either way."
@@ -737,7 +737,7 @@ Sources: [R#render-sites; IF#change-what-claude-code-already-draws; T: render-si
 | `pane:close` | ctrl+x x (also in `PaneField`) |
 
 - "`ctrl+x b`, `ctrl+x ctrl+a`, and `ctrl+x tab` require v2.1.260 or later." Chord keys must come within 3 seconds. Reserved: ctrl+c, ctrl+d, ctrl+m, ctrl+[, ctrl+i, ctrl+h, Caps Lock. [KB#unbind-default-shortcuts; KB#chords; KB#reserved-shortcuts]
-- Inference: users can rebind these keys, so the inbox's key-help text ("ctrl+x tab", `hooks/register.tsx:3219`) can go stale. Whether desktop reads `keybindings.json` is undocumented.
+- Inference: users can rebind these keys, so the inbox's key-help text ("ctrl+x tab", `hooks/register.tsx:keyList`) can go stale. Whether desktop reads `keybindings.json` is undocumented.
 - The pane's hotkeys: 1, 2, 3, j, k, v, a, t, e, x, o, r, d (repo). Tab, arrows, Enter and Esc belong to the engine.
 
 ## Settings hooks and `classic.*` events
@@ -758,10 +758,10 @@ A **settings hook** is a hook defined in a settings file or a plugin's `hooks/ho
 
 | Event | Inbox use | Key facts |
 |---|---|---|
-| `SessionStart` | `classic.SessionStart` with `source: ['clear','resume','fork']` reloads the conversation (`hooks/register.tsx:1977`) | Sources: startup, resume, clear, compact, fork. `fork` covers `--fork-session`, `/fork`, `/branch`, moving to the background (before 2.1.214 forks reported `resume`). "If you run `/clear` or switch to another conversation while background hooks are still running, nothing they return applies to the session." "When you switch conversations with `/resume` inside a session, the switch waits for the hooks to finish instead." [H#sessionstart] |
-| `PermissionRequest` | Opens dialog rows (`hooks/register.tsx:2150`) | Fires when Claude Code is about to prompt, or would auto-deny a call that can't prompt. Not for sandbox network prompts. No `tool_use_id`. "For a call that reaches a `--permission-prompt-tool` or the Agent SDK's `canUseTool` callback, the hooks run alongside your host, and whichever decides first applies." [H#permissionrequest] |
+| `SessionStart` | `classic.SessionStart` with `source: ['clear','resume','fork']` reloads the conversation (`hooks/register.tsx:on('classic.SessionStart')`) | Sources: startup, resume, clear, compact, fork. `fork` covers `--fork-session`, `/fork`, `/branch`, moving to the background (before 2.1.214 forks reported `resume`). "If you run `/clear` or switch to another conversation while background hooks are still running, nothing they return applies to the session." "When you switch conversations with `/resume` inside a session, the switch waits for the hooks to finish instead." [H#sessionstart] |
+| `PermissionRequest` | Opens dialog rows (`hooks/register.tsx:on('classic.PermissionRequest')`) | Fires when Claude Code is about to prompt, or would auto-deny a call that can't prompt. Not for sandbox network prompts. No `tool_use_id`. "For a call that reaches a `--permission-prompt-tool` or the Agent SDK's `canUseTool` callback, the hooks run alongside your host, and whichever decides first applies." [H#permissionrequest] |
 | `Stop` | Never blocks. Keeps a reply another hook blocked, for the per-reply update (`classic.Stop` in `hooks/register.tsx`) | `decision: block` makes Claude continue. `additionalContext` also continues, shown as `Stop hook feedback` "rather than a hook error". "after stop hooks have continued the turn eight times in a row, Claude Code overrides the next block" (`CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`). Input has `stop_hook_active`, `last_assistant_message`, `background_tasks`, `session_crons`. "Does not run if the stoppage occurred due to a user interrupt". "The `/goal` command is a built-in shortcut for a session-scoped prompt-based Stop hook." [H#stop] |
-| `StopFailure` | Reads usage-limit and sign-in stops | Fires instead of Stop when an API error ends the turn. `error`, `error_details`. Types add `verification_required` to the documented 12 error values; the repo handles it (`hooks/ledger.ts:943`). [H#stopfailure-input; T] |
+| `StopFailure` | Reads usage-limit and sign-in stops | Fires instead of Stop when an API error ends the turn. `error`, `error_details`. Types add `verification_required` to the documented 12 error values; the repo handles it (`hooks/claude.ts:stopKindOf`). [H#stopfailure-input; T] |
 
 
 ### Other events a "waits on you" model could use
@@ -862,9 +862,9 @@ These rows come from the guard's public source, anthropics/claude-code `mods/sec
 - Under `allowManagedModsOnly`, a module is refused "whenever it loads or reloads (one already running when the option is set keeps running until then)". [G README "Options an administrator sets"]
 
 Inference, not verified live. In any session where the guard loads (every Team or Enterprise sign-in):
-- GUIDANCE never reaches Claude. The inbox adds it as system-prompt section `inbox:guidance` through `prompt.compose` (`hooks/register.tsx:2047`).
-- The carry block never reaches Claude. The inbox adds it through `prompt.context` (`hooks/register.tsx:2228`).
-- The reload after `/clear`, `/resume` and `/branch` doesn't fire. It runs on `classic.SessionStart` (`hooks/register.tsx:1977`).
+- GUIDANCE never reaches Claude. The inbox adds it as system-prompt section `inbox:guidance` through `prompt.compose` (`hooks/register.tsx:on('prompt.compose')`).
+- The carry block never reaches Claude. The inbox adds it through `prompt.context` (`hooks/register.tsx:on('prompt.context')`).
+- The reload after `/clear`, `/resume` and `/branch` doesn't fire. It runs on `classic.SessionStart` (`hooks/register.tsx:on('classic.SessionStart')`).
 - The band, pane, per-turn model call and tools still run, unless `allowedMcpServers` is set. Then `record_finding` and `close` don't register.
 - Options to weigh: move guidance into tool descriptions (`tool.describe` passes user subjects), move carry text into `prompt.submit` additive context, and reload on a `session.*` event.
 
@@ -936,7 +936,7 @@ Inference: the UI must not assume the inbox runs in every session on a machine.
 - Project and local `env` apply "after you trust the workspace, or at startup in `-p` mode". [SETR#when-claude-code-applies-env-values]
 - The list of variables project `env` cannot set "include[s]" `CLAUDE_CONFIG_DIR` and plugin cache variables. It does not name `CLAUDE_CODE_PLUGIN_DIRS`, and the list is not exhaustive. [SETR#variables-claude-code-ignores-in-env] Whether a repository can sideload a plugin folder this way is undocumented.
 - `CLAUDE_CONFIG_DIR`: "Set it in your shell, user settings, or managed settings. In a settings file, write the absolute path." [ENVV]
-- Inference: `HERDR_PANE_ID` (`hooks/register.tsx:525`) and `GH_TOKEN` may differ in desktop sessions. The debug log shows which settings values were ignored.
+- Inference: `HERDR_PANE_ID` (`hooks/register.tsx:publishStatus`) and `GH_TOKEN` may differ in desktop sessions. The debug log shows which settings values were ignored.
 
 ### Environment variables that matter
 
@@ -982,7 +982,7 @@ No public doc mentions mods, `$.model.complete` or `$.model.fork` in its billing
 - Inference: it bills like the session. A subscriber's call draws on the five-hour and weekly windows, which are "shared with Claude chat and Cowork" on Team and Enterprise. An API or cloud user pays per token. [COST#claude-for-teams-and-enterprise] The README says "On a Claude plan, these count toward your usage limits" (`README.md:70-71`). No doc confirms it.
 - Model-specific limits exist: "'You've hit your Opus limit' or 'You've hit your Sonnet limit'". [COST#when-a-developer-asks-about-a-limit] Inference: a person working on Opus can hit the Sonnet limit, so only the inbox's call fails. The types report that as `isAnswered: false` with `reason: 'api-error'` and an `error` such as `rate_limit`. [T: `ModelCompleteResult`]
 - Claude Code's own prompt suggestions skip "while your account is close to or at its usage limit". [COST#background-token-usage] A mod can read `$.session.usage().rateLimits` (`percentUsed`). The list is "empty off a subscription". [T: `session.usage`]
-- The inbox's call: `MODEL = 'sonnet'` (`hooks/register.tsx:405`); one cached `system` block, `maxTokens: 1600`, `effort: 'low'` (`:735-737`); a 45-second timeout (`:743`). The catch-up uses `$.model.fork` (`:759`).
+- The inbox's call: `MODEL = 'sonnet'` (`hooks/register.tsx:MODEL`); one cached `system` block, `maxTokens: 1600`, `effort: 'low'` (`hooks/register.tsx:askLedgerModel`); a 45-second timeout (`hooks/register.tsx:runUpdate`). The catch-up uses `$.model.fork` (`hooks/register.tsx:catchUp`).
 
 ### `sonnet` is not one model
 
@@ -1209,7 +1209,7 @@ MCP (Model Context Protocol) is how Claude Code connects to tool servers. An **M
 
 ### Limits and behavior
 
-- Tool search is on by default; only names and server instructions load up front. "Claude Code truncates each tool description and each server's instructions at 2,048 characters by default" (`CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH`). [MCP#scale-with-mcp-tool-search] Changelog 2.1.295: deferred tool descriptions are now cut at 16,384. [CL#2-1-295] The inbox pins its tools upfront (`isDeferred: false` through `tool.describe`, `hooks/register.tsx:2058`, `:2063`, `:2071`). Whether any cut applies to mod tool descriptions is unknown.
+- Tool search is on by default; only names and server instructions load up front. "Claude Code truncates each tool description and each server's instructions at 2,048 characters by default" (`CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH`). [MCP#scale-with-mcp-tool-search] Changelog 2.1.295: deferred tool descriptions are now cut at 16,384. [CL#2-1-295] The inbox pins its tools upfront (`isDeferred: false` through `hooks/register.tsx:on('tool.describe')`). Whether any cut applies to mod tool descriptions is unknown.
 - "Each connected server takes some space in Claude's context window because its tool names and server instructions load into every session." [MCP-quickstart#add-and-verify-a-server]
 - Output: warns over 10,000 tokens; cap 25,000 tokens (`MAX_MCP_OUTPUT_TOKENS`); a result with no image over 50,000 characters is saved to a file. HTTP, SSE and (2.1.295) WebSocket messages over 16 MiB fail. [MCP#mcp-output-limits-and-warnings; CL#2-1-295]
 - Stdio servers: "Claude Code doesn't reconnect them automatically." A tool call silent for 30 minutes (stdio) or 5 minutes (remote) aborts with an error; that is per call, not the server. [MCP#automatic-reconnection; MCP#push-messages-with-channels]
@@ -1232,7 +1232,7 @@ MCP (Model Context Protocol) is how Claude Code connects to tool servers. An **M
 **Remote Control** lets claude.ai, the Claude mobile apps, or the desktop app view and steer a Claude Code session that keeps running on your machine. "The web and mobile interfaces are a window into that local session." [RC]
 
 - Mods: hooks run "in the session on your machine"; drawings appear "In the terminal on your machine". [O#where-mods-run] The row names only "claude.ai or the mobile app".
-- The desktop app is also a viewer: devices "view or steer Remote Control sessions from claude.ai, the Claude mobile apps, or Claude Desktop". [RC#trusted-devices] Whether a desktop viewer attaches as surface `desktop` (which would turn the inbox on, `hooks/register.tsx:1971`) is unknown.
+- The desktop app is also a viewer: devices "view or steer Remote Control sessions from claude.ai, the Claude mobile apps, or Claude Desktop". [RC#trusted-devices] Whether a desktop viewer attaches as surface `desktop` (which would turn the inbox on, `hooks/register.tsx:on('session.attach')`) is unknown.
 - Types: a Remote Control prompt arrives through `session.receive` with origin kind `bridge`, "the user's own from a Remote Control client". Kinds also include `'projects-relay'`. A `/config key=value` from the bridge is "not attestably the owner's hand". [T: `SessionReceiveOrigin`; `config`]
 - Requirements: Pro, Max, Team or Enterprise ("API keys are not supported"; Team and Enterprise need an Owner to enable it). Not on Bedrock, Agent Platform, Foundry, a non-Anthropic `ANTHROPIC_BASE_URL`, or a Claude apps gateway. `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` or `DISABLE_GROWTHBOOK` makes it unavailable. ZDR and HIPAA orgs can't enable it. [RC#requirements; RC#connection-and-security]
 - Ways to start: `claude remote-control` (server mode), `claude --remote-control` / `--rc` (interactive), `/remote-control` / `/rc` in a session (terminal, desktop Code mode, VS Code). `remoteControlAtStartup` auto-connects; in the desktop app it is "Settings > Claude Code > Connect new sessions to Remote Control". [RC#start-a-remote-control-session; RC#enable-remote-control-for-all-sessions]
@@ -1254,7 +1254,7 @@ MCP (Model Context Protocol) is how Claude Code connects to tool servers. An **M
 - Projects: "A conversation where Claude coordinates parallel threads of work and reports back", for when you "want to see which threads finished or need you". [MOB#work-from-your-phone] This overlaps the inbox's job.
 - Docs: mods draw nothing on the phone. Types: `mobile` is a surface with Box, Text, Button, Svg, Link, Code, Markdown and no `Input` or `Select` ("the mobile app draws no field yet"); "the mobile app reports `false`" for `isFullscreen`; Svg is drawn "in a web view"; the `session.attach` example reads `{ surface: "mobile" }`, "a phone joined: draw the lobby". [T: `Elements.mobile`; `RenderViewport`; `SvgProps`; `session.attach`] Inference: the protocol may exist without a slot for Pane or AbovePrompt ("draws the tree where it has a slot for it").
 - No `RenderSurface` value stands for claude.ai/code in a browser. [T]
-- The inbox has no mobile code. It detects a missing `Input` generically (`hooks/register.tsx:2479`) and drops `typekey-` actions without one (`:2885`).
+- The inbox has no mobile code. It detects a missing `Input` generically (`hooks/register.tsx:on('ui.render', Pane)`) and drops `typekey-` actions without one (`hooks/register.tsx:pressable`).
 - Inference: if a phone ever draws mod trees, the rework needs one tree that degrades to Buttons, Text and Markdown, with no keyboard hints and no sidebar.
 
 ## Cloud sessions
@@ -1266,7 +1266,7 @@ A **cloud session** runs on Anthropic-managed infrastructure (or an org's self-h
 - Nothing a mod draws appears. [O#where-mods-run] The inbox gate keeps it off there, assuming the desktop app does not attach to cloud sessions as `desktop`.
 - Hooks: "Claude Code runs hooks from the repository and from your organization's server-managed settings." Self-hosted sessions also run "the hooks the operator seeded from the runner host's `~/.claude/`". A session with several repositories loads no repo hooks. [ENV#setup-scripts-vs-sessionstart-hooks; ENV#limitations-in-cloud-sessions]
 - Detection: `CLAUDE_CODE_REMOTE` is `true` in the VM, "never `true` locally". `CLAUDE_CODE_REMOTE_SESSION_ID` holds a `cse_…` id. [ENV]
-- GitHub proxy (Anthropic-hosted): it "rejects requests to GitHub's GraphQL endpoint with a 403… `gh` subcommands that use GraphQL, such as `gh pr` and `gh issue`, get the same 403… a `GH_TOKEN` you set gets the same 403." "Claude can't reach GitHub APIs that exist only in GraphQL". [ENV#github-proxy] The inbox's PR block uses `gh api graphql` with `THREADS_QUERY` (`hooks/prs.ts:41`, `reviewThreads { isResolved isOutdated … }`) and `gh pr view`. Inference: both fail in cloud; `gh pr view` could move to REST, the thread list probably not.
+- GitHub proxy (Anthropic-hosted): it "rejects requests to GitHub's GraphQL endpoint with a 403… `gh` subcommands that use GraphQL, such as `gh pr` and `gh issue`, get the same 403… a `GH_TOKEN` you set gets the same 403." "Claude can't reach GitHub APIs that exist only in GraphQL". [ENV#github-proxy] The inbox's PR block uses `gh api graphql` with `THREADS_QUERY` (`hooks/prs.ts:THREADS_QUERY`, `reviewThreads { isResolved isOutdated … }`) and `gh pr view`. Inference: both fail in cloud; `gh pr view` could move to REST, the thread list probably not.
 - Network: sessions reach "The Anthropic API, for Claude Code's own requests, even at **None**". [ENV#access-levels] Inference: `$.model.complete` would work at any level.
 - Lifecycle: after a few idle minutes the VM pauses; "Your next message restores the same VM and starts Claude Code again." A reclaimed VM restores the conversation but not running background work. [ENV#time-limits; ENV#set-environment-variables; WEB#environment-expired] Inference: a mod would see a new process after each pause; whether `$.store` survives a reclaim is unknown.
 - Cost: cloud sessions count toward plan limits and "share rate limits with all other Claude and Claude Code usage". [WEB#limitations]
@@ -1312,7 +1312,7 @@ A **cloud session** runs on Anthropic-managed infrastructure (or an org's self-h
 
 `PromptOrigin.kind` in the types: `composer` (the person's own gesture, "never presumed"), `bridge` (Remote Control), `sdk`, `peer`, `peer-send-message`, `channel`, `scheduled-trigger`, `task-notification`, `projects-relay`, `coordinator`, `observer`, `observer-activity`, `auto-continuation`, `slack-ping`, `plugin` ("A plugin's `$.prompt.submit`"), `unclassified` (same-user socket posts and unstamped engine notices). [T: `PromptOrigin`]
 
-- The inbox counts a prompt as the person's words only for `composer`, `bridge`, or `plugin` with `asUser` (`hooks/register.tsx:2025`).
+- The inbox counts a prompt as the person's words only for `composer`, `bridge`, or `plugin` with `asUser` (`hooks/register.tsx:isPersonsWords`).
 - The types' settings-hook `UserPromptSubmit.source` defines `sdk` as the "non-interactive entrypoint (`-p` / Agent SDK)". [T] What a desktop Code-mode prompt carries is unknown. See "Unknown, and how to check".
 
 ### Channels
@@ -1355,7 +1355,7 @@ A **cloud session** runs on Anthropic-managed infrastructure (or an org's self-h
 - "One short wall-clock bound (1.5 s by default) covers every hook, its `$` waits and core". [T: `SessionEndInput`] The settings-hook docs agree and name the override `CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS`. The budget "applies when you exit, run `/clear`, or switch sessions with interactive `/resume`". [H#sessionend]
 - On `/clear` "the conversation ends, the process goes on under a new session id, and no `session.start` fires for it." [T: `SessionEndInput.reason`]
 - `session.detach` with reason `end` "runs inside `session.end`'s one short bound". [T: `session.detach`]
-- Inference: the inbox's `session.end` work (store writes and `publishStatus`, a `$.process.run` with a 5,000 ms timeout at `hooks/register.tsx:522-546`) can be cut off. The saved ledger must not depend on `session.end`.
+- Inference: the inbox's `session.end` work (store writes and `publishStatus`, a `$.process.run` with a 5,000 ms timeout at `hooks/register.tsx:publishStatus`) can be cut off. The saved ledger must not depend on `session.end`.
 - After the turn, `-p` waits for background work. It stops idle work after 10 minutes by default (`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`), but not while a main-conversation background command still runs. [HL#background-tasks-at-exit]
 
 ### Other `-p` behavior
@@ -1472,10 +1472,10 @@ The changelog page "is generated from the CHANGELOG.md on GitHub". On 2026-10-08
 
 ### What this means for the inbox's minimum engine
 
-- `askLedgerModel` sends `system` as a block array with `cache: true` (`hooks/register.tsx:735`). That form arrived in 2.1.292. [CL#2-1-292]
+- `askLedgerModel` sends `system` as a block array with `cache: true` (`hooks/register.tsx:askLedgerModel`). That form arrived in 2.1.292. [CL#2-1-292]
 - README says "built and tested with Claude Code 2.1.292" (`README.md:20`).
 - The desktop app keeps a 2.1.289 engine on disk next to 2.1.293 (live). Inference: a Code-mode session on 2.1.289 may fail the per-turn call or lose caching. The sessions running on 2026-10-08 used 2.1.293.
-- The inbox sets `isDeferred: false` through `tool.describe` (`hooks/register.tsx:2058`, `:2063`, `:2071`). The changelog and the mods API page date only the `$.tool.register` field (2.1.293, "earlier versions ignore it"). When `tool.describe` gained it is unknown.
+- The inbox sets `isDeferred: false` through `tool.describe` (`hooks/register.tsx:on('tool.describe')`). The changelog and the mods API page date only the `$.tool.register` field (2.1.293, "earlier versions ignore it"). When `tool.describe` gained it is unknown.
 - `$.ui.notify` and mixed `Button` children need 2.1.295. The desktop app does not bundle 2.1.295 yet (live). Changelog 2.1.139 turned off "notification preferences" when an API key or auth token is set. Inference: `$.ui.notify` may do nothing there.
 
 ### Desktop app facts from the changelog
@@ -1521,9 +1521,9 @@ The changelog page "is generated from the CHANGELOG.md on GitHub". On 2026-10-08
 |---|---|
 | `05c3548` | "Turn the mod on in the desktop app's Code mode": the `session.start` and `session.attach` gate. |
 | `f7536d0` | "Load the right conversation after /clear, /resume and /branch": `classic.SessionStart` with source `clear`, `resume` or `fork` calls `loadConversation`. |
-| `f23d9ad` | "Load the conversation the switch names, not $.session.id()": uses `e.session_id` (`hooks/register.tsx:1977`). |
+| `f23d9ad` | "Load the conversation the switch names, not $.session.id()": uses `e.session_id` (`hooks/register.tsx:on('classic.SessionStart')`). |
 
-- Tests: `tests/hooks.test.ts:1032` checks that a headless start does nothing. `:1047-1064` cover a desktop attach before and after `session.start`, then mount the band on `surface: 'desktop'`.
+- Tests: `tests/hooks.test.ts` test "a headless run stays inactive when ${origin.kind} invokes the inbox command" checks that a headless start does nothing. The tests `tests/hooks.test.ts` "the desktop app turns the mod on when it attaches before the start" and "… after the start" cover a desktop attach before and after `session.start`, then mount the band on `surface: 'desktop'`.
 - The desktop tests submit prompts with `origin: { kind: 'sdk' }`. That is an assumption about Code mode, not an observed value.
 
 ### Checks
@@ -1536,7 +1536,7 @@ The changelog page "is generated from the CHANGELOG.md on GitHub". On 2026-10-08
 
 - `AGENTS.md`: "The plugin store is keyed by the mod's name". Live store file names are keyed by plugin id (`inbox_inline-7e8589075f50.json`).
 - `AGENTS.md` and `ROADMAP.md:29` call the per-turn call a "Sonnet call". `sonnet` resolves to different models by provider. See "What the inbox's model calls cost".
-- `hooks/register.tsx` comment at `:1964-1965` says "-p, the SDK and VS Code draw nothing". That matches the docs. The types give `vscode` its own element table.
+- The comment in `hooks/register.tsx:on('session.start')` says "-p, the SDK and VS Code draw nothing". That matches the docs. The types give `vscode` its own element table.
 
 ### Store files (live, names only)
 
@@ -1560,7 +1560,7 @@ Each row names the conflict, which source to trust, and why.
 | 2 | Minimum version. Overview: terminal 2.1.287, desktop 2.1.286 [O#turn-mods-on-or-off]. Admin page: 2.1.286 for all [A]. The changelog first lists mods at 2.1.287 [CL]. | Overview | It is the more specific page and matches the changelog. Before 2.1.287 the early-access switch may still have gated mods. Unknown. |
 | 3 | Which surfaces draw. Docs: only terminal and desktop; "`e.surface` is `terminal` or `desktop`" [O#where-mods-run; R#render-sites]. Types: `RenderSurface = 'terminal' \| 'desktop' \| 'mobile' \| 'vscode'`, each with an element table [T: `RenderSurface`]. | Docs for behavior today; types for what code must handle | The types are likely ahead of the shipped apps. A render hook typed from the types must still handle all four values. |
 | 4 | Desktop exceptions. "Except elements the elements table marks terminal-only" [O#where-mods-run] leaves out the terminal-only render sites (`ToolProgress`, `TurnDuration`, `InfoNotice`) and that `Svg` is desktop-only. | Reference tables | [R#render-sites; R#elements] are the detailed lists. |
-| 5 | Desktop start. The docs imply nothing special is needed in Code mode. Live: while the mod gated on `isInteractive` alone, "`/inbox` and the mod's tools did not exist" in Code mode. Commit `05c3548` adds the attach paths (`hooks/register.tsx:1962-1974`). `SessionStartInput` mentions only REPL, `-p` and SDK [T]. | Live check | The failure was recorded. Which path turns the mod on, and the exact start values (`isInteractive`, `surfaces()`) were not logged. The docs never warn that an `isInteractive` gate excludes desktop. |
+| 5 | Desktop start. The docs imply nothing special is needed in Code mode. Live: while the mod gated on `isInteractive` alone, "`/inbox` and the mod's tools did not exist" in Code mode. Commit `05c3548` adds the attach paths (`hooks/register.tsx:on('session.start')` and `hooks/register.tsx:on('session.attach')`). `SessionStartInput` mentions only REPL, `-p` and SDK [T]. | Live check | The failure was recorded. Which path turns the mod on, and the exact start values (`isInteractive`, `surfaces()`) were not logged. The docs never warn that an `isInteractive` gate excludes desktop. |
 | 6 | Guard scope. The admin page says the guard protects "the system prompt" and managed instructions, and "Everything else is allowed" [A#know-what-happens-by-default]. The guard's source skips every user-tier hook on `prompt.compose`, `prompt.context` and `classic.*`, and refuses `tool.register` under `allowedMcpServers` [G]. | Source, for the main branch | The source is exact. Whether the shipped guard matches it is unknown. |
 | 7 | Cloud sessions. Hooks run there only "for a plugin that reaches the cloud session" [O#where-mods-run], which needs server-managed settings [PO]. | Docs | The inbox, installed from GitHub, does not reach cloud sessions. |
 | 8 | Remote turn-off. It appears only in the built-in table and the troubleshoot messages [O; TS#check-whether-mods-can-load], not on the admin page. | Neither is complete | Whether it stops built-in mods, and how "saved off" clears in the desktop app, is undocumented. |
@@ -1710,7 +1710,7 @@ Each row names the conflict, which source to trust, and why.
 | 30 | How desktop draws `variant="primary"` and `role="dismiss"`. | Sample Button in Code mode. |
 | 31 | With a terminal and desktop attached to one session, which surface fires `onPress`? Do both draw the band at once? | Attach the app to a terminal session, press in each, log `e.surface` and render counts. |
 | 32 | Minimum engine for `Client` on desktop, the desktop Link rules, Button `variant`, Button `Text` children, `$.ui.notify`. | Save each build's `index.d.ts` outside the gitignored path and diff them. |
-| 33 | What `origin.kind` does a prompt typed in desktop Code mode carry? If it is `sdk`, the inbox ignores it as the person's words (`hooks/register.tsx:2025`). | Log `e.origin` from `prompt.submit` to the debug log in a Code-mode session. |
+| 33 | What `origin.kind` does a prompt typed in desktop Code mode carry? If it is `sdk`, the inbox ignores it as the person's words (`hooks/register.tsx:isPersonsWords`). | Log `e.origin` from `prompt.submit` to the debug log in a Code-mode session. |
 | 34 | Does `$.ui.copy` work on desktop? | Answered: yes, `isCopied: true`. [desktop](claude-desktop-app.md#live-probe-of-a-code-mode-session) |
 | 35 | Do `$.prompt.fill`, `suggest`, `read`, `$.ui.selection` and `$.ui.ask` work in Code mode? | A temporary command that calls each and logs results, in a session with its own `CLAUDE_CONFIG_DIR`. |
 | 36 | Does `$.process.run` work in Code mode? | Answered: yes, `git` and `gh` ran. [desktop](claude-desktop-app.md#live-probe-of-a-code-mode-session) |

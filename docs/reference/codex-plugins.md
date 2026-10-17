@@ -452,7 +452,7 @@ upload doesn't mean the listing is ready to submit."
 - **How the server finds it.** `dataDir` reads `INBOX_DATA` or `PLUGIN_DATA`.
   Otherwise it maps `<home>/plugins/cache/<market>/<plugin>/<version>` to
   `<home>/plugins/data/<plugin>-<market>`, and falls back to
-  `~/.codex/inbox-dev` (codex/src/state.ts:89-102). MCP server processes
+  `~/.codex/inbox-dev` (codex/src/state.ts:dataDir). MCP server processes
   found the hooks' data folder this way [live]
   (docs/plans/codex-plugin.md:400). The `<plugin>-<market>` order is a code
   assumption: it cannot be told apart while both names are "inbox".
@@ -509,7 +509,7 @@ is ever listed publicly.
     destructiveHint to false."
   - [inference] `record_finding`, `close` and `inbox_press` all need
     `readOnlyHint: false`. The inbox's tools set no annotations today
-    (codex/src/server.ts:31-55).
+    (codex/src/server.ts:toolsFor).
   - "Do not request the full conversation history … Your MCP server must not
     pull, reconstruct, or infer the full chat log from the client or
     elsewhere." [inference] The per-reply update reads the transcript, which
@@ -728,7 +728,7 @@ Notes per event:
   - Stop requires `stop_hook_active` and `last_assistant_message` (nullable).
   - SubagentStop requires `agent_transcript_path`.
 - **The repo's `HookInput` type** omits `model`, `permission_mode` and
-  `tool_use_id` (codex/src/hook.ts:31-43).
+  `tool_use_id` (codex/src/hook.ts:HookInput).
 - [inference] A subagent's prompts and tool calls carry the parent's
   `session_id`. Without a check on `agent_id`, they would land in the parent
   session's inbox.
@@ -963,12 +963,12 @@ Notes per event:
     lived at least 2.5 minutes, across turns.
   - So state must live in files or in one process the others can reach. The
     repo keeps one JSON file per session under an mkdir lock
-    (codex/src/state.ts:158-188).
+    (codex/src/state.ts:withLock).
 - **The inbox server's handshake** [repo]: it echoes the client's
   `protocolVersion` or defaults to `2025-06-18`, returns
   `capabilities: { tools: {}, resources: {} }` and
   `serverInfo: { name: 'inbox', version: '0.1.0' }`, and implements no
-  `server/discover` (codex/src/server.ts:193-198).
+  `server/discover` (codex/src/server.ts:makeServer).
 - **Removed: `codex mcp-server`.** "The `codex mcp-server` command and the
   standalone `codex-mcp-server` binary have been removed." Deprecated
   2026-08-24, removed 2026-09-05. app-server "isn't an MCP server or a
@@ -1026,7 +1026,7 @@ without the model calling it. The Inbox tab is a thread entrypoint.
 - **Declaration.** `_meta["openai/ui"].entrypoints: [{ type: "global" }]`
   beside `_meta.ui.resourceUri`. "Use `{ type: "thread" }` to add an
   entrypoint in a conversation's side panel." (D/build/extensions#sidebar-apps)
-  The inbox declares `[{ type: 'thread' }]` (codex/src/server.ts:38).
+  The inbox declares `[{ type: 'thread' }]` (codex/src/server.ts:toolsFor).
 - "Normally, MCP Apps can only be invoked via the model. However, it may be
   convenient to allow users to open your MCP App via static entrypoints."
   (SPEC:L36) Up to three per app: global, thread ("Available as a content tab
@@ -1039,7 +1039,7 @@ without the model calling it. The Inbox tab is a thread entrypoint.
   "Register `app.ontoolresult` before `app.connect()` to render the initial
   result instead of calling the tool again, which delays rendering and causes
   visible flicker." (TSR:L42) The inbox tab instead calls `poll()` right after
-  `ui/initialize` and has no `tool-result` handler (codex/src/tab.tsx:886-894).
+  `ui/initialize` and has no `tool-result` handler (codex/src/tab.tsx:initialize).
 - **Thread entrypoint.** "The server receives `{}` as the tool arguments when
   the entrypoint opens." "Every thread will have a different instance of the
   entrypoint." (SPEC:L218-225)
@@ -1052,7 +1052,7 @@ without the model calling it. The Inbox tab is a thread entrypoint.
   entrypoint that describes the view's contents and differs from the plugin
   name" (SPEC:L38). Title order: `title`, `annotations.title`, `name`
   (SPEC:L82-85). The inbox's tool is titled "Inbox", the plugin name
-  (codex/src/server.ts:34-35).
+  (codex/src/server.ts:toolsFor).
 - **Icons.** SHOULD be on each entrypoint tool: SVG, monochrome, transparent,
   `currentColor`, 20x20 viewport, 1.33px strokes (SPEC:L56-63). Fallback: the
   tool icon, then the "Local MCP Server icon, or the app logo registered with
@@ -1060,7 +1060,7 @@ without the model calling it. The Inbox tab is a thread entrypoint.
   come from `_meta["io.modelcontextprotocol/serverInfo"]["icons"]` in
   `server/discover`; servers without `server/discover` use
   `serverInfo["icons"]` in `initialize`." (SPEC:L67-73) The inbox sets no
-  icons on the tool or `serverInfo` (codex/src/server.ts:33-39, :197).
+  icons on the tool or `serverInfo` (codex/src/server.ts:toolsFor, codex/src/server.ts:makeServer).
 - **File entrypoints.** `extensions` MUST use the dot form (SPEC:L288). The
   tool gets `{file: {name, resourceUri}}`; `resourceUri` is opaque.
   "`resources/read` and `resources/subscribe` work. However, they will be
@@ -1094,7 +1094,7 @@ without the model calling it. The Inbox tab is a thread entrypoint.
   display mode that does not appear in its
   `appCapabilities.availableDisplayModes`, if set" (APPSPEC:L786).
 - The inbox tab declares `appCapabilities: { tools: {} }` and no display modes
-  (codex/src/tab.tsx:889). `appCapabilities.tools` means "App exposes MCP-style
+  (codex/src/tab.tsx:initialize). `appCapabilities.tools` means "App exposes MCP-style
   tools that the host can call" (APPSPEC:L518); the tab serves none.
 
 ### The bridge: standard calls and ChatGPT aliases
@@ -1147,7 +1147,7 @@ without the model calling it. The Inbox tab is a thread entrypoint.
   `--color-border-*`, `--font-sans`, `--font-mono`, `--border-radius-*`,
   `--shadow-*` and more. "Views should set default fallback values for the set
   of these variables that they use" (APPSPEC:L791-955, L899). The tab reads
-  `styles.variables` (codex/src/tab.tsx:104-107).
+  `styles.variables` (codex/src/tab.tsx:applyHost).
 
 ### What the model sees in a tool result
 
@@ -1161,7 +1161,7 @@ without the model calling it. The Inbox tab is a thread entrypoint.
   transcript." (D/reference#tool-results)
 - "Declare `outputSchema` for any tool that returns `structuredContent`."
   (D/reference#tool-descriptor-parameters) `inbox`, `inbox_view` and
-  `inbox_press` declare none (codex/src/server.ts:33-55).
+  `inbox_press` declare none (codex/src/server.ts:toolsFor).
 - "Tools MUST return meaningful content array even when UI is available"
   (APPSPEC:L1559). BB and SPEC's own settings examples return `content: []`.
 - "Return enough structured content for both the model and UI to understand
@@ -1230,7 +1230,7 @@ without the model calling it. The Inbox tab is a thread entrypoint.
   tools" (APPSPEC:L1529-1560). The client declares
   `capabilities.extensions["io.modelcontextprotocol/ui"].mimeTypes` at
   `initialize` (L1498-1522). The inbox server does not check
-  (codex/src/server.ts:193-198).
+  (codex/src/server.ts:makeServer).
 - "Extensions are always opt-in: a client only uses an extension if both
   client and server declare support in the `extensions` field of their
   capabilities." (MATRIX) The inbox server declares no extensions, and Codex
@@ -1275,7 +1275,7 @@ without the model calling it. The Inbox tab is a thread entrypoint.
   [the implementation record](../plans/platform-architecture-audit.md).
 - "Bundle or inline the CSS in your app's HTML. The default iframe CSP can
   block external stylesheets." (TSR:L96)
-- The inbox resource sets no `_meta.ui` (codex/src/server.ts:214-215), so the
+- The inbox resource sets no `_meta.ui` (codex/src/server.ts:makeServer), so the
   default CSP applies. All data goes through `tools/call` and the bundle is
   inline, so that is fine today.
 
@@ -1314,7 +1314,7 @@ without the model calling it. The Inbox tab is a thread entrypoint.
 - **Live:** a thread tab's `resources/subscribe` never reached the server, and
   no update arrived in two minutes. Polling a tool every 5 s worked [live]
   (docs/plans/codex-plugin.md:332). The tab now polls every 3 s
-  (codex/src/tab.tsx:52).
+  (codex/src/settle.ts:POLL_MS).
 - **MCP Events cannot replace polling.** "MCP Events is available in Work
   chats on ChatGPT web, in Work chats in the desktop app with **Cloud**
   selected, and with dots." It "requires MCP 2.0 (protocol version
@@ -1366,7 +1366,7 @@ without the model calling it. The Inbox tab is a thread entrypoint.
 - Neither lists Codex or Claude Code. Whether Claude Code or the Claude
   desktop app's Code mode renders MCP Apps is not answered here.
 - [inference] Of the inbox's MCP surface, only `_meta["openai/ui"].entrypoints`
-  is OpenAI-specific (codex/src/server.ts:38). The same `ui://inbox/tab-…`
+  is OpenAI-specific (codex/src/server.ts:toolsFor). The same `ui://inbox/tab-…`
   resource could render in other MCP Apps hosts, opened by the model and
   inline.
 
@@ -1399,7 +1399,7 @@ threads a root thread and its forks belong to. They differ after a fork.
   inventory for external MCP servers." [source] (GH/codex-rs/core/src/turn_metadata.rs:275-312)
 - **The inbox resolver.** `sessionOf` reads
   `x-codex-turn-metadata.session_id`, then `thread_id`, then `threadId`
-  (codex/src/server.ts:73-79). [inference] In a fork, `session_id` is the
+  (codex/src/server.ts:sessionOf). [inference] In a fork, `session_id` is the
   root's. The inbox would then key state to the root and run
   `codex queue --thread <root>`, sending a press to the wrong chat. Reading
   `thread_id` first would key rows to the chat the person is in. Not checked
@@ -1490,7 +1490,7 @@ threads a root thread and its forks belong to. They differ after a fork.
 
 - **Which binary.** The server uses the CLI path a hook saved, then
   `CODEX_CLI_PATH`, then its parent process if named `codex`, then `codex`
-  (codex/src/server-handler.ts `appCli`, codex/src/server.ts:88).
+  (codex/src/server-handler.ts `appCli`, codex/src/server.ts:queueMessage).
 - A press from the tab in the desktop app is not yet confirmed end to end
   (docs/plans/codex-plugin.md:3-4).
 
@@ -1543,9 +1543,9 @@ threads a root thread and its forks belong to. They differ after a fork.
   GPT-6.1 Sol the default model.
 - **Unknown flags.** `exec` rejects an unknown `--disable` name with "Unknown
   feature flag: X"; the code drops it and retries [live]
-  (codex/src/update.ts:88-92; docs/plans/codex-plugin.md:407-408).
+  (codex/src/update.ts:codexAsk; docs/plans/codex-plugin.md:407-408).
   `personality` is "removed" in 0.160.1 but still in the `OFF` list
-  (codex/src/update.ts:40). On 0.163.0 `--disable personality` is still
+  (codex/src/update.ts:OFF). On 0.163.0 `--disable personality` is still
   accepted [live 0.163.0].
 - **Model.** `gpt-6.1-sol` at low effort got 12 of 12 right in 4–5 s;
   `gpt-6-luna` got 10 of 12 [live] (docs/plans/codex-plugin.md:412-419).
@@ -1737,7 +1737,7 @@ These overlap with what the inbox shows.
 - **`non_prefixed_mcp_tool_names`**: "Expose MCP model-visible namespaces
   without the legacy `mcp__` prefix" (lib.rs:1563-1568). [inference] If it
   also changes hook `tool_name`, the matcher `mcp__.*` and the tool names in
-  the inbox's guidance (codex/src/texts.ts:19, :26) break.
+  the inbox's guidance (hooks/model-text.ts:guidanceText) break.
 - **Code mode.** L/config-reference calls `features.code_mode.enabled` "under
   development and off by default", yet the desktop app runs shell commands
   through code mode [live] (docs/plans/codex-plugin.md:373). [inference] The
@@ -1993,7 +1993,7 @@ repo, and a probe client speaking app-server JSON-RPC over stdio.
 | `codex queue` mechanism (repo) | codex-plugin.md:359: "writes a row to `~/.codex/queue_1.sqlite`… The desktop app picks the row up". :398 and source: `thread/queue/add` on the app-server | Source | [inference] The SQLite row is the store behind the service, a side effect. |
 | "Every tools/call" (repo) | codex-plugin.md:327: every MCP `tools/call` carries `x-codex-turn-metadata` | Source | True for model calls only; tab calls carry `thread_id`, app-server calls `threadId`. |
 | Desktop session tried? (repo) | codex/README.md:9-10: "has not been tried yet". codex-plugin.md:421-423: it ran. :434-436: "Not yet". :3-4: tab press unconfirmed | codex-plugin.md:421-423 for hooks and polling | The README and step list are stale; the press is still unconfirmed. |
-| Poll interval (repo) | codex-plugin.md:56, :119, :332: 5 s or "every few seconds". codex/src/tab.tsx:52: 3 s | Code | |
+| Poll interval (repo) | codex-plugin.md:56, :119, :332: 5 s or "every few seconds". codex/src/settle.ts:POLL_MS: 3 s | Code | |
 | `additionalContextLimit` (repo) | codex-plugin.md:231-234: SessionStart sets it. hooks.json has none | Code | The plan was not implemented. |
 | `CODEX_CLI_PATH` in the server (repo) | codex-plugin.md:361-365: servers get no Codex variables. `.mcp.json` lists it in `env_vars`; `appCli` in server-handler.ts says ".mcp.json passes [it] on" | Unknown | Whether it arrives is not recorded. |
 | `session_meta.source` (repo) | codex-plugin.md:331: desktop transcripts have `source: "vscode"`. Live: 8 of 58 desktop transcripts do; the rest are subagent threads. Whether this and the 60-transcript count in "Session, thread and turn ids" (9 top-level) are the same sample is not recorded [unknown] | Both | True for top-level threads only. |
