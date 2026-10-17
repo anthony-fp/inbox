@@ -1892,6 +1892,10 @@ function animateDraw(before: Heights, changed: ReadonlySet<string>) {
     const from = () => (el.getAnimations().length > 0 || isFresh ? el.getBoundingClientRect().height : was.height)
     if (state && changed.has(key) && startState(el, state, from)) continue
     if (state === 'closing' || state === 'settling' || state === 'leaving') continue
+    if (state && !isMoving(state) && !sending.has(key)) {
+      release(el)
+      continue
+    }
     const target = state || el.classList.contains('group-end') ? contentHeight(el) : el.scrollHeight
     if (isFresh) {
       if (!state && entering.delete(key)) growIn(el, target)
