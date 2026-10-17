@@ -874,7 +874,7 @@ function pressed(
         effects,
       }
     }
-    // Address and Discuss are a finding's.
+    // Address, File issue and Discuss are a finding's.
     default:
       return stale
   }

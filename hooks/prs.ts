@@ -241,7 +241,7 @@ function plural(count: number, one: string, many: string): string {
  * What stands between the PR and merging, or that it is ready. "Blocked" names only what waits on the person,
  * since the rows under the block list each check and thread. Once nothing does, "Waiting" names what waits on
  * others: a thread sent to Claude or on changed lines, which is still open on GitHub, an approval, a running check.
- * `text` is the whole line. `head` is its status words, as "Blocked", and `reasons` the rest, or ''.
+ * `text` is the whole line. `head` is its status words, as "Blocked". `unlisted` is the reasons no row below the block lists.
  */
 export function readiness(
   pr: PrView,

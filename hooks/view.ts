@@ -107,7 +107,7 @@ export type ClosedDelivery = 'queued' | 'unconfirmed' | { error: string; canUndo
 /**
  * A handed-off row stays in its place, folded, and leaves the count. A settled
  * row just closed: it stays in its place with its outcome, `label`, and leaves
- * the count. `canUndo` when the person's own Done or Dismiss closed it.
+ * the count. `canUndo` when the person's own Done or Dismiss closed it, or Fix handed a finding off.
  * `delivery` shows queued answers after QUEUED_AFTER_MS, and unconfirmed answers immediately.
  */
 export type RowState =
@@ -332,10 +332,6 @@ export function feedbackOf(
   }
 }
 
-/**
- * What a row reads after a ✓ once a press went through, in the past tense: "Addressed", not "Address". An answer
- * reads as the option chosen, and a step as its own label.
- */
 /** The Fix button's label for a finding, which its settled and closed rows read as the choice made. */
 const fixLabel = (f: Pick<Finding, 'kind'>) => (f.kind === 'opportunity' ? 'Do it' : 'Fix')
 
@@ -347,6 +343,10 @@ const WORKING_LABELS: Record<string, string> = {
   'thread-draft': 'Drafting a reply…',
 }
 
+/**
+ * What a row reads after a ✓ once a press went through, in the past tense: "Addressed", not "Address". An answer
+ * reads as the option chosen, and a step as its own label.
+ */
 const DONE_LABELS: Record<string, (text: string) => string> = {
   address: () => 'Handed off',
   issue: () => 'Asked to file',
@@ -472,7 +472,7 @@ const ACTION_KEYS: Partial<Record<RowPress['action'], string>> = {
 /**
  * A row's actions in the order the pane and the tab draw them, each labeled
  * "… again" when the row's last press, other than an open or copy, was that action.
- * A settled row offers only Undo, and only after the person's own Done or Dismiss.
+ * A settled row offers only Undo, and only after the person's own Done or Dismiss, or a finding's Fix.
  */
 function actionsOf(
   row: { id: string; item: Item | null; finding: Finding | null; steps: HelpStep[] },
@@ -688,7 +688,7 @@ export type PlannedKey =
 
 /**
  * A row's actions as keys. `keys` finish the row: [Try again] first when a send failed, then options and steps,
- * the first 9 shown on letters, then Done for a task and Address for a finding. `more` are the other ways to
+ * the first 9 shown on letters, then Done for a task, and Address and File issue for a finding. `more` are the other ways to
  * respond: your own words, Explain, Discuss, and Dismiss. A question's folded options show only with `isAllShown`,
  * and until then [All N options] follows the last option shown.
  */

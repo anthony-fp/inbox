@@ -111,7 +111,7 @@ type Row = {
   handle: string
   /** `done` once the row is handed to Codex, which also sets how its feedback reads. */
   handleTone?: Tone
-  /** A finding's kind, which sets its handle's color and size. */
+  /** A finding's kind, which sorts it into its Issues or Opportunities group. */
   kind?: Finding['kind']
   /** Muted text before the title: a PR thread's file and line, or a check's workflow. */
   lead?: string
@@ -1201,7 +1201,7 @@ function ListRow({ row, track, onSelect, now }: { row: Row; track: RowTrack; onS
   )
 }
 
-/** An open row's details under its line: its kind, body, notes, actions and copy box. */
+/** An open row's details under its line: body, notes, actions and copy box. */
 function Panel({ row, isClosing }: { row: Row; isClosing: boolean }) {
   const { keys, more } = rowActions(row)
   const copied = copies.get(row.id)

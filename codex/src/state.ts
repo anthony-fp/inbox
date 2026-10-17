@@ -131,7 +131,7 @@ export function emptyState(sessionId: string): SessionState {
 
 /**
  * The plugin's data folder. Hooks get it as PLUGIN_DATA. MCP server
- * processes get no Codex variables, so they take the folder Codex gives
+ * processes get no PLUGIN_DATA, so they take the folder Codex gives
  * hooks for the installed copy they run from: the cache path
  * `<codex home>/plugins/cache/<market>/<plugin>/<version>` maps to
  * `<codex home>/plugins/data/<plugin>-<market>`.

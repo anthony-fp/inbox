@@ -229,7 +229,7 @@ export type View = InboxView & {
   heard: HeardState
   done: string[]
   running: string[]
-  /** Each row's last press, by row id. The tab draws from each row's feedback; a tab loaded before that still reads this. */
+  /** Each row's last press, by row id, which the tab reads for its PR rows and blocks. */
   lastActions: Record<string, LastAction>
   /** The turn counts each row's feedback reads, as "Explaining…" until the reply to its press. */
   turns: Turns
@@ -242,7 +242,7 @@ export type View = InboxView & {
  * The view as the server sends it to the tab, with the session the call came
  * from. The tab sends `thread` back with each press, which reads as stale in any other session.
  * `devPage` is the address of the page the server serves now. A tab showing another page replaces itself with it.
- * The name is older than installed builds reloading, and tabs open from older builds still read it.
+ * Tabs open from older builds read it by this name.
  * `serverBuild` is the fingerprint build.mjs stamped into the running server. `serverLoadError` says why a newer
  * build of the server did not load.
  */

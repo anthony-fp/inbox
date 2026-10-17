@@ -73,8 +73,7 @@ async function currentHandler(): Promise<Handler> {
 }
 
 const reply = (r: unknown) => process.stdout.write(`${JSON.stringify(r)}\n`)
-// Each message waits for the handler of the one before it, so handlers start in arrival order, as they did when
-// the server was one module. Their replies still finish in any order.
+// Each message waits for the handler of the one before it, so handlers start in arrival order. Their replies still finish in any order.
 let ready: Promise<unknown> = Promise.resolve()
 
 createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', line => {

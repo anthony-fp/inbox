@@ -1,7 +1,7 @@
 // What Codex and the tab read that differs from the mod's texts. Each one
 // keeps the mod's wording except where the surface differs: Codex shows the
 // inbox in a tab beside the conversation, with no band above the prompt.
-// The shared texts in ../../hooks/ledger.ts name Codex and the tab through CODEX.
+// The shared texts in ../../hooks/model-text.ts and ../../hooks/tools.ts name Codex and the tab through CODEX.
 
 import type { Host } from '../../hooks/model-text'
 import type { InboxView, RowView } from '../../hooks/view'
