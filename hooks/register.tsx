@@ -31,7 +31,6 @@ import type {
   FoldKind,
   Item,
   Ledger,
-  Finding,
   PrCheck,
   PrThread,
   PrView,
@@ -143,7 +142,7 @@ import {
   withRewrite,
   withUnconfirmed,
 } from './presses'
-import type { Effect, EffectHost, PrActionId, RowPress } from './presses'
+import type { Effect, EffectHost, RowPress } from './presses'
 import {
   closedShown,
   DOT,

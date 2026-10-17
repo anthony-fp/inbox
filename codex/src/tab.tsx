@@ -71,7 +71,7 @@ import {
   took,
   waitingThreads,
 } from '../../hooks/prs'
-import type { Finding, Item, PrCheck, PrThread, PrView } from '../../types'
+import type { Finding, PrCheck, PrThread, PrView } from '../../types'
 import { followTo } from '../../hooks/arrivals'
 import { parseInline } from '../../hooks/inline'
 import { isShownEmpty, newRows, openRows, TAB_IDS, TAB_OF } from './arrivals'

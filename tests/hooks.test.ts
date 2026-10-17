@@ -2780,7 +2780,7 @@ test('every row in the demo, on every tab, draws its plan’s buttons in the pla
     now: 1_000_000,
   })
   const TITLE_START = 20
-  const expectedLabels = (row: (typeof view.findings.rows)[number], look: 'terminal' | 'desktop') => {
+  const expectedLabels = (row: (typeof view.findings.rows)[number]) => {
     const { keys, more } = rowKeyPlan(row, true)
     return [...keys, ...more].flatMap(k => {
       if (k.slot === 'retry') return ['Try again']
@@ -2845,10 +2845,9 @@ test('every row in the demo, on every tab, draws its plan’s buttons in the pla
         )
         expect(isTitleDrawn, `${look} ${tab.id} row ${row.id} draws its title`).toBe(true)
         if (row.state.is !== 'open') continue
-        expect(
-          inOrder(controls, expectedLabels(row, look)),
-          `${look} ${tab.id} row ${row.id}: ${controls.join(', ')}`,
-        ).toBe(true)
+        expect(inOrder(controls, expectedLabels(row)), `${look} ${tab.id} row ${row.id}: ${controls.join(', ')}`).toBe(
+          true,
+        )
       }
     }
     if (look === 'terminal') await pane.press({ key: 'tab-prs' })

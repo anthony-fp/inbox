@@ -1,6 +1,6 @@
 import type { Card, Closed, ClosedFinding, Finding, Help, Item, Ledger } from '../types'
 import type { Host } from './model-text'
-import { clip, codeBlocks } from './text'
+import { codeBlocks } from './text'
 
 export const EMPTY: Ledger = {
   card: null,
