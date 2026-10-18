@@ -62,6 +62,17 @@ that updates the inbox after each reply, reads two.
   why. A finding that expired or that Claude closed as fixed can be recorded
   again. The ledger keeps the newest 12 closed findings, so a dismissal older
   than that is forgotten.
+- A question or task replaces a finding only when it asks about it: its label
+  is the finding's id, its ask restates the finding's title or detail or both name the same pull
+  request number. When the inbox model's `ASKED` line claims the link, an ask
+  that shares two key words with the finding's title also passes. The inbox model's `ASKED` line for any
+  other item is ignored and the finding stays open. The finding closes as
+  "asked as iN" and keeps `askedAs`, the item's id.
+- The finding reopens, without `askedAs`, when that item closes with the work
+  undone: the person dismissed it, it expired, it no longer applies, or the
+  person put it off ("not now", "not yet", "later"). An answer that decides it,
+  or Done, leaves the finding closed. Fix on a finding that still has an open
+  item with its `askedAs` closes that item.
 - Fix, File issue, Discuss and Reply keep the finding open until Claude
   closes it. Dismiss closes it.
 - The inbox model closes a finding only with a `FIXED` line, when the

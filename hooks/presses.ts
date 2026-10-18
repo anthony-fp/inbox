@@ -701,8 +701,17 @@ function pressed(
       effects: [{ kind: 'send' as const, text, by: null }],
     })
     switch (p.action) {
-      case 'address':
-        return sendFinding('handoff', messages.finding(finding, 'address'))
+      case 'address': {
+        const sent = sendFinding('handoff', messages.finding(finding, 'address'))
+        const asker = ledger.items.find(i => i.id === finding.askedAs)
+
+        return asker
+          ? {
+              ...sent,
+              ledger: closeItem(ledger, asker.id, { how: 'update', outcome: `fix sent for ${finding.id}` }, ctx.now),
+            }
+          : sent
+      }
       case 'issue':
         return sendFinding('handoff', messages.finding(finding, 'issue'))
       case 'explain':

@@ -125,6 +125,8 @@ export type Finding = {
   /** The file it is about, as Claude gave it. */
   path: string | null
   at: number
+  /** The item that replaced this finding by asking about it. A finding closed as "asked as iN" reopens when that item closes with the work undone. */
+  askedAs?: string
 }
 
 export type FoldKind = Item['kind'] | Finding['kind']

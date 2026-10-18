@@ -302,22 +302,71 @@ function closedRecord(item, closing, now) {
   const { id, kind, ask, label } = item;
   return { id, kind, ask, ...label ? { label } : {}, ...closing, at: now, item };
 }
-function closedFindingRecord(finding, closing, now) {
-  return { ...finding, ...closing, closedAt: now };
+function closedFindingRecord(finding, closing, now, askedAs) {
+  return { ...finding, ...askedAs ? { askedAs } : {}, ...closing, closedAt: now };
 }
 var CLOSED_BY_CLAUDE = "closed by Claude";
-function closeFinding(ledger, id, closing, now) {
+function closeFinding(ledger, id, closing, now, askedAs) {
   const finding = ledger.findings.find((f) => f.id === id);
   if (!finding) return ledger;
   return {
     ...ledger,
     findings: ledger.findings.filter((f) => f.id !== id),
-    closedFindings: [...ledger.closedFindings, closedFindingRecord(finding, closing, now)]
+    closedFindings: [...ledger.closedFindings, closedFindingRecord(finding, closing, now, askedAs)]
   };
+}
+var SHARED_TITLE_WORDS = 2;
+var PUT_OFF = /\b(?:not (?:now|yet)|put off|for later|postpone|defer)/i;
+function leavesWorkOpen(c) {
+  return c.how !== "done" && (isLapsed(c) || PUT_OFF.test(c.outcome));
+}
+function reopenAskedFindings(ledger, closes) {
+  return closes.filter(leavesWorkOpen).reduce((l, c) => {
+    const record = l.closedFindings.findLast((f) => f.askedAs === c.id);
+    if (!record) return l;
+    const reopened = reopenFinding(l, record.id);
+    return {
+      ...reopened,
+      findings: reopened.findings.map((f) => {
+        const { askedAs: _askedAs, ...rest } = f;
+        return f.id === record.id ? rest : f;
+      })
+    };
+  }, ledger);
+}
+function prNumbers(text) {
+  return new Set([...text.matchAll(/(?:#|\bPR\s*#?|\/pull\/)(\d+)/gi)].map((m) => m[1]));
+}
+function asksAbout(item, finding, isClaimed = false) {
+  if (item.label === finding.id) return true;
+  if (restates(finding.title, item.ask) || restates(finding.detail, item.ask)) return true;
+  if (isClaimed) {
+    const known = keyWords(finding.title);
+    if ([...keyWords(item.ask)].filter((w) => known.has(w)).length >= SHARED_TITLE_WORDS) return true;
+  }
+  const itemPrs = prNumbers(`${item.label ?? ""} ${item.ask}`);
+  return [...prNumbers(`${finding.title} ${finding.detail}`)].some((n) => itemPrs.has(n));
 }
 function pruneClosed(ledger, keep) {
   const pruned = (records) => records.filter((r, n) => n >= records.length - MAX_CLOSED || keep.has(r.id));
   return { ...ledger, closed: pruned(ledger.closed), closedFindings: pruned(ledger.closedFindings) };
+}
+function idNumber(id) {
+  return Number(id.match(/\d+/)?.[0] ?? Number.NaN);
+}
+function inIdOrder(open, entry) {
+  const at = open.findIndex((x) => idNumber(x.id) > idNumber(entry.id));
+  return at < 0 ? [...open, entry] : [...open.slice(0, at), entry, ...open.slice(at)];
+}
+function reopenFinding(ledger, id) {
+  const record = ledger.closedFindings.findLast((f) => f.id === id);
+  if (!record || ledger.findings.some((f) => f.id === id)) return ledger;
+  const { how: _how, outcome: _outcome, closedAt: _closedAt, ...finding } = record;
+  return {
+    ...ledger,
+    findings: inIdOrder(ledger.findings, finding),
+    closedFindings: ledger.closedFindings.filter((f) => f.id !== id)
+  };
 }
 function applyExchangeUpdate(ledger, update, exchange, now, promptAt) {
   const explainedId = exchange.press?.action === "explain" ? exchange.press.id : null;
@@ -388,31 +437,46 @@ function applyUpdate(ledger, u, now, turn, promptAt = now) {
   const askedBy = /* @__PURE__ */ new Map();
   for (const a of u.asked) {
     const id = typeof a.item === "number" ? addedIds[a.item] : a.item;
-    if (id && kept.some((i) => i.id === id)) askedBy.set(a.id, id);
+    const asker = kept.find((i) => i.id === id);
+    const finding = ledger.findings.find((f) => f.id === a.id);
+    if (asker && finding && asksAbout(asker, finding, true)) askedBy.set(a.id, asker.id);
   }
   for (const i of kept.filter((i2) => created.has(i2.id)))
-    for (const f of ledger.findings) if (!askedBy.has(f.id) && restates(f.title, i.ask)) askedBy.set(f.id, i.id);
+    for (const f of ledger.findings) if (!askedBy.has(f.id) && asksAbout(i, f)) askedBy.set(f.id, i.id);
   const { findings, closedFindings } = ledger.findings.reduce((l, f) => {
     const asker = askedBy.get(f.id);
-    const outcome = closing.get(f.id) ?? (asker ? `asked as ${asker}` : void 0);
-    return outcome === void 0 ? l : closeFinding(l, f.id, { outcome, how: "update" }, now);
+    const outcome = closing.get(f.id);
+    if (outcome !== void 0) return closeFinding(l, f.id, { outcome, how: "update" }, now);
+    return asker ? closeFinding(l, f.id, { outcome: `asked as ${asker}`, how: "update" }, now, asker) : l;
   }, ledger);
-  return {
-    ...ledger,
-    card,
-    items: kept,
-    closed,
-    findings,
-    closedFindings,
-    nextId,
-    batchTurn: added > 0 ? turn : ledger.batchTurn
-  };
+  return reopenAskedFindings(
+    {
+      ...ledger,
+      card,
+      items: kept,
+      closed,
+      findings,
+      closedFindings,
+      nextId,
+      batchTurn: added > 0 ? turn : ledger.batchTurn
+    },
+    closed.slice(ledger.closed.length)
+  );
 }
 function withUpdate(item, updated) {
   const change = updated.findLast((c) => c.id === item.id);
   if (!change || item.kind !== "question") return item;
   const options = change.options ?? item.options;
   return { ...item, options, rec: recommendedOption(options, change.rec ?? item.rec) };
+}
+function closedState(d) {
+  if (d.how === "dismissed") return "dismissed";
+  if (d.how === "expired") return "lapsed";
+  const isOvertaken = /^(?:closed by \w+: )?(?:no longer applies|replaced|superseded|moot)/i.test(d.outcome);
+  return (d.how === "claude" || d.how === "update") && isOvertaken ? "lapsed" : "handled";
+}
+function isLapsed(d) {
+  return closedState(d) !== "handled";
 }
 
 // ../hooks/model-text.ts

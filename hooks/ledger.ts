@@ -403,8 +403,8 @@ function closedRecord(item: Item, closing: Closing, now: number): Closed {
   return { id, kind, ask, ...(label ? { label } : {}), ...closing, at: now, item }
 }
 
-function closedFindingRecord(finding: Finding, closing: Closing, now: number): ClosedFinding {
-  return { ...finding, ...closing, closedAt: now }
+function closedFindingRecord(finding: Finding, closing: Closing, now: number, askedAs?: string): ClosedFinding {
+  return { ...finding, ...(askedAs ? { askedAs } : {}), ...closing, closedAt: now }
 }
 
 /** How an outcome the mod saved before `how` existed marks an item Claude closed. */
@@ -438,22 +438,71 @@ export function closeByAgent(
 export type Closing = Pick<Closed, 'how' | 'outcome'>
 
 export function closeItem(ledger: Ledger, id: string, closing: Closing, now: number): Ledger {
-  return {
-    ...ledger,
-    items: ledger.items.filter(i => i.id !== id),
-    closed: [...ledger.closed, ...ledger.items.filter(i => i.id === id).map(i => closedRecord(i, closing, now))],
-  }
+  const records = ledger.items.filter(i => i.id === id).map(i => closedRecord(i, closing, now))
+
+  return reopenAskedFindings(
+    { ...ledger, items: ledger.items.filter(i => i.id !== id), closed: [...ledger.closed, ...records] },
+    records,
+  )
 }
 
-export function closeFinding(ledger: Ledger, id: string, closing: Closing, now: number): Ledger {
+/** `askedAs` is the id of the item that replaces the finding, kept on its close record. */
+export function closeFinding(ledger: Ledger, id: string, closing: Closing, now: number, askedAs?: string): Ledger {
   const finding = ledger.findings.find(f => f.id === id)
   if (!finding) return ledger
 
   return {
     ...ledger,
     findings: ledger.findings.filter(f => f.id !== id),
-    closedFindings: [...ledger.closedFindings, closedFindingRecord(finding, closing, now)],
+    closedFindings: [...ledger.closedFindings, closedFindingRecord(finding, closing, now, askedAs)],
   }
+}
+
+const SHARED_TITLE_WORDS = 2
+const PUT_OFF = /\b(?:not (?:now|yet)|put off|for later|postpone|defer)/i
+
+/** A close that leaves the work undone: the person dismissed it, it expired or no longer applies, or they put it off. */
+function leavesWorkOpen(c: Pick<Closed, 'how' | 'outcome'>): boolean {
+  return c.how !== 'done' && (isLapsed(c) || PUT_OFF.test(c.outcome))
+}
+
+/** Reopens each finding that a question now closed without the work done had replaced. */
+function reopenAskedFindings(ledger: Ledger, closes: Closed[]): Ledger {
+  return closes.filter(leavesWorkOpen).reduce((l, c) => {
+    const record = l.closedFindings.findLast(f => f.askedAs === c.id)
+    if (!record) return l
+    const reopened = reopenFinding(l, record.id)
+
+    return {
+      ...reopened,
+      findings: reopened.findings.map(f => {
+        const { askedAs: _askedAs, ...rest } = f
+
+        return f.id === record.id ? rest : f
+      }),
+    }
+  }, ledger)
+}
+
+function prNumbers(text: string): Set<string> {
+  return new Set([...text.matchAll(/(?:#|\bPR\s*#?|\/pull\/)(\d+)/gi)].map(m => m[1]!))
+}
+
+/**
+ * Whether an item asks about a finding: its label is the finding's id, or its ask restates the finding's title or
+ * detail or both name a pull request number. A claimed link (the inbox model's ASKED line) also passes when the ask shares
+ * two key words with the title.
+ */
+function asksAbout(item: Pick<Item, 'ask' | 'label'>, finding: Finding, isClaimed = false): boolean {
+  if (item.label === finding.id) return true
+  if (restates(finding.title, item.ask) || restates(finding.detail, item.ask)) return true
+  if (isClaimed) {
+    const known = keyWords(finding.title)
+    if ([...keyWords(item.ask)].filter(w => known.has(w)).length >= SHARED_TITLE_WORDS) return true
+  }
+  const itemPrs = prNumbers(`${item.label ?? ''} ${item.ask}`)
+
+  return [...prNumbers(`${finding.title} ${finding.detail}`)].some(n => itemPrs.has(n))
 }
 
 /**
@@ -592,27 +641,33 @@ export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number
   const askedBy = new Map<string, string>()
   for (const a of u.asked) {
     const id = typeof a.item === 'number' ? addedIds[a.item] : a.item
-    if (id && kept.some(i => i.id === id)) askedBy.set(a.id, id)
+    const asker = kept.find(i => i.id === id)
+    const finding = ledger.findings.find(f => f.id === a.id)
+    if (asker && finding && asksAbout(asker, finding, true)) askedBy.set(a.id, asker.id)
   }
   for (const i of kept.filter(i => created.has(i.id)))
-    for (const f of ledger.findings) if (!askedBy.has(f.id) && restates(f.title, i.ask)) askedBy.set(f.id, i.id)
+    for (const f of ledger.findings) if (!askedBy.has(f.id) && asksAbout(i, f)) askedBy.set(f.id, i.id)
   const { findings, closedFindings } = ledger.findings.reduce((l, f) => {
     const asker = askedBy.get(f.id)
-    const outcome = closing.get(f.id) ?? (asker ? `asked as ${asker}` : undefined)
+    const outcome = closing.get(f.id)
+    if (outcome !== undefined) return closeFinding(l, f.id, { outcome, how: 'update' }, now)
 
-    return outcome === undefined ? l : closeFinding(l, f.id, { outcome, how: 'update' }, now)
+    return asker ? closeFinding(l, f.id, { outcome: `asked as ${asker}`, how: 'update' }, now, asker) : l
   }, ledger)
 
-  return {
-    ...ledger,
-    card,
-    items: kept,
-    closed,
-    findings,
-    closedFindings,
-    nextId,
-    batchTurn: added > 0 ? turn : ledger.batchTurn,
-  }
+  return reopenAskedFindings(
+    {
+      ...ledger,
+      card,
+      items: kept,
+      closed,
+      findings,
+      closedFindings,
+      nextId,
+      batchTurn: added > 0 ? turn : ledger.batchTurn,
+    },
+    closed.slice(ledger.closed.length),
+  )
 }
 
 function withUpdate(item: Item, updated: Update['updated']): Item {
@@ -682,9 +737,13 @@ export function addAgentItem(
   const kept = items.slice(-MAX_OPEN)
   const dropped = items.filter(i => !kept.includes(i))
   const closed = [...ledger.closed, ...dropped.map(i => closedRecord(i, { outcome: EXPIRED, how: 'expired' }, now))]
-  const restated = ledger.findings.filter(f => restates(f.title, entry.ask))
+  const asked = { ...entry, label: null }
+  const restated = ledger.findings.filter(f => asksAbout(asked, f))
   const base: Ledger = { ...ledger, items: kept, closed, nextId: ledger.nextId + 1, batchTurn: ledger.turn }
-  const next = restated.reduce((l, f) => closeFinding(l, f.id, { outcome: `asked as ${id}`, how: 'update' }, now), base)
+  const next = reopenAskedFindings(
+    restated.reduce((l, f) => closeFinding(l, f.id, { outcome: `asked as ${id}`, how: 'update' }, now, id), base),
+    closed.slice(ledger.closed.length),
+  )
 
   return { ledger: next, is: 'added', id, expired: dropped[0] ?? null }
 }

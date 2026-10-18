@@ -3,6 +3,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import { CLAUDE_CODE, answerNote, buildPrompt, carryText, latestBatch, questionNumbers } from '../hooks/model-text'
 import {
   EMPTY,
+  addAgentItem,
   addFinding,
   applyUpdate,
   closeByAgent,
@@ -17,6 +18,7 @@ import {
 } from '../hooks/ledger'
 import { readCommandRow, resetTime, statusLine, stopKindOf } from '../hooks/claude'
 import { parseInline } from '../hooks/inline'
+import { applyPress } from '../hooks/presses'
 import { recordClose } from '../hooks/tools'
 import type { Item } from '../types'
 
@@ -531,13 +533,14 @@ describe('reopening', () => {
   test('a finding an item asks about closes into that item', () => {
     const finding = { kind: 'issue' as const, title: 'Research folder sits in the app', detail: 'd', path: null, at: 1 }
     const open = addFinding(addFinding(EMPTY, finding).ledger, { ...finding, title: 'Tabs unreadable' }).ledger
-    const reply = 'NEW: do | - | Tell Claude when QA ends, to move the folder | - | -\nASKED: f1 | new 1'
+    const reply =
+      'NEW: do | - | Tell Claude when QA ends, to move the research folder out of the app | - | -\nASKED: f1 | new 1'
     const updated = applyUpdate(open, parseReply(reply)!, 6, 1)
     expect(updated.items.map(i => i.id)).toEqual(['i3'])
     expect(updated.findings.map(f => f.id)).toEqual(['f2'])
     expect(updated.closedFindings.map(f => [f.id, f.how, f.outcome])).toEqual([['f1', 'update', 'asked as i3']])
     const later = applyUpdate(updated, parseReply('ASKED: f2 | i3')!, 7, 2)
-    expect(later.findings).toEqual([])
+    expect(later.findings.map(f => f.id)).toEqual(['f2'])
   })
 
   test('an ASKED line naming no open item leaves the finding open', () => {
@@ -567,6 +570,111 @@ describe('reopening', () => {
     expect(asked.closedFindings.map(f => f.outcome)).toEqual(['asked as i2'])
     const again = addFinding(asked, finding)
     expect([again.isAdded, again.id]).toEqual([false, 'i2'])
+  })
+})
+
+describe('a finding replaced by a question', () => {
+  const finding = (title: string, detail = 'd') => ({
+    kind: 'issue' as const,
+    title,
+    detail,
+    path: null,
+    at: 1,
+  })
+  const ctx = { now: 9, turnsStarted: 1, extraSteps: [] }
+  const asked = () => {
+    const open = addFinding(EMPTY, finding('Dismissed findings come back when recorded again')).ledger
+    const reply =
+      'NEW: decide | - | Fix dismissed findings coming back when recorded again? | Yes / Not now | -\nASKED: f1 | new 1'
+    return applyUpdate(open, parseReply(reply)!, 6, 1)
+  }
+
+  test('an ASKED line for an unrelated item leaves the finding open', () => {
+    const open = addFinding(EMPTY, finding('Tabs unreadable in light theme')).ledger
+    const reply = 'NEW: decide | - | Merge the release branch? | Yes / No | -\nASKED: f1 | new 1'
+    const updated = applyUpdate(open, parseReply(reply)!, 6, 1)
+    expect([updated.findings.map(f => f.id), updated.closedFindings]).toEqual([['f1'], []])
+  })
+
+  test('an item labelled with the finding id, or asking from its detail, or naming its PR, takes its place', () => {
+    const open = addFinding(
+      EMPTY,
+      finding('Tabs unreadable', 'The Findings tab text vanishes in the light theme'),
+    ).ledger
+    const replies = [
+      'NEW: decide | f1 | Which approach do you want? | A / B | -',
+      'NEW: decide | - | Should the Findings tab text stay visible in the light theme? | Yes / No | -',
+    ]
+    for (const reply of replies)
+      expect(applyUpdate(open, parseReply(`${reply}\nASKED: f1 | new 1`)!, 6, 1).findings).toEqual([])
+    const withPr = addFinding(EMPTY, finding('Review thread open on PR #42')).ledger
+    const named = addAgentItem(
+      withPr,
+      { kind: 'question', ask: 'Reply to the reviewer on #42?', options: [], rec: null, helps: [] },
+      6,
+    )
+    expect(named.ledger.findings).toEqual([])
+    const other = addAgentItem(
+      withPr,
+      { kind: 'question', ask: 'Reply to the reviewer on #43?', options: [], rec: null, helps: [] },
+      6,
+    )
+    expect(other.ledger.findings.map(f => f.id)).toEqual(['f1'])
+  })
+
+  test('an unrelated question sharing common words with a finding does not replace it', () => {
+    const open = addFinding(
+      EMPTY,
+      finding('Row flickers when idle', 'The inbox tab redraws the row on every tick'),
+    ).ledger
+    const ask = 'Should the Codex inbox tab keep its row order?'
+    const fallback = applyUpdate(open, parseReply(`NEW: decide | - | ${ask} | Yes / No | -`)!, 6, 1)
+    expect([fallback.items.length, fallback.findings.map(f => f.id)]).toEqual([1, ['f1']])
+    const added = addAgentItem(open, { kind: 'question', ask, options: [], rec: null, helps: [] }, 6)
+    expect(added.ledger.findings.map(f => f.id)).toEqual(['f1'])
+    const claimed = parseReply('NEW: decide | - | Merge the release branch? | Yes / No | -\nASKED: f1 | new 1')!
+    expect(applyUpdate(open, claimed, 6, 1).findings.map(f => f.id)).toEqual(['f1'])
+  })
+
+  test('the finding comes back when its question is dismissed, expired, put off or no longer applies', () => {
+    const closings = [
+      { how: 'dismissed' as const, outcome: 'dismissed' },
+      { how: 'expired' as const, outcome: 'expired, unanswered' },
+      { how: 'answered' as const, outcome: 'Not now' },
+      { how: 'claude' as const, outcome: 'closed by Claude: no longer applies' },
+    ]
+    for (const closing of closings) {
+      const ledger = closeItem(asked(), 'i2', closing, 8)
+      expect([ledger.findings.map(f => [f.id, f.askedAs]), ledger.closedFindings]).toEqual([[['f1', undefined]], []])
+    }
+  })
+
+  test('an update that closes the question as put off brings the finding back', () => {
+    const ledger = applyUpdate(asked(), parseReply('GOAL: g\nCLOSED: i2 | the person put it off for later')!, 8, 2)
+    expect(ledger.findings.map(f => f.id)).toEqual(['f1'])
+  })
+
+  test('the finding stays closed when the question is answered or done', () => {
+    for (const closing of [
+      { how: 'answered' as const, outcome: 'Yes' },
+      { how: 'done' as const, outcome: 'done' },
+      { how: 'update' as const, outcome: 'fixed in the last commit' },
+    ]) {
+      const ledger = closeItem(asked(), 'i2', closing, 8)
+      expect([ledger.findings, ledger.closedFindings.map(f => f.id)]).toEqual([[], ['f1']])
+    }
+  })
+
+  test('the link survives a save, and a finding asked about in a saved ledger needs no conversion', () => {
+    const saved = JSON.parse(JSON.stringify(asked()))
+    expect(upgradeLedger(saved).closedFindings[0]?.askedAs).toBe('i2')
+  })
+
+  test('Fix on a finding closes the question that asks about it', () => {
+    const linked = reopenFinding(asked(), 'f1')
+    const r = applyPress(linked, undefined, { action: 'address', id: 'f1' }, ctx)
+    if ('stale' in r) throw new Error('stale')
+    expect([r.ledger.items, r.ledger.closed.map(c => c.id), r.effects.map(e => e.kind)]).toEqual([[], ['i2'], ['send']])
   })
 })
 
