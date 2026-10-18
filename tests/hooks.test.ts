@@ -43,6 +43,7 @@ let promptRows = 0
 let stopBlock: string | undefined
 
 let dialogAnswer: Record<string, unknown> = { result: 'ok', text: 'ok' }
+let dialogDismissed = false
 
 let isGhMissing = false
 
@@ -131,6 +132,7 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   ran = []
   stopBlock = undefined
   dialogAnswer = { result: 'ok', text: 'ok' }
+  dialogDismissed = false
   ghAnswers = []
   isGhMissing = false
   ledgerReply = LEDGER_REPLY
@@ -244,7 +246,12 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   on('classic.PermissionRequest', () => ({}))
   on('classic.Stop', () => (stopBlock ? { block: stopBlock } : {}))
   on('classic.SessionStart', () => ({}))
-  on('tool.call', (_$, e) => (e.tool === 'AskUserQuestion' ? dialogAnswer : { result: 'ok', text: 'ok' }) as never)
+  on('tool.call', (_$, e) => {
+    if (e.tool !== 'AskUserQuestion') return { result: 'ok', text: 'ok' } as never
+    if (dialogDismissed) throw new Error('The user rejected the question')
+
+    return dialogAnswer as never
+  })
   on('ui.render', ($, e) => $.ui.resolve(e).Box({}))
   on('ui.press', async ($, e, next) => {
     await runBeforeAct()
@@ -342,8 +349,11 @@ test('a dialog reaches the model with its questions, whether answered or dismiss
   expect(prompts.at(-1)).toContain('Push the fix now?')
   expect(prompts.at(-1)).toContain('User has answered: Push now')
 
-  dialogAnswer = { isError: true, result: 'The user rejected the question', text: 'The user rejected the question' }
-  await turn('t2', () => ask(push))
+  dialogDismissed = true
+  await turn('t2', async () => {
+    await expect(ask(push)).rejects.toThrow()
+  })
+  dialogDismissed = false
   expect(prompts.at(-1)).toContain('Push the fix now?')
   expect(prompts.at(-1)).not.toContain('rejected the question')
 

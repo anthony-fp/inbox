@@ -2818,10 +2818,16 @@ export const register: Register = on => {
       const questions = (Array.isArray(input.questions) ? input.questions : []) as { question?: unknown }[]
       const question = typeof questions[0]?.question === 'string' ? questions[0].question : 'A question'
       await openDialog($, { kind: 'question', text: question, key })
-      const ran = await run()
-      noteActivity(dialogActivity(dialogQuestions(input.questions), dialogOutcome(ran)))
+      const dialog = dialogQuestions(input.questions)
+      try {
+        const ran = await run()
+        noteActivity(dialogActivity(dialog, dialogOutcome(ran)))
 
-      return ran
+        return ran
+      } catch (error) {
+        noteActivity(dialogActivity(dialog, { kind: 'dismissed' }))
+        throw error
+      }
     }
     return run()
   })
