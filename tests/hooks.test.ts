@@ -3226,3 +3226,39 @@ test('every row in the demo, on every tab, draws its plan’s buttons in the pla
     expect(checked, `${look} PR rows checked`).toBeGreaterThan(1)
   }
 })
+
+test('a forked conversation keeps the parent’s findings and closed records, and dismissing the question that replaced a finding brings the finding back', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.tool.call({
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
+    title: 'Retry loop never backs off',
+    detail: 'The fetch retry spins with no delay.',
+  })
+  ledgerReply =
+    'GOAL: Fix retries\nNOW: Waiting\nASKED: f1 | new 1\nNEW: decide | 1 | Add a backoff to the retry loop? | Yes / No | Yes'
+  await $.prompt.submit({ text: 'fix the retries', wait: false, origin: { kind: 'composer' } })
+  await $.turn.complete({ answer: 'Add a backoff?', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: /Add a backoff to the retry loop\?/ })).toBeDefined()
+  const contextOf = async () =>
+    ((await $.prompt.submit({ text: 'where are we?', wait: false, origin: { kind: 'composer' } })).context ?? []).join(
+      '\n',
+    )
+  expect(await contextOf()).not.toContain('[f1]')
+
+  await $.session.end({ reason: 'resume', sessionId: 'session-1', resume: { id: 'session-1' } })
+  await $.classic.SessionStart({ source: 'fork', session_id: 'session-2' })
+  await clock.settle()
+  expect(await contextOf()).toContain('[i2] (1) "Add a backoff to the retry loop?"')
+  expect(await contextOf()).not.toContain('[f1]')
+  await pane.press({ key: 'dismiss-i2' })
+  await clock.settle()
+  await clock.advance(SETTLED_MS)
+  expect(await contextOf()).toContain('- [f1] issue: Retry loop never backs off')
+})

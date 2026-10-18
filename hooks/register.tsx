@@ -2535,25 +2535,32 @@ async function initializeInbox($: EngineInterface) {
  * /clear, /resume or /branch, which switch conversations under a new session
  * id without a session.start.
  */
-function loadConversation($: EngineInterface, id: string): Promise<void> {
+function loadConversation($: EngineInterface, id: string, forkedFrom?: string): Promise<void> {
   const revision = ++loadRevision
-  return prepareConversation($, id, revision)
+  return prepareConversation($, id, revision, forkedFrom)
 }
 
-async function prepareConversation($: EngineInterface, id: string, revision: number) {
-  const refusalRevision = doneRefusalRevision
+/** The saved state of conversation `id`, once its pending saves and commits have landed. */
+function readSettled($: EngineInterface, id: string) {
   const pendingSave = savesBySession.get(id)
   const pendingCommits = [...(commitsBySession.get(id) ?? [])]
-  const savedRead = Promise.all([
+
+  return Promise.all([
     pendingSave?.catch(() => undefined),
     ...pendingCommits.map(commit => commit.catch(() => undefined)),
   ]).then(() => readSaved($, id))
-  const [sessionRoot, saved] = await Promise.all([$.session.root(), savedRead])
+}
+
+async function prepareConversation($: EngineInterface, id: string, revision: number, forkedFrom?: string) {
+  const refusalRevision = doneRefusalRevision
+  const [sessionRoot, saved] = await Promise.all([$.session.root(), readSettled($, id)])
   if (revision !== loadRevision) return
   const applying = applyingConversation.then(async () => {
     if (revision !== loadRevision) return
     const latest = refusalRevision === doneRefusalRevision ? saved : await readSaved($, id)
-    await applyConversation($, id, revision, sessionRoot, latest)
+    // A fork continues its parent's inbox, so a new id with no saved state starts from the parent's.
+    const parent = latest?.session || !forkedFrom ? null : await readSettled($, forkedFrom)
+    await applyConversation($, id, revision, sessionRoot, latest, parent?.session)
   })
   applyingConversation = applying.catch(() => undefined)
   return applying
@@ -2565,6 +2572,7 @@ async function applyConversation(
   revision: number,
   sessionRoot: string,
   saved: { session: SavedSession | undefined } | null,
+  parent?: SavedSession,
 ) {
   if (revision !== loadRevision) return
   const isCurrent = () => revision === loadRevision && sessionId === id
@@ -2590,7 +2598,12 @@ async function applyConversation(
       isCurrent() ? (isFresh ? (saved === null ? id : null) : u === id ? u : null) : u,
     )) === id
   if (!isCurrent()) return
-  const loaded = saved === null ? current : await bringBack($, current, saved.session, isCurrent)
+  const loaded =
+    saved === null
+      ? current
+      : parent
+        ? await bringBack($, current, parent, isCurrent, false)
+        : await bringBack($, current, saved.session, isCurrent)
   if (!isCurrent()) return
   const isEmpty = !loaded.card && loaded.items.length === 0
   const { turnsStarted, turnsApplied } = await read($, PRESENCE)
@@ -2619,12 +2632,13 @@ async function bringBack(
   current: Ledger,
   session: SavedSession | undefined,
   isCurrent: () => boolean = () => true,
+  isAway = true,
 ): Promise<Ledger> {
   if (current.turn !== 0 || current.card || !session) return current
   const loaded = upgradeLedger(session.ledger)
   await update($, LEDGER, l => (isCurrent() ? loaded : l))
   if (!isCurrent()) return current
-  await update($, PRESENCE, p => (isCurrent() ? { ...p, lastActiveAt: session.savedAt, isAway: true } : p))
+  if (isAway) await update($, PRESENCE, p => (isCurrent() ? { ...p, lastActiveAt: session.savedAt, isAway: true } : p))
 
   return isCurrent() ? loaded : current
 }
@@ -2712,7 +2726,8 @@ export const register: Register = on => {
     // $.session.id() still names the previous conversation here, so the new id comes
     // from the event. A start with --resume also raises this, for the conversation
     // session.start already loaded.
-    if (isOn && e.session_id !== sessionId) await loadConversation($, e.session_id)
+    if (isOn && e.session_id !== sessionId)
+      await loadConversation($, e.session_id, e.source === 'fork' ? sessionId : undefined)
 
     return r
   })

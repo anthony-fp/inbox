@@ -665,9 +665,22 @@ describe('a finding replaced by a question', () => {
     }
   })
 
-  test('the link survives a save, and a finding asked about in a saved ledger needs no conversion', () => {
+  test('the link survives a save', () => {
     const saved = JSON.parse(JSON.stringify(asked()))
     expect(upgradeLedger(saved).closedFindings[0]?.askedAs).toBe('i2')
+  })
+
+  test('a finding saved as "asked as iN" before the link was kept comes back when that question is dismissed', () => {
+    const saved = JSON.parse(JSON.stringify(asked()))
+    delete saved.closedFindings[0].askedAs
+    const dismissed = closeItem(upgradeLedger(saved), 'i2', { how: 'dismissed', outcome: 'dismissed' }, 8)
+    expect([dismissed.findings.map(f => [f.id, f.askedAs]), dismissed.closedFindings]).toEqual([
+      [['f1', undefined]],
+      [],
+    ])
+    const fixed = JSON.parse(JSON.stringify(saved))
+    fixed.closedFindings[0].outcome = 'fixed in the theme'
+    expect(upgradeLedger(fixed).closedFindings[0]?.askedAs).toBeUndefined()
   })
 
   test('Fix on a finding closes the question that asks about it', () => {

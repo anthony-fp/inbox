@@ -44,7 +44,7 @@ export function upgradeLedger(ledger: Ledger): Ledger {
     ...rest,
     findings: [...(rest.findings ?? []), ...(notes ?? [])],
     // reopenFinding puts these back, so a conversion added for findings must run on them too.
-    closedFindings: rest.closedFindings ?? [],
+    closedFindings: (rest.closedFindings ?? []).map(upgradeClosedFinding),
     items: rest.items.map(upgradeItem),
     closed: (rest.closed ?? decided ?? []).map(d => ({
       ...d,
@@ -53,6 +53,15 @@ export function upgradeLedger(ledger: Ledger): Ledger {
       ...(d.item ? { item: upgradeItem(d.item) } : {}),
     })),
   }
+}
+
+const ASKED_AS = /^asked as (i\d+)$/
+
+/** A finding closed as "asked as iN" before the close record kept `askedAs` gets the link from its outcome. */
+function upgradeClosedFinding(f: ClosedFinding): ClosedFinding {
+  const asker = f.how === 'update' ? ASKED_AS.exec(f.outcome)?.[1] : undefined
+
+  return asker && f.askedAs === undefined ? { ...f, askedAs: asker } : f
 }
 
 /** Also run on the copy a close record keeps, which reopenItem puts back. */
