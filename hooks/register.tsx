@@ -87,6 +87,8 @@ import {
   carryText,
   catchUpPrompt,
   CLAUDE_CODE,
+  dialogActivity,
+  dialogQuestions,
   guidanceText,
   promptNotes,
   screenText,
@@ -99,7 +101,7 @@ import {
 } from './model-text'
 import {
   commandRowLine,
-  dialogLine,
+  dialogOutcome,
   resetTime,
   readCommandRow,
   statusLine,
@@ -659,10 +661,6 @@ function noteActivity(line: string) {
 
 function messageText(message: SessionAppendMessage): string {
   return message.content.map(b => (b.type === 'text' ? b.text : '')).join('')
-}
-
-function resultFields(ran: { result?: unknown }): Record<string, unknown> {
-  return ran.result && typeof ran.result === 'object' ? (ran.result as Record<string, unknown>) : {}
 }
 
 async function syncTheme($: EngineInterface) {
@@ -2815,7 +2813,7 @@ export const register: Register = on => {
       const question = typeof questions[0]?.question === 'string' ? questions[0].question : 'A question'
       await openDialog($, { kind: 'question', text: question, key })
       const ran = await run()
-      noteActivity(dialogLine(ran.text ?? '', typeof resultFields(ran).afkTimeoutMs === 'number'))
+      noteActivity(dialogActivity(dialogQuestions(input.questions), dialogOutcome(ran)))
 
       return ran
     }

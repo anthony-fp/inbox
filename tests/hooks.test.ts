@@ -42,6 +42,8 @@ let promptRows = 0
 
 let stopBlock: string | undefined
 
+let dialogAnswer: Record<string, unknown> = { result: 'ok', text: 'ok' }
+
 let ghAnswers: {
   match: (argv: readonly string[]) => boolean
   stdout: string
@@ -126,6 +128,7 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   held = []
   ran = []
   stopBlock = undefined
+  dialogAnswer = { result: 'ok', text: 'ok' }
   ghAnswers = []
   ledgerReply = LEDGER_REPLY
   surfaces = []
@@ -237,7 +240,7 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   on('classic.PermissionRequest', () => ({}))
   on('classic.Stop', () => (stopBlock ? { block: stopBlock } : {}))
   on('classic.SessionStart', () => ({}))
-  on('tool.call', () => ({ result: 'ok', text: 'ok' }))
+  on('tool.call', (_$, e) => (e.tool === 'AskUserQuestion' ? dialogAnswer : { result: 'ok', text: 'ok' }) as never)
   on('ui.render', ($, e) => $.ui.resolve(e).Box({}))
   on('ui.press', async ($, e, next) => {
     await runBeforeAct()
@@ -312,6 +315,37 @@ test('a question the desktop app’s box shows reaches the update, even when the
   expect(prompts[0]).toContain(
     '<reply>\nNo issue tracker is connected.\n\nWhich tracker should I file it in?\nOptions: Retry GitHub / Use another tracker\n</reply>',
   )
+})
+
+test('a dialog reaches the model with its questions, whether answered or dismissed', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  const prompts: string[] = []
+  world($, on, prompts)
+  const ask = (...questions: { question: string; options: { label: string }[] }[]) =>
+    $.tool.call({ tool: 'AskUserQuestion', questions } as never)
+  const turn = async (turnId: string, dialog: () => Promise<unknown>) => {
+    await $.prompt.submit({ text: 'go on', wait: false, origin: { kind: 'composer' } })
+    await $.turn.start({ text: 'go on', turnId })
+    await dialog()
+    await $.turn.complete({ answer: 'Done.', durationMs: 5, isAborted: false, turnId, reason: 'answer' })
+    await clock.settle()
+  }
+  const push = { question: 'Push the fix now?', options: [{ label: 'Push now (Recommended)' }, { label: 'Wait' }] }
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  dialogAnswer = { result: {}, text: 'User has answered: Push now' }
+  await turn('t1', () => ask(push))
+  expect(prompts.at(-1)).toContain('Push the fix now?')
+  expect(prompts.at(-1)).toContain('User has answered: Push now')
+
+  dialogAnswer = { isError: true, result: 'The user rejected the question', text: 'The user rejected the question' }
+  await turn('t2', () => ask(push))
+  expect(prompts.at(-1)).toContain('Push the fix now?')
+  expect(prompts.at(-1)).not.toContain('rejected the question')
+
+  dialogAnswer = { result: {}, text: 'Both answered' }
+  await turn('t3', () => ask(push, { question: 'Which branch?', options: [{ label: 'main' }, { label: 'next' }] }))
+  expect(prompts.at(-1)).toContain('Which branch?')
 })
 
 test('a question’s handle is the number a typed answer reaches, and the band counts what the tab counts', async ($, on) => {

@@ -74,7 +74,7 @@ Terms follow `GLOSSARY.md`. "The mod" is the Claude Code mod in this repo.
 | Last action on a row | Recorded by `runPress()` | The same rule in the tab: each button shows what it did as soon as it is pressed | Direct |
 | Card after 15 minutes away, or on resume | `clock.every` and `isAway` | A timer in the MCP server. The tab shows the card | Direct |
 | PRs tab | `gh` polled from the mod | `gh` polled by the server. `prs.ts` carries over | Direct, later |
-| Questions and permission dialogs | AskUserQuestion and `PermissionRequest` | `PermissionRequest` exists. Codex's question tool is not on by default | Later |
+| Questions and permission dialogs | AskUserQuestion and `PermissionRequest` | Permission dialogs: `PermissionRequest` exists and is not used yet. Question dialogs (`request_user_input_async`): no hook fires. The Stop hook reads the turn's dialogs from the transcript and notes each, with its questions and options, as still open. The answer arrives as the person's next message | Question dialogs built; permission dialogs later |
 | Rate-limit and sign-in stops | `classic.StopFailure` | No such event. `Interrupt` covers only interrupts | Gap 6 |
 | The person's `!` and slash commands | `session.append` command rows | No event | Gap 6 |
 | Telling a button's message from the person's own | `origin.kind` on `prompt.submit` | `UserPromptSubmit` gets only the text. The server matches it against the messages it queued | Direct |

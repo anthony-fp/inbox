@@ -49,6 +49,52 @@ test('a session starts with the guidance, records the prompt, and ends the turn 
   assert.deepEqual(deps.updates, ['s1'])
 })
 
+test('a Stop notes the dialogs the agent opened in the ending turn as open, and leaves earlier turns out', async () => {
+  const dir = tempDir()
+  const transcript = join(tempDir(), 'rollout.jsonl')
+  const deps = hookDeps(dir)
+  const started = (turn: string) => ({ type: 'event_msg', payload: { type: 'task_started', turn_id: turn } })
+  const dialog = (questions: unknown[]) => ({
+    type: 'response_item',
+    payload: { type: 'function_call', name: 'request_user_input_async', arguments: JSON.stringify({ questions }) },
+  })
+  writeFileSync(
+    transcript,
+    [
+      started('t1'),
+      dialog([{ title: 'Use Node or Python?', options: ['Node', 'Python'] }]),
+      started('t2'),
+      dialog([
+        { title: 'Push the fix now?', options: ['Push now (Recommended)', 'Wait'] },
+        { title: 'Tag it?', options: ['Yes', 'No'] },
+      ]),
+      { type: 'response_item', payload: { type: 'function_call', name: 'shell', arguments: '{}' } },
+    ]
+      .map(row => JSON.stringify(row))
+      .join('\n'),
+  )
+
+  await handleHook(input('UserPromptSubmit', { prompt: 'Ship it', turn_id: 't2' }), deps)
+  await handleHook(
+    input('Stop', { turn_id: 't2', transcript_path: transcript, last_assistant_message: 'Asked in the dialog.' }),
+    deps,
+  )
+  const activity = (await readState(dir, 's1')).pending[0]?.ex.activity ?? []
+  assert.equal(activity.length, 1)
+  assert.match(activity[0]!, /Push the fix now\?.*Tag it\?/)
+  assert.doesNotMatch(activity[0]!, /Node or Python/)
+
+  await handleHook(
+    input('Stop', {
+      turn_id: 't9',
+      transcript_path: join(tempDir(), 'missing.jsonl'),
+      last_assistant_message: 'Done.',
+    }),
+    deps,
+  )
+  assert.deepEqual((await readState(dir, 's1')).pending[1]?.ex.activity, [])
+})
+
 test('each hook records that it ran, with the turn UserPromptSubmit saw, and the tab reads the session as heard', async () => {
   const dir = tempDir()
   let clock = 1000

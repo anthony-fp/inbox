@@ -1,16 +1,17 @@
 import type { SessionMessage } from 'claude-code'
 import type { Dialog, Ledger, Stop } from '../types'
-import { toolActivity } from './model-text'
+import { dialogActivity, dialogQuestions, toolActivity } from './model-text'
+import type { DialogOutcome } from './model-text'
 import { clip } from './text'
 
 const NL = '\n'
 
-export function dialogLine(answer: string, isTimedOut: boolean): string {
-  const how = isTimedOut
-    ? 'it timed out while the user was away, so the user did not answer; it went on with'
-    : 'answer'
+export function dialogOutcome(ran: { text?: string; isError?: true; deny?: string; result?: unknown }): DialogOutcome {
+  if (ran.isError || typeof ran.deny === 'string') return { kind: 'dismissed' }
+  const answer = ran.text ?? ''
+  const fields = ran.result && typeof ran.result === 'object' ? (ran.result as { afkTimeoutMs?: unknown }) : {}
 
-  return `asked the user in a dialog; ${how}: ${answer.slice(0, 400)}`
+  return typeof fields.afkTimeoutMs === 'number' ? { kind: 'timed-out', answer } : { kind: 'answered', answer }
 }
 
 /**
@@ -67,9 +68,10 @@ export function transcriptText(messages: SessionMessage[]): string {
     }
     if (text) lines.push(`Agent: ${clip(text, MESSAGE_MAX)}`)
     for (const use of m.toolUses) {
-      const timedOut = typeof (use.result as { afkTimeoutMs?: unknown } | undefined)?.afkTimeoutMs === 'number'
       const line =
-        use.tool === 'AskUserQuestion' ? dialogLine(use.text ?? '', timedOut) : toolActivity(use.tool, use.input)
+        use.tool === 'AskUserQuestion'
+          ? dialogActivity(dialogQuestions(use.input.questions), dialogOutcome(use))
+          : toolActivity(use.tool, use.input)
       if (line) lines.push(`Agent ${line}`)
     }
   }

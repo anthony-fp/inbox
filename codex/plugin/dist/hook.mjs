@@ -8,68 +8,9 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { resolve as resolve2 } from "node:path";
 
-// ../hooks/ledger.ts
-var EMPTY = {
-  card: null,
-  items: [],
-  closed: [],
-  findings: [],
-  closedFindings: [],
-  prs: [],
-  nextId: 1,
-  turn: 0,
-  batchTurn: 0
-};
-var MAX_CLOSED = 12;
-var EXPIRED = "expired, unanswered";
-function readKind(kind) {
-  return kind === "task" || kind === "do" ? "task" : "question";
-}
-function upgradeLedger(ledger) {
-  const { notes, decided, ...rest } = ledger;
-  return {
-    ...rest,
-    findings: [...rest.findings ?? [], ...notes ?? []],
-    // reopenFinding puts these back, so a conversion added for findings must run on them too.
-    closedFindings: rest.closedFindings ?? [],
-    items: rest.items.map(upgradeItem),
-    closed: (rest.closed ?? decided ?? []).map((d) => ({
-      ...d,
-      kind: readKind(d.kind),
-      how: d.how ?? howFromOutcome(d.outcome),
-      ...d.item ? { item: upgradeItem(d.item) } : {}
-    }))
-  };
-}
-function upgradeItem(item) {
-  return { ...item, kind: readKind(item.kind), at: item.at ?? null, rec: recommendedOption(item.options, item.rec) };
-}
-function words(text) {
-  return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-}
-function recommendedOption(options, rec) {
-  if (!rec) return null;
-  const named = new Set(words(rec));
-  let best = null;
-  for (const option of options) {
-    const w = words(option);
-    if (w.length > words(best ?? "").length && w.every((x) => named.has(x))) best = option;
-  }
-  const label = (text) => text.match(/^\s*\(?([a-z]|\d{1,2})\s*[:.)]/i)?.[1]?.toLowerCase();
-  const byLabel = /^\s*(?:option\s+)?([a-z]|\d{1,2})\s*[.!]?\s*$/i.exec(rec)?.[1]?.toLowerCase();
-  return best ?? (byLabel ? options.find((o) => label(o) === byLabel) ?? null : null);
-}
-function howFromOutcome(outcome) {
-  if (outcome === "dismissed") return "dismissed";
-  if (outcome === EXPIRED) return "expired";
-  if (outcome === "done" || outcome === "you ran it") return "done";
-  if (outcome.startsWith(CLOSED_BY_CLAUDE)) return "claude";
-  return "update";
-}
-var CLOSED_BY_CLAUDE = "closed by Claude";
-function pruneClosed(ledger, keep) {
-  const pruned = (records) => records.filter((r, n) => n >= records.length - MAX_CLOSED || keep.has(r.id));
-  return { ...ledger, closed: pruned(ledger.closed), closedFindings: pruned(ledger.closedFindings) };
+// ../hooks/text.ts
+function clip(text, max) {
+  return text.length <= max ? text : text.slice(0, max) + " \u2026[cut]";
 }
 
 // ../hooks/model-text.ts
@@ -116,6 +57,51 @@ function toolActivity(tool, input) {
       return `started agent: ${text("description")}`;
   }
   return tool.startsWith("mcp__") ? `called ${tool.slice(5)}` : null;
+}
+var DIALOG_QUESTIONS_SHOWN = 3;
+var DIALOG_QUESTION_MAX = 200;
+var DIALOG_OPTIONS_SHOWN = 6;
+var DIALOG_OPTION_MAX = 60;
+var DIALOG_ANSWER_MAX = 400;
+var RECOMMENDED_SUFFIX = /\s*\(recommended\)\s*$/i;
+function dialogQuestions(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((q) => {
+    const fields = q ?? {};
+    const text = [fields.question, fields.title].find((v) => typeof v === "string" && v.trim() !== "");
+    if (!text) return [];
+    const options = (Array.isArray(fields.options) ? fields.options : []).flatMap((o) => {
+      const label = typeof o === "string" ? o : o?.label;
+      return typeof label === "string" && label.trim() !== "" ? [label.trim()] : [];
+    });
+    return [{ question: text.trim(), options }];
+  });
+}
+function dialogQuestionText(q) {
+  const shown = q.options.slice(0, DIALOG_OPTIONS_SHOWN).map((label) => {
+    const plain = label.replace(RECOMMENDED_SUFFIX, "");
+    const text = clip(plain, DIALOG_OPTION_MAX);
+    return plain === label ? text : `${text} (recommended)`;
+  });
+  const more = q.options.length > shown.length ? ` / and ${q.options.length - shown.length} more` : "";
+  const options = shown.length > 0 ? ` (options: ${shown.join(" / ")}${more})` : "";
+  return `"${clip(q.question.replaceAll('"', "'"), DIALOG_QUESTION_MAX)}"${options}`;
+}
+function dialogActivity(questions, outcome) {
+  const shown = questions.slice(0, DIALOG_QUESTIONS_SHOWN).map(dialogQuestionText);
+  const more = questions.length - shown.length;
+  const asked = shown.length > 0 ? `: ${shown.join("; ")}${more > 0 ? `; and ${more} more` : ""}` : "";
+  const head = `asked the user in a dialog${asked}`;
+  switch (outcome.kind) {
+    case "answered":
+      return `${head}; answer: ${outcome.answer.slice(0, DIALOG_ANSWER_MAX)}`;
+    case "timed-out":
+      return `${head}; it timed out while the user was away, so the user did not answer; it went on with: ${outcome.answer.slice(0, DIALOG_ANSWER_MAX)}`;
+    case "dismissed":
+      return `${head}; the user dismissed it without answering`;
+    case "open":
+      return `${head}; still open, waiting on the user's answer`;
+  }
 }
 function surfaceAtStart(host) {
   return host.surface.charAt(0).toUpperCase() + host.surface.slice(1);
@@ -249,6 +235,70 @@ function promptNotes(host, ledger, prompt, told) {
   if (!closed && (inbox === told.inbox || isEmpty && told.inbox === null)) return { notes, told };
   notes.push(closed ? `${inbox}${NL}${closed}` : inbox);
   return { notes, told: { inbox, closed: ledger.closed.map((d) => d.id) } };
+}
+
+// ../hooks/ledger.ts
+var EMPTY = {
+  card: null,
+  items: [],
+  closed: [],
+  findings: [],
+  closedFindings: [],
+  prs: [],
+  nextId: 1,
+  turn: 0,
+  batchTurn: 0
+};
+var MAX_CLOSED = 12;
+var EXPIRED = "expired, unanswered";
+function readKind(kind) {
+  return kind === "task" || kind === "do" ? "task" : "question";
+}
+function upgradeLedger(ledger) {
+  const { notes, decided, ...rest } = ledger;
+  return {
+    ...rest,
+    findings: [...rest.findings ?? [], ...notes ?? []],
+    // reopenFinding puts these back, so a conversion added for findings must run on them too.
+    closedFindings: rest.closedFindings ?? [],
+    items: rest.items.map(upgradeItem),
+    closed: (rest.closed ?? decided ?? []).map((d) => ({
+      ...d,
+      kind: readKind(d.kind),
+      how: d.how ?? howFromOutcome(d.outcome),
+      ...d.item ? { item: upgradeItem(d.item) } : {}
+    }))
+  };
+}
+function upgradeItem(item) {
+  return { ...item, kind: readKind(item.kind), at: item.at ?? null, rec: recommendedOption(item.options, item.rec) };
+}
+function words(text) {
+  return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+function recommendedOption(options, rec) {
+  if (!rec) return null;
+  const named = new Set(words(rec));
+  let best = null;
+  for (const option of options) {
+    const w = words(option);
+    if (w.length > words(best ?? "").length && w.every((x) => named.has(x))) best = option;
+  }
+  const label = (text) => text.match(/^\s*\(?([a-z]|\d{1,2})\s*[:.)]/i)?.[1]?.toLowerCase();
+  const byLabel = /^\s*(?:option\s+)?([a-z]|\d{1,2})\s*[.!]?\s*$/i.exec(rec)?.[1]?.toLowerCase();
+  return best ?? (byLabel ? options.find((o) => label(o) === byLabel) ?? null : null);
+}
+function howFromOutcome(outcome) {
+  if (outcome === "dismissed") return "dismissed";
+  if (outcome === EXPIRED) return "expired";
+  if (outcome === "done" || outcome === "you ran it") return "done";
+  if (outcome.startsWith(CLOSED_BY_CLAUDE)) return "claude";
+  return "update";
+}
+var CLOSED_BY_CLAUDE = "closed by Claude";
+function pruneClosed(ledger, keep) {
+  const pruned = (records) => records.filter((r, n) => n >= records.length - MAX_CLOSED || keep.has(r.id));
+  return { ...ledger, closed: pruned(ledger.closed), closedFindings: pruned(ledger.closedFindings) };
 }
 
 // ../hooks/prs.ts
@@ -721,6 +771,54 @@ async function isNonInteractiveRun(path) {
     return false;
   }
 }
+var DIALOG_TOOL = "request_user_input_async";
+var TAIL_BYTES = 4 * 1024 * 1024;
+async function dialogsInTurn(path, turnId) {
+  if (path === null) return [];
+  try {
+    const file = await open(path, "r");
+    try {
+      const { size } = await file.stat();
+      const start = Math.max(0, size - TAIL_BYTES);
+      const buf = Buffer.alloc(size - start);
+      const { bytesRead } = await file.read(buf, 0, buf.length, start);
+      const lines = buf.subarray(0, bytesRead).toString("utf8").split("\n");
+      if (start > 0) lines.shift();
+      const byTurn = /* @__PURE__ */ new Map();
+      let current = "";
+      let newest = "";
+      for (const line of lines) {
+        if (!line.includes('"task_started"') && !line.includes(DIALOG_TOOL)) continue;
+        let row;
+        try {
+          row = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        const p = row.payload;
+        if (row.type === "event_msg" && p?.type === "task_started" && p.turn_id) {
+          current = p.turn_id;
+          newest = current;
+          if (!byTurn.has(current)) byTurn.set(current, []);
+        } else if (row.type === "response_item" && p?.type === "function_call" && p.name === DIALOG_TOOL) {
+          let args;
+          try {
+            args = JSON.parse(p.arguments ?? "");
+          } catch {
+            continue;
+          }
+          byTurn.set(current, [...byTurn.get(current) ?? [], dialogQuestions(args.questions)]);
+        }
+      }
+      const wanted = newest === "" ? "" : turnId ?? newest;
+      return (byTurn.get(wanted) ?? []).filter((questions) => questions.length > 0);
+    } finally {
+      await file.close();
+    }
+  } catch {
+    return [];
+  }
+}
 
 // src/hook.ts
 async function handleHook(input, deps) {
@@ -764,7 +862,21 @@ async function handleHook(input, deps) {
     }
     case "Stop": {
       const reply = input.last_assistant_message ?? "";
-      const written = await updateState(dir, id, (s) => noteHook(endTurn(withCli(s), reply, now()), "stop", now()));
+      const dialogs = await dialogsInTurn(input.transcript_path, input.turn_id);
+      const lines = dialogs.map((questions) => dialogActivity(questions, { kind: "open" }));
+      const written = await updateState(
+        dir,
+        id,
+        (s) => noteHook(
+          endTurn(
+            lines.reduce((x, line) => noteActivity(x, line), withCli(s)),
+            reply,
+            now()
+          ),
+          "stop",
+          now()
+        )
+      );
       if (written.pending.length > 0) deps.startUpdate(id);
       return null;
     }

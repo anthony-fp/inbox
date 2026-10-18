@@ -1749,8 +1749,8 @@ These overlap with what the inbox shows.
 
 `transcript_path` points to a JSONL file of the thread. "the transcript
 format isn't a stable interface for hooks and may change over time."
-(L/hooks#common-input-fields) The inbox reads it only to detect
-`exec` runs.
+(L/hooks#common-input-fields) The inbox reads it to detect `exec` runs and,
+at each Stop, to find the question dialogs the agent opened in the ending turn.
 
 - **Command ends.** Every command's end is an `event_msg` / `item_completed`
   with `item.type: "CommandExecution"`; its `id` equals the hook's
@@ -1766,6 +1766,19 @@ format isn't a stable interface for hooks and may change over time."
   `event_msg`, `world_state`, `turn_context`, `token_usage_record`,
   `compacted`, `inter_agent_communication_metadata`. All 60 recent threads have
   `history_mode: "paginated"`.
+- **Question dialogs** [live 2026-10-17, 46 calls in the local rollout files].
+  Codex's dialog tool is `request_user_input_async`. No hook fires for it. A
+  call is a `response_item` row whose `payload.type` is `function_call` and
+  whose `payload.name` is `request_user_input_async`. `payload.arguments` is a
+  JSON string `{"questions": [...]}`. Each question has a `title` and, in most,
+  an `options` list of plain strings. A recommended option ends
+  "(Recommended)". Its `function_call_output` holds only
+  whether the dialog was accepted. The person's answer arrives later as their
+  next prompt. The call rows carry no turn id. A turn starts at the
+  `event_msg` row with `payload.type: "task_started"` and a `payload.turn_id`.
+  [inference] That id is the `turn_id` the hooks get.
+  `codex/src/transcript.ts:dialogsInTurn` reads the last 4 MB of the file and
+  keeps the dialogs after the `task_started` row for the Stop hook's turn.
 - **Still plain JSONL** [live 2026-10-08]: 146 files in three days, none
   compressed, although `local_thread_store_compression` is on.
 - [inference] The format is moving: paginated history, `migrate-rollouts`,

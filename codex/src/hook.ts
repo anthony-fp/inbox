@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process'
 import { resolve } from 'node:path'
 
+import { dialogActivity } from '../../hooks/model-text'
 import { activityOf, cleared, endTurn, noteActivity, noteHook, notePrompt, patchFiles, startContext } from './core'
 import { updateState } from './state'
 import type { SessionState } from './state'
-import { isNonInteractiveRun } from './transcript'
+import { dialogsInTurn, isNonInteractiveRun } from './transcript'
 
 export type HookInput = {
   hook_event_name: string
@@ -77,7 +78,19 @@ export async function handleHook(input: HookInput, deps: HookDeps): Promise<Reco
     }
     case 'Stop': {
       const reply = input.last_assistant_message ?? ''
-      const written = await updateState(dir, id, s => noteHook(endTurn(withCli(s), reply, now()), 'stop', now()))
+      const dialogs = await dialogsInTurn(input.transcript_path, input.turn_id)
+      const lines = dialogs.map(questions => dialogActivity(questions, { kind: 'open' }))
+      const written = await updateState(dir, id, s =>
+        noteHook(
+          endTurn(
+            lines.reduce((x, line) => noteActivity(x, line), withCli(s)),
+            reply,
+            now(),
+          ),
+          'stop',
+          now(),
+        ),
+      )
       if (written.pending.length > 0) deps.startUpdate(id)
 
       return null

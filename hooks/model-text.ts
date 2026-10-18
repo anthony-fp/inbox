@@ -1,6 +1,6 @@
 import type { Closed, Finding, Item, Ledger } from '../types'
 import type { Exchange } from './ledger'
-import { clipMiddle, numberBlocks } from './text'
+import { clip, clipMiddle, numberBlocks } from './text'
 
 const NL = '\n'
 
@@ -130,6 +130,73 @@ export function toolActivity(tool: string, input: Record<string, unknown>): stri
   }
 
   return tool.startsWith('mcp__') ? `called ${tool.slice(5)}` : null
+}
+
+export type DialogQuestion = { question: string; options: string[] }
+
+export type DialogOutcome =
+  | { kind: 'answered'; answer: string }
+  | { kind: 'timed-out'; answer: string }
+  | { kind: 'dismissed' }
+  | { kind: 'open' }
+
+const DIALOG_QUESTIONS_SHOWN = 3
+const DIALOG_QUESTION_MAX = 200
+const DIALOG_OPTIONS_SHOWN = 6
+const DIALOG_OPTION_MAX = 60
+const DIALOG_ANSWER_MAX = 400
+const RECOMMENDED_SUFFIX = /\s*\(recommended\)\s*$/i
+
+/**
+ * The questions of a dialog tool's input. Claude's AskUserQuestion gives `question` and options with a `label`.
+ * Codex's `request_user_input_async` gives `title` and plain option strings.
+ */
+export function dialogQuestions(raw: unknown): DialogQuestion[] {
+  if (!Array.isArray(raw)) return []
+
+  return raw.flatMap((q: unknown) => {
+    const fields = (q ?? {}) as Record<string, unknown>
+    const text = [fields.question, fields.title].find((v): v is string => typeof v === 'string' && v.trim() !== '')
+    if (!text) return []
+    const options = (Array.isArray(fields.options) ? fields.options : []).flatMap((o: unknown) => {
+      const label = typeof o === 'string' ? o : (o as { label?: unknown } | null)?.label
+
+      return typeof label === 'string' && label.trim() !== '' ? [label.trim()] : []
+    })
+
+    return [{ question: text.trim(), options }]
+  })
+}
+
+function dialogQuestionText(q: DialogQuestion): string {
+  const shown = q.options.slice(0, DIALOG_OPTIONS_SHOWN).map(label => {
+    const plain = label.replace(RECOMMENDED_SUFFIX, '')
+    const text = clip(plain, DIALOG_OPTION_MAX)
+
+    return plain === label ? text : `${text} (recommended)`
+  })
+  const more = q.options.length > shown.length ? ` / and ${q.options.length - shown.length} more` : ''
+  const options = shown.length > 0 ? ` (options: ${shown.join(' / ')}${more})` : ''
+
+  return `"${clip(q.question.replaceAll('"', "'"), DIALOG_QUESTION_MAX)}"${options}`
+}
+
+/** The activity line for a dialog the agent put to the person, with the questions and how it ended. */
+export function dialogActivity(questions: DialogQuestion[], outcome: DialogOutcome): string {
+  const shown = questions.slice(0, DIALOG_QUESTIONS_SHOWN).map(dialogQuestionText)
+  const more = questions.length - shown.length
+  const asked = shown.length > 0 ? `: ${shown.join('; ')}${more > 0 ? `; and ${more} more` : ''}` : ''
+  const head = `asked the user in a dialog${asked}`
+  switch (outcome.kind) {
+    case 'answered':
+      return `${head}; answer: ${outcome.answer.slice(0, DIALOG_ANSWER_MAX)}`
+    case 'timed-out':
+      return `${head}; it timed out while the user was away, so the user did not answer; it went on with: ${outcome.answer.slice(0, DIALOG_ANSWER_MAX)}`
+    case 'dismissed':
+      return `${head}; the user dismissed it without answering`
+    case 'open':
+      return `${head}; still open, waiting on the user's answer`
+  }
 }
 
 function ledgerBlocks(ledger: Ledger): string[] {
