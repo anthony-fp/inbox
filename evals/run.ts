@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
@@ -10,6 +10,7 @@ import type { Exchange } from '../hooks/ledger'
 import type { Ledger } from '../types'
 import { run } from '../codex/src/run'
 import { codexAsk } from '../codex/src/update'
+import { codexCli } from './codex-cli'
 
 type Agent = 'claude' | 'codex'
 
@@ -62,8 +63,6 @@ function claude(prompt: string): Promise<string | null> {
   })
 }
 
-const APP_CLI = '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex'
-const codexCli = process.env.CODEX_CLI_PATH || (existsSync(APP_CLI) ? APP_CLI : 'codex')
 const askCodex = codexAsk(run, codexCli, mkdtempSync(join(tmpdir(), 'inbox-eval-')))
 
 function failures(before: Ledger, after: Ledger, checks: Check[]): string[] {
