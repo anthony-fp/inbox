@@ -14,6 +14,10 @@ https://github.com/user-attachments/assets/a493119c-4d8b-46e0-a18a-bd0ecf041b6b
 
 ## Install
 
+If you're like me, just paste a link to this Github repo to your agent and ask it to install.
+
+If you want to do things the old way, proceed...
+
 ### Claude Code
 
 In a Claude Code session in the terminal, type:
