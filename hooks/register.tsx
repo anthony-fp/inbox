@@ -548,6 +548,7 @@ let intervals: Timer[] = []
 let press: Press | null = null
 let sentBack: string[] = []
 let turnBox: string | null = null
+let isDialogDismissed = false
 let sessionId = ''
 let root = ''
 let fetchingPrs: Promise<void> = Promise.resolve()
@@ -643,6 +644,7 @@ function resetTurn() {
   press = null
   sentBack = []
   turnBox = null
+  isDialogDismissed = false
 }
 
 function notePerson(line: string) {
@@ -2833,16 +2835,12 @@ export const register: Register = on => {
       const questions = (Array.isArray(input.questions) ? input.questions : []) as { question?: unknown }[]
       const question = typeof questions[0]?.question === 'string' ? questions[0].question : 'A question'
       await openDialog($, { kind: 'question', text: question, key })
-      const dialog = dialogQuestions(input.questions)
-      try {
-        const ran = await run()
-        noteActivity(dialogActivity(dialog, dialogOutcome(ran)))
+      const ran = await run()
+      const outcome = dialogOutcome(ran)
+      noteActivity(dialogActivity(dialogQuestions(input.questions), outcome))
+      if (outcome.kind === 'dismissed') isDialogDismissed = true
 
-        return ran
-      } catch (error) {
-        noteActivity(dialogActivity(dialog, { kind: 'dismissed' }))
-        throw error
-      }
+      return ran
     }
     return run()
   })
@@ -2892,7 +2890,9 @@ export const register: Register = on => {
     if (!isOn) return r
     void wakeForDone($).catch(() => undefined)
     void followNewRows($).catch(() => undefined)
-    if (e.reason !== 'answer' || (e.answer.trim() === '' && turnBox === null)) return r
+    const hasReply = e.answer.trim() !== '' || turnBox !== null
+    const isAnswered = e.reason === 'answer' && hasReply
+    if (!isAnswered && !isDialogDismissed) return r
 
     const [ledger, shown, now] = await Promise.all([read($, LEDGER), screen($), $.clock.now()])
     const reply = [...sentBack, e.answer, turnBox ?? ''].filter(text => text.trim() !== '').join('\n\n')

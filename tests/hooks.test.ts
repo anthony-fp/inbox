@@ -43,7 +43,6 @@ let promptRows = 0
 let stopBlock: string | undefined
 
 let dialogAnswer: Record<string, unknown> = { result: 'ok', text: 'ok' }
-let dialogDismissed = false
 
 let isGhMissing = false
 
@@ -132,7 +131,6 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   ran = []
   stopBlock = undefined
   dialogAnswer = { result: 'ok', text: 'ok' }
-  dialogDismissed = false
   ghAnswers = []
   isGhMissing = false
   ledgerReply = LEDGER_REPLY
@@ -248,8 +246,6 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   on('classic.SessionStart', () => ({}))
   on('tool.call', (_$, e) => {
     if (e.tool !== 'AskUserQuestion') return { result: 'ok', text: 'ok' } as never
-    if (dialogDismissed) throw new Error('The user rejected the question')
-
     return dialogAnswer as never
   })
   on('ui.render', ($, e) => $.ui.resolve(e).Box({}))
@@ -336,11 +332,12 @@ test('a dialog reaches the model with its questions, whether answered or dismiss
   world($, on, prompts)
   const ask = (...questions: { question: string; options: { label: string }[] }[]) =>
     $.tool.call({ tool: 'AskUserQuestion', questions } as never)
-  const turn = async (turnId: string, dialog: () => Promise<unknown>) => {
+  const turn = async (turnId: string, dialog: () => Promise<unknown>, ending: 'answer' | 'aborted' = 'answer') => {
     await $.prompt.submit({ text: 'go on', wait: false, origin: { kind: 'composer' } })
     await $.turn.start({ text: 'go on', turnId })
     await dialog()
-    await $.turn.complete({ answer: 'Done.', durationMs: 5, isAborted: false, turnId, reason: 'answer' })
+    const answer = ending === 'answer' ? 'Done.' : ''
+    await $.turn.complete({ answer, durationMs: 5, isAborted: ending === 'aborted', turnId, reason: ending })
     await clock.settle()
   }
   const push = { question: 'Push the fix now?', options: [{ label: 'Push now (Recommended)' }, { label: 'Wait' }] }
@@ -351,13 +348,16 @@ test('a dialog reaches the model with its questions, whether answered or dismiss
   expect(prompts.at(-1)).toContain('Push the fix now?')
   expect(prompts.at(-1)).toContain('User has answered: Push now')
 
-  dialogDismissed = true
-  await turn('t2', async () => {
-    await expect(ask(push)).rejects.toThrow()
-  })
-  dialogDismissed = false
+  dialogAnswer = {
+    isError: true,
+    result: 'User declined to answer questions',
+    text: 'User declined to answer questions',
+  }
+  await turn('t2', () => ask(push), 'aborted')
+  expect(prompts.length).toBe(2)
   expect(prompts.at(-1)).toContain('Push the fix now?')
-  expect(prompts.at(-1)).not.toContain('rejected the question')
+  expect(prompts.at(-1)).toContain('the user dismissed it without answering')
+  expect(prompts.at(-1)).not.toContain('User declined')
 
   dialogAnswer = { result: {}, text: 'Both answered' }
   await turn('t3', () => ask(push, { question: 'Which branch?', options: [{ label: 'main' }, { label: 'next' }] }))

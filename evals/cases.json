@@ -1728,6 +1728,85 @@
     ]
   },
   {
+    "name": "dialog-escaped-no-reply",
+    "about": "A dialog the person dismissed with Escape, which ends the turn with no reply, is still a question for them.",
+    "ledger": {
+      "turn": 5,
+      "nextId": 5,
+      "card": {
+        "goal": "Fix the parser",
+        "done": [],
+        "now": "Fix committed locally",
+        "running": []
+      },
+      "items": []
+    },
+    "exchange": {
+      "person": "fix the failing parser test",
+      "activity": [
+        "edited src/parser.ts",
+        "ran: git commit -am \"Fix parser\"",
+        "asked the user in a dialog: \"Push the fix now?\" (options: Push now (recommended) / Wait); the user dismissed it without answering"
+      ],
+      "reply": ""
+    },
+    "checks": [
+      {
+        "new": "push",
+        "kind": "question"
+      }
+    ]
+  },
+  {
+    "name": "dialog-about-finding-escaped",
+    "about": "A dialog about a finding that the person dismissed with Escape, which ends the turn with no reply, is still a question for them.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 10,
+      "card": {
+        "goal": "Add a greeting CLI",
+        "done": ["--name option added"],
+        "now": "Tests pass",
+        "running": []
+      },
+      "items": [],
+      "findings": [
+        {
+          "id": "f4",
+          "kind": "issue",
+          "title": "average() reads past the end of the array",
+          "detail": "The loop in util.js runs to i <= nums.length, so the sum is NaN.",
+          "path": "util.js",
+          "at": 1
+        },
+        {
+          "id": "f5",
+          "kind": "issue",
+          "title": "README lists a removed flag",
+          "detail": "The README still documents --loud.",
+          "path": "README.md",
+          "at": 1
+        }
+      ]
+    },
+    "exchange": {
+      "person": "go on",
+      "activity": [
+        "asked the user in a dialog: \"Fix the average bug in util.js now?\" (options: Fix it now (recommended) / Leave it); the user dismissed it without answering"
+      ],
+      "reply": ""
+    },
+    "checks": [
+      {
+        "open": "f5"
+      },
+      {
+        "new": "average",
+        "kind": "question"
+      }
+    ]
+  },
+  {
     "name": "codex-open-dialog-is-question",
     "about": "A dialog still open at the end of the turn is a question waiting on the person.",
     "ledger": {
