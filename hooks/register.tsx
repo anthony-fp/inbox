@@ -180,14 +180,7 @@ import {
   shortAgo,
 } from './view'
 import type { ActionEmphasis, ActionIcon, DrawnEntry, InboxView, ModLook, PlannedKey, RowView, RowWait } from './view'
-import {
-  CLOSE_DESCRIPTION,
-  CLOSE_SCHEMA,
-  FINDING_SCHEMA,
-  findingDescription,
-  recordClose,
-  recordFinding,
-} from './tools'
+import { CLOSE_DESCRIPTION, CLOSE_SCHEMA, RECORD_SCHEMA, recordDescription, recordClose, recordItem } from './tools'
 import type { UndoProps } from './undo-client'
 import { followTo, recordRows, isTabEmpty } from './arrivals'
 import { parseInline } from './inline'
@@ -249,7 +242,7 @@ const TOOLS_REFUSED_TEXT =
   "Claude cannot record or close items here: your organization's settings block the inbox's tools."
 const PR_POLL_MS = 2 * 60_000
 
-const FINDING_TOOL = 'mcp__inbox__record_finding'
+const RECORD_TOOL = 'mcp__inbox__record'
 const CLOSE_TOOL = 'mcp__inbox__close'
 
 const PANE = 'inbox'
@@ -1229,11 +1222,7 @@ async function upgradeState($: EngineInterface): Promise<Ledger> {
   return ledger
 }
 
-async function runTool(
-  $: EngineInterface,
-  tool: typeof recordFinding,
-  input: Record<string, unknown>,
-): Promise<string> {
+async function runTool($: EngineInterface, tool: typeof recordItem, input: Record<string, unknown>): Promise<string> {
   const now = await $.clock.now()
   let result = ''
   await commitLedger($, l => {
@@ -2502,10 +2491,10 @@ async function initializeInbox($: EngineInterface) {
   const refused = () => {
     toolsRefused = true
   }
-  const findingText = findingDescription(CLAUDE_CODE)
+  const recordText = recordDescription(CLAUDE_CODE)
   await Promise.all([
     registerInboxCommand($),
-    $.tool.register({ name: 'record_finding', description: findingText, inputSchema: FINDING_SCHEMA }).catch(refused),
+    $.tool.register({ name: 'record', description: recordText, inputSchema: RECORD_SCHEMA }).catch(refused),
     $.tool.register({ name: 'close', description: CLOSE_DESCRIPTION, inputSchema: CLOSE_SCHEMA }).catch(refused),
   ])
   // A pane kept across a hot reload is already drawn.
@@ -2782,9 +2771,9 @@ export const register: Register = on => {
     }
   })
 
-  on('tool.describe', { tool: FINDING_TOOL }, async ($, e, next) => ({ ...(await next(e)), isDeferred: false }))
-  on('tool.call', { tool: FINDING_TOOL }, async ($, e) => ({
-    result: await runTool($, recordFinding, e as unknown as Record<string, unknown>),
+  on('tool.describe', { tool: RECORD_TOOL }, async ($, e, next) => ({ ...(await next(e)), isDeferred: false }))
+  on('tool.call', { tool: RECORD_TOOL }, async ($, e) => ({
+    result: await runTool($, recordItem, e as unknown as Record<string, unknown>),
   }))
   on('tool.describe', { tool: CLOSE_TOOL }, async ($, e, next) => ({ ...(await next(e)), isDeferred: false }))
   on('tool.call', { tool: CLOSE_TOOL }, async ($, e) => ({

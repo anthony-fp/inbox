@@ -11,7 +11,7 @@ import type { PressResult, RowPress } from '../../hooks/presses'
 import { inboxView, PRESS_GUARD_MS } from '../../hooks/view'
 import type { ReplyHolds } from '../../hooks/view'
 import { ledgerActions, RowActions } from '../src/row-actions'
-import { recordClose, recordFinding } from '../../hooks/tools'
+import { recordClose, recordItem } from '../../hooks/tools'
 import { CODEX } from '../src/texts'
 import { emptyState, updateState } from '../src/state'
 import { viewOf } from '../src/core'
@@ -165,10 +165,10 @@ test('the Codex renderer preserves retry, folded-option and finding action order
   const answered = answer as PressResult | null
   assert.ok(answered && !('stale' in answered))
   assert.equal(answered.ledger.closed[0]?.outcome, 'F')
-  const findingLedger = recordFinding(
+  const findingLedger = recordItem(
     CODEX,
     EMPTY,
-    { kind: 'issue', title: 'Missing retry limit', detail: 'The request loops.' },
+    { kind: 'finding', finding_kind: 'issue', title: 'Missing retry limit', detail: 'The request loops.' },
     1,
   ).ledger
   const finding = inboxView({

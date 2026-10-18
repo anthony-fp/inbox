@@ -19,7 +19,7 @@ Shared modules are in `hooks/`. Both hosts consume them, directly or through the
 | `hooks/claude.ts` | Mod only. Claude transcript, command, dialog, stop and sidebar helpers. |
 | `hooks/prs.ts` | Shared module. PR parsing, readiness and prompts. |
 | `hooks/pr-tab.ts` | Shared module. The PRs tab's rules: fetching each tracked PR through a host's gh runner, which PRs the tab draws, its row ids, and what each PR press does. |
-| `hooks/tools.ts` | Shared module. The record_finding and close tools. |
+| `hooks/tools.ts` | Shared module. The record and close tools. |
 | `hooks/demo.ts` | Shared module. Sample data for `/inbox demo` and the Codex demo. |
 | `hooks/layout.ts` | Shared module. Sizes the desktop look and the Codex tab share. |
 | `hooks/tones.ts` | Shared module. Status colors for native marks and terminal palettes. The Codex build writes them into CSS. |
@@ -77,7 +77,7 @@ Change a rule in its owner. Do not change it in a reader.
 | Press guard | `hooks/view.ts:PRESS_GUARD_MS` | All three looks |
 | Row padding | `hooks/layout.ts:ROW_PAD_PT` | Desktop and Codex |
 | Demo data | `hooks/demo.ts:demoView` | The mod's `/inbox demo` and `codex/src/demo.ts:demoState` |
-| Model-read texts | `hooks/model-text.ts:guidanceText`, `hooks/model-text.ts:systemText`, `hooks/model-text.ts:inboxText`, `hooks/model-text.ts:promptNotes`, `hooks/tools.ts:findingDescription` | The mod and Codex, each through its `Host` |
+| Model-read texts | `hooks/model-text.ts:guidanceText`, `hooks/model-text.ts:systemText`, `hooks/model-text.ts:inboxText`, `hooks/model-text.ts:promptNotes`, `hooks/tools.ts:recordDescription` | The mod and Codex, each through its `Host` |
 | Saved state shapes and upgrades | `types/index.d.ts:PluginState`, `hooks/ledger.ts:upgradeLedger`, `hooks/presses.ts:upgradeLastActions` | The mod also uses `hooks/register.tsx:upgradeState`. Codex uses `codex/src/state.ts:upgraded`, which gives a state saved without `heldRows` an empty list. |
 | PR readiness and prompts | `hooks/prs.ts:readiness`, `hooks/prs.ts:prompts` | The mod and the Codex tab |
 | Tracked-PR help steps | `hooks/pr-tab.ts:itemPrSteps` | Both hosts, in views and press validation |

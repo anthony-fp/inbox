@@ -13,8 +13,8 @@ that updates the inbox after each reply, reads two.
 
 | Text | Read by | When | Role |
 | --- | --- | --- | --- |
-| `guidanceText`, the "# Inbox" system prompt section | Claude | Every turn | What the inbox shows; when to record a finding; the latest inbox line is the current state; when to close |
-| `record_finding` description and fields | Claude | Every turn | What happens to a finding; the bar; the fields |
+| `guidanceText`, the "# Inbox" system prompt section | Claude | Every turn | What the inbox shows; when to record a question, a task or a finding; the latest inbox line is the current state; when to close |
+| `record` description and fields | Claude | Every turn | What each kind of item is; what happens to a finding; the bar; the fields |
 | `close` description and fields | Claude | Every turn | Where the id comes from; answer or reason |
 | Inbox line (`inboxText`, `closedText`) | Claude | Beside a prompt, when the inbox changed | Open items and findings with ids; what closed since, with when to ask again |
 | Answer line (`answerNote`) | Claude | Beside a prompt that answers numbered items | Which items the numbers mean |
@@ -44,8 +44,19 @@ that updates the inbox after each reply, reads two.
   again.
 - A dismissed question carries "Ask it again only if the user brings it up" on
   its own line.
-- `record_finding` answers with the new finding's id, so Claude can close it
-  in the same turn.
+- `record` answers without an id, since replies repeated one to the user.
+  The next inbox line lists every open id for `close`. It answers "Already
+  open" for an ask an open item restates, and refuses one the person already answered or dismissed.
+- Claude asks in its reply and records the same ask in that turn, as a
+  question with options and a recommendation, or as a task with steps. It
+  does not record rhetorical questions, offers to continue, FYIs or
+  invitations to look at finished work. The tool stays loaded up front after
+  `/resume`, and its description carries these rules for Codex, which skips
+  the guidance on resume.
+- Nothing is sent back to Claude at the end of a turn. The inbox model keeps
+  adding the asks Claude did not record. An item Claude
+  recorded is in `<open>`, so the model does not add the reply's same ask
+  again. `evals/cases.json` has cases for it.
 - Every way a finding leaves goes to Closed with its outcome, and the inbox
   line tells Claude, so a dismissed finding is not recorded again.
 - Fix, File issue, Discuss and Reply keep the finding open until Claude
@@ -67,13 +78,6 @@ The inbox model's input still calls closed items `<decided>`, "items the
 person already settled". Renamed to `<closed>`, "items closed recently", the
 model re-added a dismissed question in 4 of 5 runs.
 
-## Proposed changes
-
-1. Optional: at turn end, a reply that says it left something untested or
-   unfixed, with no finding recorded that turn, is sent back once. It catches
-   misses, at the cost of some false alarms.
-
 ## Decisions
 
 1. Roadmap: drop "Claude's calls replace Findings", or keep it?
-2. Turn-end check for unrecorded findings: build it, or leave it out?

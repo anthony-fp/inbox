@@ -1820,5 +1820,88 @@
         "new": "expire|minutes|hour"
       }
     ]
+  },
+  {
+    "name": "agent-recorded-question-not-added-again",
+    "about": "A question the agent recorded with its record tool is in <open>, so the reply that asks the same thing adds nothing.",
+    "ledger": {
+      "turn": 4,
+      "nextId": 4,
+      "card": {
+        "goal": "Fix the onboarding docs",
+        "done": [],
+        "now": "Waiting on approval",
+        "running": []
+      },
+      "items": [
+        {
+          "id": "i3",
+          "kind": "question",
+          "label": null,
+          "ask": "Edit the shared onboarding page's SSO section?",
+          "options": ["Approve edit", "Not yet"],
+          "rec": "Approve edit",
+          "helps": [],
+          "turn": 4,
+          "at": 4
+        }
+      ]
+    },
+    "exchange": {
+      "person": "the onboarding page is wrong about SSO, look into it",
+      "turn": 4,
+      "activity": ["ran: rg -n SSO docs/onboarding.md", "called inbox__record"],
+      "reply": "The onboarding page says SSO is set up per user. It is set up per workspace: an admin turns it on once in Settings → Security, and every member then signs in with it.\n\nThe page is shared with the support team, so I won't edit the page without your OK. The change replaces the second paragraph of the SSO section with the per-workspace steps. I'd approve it."
+    },
+    "checks": [
+      {
+        "open": "i3"
+      },
+      {
+        "added": 0
+      }
+    ]
+  },
+  {
+    "name": "agent-recorded-question-other-ask-added",
+    "about": "With one question recorded by the agent, a second ask the reply makes that nothing records is still added.",
+    "ledger": {
+      "turn": 4,
+      "nextId": 4,
+      "card": {
+        "goal": "Fix the onboarding docs",
+        "done": [],
+        "now": "Waiting on approval",
+        "running": []
+      },
+      "items": [
+        {
+          "id": "i3",
+          "kind": "question",
+          "label": null,
+          "ask": "Edit the shared onboarding page's SSO section?",
+          "options": ["Approve edit", "Not yet"],
+          "rec": "Approve edit",
+          "helps": [],
+          "turn": 4,
+          "at": 4
+        }
+      ]
+    },
+    "exchange": {
+      "person": "the onboarding page is wrong about SSO, look into it",
+      "turn": 4,
+      "activity": ["ran: rg -n SSO docs/onboarding.md", "called inbox__record"],
+      "reply": "The onboarding page says SSO is set up per user. It is set up per workspace: an admin turns it on once in Settings → Security, and every member then signs in with it.\n\nThe page is shared with the support team, so I won't edit the page without your OK. The change replaces the second paragraph of the SSO section with the per-workspace steps. I'd approve it.\n\nSeparately: should the SSO screenshots in the page be retaken now, or after the Settings redesign ships?"
+    },
+    "checks": [
+      {
+        "open": "i3"
+      },
+      {
+        "new": "screenshot",
+        "kind": "question"
+      }
+    ]
   }
 ]

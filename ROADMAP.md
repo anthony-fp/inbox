@@ -2,13 +2,6 @@
 
 Planned work, not built yet.
 
-- **Claude writes its own items.** One tool lets Claude record its
-  questions, its tasks and its calls, and close them. It replaces
-  `record_finding`.
-  The per-turn Sonnet call stops creating items and writes only the card.
-  At the end of a turn, a reply that asks you something no item records is
-  sent back once, so Claude records it. The tool must stay loaded up front
-  after `/resume`.
 - **Claude's calls replace Findings.** A finding outside the task is a call
   Claude made: to leave it for now. The Findings tab becomes a list of calls
   you might make differently, shown as "question → choice, not

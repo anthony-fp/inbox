@@ -355,7 +355,7 @@ upload doesn't mean the listing is ready to submit."
   allowance"). (L/extend/mcp#other-configuration-options) The exact meaning of
   `auto` and `approve` is not spelled out [unknown].
 - **The plugin-file placement works but is undocumented.**
-  `default_tools_approval_mode: "approve"` in `.mcp.json` let `record_finding`
+  `default_tools_approval_mode: "approve"` in `.mcp.json` let `record`
   run without approval; without it, Codex refused the call [live]
   (docs/plans/codex-plugin.md:399). No page documents the key inside a
   plugin's `.mcp.json`. Whether per-tool `approval_mode` works there is
@@ -507,7 +507,7 @@ is ever listed publicly.
     persisting artifacts, starting stateful jobs or workflows, queuing work".
     "Being able to undo an action does not, by itself, justify setting
     destructiveHint to false."
-  - [inference] `record_finding`, `close` and `inbox_press` all need
+  - [inference] `record`, `close` and `inbox_press` all need
     `readOnlyHint: false`. The inbox's tools set no annotations today
     (codex/src/server.ts:toolsFor).
   - "Do not request the full conversation history … Your MCP server must not
@@ -2038,7 +2038,7 @@ otherwise write to real state.
 | What does Codex send in `initialize` (`extensions`, `protocolVersion`) and does it call `server/discover`? | Log raw `initialize` params and every method name for one session. Also try declaring `extensions["io.modelcontextprotocol/ui"]` server-side. |
 | What is in `ui/initialize`'s result (`hostCapabilities`, `displayMode`, `platform`, draft keys)? | Dump it to the tab's debug view or a server log. |
 | Which `_meta` keys reach the server and the widget (`openai/session`, `openai/widgetSessionId`)? | Log `params._meta` on `tools/call`, and the `_meta` of each result the tab receives. |
-| Does Codex hide `visibility: ["app"]` tools from the model, and reject app calls to model-only tools? | Ask the model to list or call `inbox_press`; call `record_finding` from the tab. |
+| Does Codex hide `visibility: ["app"]` tools from the model, and reject app calls to model-only tools? | Ask the model to list or call `inbox_press`; call `record` from the tab. |
 | Is `ui/update-model-context` supported in Codex tabs, and is it marked untrusted? | Send a text block, ask the model to repeat it, inspect the transcript wrapper and composer. |
 | Does Codex send `ui/resource-teardown` and `host-context-changed`? | Log both; toggle the theme and resize the panel. |
 | Do `ui/request-display-mode`, entrypoint `icons`, a distinct title, `ui/open-link` and `clipboardWrite` work in the Codex tab? | Try each in a copy of the plugin and compare. |

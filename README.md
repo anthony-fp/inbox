@@ -215,8 +215,8 @@ tells Claude a few seconds later, or once Claude's running turn ends.
 - Tool calls. The inbox reads each call to write the tool lines above, to
   show a question while Claude's question dialog is open, and to find a PR
   this session opens with `gh pr create`. It passes every call on unchanged,
-  except calls to its own two tools. `record_finding` saves a finding and
-  `close` closes an item. The inbox answers these itself, so they run
+  except calls to its own two tools. `record` saves a question, a task or a
+  finding and `close` closes an item. The inbox answers these itself, so they run
   without a permission prompt.
 - Permission prompts. While Claude Code asks you to approve a tool call, the
   inbox shows a row for it, then passes the request on unchanged. It never

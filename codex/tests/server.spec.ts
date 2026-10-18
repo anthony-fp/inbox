@@ -468,8 +468,8 @@ test('the inbox tool answers in text: the count, each row that waits, and where 
 test('Codex’s own tool calls reach their session through the turn metadata', async () => {
   const { dir, call } = await setup(0)
   const r = await call(
-    'record_finding',
-    { kind: 'issue', title: 'No lint script', detail: 'Only tests run.' },
+    'record',
+    { kind: 'finding', finding_kind: 'issue', title: 'No lint script', detail: 'Only tests run.' },
     { 'x-codex-turn-metadata': { session_id: 's1', thread_id: 's1' } },
   )
   assert.match(r.result.content[0]?.text ?? '', /^Recorded\. /)

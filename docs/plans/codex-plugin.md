@@ -60,7 +60,7 @@ Terms follow `GLOSSARY.md`. "The mod" is the Claude Code mod in this repo.
 
 | Inbox feature | In the mod | In the plugin | Fit |
 | --- | --- | --- | --- |
-| `record_finding`, `close` | `$.tool.register`, allowed without a prompt | MCP tools served by the plugin. Approval set per tool in the person's Codex config | Direct, but see gap 5 |
+| `record`, `close` | `$.tool.register`, allowed without a prompt | MCP tools served by the plugin. Approval set per tool in the person's Codex config | Direct, but see gap 5 |
 | Session checks, `run_check`, the claim check | Removed | Removed | None |
 | `GUIDANCE` in the system prompt | `prompt.compose` adds a section | `SessionStart` context on every start, resume, clear and compact | Direct. It becomes developer context, not system prompt |
 | Start-of-context block (`carryText`) | `prompt.context` | The same `SessionStart` output | Direct |
@@ -187,7 +187,7 @@ the inbox model, an OpenAI model.
 - "Claude" becomes "Codex".
 - The surface: the band and the /inbox pane become the Inbox tab. Tool
   names stay, since Codex also names the inbox's tools
-  `mcp__inbox__record_finding` and `mcp__inbox__close` [verified].
+  `mcp__inbox__record` and `mcp__inbox__close` [verified].
 
 Then measure it as AGENTS.md describes. Run the same sample exchanges several times
 through `codex exec` with each candidate model, and count re-added, wrongly
@@ -261,7 +261,7 @@ Includes:
 
 1. Plugin manifest, marketplace entry, and an install that works on this Mac.
 2. The MCP server, with saved state.
-3. `record_finding` and `close` as MCP tools.
+3. `record` and `close` as MCP tools.
 4. `GUIDANCE`, the start-of-context block, the inbox line and the answer line,
    through hooks.
 5. The per-reply update with `codex exec`, using the measured text and model.
@@ -380,7 +380,7 @@ bypassed:
 | Claim check | Codex honors `{decision: "block", reason}` from `Stop`: the turn went on, and the next `Stop` had `stop_hook_active: true`. |
 | A press | The server closed the question, and `codex queue` wrote the answer for the right thread with the CLI path a hook saved. `codex exec resume` also reads the queue, and delivered it. |
 | A press from a server Codex started | Against the real Codex home, an app-server started the inbox server, and `mcpServer/tool/call` pressed an answer the way the tab does. The server ran `codex queue`, the message started its own turn as a user message, and the model answered it. `codex queue` goes through the app-server's `thread/queue/add`, and needs a saved thread: it fails for an ephemeral one. |
-| Findings | `record_finding` needs no approval with `default_tools_approval_mode: "approve"` in `.mcp.json`. Without it, Codex refused the call. |
+| Findings | `record` needs no approval with `default_tools_approval_mode: "approve"` in `.mcp.json`. Without it, Codex refused the call. |
 | Data folder | MCP server processes found the hooks' data folder from their own install path. |
 | Tab | Drawn in a browser with a stand-in host, in dark and light, at the desktop tab's 576 px. The stand-in ran the real server code. Typed text and its focus outlasted two polls. A poll held back past a press did not bring the closed row back. A row closed by a press or by the update stayed in place for five seconds, then moved under Closed. |
 

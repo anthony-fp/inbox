@@ -33,10 +33,10 @@ import type { EffectHost, RowPress } from '../../hooks/presses'
 import {
   CLOSE_DESCRIPTION,
   CLOSE_SCHEMA,
-  FINDING_SCHEMA,
-  findingDescription,
+  RECORD_SCHEMA,
+  recordDescription,
   recordClose,
-  recordFinding,
+  recordItem,
 } from '../../hooks/tools'
 import { noteToolCall, viewOf } from './core'
 import type { TabView } from './core'
@@ -77,7 +77,7 @@ function viewsStillShown(
 }
 
 const toolsFor = (uri: string) => [
-  { name: 'record_finding', description: findingDescription(CODEX), inputSchema: FINDING_SCHEMA },
+  { name: 'record', description: recordDescription(CODEX), inputSchema: RECORD_SCHEMA },
   { name: 'close', description: CLOSE_DESCRIPTION, inputSchema: CLOSE_SCHEMA },
   // No resourceUri: Codex mounts every model-called MCP App inline in the transcript.
   { name: 'inbox', description: INBOX_DESCRIPTION, inputSchema: { type: 'object', properties: {} } },
@@ -583,11 +583,11 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     if (!id) return { ...text('Not done: this call carries no session id.'), isError: true }
     const heard = (s: SessionState) => (turn === undefined ? s : noteToolCall(s, turn, now()))
     switch (name) {
-      case 'record_finding':
+      case 'record':
       case 'close': {
         let result = ''
         await updateState(dir, id, s => {
-          const r = (name === 'close' ? recordClose : recordFinding)(CODEX, s.ledger, args, now())
+          const r = (name === 'close' ? recordClose : recordItem)(CODEX, s.ledger, args, now())
           result = r.result
           return heard({ ...s, ledger: r.ledger })
         })

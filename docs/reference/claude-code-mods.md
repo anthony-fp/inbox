@@ -866,7 +866,7 @@ Inference, not verified live. In any session where the guard loads (every Team o
 - GUIDANCE never reaches Claude. The inbox adds it as system-prompt section `inbox:guidance` through `prompt.compose` (`hooks/register.tsx:on('prompt.compose')`).
 - The carry block never reaches Claude. The inbox adds it through `prompt.context` (`hooks/register.tsx:on('prompt.context')`).
 - The reload after `/clear`, `/resume` and `/branch` doesn't fire. It runs on `classic.SessionStart` (`hooks/register.tsx:on('classic.SessionStart')`).
-- The band, pane, per-turn model call and tools still run, unless `allowedMcpServers` is set. Then `record_finding` and `close` don't register.
+- The band, pane, per-turn model call and tools still run, unless `allowedMcpServers` is set. Then `record` and `close` don't register.
 - Options to weigh: move guidance into tool descriptions (`tool.describe` passes user subjects), move carry text into `prompt.submit` additive context, and reload on a `session.*` event.
 
 ### Policies that stop or limit user mods
@@ -1143,7 +1143,7 @@ Highest precedence first: [PLD#name-conflicts]
 ### Plugin security
 
 - "A Claude Code plugin you install can execute arbitrary code on your machine with your user privileges." [PS]
-- "Claude Code runs hooks, monitors, MCP servers, LSP servers, and the processes a mod starts outside the sandbox." Permission rules "cover the tool calls Claude makes, not the code a plugin runs by itself". The inbox's `record_finding` and `close` are tool calls, so permission rules apply to them. [PS#understand-what-a-plugin-can-do]
+- "Claude Code runs hooks, monitors, MCP servers, LSP servers, and the processes a mod starts outside the sandbox." Permission rules "cover the tool calls Claude makes, not the code a plugin runs by itself". The inbox's `record` and `close` are tool calls, so permission rules apply to them. [PS#understand-what-a-plugin-can-do]
 - With auto-update, "the files you reviewed can change on disk". [PS#understand-what-a-plugin-can-do]
 
 ### Other components the inbox could add

@@ -14,7 +14,7 @@ import {
 import type { EffectHost, PressResult, RowPress } from '../../hooks/presses'
 import { applyPrPress } from '../../hooks/pr-tab'
 import { demoView } from '../../hooks/demo'
-import { recordClose, recordFinding } from '../../hooks/tools'
+import { recordClose, recordItem } from '../../hooks/tools'
 import {
   closedShown,
   feedbackText,
@@ -500,8 +500,12 @@ test('Fix hands a finding off and settles it as the choice made, then lists it i
   const w = withItems()
   const s = {
     ...w,
-    ledger: recordFinding(CODEX, w.ledger, { kind: 'issue', title: 'No lint script', detail: 'Only tests run.' }, 10)
-      .ledger,
+    ledger: recordItem(
+      CODEX,
+      w.ledger,
+      { kind: 'finding', finding_kind: 'issue', title: 'No lint script', detail: 'Only tests run.' },
+      10,
+    ).ledger,
   }
   const r = pressed(s, { action: 'address', id: 'f3' })
   assert.ok(!('stale' in r))
@@ -648,8 +652,12 @@ test('Dismiss settles a row in place with Undo, and Undo puts it back open where
   assert.ok('stale' in pressed(expired, { action: 'undo', id: 'i1' }))
   const withFinding = {
     ...s,
-    ledger: recordFinding(CODEX, s.ledger, { kind: 'issue', title: 'No lint script', detail: 'Only tests run.' }, 10)
-      .ledger,
+    ledger: recordItem(
+      CODEX,
+      s.ledger,
+      { kind: 'finding', finding_kind: 'issue', title: 'No lint script', detail: 'Only tests run.' },
+      10,
+    ).ledger,
   }
   const restored = after(after(withFinding, { action: 'dismiss', id: 'f3' }), { action: 'undo', id: 'f3' })
   assert.deepEqual(
@@ -739,10 +747,10 @@ test('a row Codex closes while the person types a reply stays held in place, out
 
 test('a held finding’s reply sends what a reply to the open finding sends, and a row the person closed holds nothing', () => {
   const s = withItems()
-  const recorded = recordFinding(
+  const recorded = recordItem(
     CODEX,
     s.ledger,
-    { kind: 'issue', title: 'No lint script', detail: 'Only tests run.' },
+    { kind: 'finding', finding_kind: 'issue', title: 'No lint script', detail: 'Only tests run.' },
     10,
   ).ledger
   const closed = recordClose(CODEX, recorded, { id: 'f3', reason: 'added one' }, 50).ledger
@@ -827,8 +835,12 @@ test('the tab moves from an empty Needs you to Findings when it opens on a findi
   assert.deepEqual(first.added, { needsYou: [], findings: [] })
   const withFinding = {
     ...s,
-    ledger: recordFinding(CODEX, s.ledger, { kind: 'issue', title: 'No lint script', detail: 'Only tests run.' }, 20)
-      .ledger,
+    ledger: recordItem(
+      CODEX,
+      s.ledger,
+      { kind: 'finding', finding_kind: 'issue', title: 'No lint script', detail: 'Only tests run.' },
+      20,
+    ).ledger,
   }
   const next = newRows(first.seen, viewOf(withFinding, 20))
   assert.deepEqual(next.added, { needsYou: [], findings: ['f1'] })

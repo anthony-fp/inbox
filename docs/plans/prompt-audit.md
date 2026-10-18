@@ -121,7 +121,7 @@ The saved records do not say whether an answer came from a press or from the age
 - **What changed:**
   - `systemText` has an `ASKED: <finding> | <item>` line, for "new N" or an open item's id.
   - The code also closes an open finding when a new item rewords its title.
-  - `record_finding` does not add a finding that rewords an open item. It answers with that item's id.
+  - `record` does not add a finding that rewords an open item. It answers with that item's id.
 
 ### 8. Codex reads the inbox in two shapes
 
@@ -144,7 +144,7 @@ The saved records do not say whether an answer came from a press or from the age
 | Text | Where | Reader | Result |
 | --- | --- | --- | --- |
 | The guidance | `hooks/model-text.ts:guidanceText` | Claude, Codex | Themes 1, 6, 7 |
-| `record_finding` and `close`, their fields and results | `hooks/tools.ts` | Claude, Codex | Themes 3, 6 |
+| `record` and `close`, their fields and results | `hooks/tools.ts` | Claude, Codex | Themes 3, 6 |
 | The inbox model's instructions and input | `hooks/model-text.ts:systemText`, `hooks/model-text.ts:buildPrompt` | Inbox model | Themes 2, 4, 5, 7 |
 | The catch-up prompts | `hooks/model-text.ts:catchUpPrompt`, `hooks/model-text.ts:transcriptCatchUpPrompt` | Inbox model or a fork | Theme 5 |
 | `inbox:` texts beside a prompt | `hooks/model-text.ts:inboxText`, `hooks/model-text.ts:closedText`, `hooks/model-text.ts:answerNote` | Claude, Codex | Themes 3, 6 |
@@ -232,7 +232,7 @@ The first version asked the dismissed question again in up to 4 of 8 Sonnet runs
 
 **A todo the person mentions is a question, not a finding.** Two changes:
 
-- **The `record_finding` description** now leaves out "todos or ideas the user mentioned". The agent was measured with a stand-in server, 6 runs per case.
+- **The finding part of the `record` description** now leaves out "todos or ideas the user mentioned". The agent was measured with a stand-in server, 6 runs per case.
 - **The inbox model has a `TODO:` line.** It names the work. Code turns that into the question "Ready to start on <work>?" with the options Proceed / Not yet. Sonnet sometimes writes a `TODO:` line for a finding the person puts off, so code drops a todo that rewords an open item or finding.
 
 | Case | Sonnet before | Sonnet after | Codex before | Codex after |
@@ -285,7 +285,7 @@ These are code fixes. None changes what a model reads. Items 1, 3, 4 and 6 are f
 ### Items leave or linger at the wrong time
 
 7. **A question re-asked after 12 prompts disappears at that moment.** A restatement merges into the old item and keeps its old turn, so it expires in the same update. Fix: a restatement refreshes the item's turn.
-8. **Findings past 30 are deleted silently.** Nothing records them, and `record_finding` still answers "Recorded". Fix: move them to Closed as "list full", and say so in the result.
+8. **Findings past 30 are deleted silently.** Nothing records them, and `record` still answers "Recorded". Fix: move them to Closed as "list full", and say so in the result.
 9. **A typed reply that is itself a question closes the question.** The inbox model is then told never to add it again. This happened in this session: a question was closed with a follow-up question as its answer. It needs a fixture before a fix.
 10. **The Herdr sidebar shows a stale NOW** for the whole next turn after the last question is answered.
 

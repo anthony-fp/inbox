@@ -723,8 +723,9 @@ test('last actions an earlier build saved convert once by the table, and a task 
   await $.turn.complete({ answer: 'Run ./load.sh.', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
   await clock.settle()
   await $.tool.call({
-    tool: 'mcp__inbox__record_finding',
-    kind: 'issue',
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
     title: 'README is stale',
     detail: 'Old name.',
   })
@@ -779,8 +780,9 @@ test('the band is [Open inbox] and the counts, the same while working and after 
   await $.turn.complete({ answer: 'Plan ready.', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
   await clock.settle()
   await $.tool.call({
-    tool: 'mcp__inbox__record_finding',
-    kind: 'issue',
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
     title: 'README is stale',
     detail: 'It names the old command.',
   })
@@ -849,8 +851,9 @@ test('after a failed update, the next reply catches up over the whole conversati
   await $.turn.complete({ answer: 'Plan ready.', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
   await clock.settle()
   await $.tool.call({
-    tool: 'mcp__inbox__record_finding',
-    kind: 'issue',
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
     title: 'README is stale',
     detail: 'It names the old command.',
   })
@@ -935,8 +938,9 @@ test('a finding Claude records while the pane shows an empty tab brings the pane
   const pane = await $.ui.mount(PANE)
   expect(await pane.find({ text: /^Nothing needs you\.$/ })).toBeDefined()
   const r = await $.tool.call({
-    tool: 'mcp__inbox__record_finding',
-    kind: 'issue',
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
     title: 'Retry loop never backs off',
     detail: 'The fetch retry spins with no delay and can hammer the API.',
     path: 'src/api.ts',
@@ -969,13 +973,54 @@ test('a finding Claude records while the pane shows an empty tab brings the pane
   expect(await pane.find({ text: /1 closed/ })).toBeDefined()
 
   await $.tool.call({
-    tool: 'mcp__inbox__record_finding',
-    kind: 'opportunity',
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'opportunity',
     title: 'Cache the API token',
     detail: 'Each call fetches a new token.',
   })
   await clock.settle()
   expect(await pane.find({ text: /Cache the API token/ })).toBeDefined()
+})
+
+test('a question Claude records waits in the pane with its recommendation, a repeat is not added, and one the person dismissed is not recorded again', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  on('ui.panes', () => ({ value: [{ id: 'inbox', title: 'Inbox', isShown: true, isFocused: true, isPlaced: true }] }))
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'inbox', args: '' } as never)
+  const pane = await $.ui.mount(PANE)
+  const question = {
+    tool: 'mcp__inbox__record',
+    kind: 'question',
+    ask: 'Which cache should the API use?',
+    options: ['Redis', 'In-memory'],
+    rec: 'Redis',
+  } as const
+  const r = await $.tool.call(question)
+  expect(r.result).toBe('Recorded. The user sees it in the /inbox pane.')
+  await clock.settle()
+  expect(await pane.find({ text: /Which cache should the API use\?/ })).toBeDefined()
+  expect((await $.tool.call({ ...question, ask: 'Which cache should the API use?' })).result).toBe('Already open.')
+  expect((await $.tool.call({ ...question, ask: 'Which cache should it use?', rec: 'Memcached' })).result).toBe(
+    'Not recorded: rec must be one of the options.',
+  )
+
+  const task = await $.tool.call({
+    tool: 'mcp__inbox__record',
+    kind: 'task',
+    ask: 'Sign in to the registry',
+    steps: ['npm login', 'Then tell me when it is done.'],
+  })
+  expect(task.result).toBe(
+    'Recorded. The user sees it in the /inbox pane. Some steps were not a command, a file path or a link, so they are left out.',
+  )
+
+  await $.tool.call({ tool: 'mcp__inbox__close', id: 'i1', answer: 'Redis' })
+  expect((await $.tool.call(question)).result).toBe(
+    'Not recorded: the user already closed this (Redis). Ask it again only if they bring it up.',
+  )
 })
 
 test('/inbox opens on the tab that has rows when the tab it would show is empty', async ($, on) => {
@@ -986,8 +1031,9 @@ test('/inbox opens on the tab that has rows when the tab it would show is empty'
 
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   await $.tool.call({
-    tool: 'mcp__inbox__record_finding',
-    kind: 'issue',
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
     title: 'No lint script',
     detail: 'Only tests run.',
   })
@@ -1007,7 +1053,13 @@ test('findings that arrive one by one after the pane moves to them keep the firs
   await $.command.run({ command: 'inbox', args: '' } as never)
   const pane = await $.ui.mount(PANE)
   for (const title of ['Retry loop never backs off', 'Token cached forever', 'No lint script']) {
-    await $.tool.call({ tool: 'mcp__inbox__record_finding', kind: 'issue', title, detail: 'Found while reading.' })
+    await $.tool.call({
+      tool: 'mcp__inbox__record',
+      kind: 'finding',
+      finding_kind: 'issue',
+      title,
+      detail: 'Found while reading.',
+    })
     await clock.settle()
   }
   expect(await pane.find({ key: 'address-f1' })).toBeDefined()
@@ -1030,8 +1082,9 @@ test('t opens a field for the person’s own words: a question’s words go to C
   })
   await clock.settle()
   await $.tool.call({
-    tool: 'mcp__inbox__record_finding',
-    kind: 'issue',
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
     title: 'README is stale',
     detail: 'It names the old command.',
   })
@@ -1495,8 +1548,9 @@ test('Claude closes an item or finding that no longer applies, by the id it read
   })
   await clock.settle()
   await $.tool.call({
-    tool: 'mcp__inbox__record_finding',
-    kind: 'issue',
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
     title: 'README is stale',
     detail: 'It names the old command.',
   })
@@ -2417,8 +2471,9 @@ test('resuming a session waits for its in-flight save before loading it', async 
     await held
   }
   const adding = $.tool.call({
-    tool: 'mcp__inbox__record_finding',
-    kind: 'issue',
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
     title: 'New finding',
     detail: 'New detail.',
   })
@@ -2479,8 +2534,9 @@ test('a ledger write committed before clear still saves to its original session'
   await $.turn.complete({ answer: 'Old reply.', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
   await clock.settle()
   const adding = $.tool.call({
-    tool: 'mcp__inbox__record_finding',
-    kind: 'issue',
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
     title: 'Late finding',
     detail: 'Late detail.',
   })
@@ -2513,15 +2569,17 @@ test('the latest committed ledger wins when an older write completes afterward',
   })
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   const first = $.tool.call({
-    tool: 'mcp__inbox__record_finding',
-    kind: 'issue',
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
     title: 'First finding',
     detail: 'First.',
   })
   await afterWrite
   await $.tool.call({
-    tool: 'mcp__inbox__record_finding',
-    kind: 'issue',
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
     title: 'Second finding',
     detail: 'Second.',
   })
@@ -2668,7 +2726,13 @@ test('a saved session the store cannot read shows as unreadable, not empty, unti
   ledgerReply = 'NOW: Looking at it'
   await $.prompt.submit({ text: 'keep going', wait: false, origin: { kind: 'composer' } })
   await $.turn.complete({ answer: 'ok', durationMs: 5, isAborted: false, turnId: 't2', reason: 'answer' })
-  await $.tool.call({ tool: 'mcp__inbox__record_finding', kind: 'issue', title: 'README is stale', detail: 'Old.' })
+  await $.tool.call({
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
+    title: 'README is stale',
+    detail: 'Old.',
+  })
   await clock.settle()
   expect(stored.get('s:session-1')).toContain('Use Node or Python?')
 
@@ -2875,7 +2939,13 @@ test('the desktop pane draws each action as one button and the tabs as one click
   await clock.settle()
   expect((await tabBar()).shown).toBe('findings')
 
-  await $.tool.call({ tool: 'mcp__inbox__record_finding', kind: 'issue', title: 'README is stale', detail: 'Old.' })
+  await $.tool.call({
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
+    title: 'README is stale',
+    detail: 'Old.',
+  })
   await $.tool.call({ tool: 'mcp__inbox__close', id: 'f3', reason: 'fixed' } as never)
   await clock.advance(9000)
   const fold = async () => (await pane.find({ key: 'fold-issue' }))?.props.props as FoldProps
@@ -2892,8 +2962,9 @@ test('the desktop pane draws each action as one button and the tabs as one click
   expect(await pane.find(closedItem)).toBeDefined()
 
   await $.tool.call({
-    tool: 'mcp__inbox__record_finding',
-    kind: 'issue',
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
     title: 'Retry loop never backs off',
     detail: 'Hot.',
   })
@@ -2913,9 +2984,21 @@ test('a tool call after a hot reload, before the load converts the ledger, still
     return next({ ...e, value: old as never })
   })
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
-  await $.tool.call({ tool: 'mcp__inbox__record_finding', kind: 'issue', title: 'README is stale', detail: 'Old.' })
+  await $.tool.call({
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
+    title: 'README is stale',
+    detail: 'Old.',
+  })
   strip = true
-  await $.tool.call({ tool: 'mcp__inbox__record_finding', kind: 'issue', title: 'Second', detail: 'Two.' })
+  await $.tool.call({
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
+    title: 'Second',
+    detail: 'Two.',
+  })
   strip = false
   const r = await $.tool.call({ tool: 'mcp__inbox__close', id: 'f1', reason: 'fixed' } as never)
   expect(r.result).toBe('Closed the finding.')

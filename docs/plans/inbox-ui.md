@@ -13,7 +13,7 @@ The facts behind it are in [docs/reference/](../reference/README.md), checked on
 - **Item**: a question the agent asked, or a task only the person can do.
 - **Row**: one entry in a list. A row is an item, a finding, a PR, a PR check or a review thread.
 - **Need you**: the rows the Needs you tab counts. Section 2.1 defines it.
-- **Per-turn update**: a model call after each reply that adds and closes items. It is the only source of items besides the agent's own `record_finding` and `close` tools.
+- **Per-turn update**: a model call after each reply that adds and closes items. It adds the items the agent did not record with its `record` tool, and writes the card.
 - **Card goal and current step**: the per-turn update's one-line summary of the session: what it is for, and what the agent is doing now.
 - **Mod**: the Claude Code plugin in `hooks/` that draws the band and pane.
 - **Band**: the mod's lines above the prompt.

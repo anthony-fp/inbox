@@ -22,7 +22,7 @@ test('a session starts with the guidance, records the prompt, and ends the turn 
     input('SessionStart', { cwd: root, source: 'startup', transcript_path: transcript }),
     deps,
   )
-  assert.match(JSON.stringify(start), /mcp__inbox__record_finding/)
+  assert.match(JSON.stringify(start), /mcp__inbox__record/)
   const started = await readState(dir, 's1')
   assert.equal(started.root, root)
   assert.equal(started.cliPath, '/apps/codex')

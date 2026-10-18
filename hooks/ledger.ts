@@ -644,6 +644,51 @@ export function addFinding(
   }
 }
 
+export type AgentItemResult =
+  | { ledger: Ledger; is: 'added'; id: string; expired: Item | null }
+  | { ledger: Ledger; is: 'open'; id: string }
+  | { ledger: Ledger; is: 'closed'; outcome: string }
+
+/**
+ * Adds a question or task Claude recorded. One that an open item restates is skipped, and so is one that
+ * repeats an item the person answered or dismissed (an expired item can be asked again). The list keeps its
+ * newest MAX_OPEN items. A finding the new ask restates closes, so one thing shows in one list.
+ */
+export function addAgentItem(
+  ledger: Ledger,
+  entry: Pick<Item, 'kind' | 'ask' | 'options' | 'rec' | 'helps'>,
+  now: number,
+): AgentItemResult {
+  const candidate = { ...entry, label: null }
+  const open = matchOpen(ledger.items, candidate)
+  const openItem = ledger.items[open]
+  if (openItem) return { ledger, is: 'open', id: openItem.id }
+  const repeated = ledger.closed.findLast(c => c.how !== 'expired' && matchOpen([c], candidate) >= 0)
+  if (repeated) return { ledger, is: 'closed', outcome: repeated.outcome }
+
+  const id = `i${ledger.nextId}`
+  const items = [...ledger.items, { ...entry, label: null, id, turn: ledger.turn, at: now }]
+  const kept = items.slice(-MAX_OPEN)
+  const dropped = items.filter(i => !kept.includes(i))
+  const closed = [...ledger.closed, ...dropped.map(i => closedRecord(i, { outcome: EXPIRED, how: 'expired' }, now))]
+  const restated = ledger.findings.filter(f => restates(f.title, entry.ask))
+  const base: Ledger = { ...ledger, items: kept, closed, nextId: ledger.nextId + 1, batchTurn: ledger.turn }
+  const next = restated.reduce((l, f) => closeFinding(l, f.id, { outcome: `asked as ${id}`, how: 'update' }, now), base)
+
+  return { ledger: next, is: 'added', id, expired: dropped[0] ?? null }
+}
+
+/** A step for a task: a link, a file or a command. Anything else is not usable and returns null. */
+export function stepHelp(step: string): Help | null {
+  const value = step.trim()
+  if (/^https?:\/\//i.test(value)) return readHelp('link', value, null, [], null)
+  if (/^(?:\/|~\/|\.{1,2}\/)\S*$/.test(value)) return readHelp('open', value, null, [], null)
+
+  const isSentence = /^[A-Z][a-z]+\s+[a-z]/.test(value) || /[.!?]$/.test(value)
+
+  return value !== '' && !isSentence ? readHelp('terminal', value, null, [], null) : null
+}
+
 export type ClosedState = 'handled' | 'dismissed' | 'lapsed'
 
 export function closedState(d: Pick<Closed, 'how' | 'outcome'>): ClosedState {

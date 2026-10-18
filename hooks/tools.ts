@@ -1,20 +1,50 @@
-import { addFinding, closeByAgent } from './ledger'
+import { addAgentItem, addFinding, closeByAgent, recommendedOption, stepHelp } from './ledger'
 import type { Host } from './model-text'
 import type { Ledger } from '../types'
 
-export const FINDING_SCHEMA = {
+export const RECORD_SCHEMA = {
   type: 'object',
   properties: {
     kind: {
       type: 'string',
-      enum: ['issue', 'opportunity'],
-      description: 'issue: something wrong or risky. opportunity: something that could be better.',
+      enum: ['question', 'task', 'finding'],
+      description:
+        'question: a decision only the user can make. task: a step only the user can do. finding: something outside the current task that deserves their attention.',
     },
-    title: { type: 'string', description: 'What it is, in at most 12 plain words.' },
-    detail: { type: 'string', description: 'Why it matters and what you would do, in one or two sentences.' },
-    path: { type: 'string', description: 'The file it is about, if one.' },
+    ask: {
+      type: 'string',
+      description:
+        'For a question or task: what you need from the user, in at most 12 plain words, readable without your reply.',
+    },
+    options: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'For a question: the answers the user can pick, at most 5 words each. Give at least one.',
+    },
+    rec: {
+      type: 'string',
+      description:
+        'For a question: the option you recommend, copied from options. Leave it out when you recommend none.',
+    },
+    steps: {
+      type: 'array',
+      items: { type: 'string' },
+      description:
+        'For a task: up to 3 things the user can do in one press, each written bare as a command, a file path or an https link.',
+    },
+    finding_kind: {
+      type: 'string',
+      enum: ['issue', 'opportunity'],
+      description: 'For a finding. issue: something wrong or risky. opportunity: something that could be better.',
+    },
+    title: { type: 'string', description: 'For a finding: what it is, in at most 12 plain words.' },
+    detail: {
+      type: 'string',
+      description: 'For a finding: why it matters and what you would do, in one or two sentences.',
+    },
+    path: { type: 'string', description: 'For a finding: the file it is about, if one.' },
   },
-  required: ['kind', 'title', 'detail'],
+  required: ['kind'],
 }
 
 export const CLOSE_SCHEMA = {
@@ -33,8 +63,12 @@ export const CLOSE_SCHEMA = {
   required: ['id'],
 }
 
-export function findingDescription(host: Host): string {
-  return `Record a finding for the user. It waits in ${host.findingsIn} until it is closed, and from there the user can ask you to address it or discuss it. Record what a careful senior engineer would flag to a teammate, once you have checked it. Leave out style nits, anything the user already decided, todos or ideas the user mentioned, problems in your own change, progress, and anything only the user can do or decide: handle those in your reply.`
+export function recordDescription(host: Host): string {
+  return `Record something the user must see in ${host.surface}, and still say it in your reply. Use it in the turn you raise it, once for each thing.
+- question: a decision, approval or piece of information only the user has, which you need before you go on. Give options, and rec when you recommend one. This includes an act you hold until they say so, such as "say when you want those committed".
+- task: a step only the user can do, such as signing in or running a command with their password. Put the commands, files and links in steps.
+- finding: something outside the current task that deserves their attention. It waits in ${host.findingsIn} until it is closed, and the user can ask you to address it or discuss it. Record what a careful senior engineer would flag to a teammate, once you have checked it. Leave out style nits, anything the user already decided, todos or ideas the user mentioned, problems in your own change, progress, and anything only the user can do or decide: handle those in your reply, or record them as a question or task.
+Do not record rhetorical questions, offers to continue when continuing is the default, FYIs, or invitations to look at finished work.`
 }
 
 export const CLOSE_DESCRIPTION = `Close an open item or finding by its id, such as i35 or f12, as listed in the latest "inbox:" text beside the user's prompt. Pass the user's answer when their message answered it, and a reason otherwise.`
@@ -43,8 +77,62 @@ function cut(value: unknown, max: number): string {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
 }
 
+const MAX_ASK = 200
+const MAX_OPTION = 60
+const MAX_OPTIONS = 8
+const MAX_STEPS = 3
+
+function list(value: unknown, max: number, each: number): string[] {
+  return Array.isArray(value)
+    ? value
+        .map(v => cut(v, each))
+        .filter(Boolean)
+        .slice(0, max)
+    : []
+}
+
 /** `result` is the text the agent reads back. */
-export function recordFinding(
+export function recordItem(
+  host: Host,
+  ledger: Ledger,
+  input: Record<string, unknown>,
+  now: number,
+): { ledger: Ledger; result: string } {
+  if (input.kind === 'finding') return recordFinding(host, ledger, input, now)
+  if (input.kind !== 'question' && input.kind !== 'task')
+    return { ledger, result: 'Not recorded: kind must be question, task or finding.' }
+  const ask = cut(input.ask, MAX_ASK)
+  if (ask === '') return { ledger, result: `Not recorded: a ${input.kind} needs an ask.` }
+  const options = input.kind === 'question' ? list(input.options, MAX_OPTIONS, MAX_OPTION) : []
+  if (input.kind === 'question' && options.length === 0)
+    return { ledger, result: 'Not recorded: a question needs at least one option.' }
+  const recInput = input.kind === 'question' ? cut(input.rec, MAX_OPTION) : ''
+  const rec = recInput === '' ? null : recommendedOption(options, recInput)
+  if (recInput !== '' && rec === null) return { ledger, result: 'Not recorded: rec must be one of the options.' }
+  const steps = input.kind === 'task' ? list(input.steps, MAX_STEPS + 3, 4000) : []
+  const helps = steps.flatMap(step => stepHelp(step) ?? []).slice(0, MAX_STEPS)
+
+  const r = addAgentItem(ledger, { kind: input.kind, ask, options, rec, helps }, now)
+  if (r.is === 'open') return { ledger, result: 'Already open.' }
+  if (r.is === 'closed')
+    return {
+      ledger,
+      result: `Not recorded: the user already closed this (${r.outcome}). Ask it again only if they bring it up.`,
+    }
+
+  return {
+    ledger: r.ledger,
+    result:
+      `Recorded. The user sees it in ${host.surface}.` +
+      (helps.length < steps.length
+        ? ' Some steps were not a command, a file path or a link, so they are left out.'
+        : '') +
+      (r.expired ? ` The list was full, so the oldest item closed: ${r.expired.ask}.` : ''),
+  }
+}
+
+/** `result` is the text the agent reads back. */
+function recordFinding(
   host: Host,
   ledger: Ledger,
   input: Record<string, unknown>,
@@ -55,7 +143,7 @@ export function recordFinding(
   if (title === '' || detail === '') return { ledger, result: 'Not recorded: a finding needs a title and a detail.' }
   const path = cut(input.path, 300)
   const r = addFinding(ledger, {
-    kind: input.kind === 'opportunity' ? 'opportunity' : 'issue',
+    kind: input.finding_kind === 'opportunity' ? 'opportunity' : 'issue',
     title,
     detail,
     path: path || null,
