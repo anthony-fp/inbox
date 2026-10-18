@@ -56,6 +56,7 @@ import {
   threadActions,
   threadRowText,
   threadSentIn,
+  GH_MISSING_TEXT,
 } from './pr-tab'
 import type { Applied, GhRun, PrAction, PrPress } from './pr-tab'
 import {
@@ -1788,6 +1789,20 @@ async function gh($: EngineInterface, args: string[]) {
   return $.process.run(['gh', ...args], { cwd: root, timeoutMs: 20_000 })
 }
 
+/**
+ * `$.process.run` rejects when the command cannot start, and also when it is still running at the timeout. Asking
+ * for `gh --version` tells them apart: only a gh that cannot start makes this reject too.
+ */
+async function isGhUnstartable($: EngineInterface): Promise<boolean> {
+  try {
+    await gh($, ['--version'])
+
+    return false
+  } catch {
+    return true
+  }
+}
+
 async function linkPrs($: EngineInterface, refs: string[]) {
   if (refs.length === 0) return
   const linked = (await read($, LEDGER)).prs
@@ -1828,6 +1843,7 @@ async function fetchPrsNow($: EngineInterface, findsBranchPr: boolean) {
       Object.entries(fetched).filter(([ref]) => isTracked({ ...state, branchRef }, stillLinked, ref)),
     )
     await update($, PR_VIEWS, v => ({
+      isGhMissing: false,
       views: {
         ...views,
         ...Object.fromEntries(
@@ -1838,7 +1854,8 @@ async function fetchPrsNow($: EngineInterface, findsBranchPr: boolean) {
       isFetching: nextFetchFindsBranchPr !== null,
     }))
   } catch {
-    await update($, PR_VIEWS, v => ({ ...v, isFetching: nextFetchFindsBranchPr !== null }))
+    const isGhMissing = await isGhUnstartable($)
+    await update($, PR_VIEWS, v => ({ ...v, isGhMissing, isFetching: nextFetchFindsBranchPr !== null }))
   }
   void followNewRows($).catch(() => undefined)
 }
@@ -4917,6 +4934,21 @@ export const register: Register = on => {
         ...prRowGroup(PR_GROUP_TITLES.checks, checks, `${pr.ref}-checks`),
       ])
     }
+    const ghMissingNotice = () => {
+      const line = (
+        <Text color={pal.muted} wrap="wrap">
+          {GH_MISSING_TEXT}
+        </Text>
+      )
+
+      return section(
+        look === 'desktop' ? (
+          desktopFrame({ key: 'gh-missing', padY: 0, children: line })
+        ) : (
+          <Box paddingLeft={1}>{line}</Box>
+        ),
+      )
+    }
     const olderPrs = () => {
       const text = olderPrsText(ledger.prs)
       if (!text) return []
@@ -4941,11 +4973,13 @@ export const register: Register = on => {
         <Box flexDirection="column" flexGrow={1}>
           {emptyState({
             title: prState.isFetching ? 'Checking for PRs…' : 'No PRs',
-            hint: 'Your PRs show here when this session opens or links one, or when your branch has one.',
+            hint: prState.isGhMissing
+              ? GH_MISSING_TEXT
+              : 'Your PRs show here when this session opens or links one, or when your branch has one.',
           })}
         </Box>
       ) : (
-        sections([...prGroups.map(prBlock), ...olderPrs()], 2)
+        sections([...(prState.isGhMissing ? [ghMissingNotice()] : []), ...prGroups.map(prBlock), ...olderPrs()], 2)
       )
 
     const move = (step: number) => {

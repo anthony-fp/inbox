@@ -161,6 +161,8 @@ export function prMarkId(ref: string): string {
   return `pr:${ref}`
 }
 
+export const GH_MISSING_TEXT = 'The inbox could not find gh, so it cannot read your PRs.'
+
 export const PR_GROUP_TITLES = { threads: 'Review threads', checks: 'Failing checks' }
 
 /** What a review thread's row says, for each look to draw in its own controls. */

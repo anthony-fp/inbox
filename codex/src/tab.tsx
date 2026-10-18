@@ -49,6 +49,7 @@ import type { ActionEmphasis, DrawnEntry, DrawnLists, Feedback, ReplyHolds, RowV
 import {
   checkActions,
   checkRunText,
+  GH_MISSING_TEXT,
   PR_GROUP_TITLES,
   PR_TONES,
   prBlockActions,
@@ -1624,7 +1625,7 @@ function Prs({ v, now }: { v: View; now: number }) {
     return (
       <div class="empty">
         <div class="title">{v.isFetchingPrs ? 'Checking for PRs…' : 'No PRs'}</div>
-        <div class="muted">{v.isGhMissing ? GH_MISSING : PRS_HINT}</div>
+        <div class="muted">{v.isGhMissing ? GH_MISSING_TEXT : PRS_HINT}</div>
       </div>
     )
   const openId = rows[selectedIndex(rows, 'prs', v)]?.id
@@ -1633,7 +1634,7 @@ function Prs({ v, now }: { v: View; now: number }) {
     <main>
       {v.isGhMissing ? (
         <section>
-          <div class="group-title muted">{GH_MISSING}</div>
+          <div class="group-title muted">{GH_MISSING_TEXT}</div>
         </section>
       ) : null}
       {blocks.map(b =>
@@ -1653,8 +1654,6 @@ function Prs({ v, now }: { v: View; now: number }) {
     </main>
   )
 }
-
-const GH_MISSING = 'The inbox could not find gh, so it cannot read your PRs.'
 
 const LATE_READ_MS = 60_000
 

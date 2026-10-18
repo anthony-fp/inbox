@@ -242,7 +242,13 @@ export type Tab = 'needsYou' | 'findings' | 'prs'
  */
 export type Cursor = { id: string | null; index: number; openedAt: number }
 
-export type PrViews = { views: Record<string, PrView>; branchRef: string | null; isFetching: boolean }
+export type PrViews = {
+  views: Record<string, PrView>
+  branchRef: string | null
+  isFetching: boolean
+  /** The mod sets this when its last fetch found no gh to start. Codex keeps its own flag in the server. */
+  isGhMissing?: boolean
+}
 
 export type Turns = Pick<Presence, 'turnsStarted' | 'turnsApplied'>
 

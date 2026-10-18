@@ -44,6 +44,8 @@ let stopBlock: string | undefined
 
 let dialogAnswer: Record<string, unknown> = { result: 'ok', text: 'ok' }
 
+let isGhMissing = false
+
 let ghAnswers: {
   match: (argv: readonly string[]) => boolean
   stdout: string
@@ -130,6 +132,7 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   stopBlock = undefined
   dialogAnswer = { result: 'ok', text: 'ok' }
   ghAnswers = []
+  isGhMissing = false
   ledgerReply = LEDGER_REPLY
   surfaces = []
   files = []
@@ -201,6 +204,7 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   on('fs.stat', () => ({ value: { kind: 'file' as const, size: 1, mtimeMs: 1, isLink: false } }))
   on('process.run', async ($, e) => {
     ran.push([...e.argv])
+    if (isGhMissing && e.argv[0] === 'gh') throw new Error('spawn gh ENOENT')
     await ghAnswers.find(a => a.match(e.argv))?.hold?.()
     return { value: gh(e.argv) }
   })
@@ -1942,6 +1946,36 @@ test('opening the PRs tab while another PR fetch runs still finds the branch’s
   expect(await pane.find({ text: /Linked work/ })).toBeDefined()
   expect(await pane.find({ text: /Branch work/ })).toBeDefined()
 })
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`the ${surface} PRs tab says gh is missing until gh starts again`, async ($, on) => {
+    const clock = mock.clock(on, { now: 1_000_000 })
+    world($, on, [])
+    const notice = /could not find gh/
+    isGhMissing = true
+
+    await $.session.start({ cwd: '/tmp/project', surface, isInteractive: true })
+    const pane = await $.ui.mount({ ...PANE, surface })
+    const show = async (index: number, id: string) => {
+      if (surface === 'terminal') return pane.press({ key: `tab-${id}` })
+      const { tabs, gap } = (await pane.find({ key: 'tabs' }))?.props.props as TabsProps
+      const x = tabs.slice(0, index).reduce((sum, t) => sum + t.width + gap, 0)
+
+      return pane.pointer({ type: 'down', x, y: 1, button: 'left', in: 'tabs' })
+    }
+    await show(2, 'prs')
+    await clock.settle()
+    expect(await pane.find({ text: notice })).toBeDefined()
+
+    isGhMissing = false
+    await show(0, 'needsYou')
+    await clock.settle()
+    await show(2, 'prs')
+    await clock.settle()
+    expect(await pane.find({ text: /No PRs/ })).toBeDefined()
+    expect(await pane.find({ text: notice })).toBeUndefined()
+  })
+}
 
 test('a PR’s Dismiss settles its block with Undo, which brings it back, a ready PR’s Merge asks Claude unless it stopped being ready, and a fetch keeps a Dismiss made while it ran, and the branch PR when its lookup fails', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })

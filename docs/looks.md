@@ -88,6 +88,7 @@ Change a rule in its owner. Do not change it in a reader.
 | Undo result | `hooks/presses.ts:applyPress`, `hooks/pr-tab.ts:applyPrPress` | Both hosts clear their closed-note acknowledgement when the result names an actual reopen |
 | Arrival acknowledgement | `hooks/presses.ts:withArrival` | Both hosts; one bulk press can affect several rows |
 | PR presses, which PRs the tab draws, and how a PR is fetched | `hooks/pr-tab.ts:applyPrPress`, `hooks/pr-tab.ts:drawnPrs`, `hooks/pr-tab.ts:fetchTracked` | The mod and the Codex server |
+| Missing-gh notice text | `hooks/pr-tab.ts:GH_MISSING_TEXT` | All three looks. The mod sets `PrViews.isGhMissing` when `gh --version` cannot start after a failed fetch. The Codex server sets its own flag from `codex/src/gh.ts:ghFinder`. |
 | PR button order, labels, emphasis and icon kind | `hooks/pr-tab.ts:threadActions`, `hooks/pr-tab.ts:checkActions`, `hooks/pr-tab.ts:prBlockActions` | All three looks |
 
 Some content and host bookkeeping still have two copies. These are remaining work in `docs/plans/three-looks.md`.
