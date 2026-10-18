@@ -1,25 +1,15 @@
-# inbox
+# Inbox
 
-Coding agents bury the things they need from you. A question sits at the end
-of a long reply. A bug Claude noticed along the way gets one line, then scrolls
-away. A review comment waits on your PR while you're busy with something else.
+I have ADHD. Working with an agent in a chat thread format is very cognitively taxing. The number of things you're having to hold in your head begins to compound the longer the session goes on. The questions, bugs, ideas, and tasks all begin to pile up and intermix making it difficult to keep everything in line.
 
-The inbox pulls all of that out and keeps it beside the conversation, with
-buttons for what you'd likely do next. Press an answer and it goes to the agent
-as your message. It works with Claude and Codex, in three places:
+Inbox provides immediately apparent relief here by giving your agent an organized, stable place to surface everything that needs a decision. Inbox also makes sure your agent always provides a proactive, anticipatory set of quick actions on each item, including a recommended action.
 
-- **Claude Code in the terminal**, as a mod. Type `/inbox`.
-- **Code sessions in the Claude desktop app**, as the same mod, in a pane
-  beside the conversation.
-- **Codex in the ChatGPT desktop app**, as a plugin, in an Inbox tab in the
-  side panel.
+Even better, Inbox provides your agent a place to surface latent issues and opportunities, ones that it might otherwise gloss over in the interest of exclusively addressing the task at hand.
 
-Each one follows its app's own style and works the same way in all three.
+Inbox is available for Claude Code in the terminal and desktop app, and Codex in the ChatGPT desktop app. Each variant is uniquely crafted for each platform, but works in same fundamental way in all three.
 
-
-
+## How it works
 https://github.com/user-attachments/assets/a493119c-4d8b-46e0-a18a-bd0ecf041b6b
-
 
 
 ## Install
