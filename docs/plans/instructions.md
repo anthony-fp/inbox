@@ -27,9 +27,13 @@ that updates the inbox after each reply, reads two.
 
 - Each rule is written once. `guidanceText` holds when to record and when to
   close. The tool descriptions hold only what a call needs.
-- The mention rule: a workaround or an untested part goes in the reply as well
-  as in a finding. Other findings are mentioned only when they bear on what
-  the user asked.
+- The mention rule: a workaround or a part Claude cannot check from where it
+  is goes in the reply as well as in a finding. Other findings are mentioned
+  only when they bear on what the user asked.
+- The recording bar: Claude checks a finding once before recording it. A
+  problem in its own change, a check it could run, progress, and anything only
+  the user can do or decide are not findings. Claude fixes, runs, says or asks
+  them instead, so a blocker reaches Needs you as a question or task.
 - The bar excludes "anything the user already decided", not "anything already
   discussed".
 - Claude reads "Closed" everywhere: the inbox line and the start-of-context
