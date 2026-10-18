@@ -798,6 +798,10 @@ test('Codex closing an item reads as Codex in its outcome', () => {
     recordClose(CODEX, withItems().ledger, { id: 'i9', reason: 'x' }, 50).result.startsWith('Not closed'),
     true,
   )
+  const closed = recordClose(CODEX, withItems().ledger, { id: 'i1', reason: 'a' }, 50)
+  const again = recordClose(CODEX, closed.ledger, { id: 'i1', answer: 'b' }, 60)
+  assert.equal(again.result, 'Already closed: you closed it earlier.')
+  assert.equal(again.ledger, closed.ledger)
 })
 
 test('the tab says the hooks were not heard when none ran, when a tool call comes in a turn no prompt recorded, or when two prompts saw no Stop', () => {

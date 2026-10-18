@@ -1,6 +1,6 @@
 import { addAgentItem, addFinding, closeByAgent, recommendedOption, stepHelp } from './ledger'
 import type { Host } from './model-text'
-import type { Ledger } from '../types'
+import type { Closed, Ledger } from '../types'
 
 export const RECORD_SCHEMA = {
   type: 'object',
@@ -165,6 +165,23 @@ function recordFinding(
   }
 }
 
+function closedHow(c: Pick<Closed, 'how' | 'outcome'>): string {
+  switch (c.how) {
+    case 'answered':
+      return `the user answered it (${c.outcome})`
+    case 'done':
+      return 'the user marked it done'
+    case 'dismissed':
+      return 'the user dismissed it'
+    case 'expired':
+      return 'it expired'
+    case 'claude':
+      return 'you closed it earlier'
+    case 'update':
+      return `the inbox closed it (${c.outcome})`
+  }
+}
+
 /** `result` is the text the agent reads back. */
 export function recordClose(
   host: Host,
@@ -181,6 +198,8 @@ export function recordClose(
   if (r.closed === 'item')
     return { ledger: r.ledger, result: `Closed. The user sees it in ${host.surface} with its outcome.` }
   if (r.closed === 'finding') return { ledger: r.ledger, result: 'Closed the finding.' }
+  const earlier = [...ledger.closed, ...ledger.closedFindings].findLast(c => c.id === id)
+  if (earlier) return { ledger, result: `Already closed: ${closedHow(earlier)}.` }
 
   return {
     ledger,

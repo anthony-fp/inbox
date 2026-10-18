@@ -17,6 +17,7 @@ import {
 } from '../hooks/ledger'
 import { readCommandRow, resetTime, statusLine, stopKindOf } from '../hooks/claude'
 import { parseInline } from '../hooks/inline'
+import { recordClose } from '../hooks/tools'
 import type { Item } from '../types'
 
 const REPLY = `GOAL: Move annotation queue logic into a tested reducer
@@ -461,6 +462,22 @@ describe('reopening', () => {
       { ...finding, id: 'f1', how: 'dismissed', outcome: 'dismissed', closedAt: 9 },
     ])
     expect(reopenFinding(dismissed, 'f1')).toEqual(two)
+  })
+
+  test('closing an id that is already closed says how it closed and changes nothing', () => {
+    const finding = { kind: 'issue' as const, title: 'Hotkeys vanish', detail: 'In ANSI', path: null, at: 1 }
+    const open = addFinding(EMPTY, finding).ledger
+    const dismissed = closeFinding(open, 'f1', { how: 'dismissed', outcome: 'dismissed' }, 5)
+    const again = recordClose(CLAUDE_CODE, dismissed, { id: 'f1', reason: 'fixed' }, 9)
+    expect(again.result).toBe('Already closed: the user dismissed it.')
+    expect(again.ledger).toBe(dismissed)
+    const fixed = closeFinding(open, 'f1', { how: 'update', outcome: 'fixed in the theme' }, 5)
+    expect(recordClose(CLAUDE_CODE, fixed, { id: 'f1', reason: 'x' }, 9).result).toBe(
+      'Already closed: the inbox closed it (fixed in the theme).',
+    )
+    const expired = closeFinding(open, 'f1', { how: 'expired', outcome: 'list full' }, 5)
+    expect(recordClose(CLAUDE_CODE, expired, { id: 'f1', reason: 'x' }, 9).result).toBe('Already closed: it expired.')
+    expect(recordClose(CLAUDE_CODE, expired, { id: 'f7', reason: 'x' }, 9).result).toContain('Not closed:')
   })
 
   test('Claude and the per-turn update close findings with how and outcome, and the update closes one only as fixed', () => {
