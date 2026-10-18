@@ -403,10 +403,10 @@ describe('applyUpdate', () => {
       1,
     ],
     [
-      'the ask of an item closed before the prompt',
+      'the ask of an item answered before the prompt',
       'NEW: decide | - | Rename greet.mjs to hello.mjs? | - | -',
       6000,
-      1,
+      0,
     ],
     ['an unrelated question', 'NEW: decide | 9 | Cut CHANGELOG.md down to this release? | - | -', 5000, 1],
   ]
@@ -422,6 +422,24 @@ describe('applyUpdate', () => {
       const next = applyUpdate({ ...answered, turn: 2 }, parseReply(line)!, 7000, 2, promptAt)
       expect(next.items.length).toBe(added)
     })
+
+  test('a NEW line with the ask of an item that expired before the prompt is added', () => {
+    const first = applyUpdate(
+      { ...EMPTY, turn: 1 },
+      parseReply('NEW: decide | 1 | Rename greet.mjs to hello.mjs? | - | -')!,
+      1000,
+      1,
+    )
+    const expired = closeItem(first, 'i1', { how: 'expired', outcome: 'expired' }, 5500)
+    const next = applyUpdate(
+      { ...expired, turn: 2 },
+      parseReply('NEW: decide | - | Rename greet.mjs to hello.mjs? | - | -')!,
+      7000,
+      2,
+      6000,
+    )
+    expect(next.items.length).toBe(1)
+  })
 })
 
 describe('reopening', () => {

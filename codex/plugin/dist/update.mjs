@@ -299,9 +299,10 @@ function matchOpen(items, a) {
     (i) => i.id === a.label || sameAsk(i.ask, a.ask) || i.kind === a.kind && restates(i.ask, a.ask)
   );
 }
-function repeatsRecentlyClosed(closed, a, since) {
+function repeatsClosed(closed, a, since) {
   const recent = closed.filter((c) => c.at >= since);
-  return matchOpen(recent, a) >= 0 || a.label !== null && recent.some((c) => c.label === a.label);
+  const settled = closed.filter((c) => c.how !== "expired");
+  return matchOpen([...recent, ...settled], a) >= 0 || a.label !== null && recent.some((c) => c.label === a.label);
 }
 function closedRecord(item, closing, now) {
   const { id, kind, ask, label } = item;
@@ -406,7 +407,7 @@ function applyUpdate(ledger, u, now, turn, promptAt = now) {
   const addedIds = [];
   const created = /* @__PURE__ */ new Set();
   for (const a of u.added) {
-    if (repeatsRecentlyClosed(ledger.closed, a, promptAt)) {
+    if (repeatsClosed(ledger.closed, a, promptAt)) {
       addedIds.push(null);
       continue;
     }
@@ -431,7 +432,7 @@ function applyUpdate(ledger, u, now, turn, promptAt = now) {
       options: ["Proceed", "Not yet"],
       rec: null
     };
-    const isKnown = items.some((i) => restates(i.ask, work)) || ledger.findings.some((f) => restates(f.title, work)) || repeatsRecentlyClosed(ledger.closed, { ...todo, helps: [] }, promptAt);
+    const isKnown = items.some((i) => restates(i.ask, work)) || ledger.findings.some((f) => restates(f.title, work)) || repeatsClosed(ledger.closed, { ...todo, helps: [] }, promptAt);
     if (isKnown) continue;
     items.push({ ...todo, helps: [], id: `i${nextId}`, turn, at: now });
     nextId += 1;

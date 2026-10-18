@@ -400,10 +400,12 @@ function matchOpen(items: Pick<Item, 'id' | 'kind' | 'ask'>[], a: Update['added'
   )
 }
 
-function repeatsRecentlyClosed(closed: Closed[], a: Update['added'][number], since: number): boolean {
+/** An ask closed this turn repeats on its label too. An expired one from before can be asked again, as in addAgentItem. */
+function repeatsClosed(closed: Closed[], a: Update['added'][number], since: number): boolean {
   const recent = closed.filter(c => c.at >= since)
+  const settled = closed.filter(c => c.how !== 'expired')
 
-  return matchOpen(recent, a) >= 0 || (a.label !== null && recent.some(c => c.label === a.label))
+  return matchOpen([...recent, ...settled], a) >= 0 || (a.label !== null && recent.some(c => c.label === a.label))
 }
 
 function closedRecord(item: Item, closing: Closing, now: number): Closed {
@@ -609,7 +611,7 @@ export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number
   const addedIds: (string | null)[] = []
   const created = new Set<string>()
   for (const a of u.added) {
-    if (repeatsRecentlyClosed(ledger.closed, a, promptAt)) {
+    if (repeatsClosed(ledger.closed, a, promptAt)) {
       addedIds.push(null)
       continue
     }
@@ -637,7 +639,7 @@ export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number
     const isKnown =
       items.some(i => restates(i.ask, work)) ||
       ledger.findings.some(f => restates(f.title, work)) ||
-      repeatsRecentlyClosed(ledger.closed, { ...todo, helps: [] }, promptAt)
+      repeatsClosed(ledger.closed, { ...todo, helps: [] }, promptAt)
     if (isKnown) continue
     items.push({ ...todo, helps: [], id: `i${nextId}`, turn, at: now })
     nextId += 1
