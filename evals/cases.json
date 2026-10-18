@@ -1367,5 +1367,128 @@
         "kind": "question"
       }
     ]
+  },
+  {
+    "name": "approval-gate-is-question",
+    "about": "A reply that holds an edit until the person approves it asks for that approval.",
+    "ledger": {
+      "turn": 4,
+      "nextId": 4,
+      "card": {
+        "goal": "Fix the onboarding docs",
+        "done": [],
+        "now": "Waiting on approval",
+        "running": []
+      },
+      "items": []
+    },
+    "exchange": {
+      "person": "the onboarding page is wrong about SSO, look into it",
+      "turn": 4,
+      "activity": ["ran: rg -n SSO docs/onboarding.md"],
+      "reply": "The onboarding page says SSO is set up per user. It is set up per workspace: an admin turns it on once in Settings → Security, and every member then signs in with it.\n\nThe page is shared with the support team, so I won't edit the page without your OK. The change replaces the second paragraph of the SSO section with the per-workspace steps."
+    },
+    "checks": [
+      {
+        "new": "edit|onboarding|SSO|page",
+        "kind": "question"
+      }
+    ]
+  },
+  {
+    "name": "soft-ask-is-question",
+    "about": "A soft ask at the end of a reply waits on the person.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 6,
+      "card": {
+        "goal": "Clean up the billing tests",
+        "done": [],
+        "now": "Tests fixed",
+        "running": []
+      },
+      "items": []
+    },
+    "exchange": {
+      "person": "fix the three flaky billing tests",
+      "turn": 6,
+      "activity": [
+        "edited tests/billing/invoice.test.ts",
+        "edited tests/billing/refund.test.ts",
+        "edited tests/billing/tax.test.ts",
+        "ran: npm test -- billing"
+      ],
+      "reply": "Fixed all three. Each one read the clock directly, so it failed near midnight UTC. They now use the fake clock the other billing tests use. 40 runs in a row passed.\n\nThe changes are uncommitted. Say when you want those committed."
+    },
+    "checks": [
+      {
+        "new": "commit"
+      }
+    ]
+  },
+  {
+    "name": "numbered-questions-all-kept",
+    "about": "Every question in a numbered list becomes its own item.",
+    "ledger": {
+      "turn": 2,
+      "nextId": 2,
+      "card": {
+        "goal": "Plan the export feature",
+        "done": [],
+        "now": "Waiting on scope answers",
+        "running": []
+      },
+      "items": []
+    },
+    "exchange": {
+      "person": "plan the CSV export",
+      "turn": 2,
+      "activity": [],
+      "reply": "I read the reports module and the existing PDF export. Before I write the plan, five things need your call:\n\n1. Should the export include archived reports? I'd leave them out: nobody can open them in the app.\n2. Comma or semicolon as the separator? I'd use comma, the default in Sheets and Excel in the US.\n3. Should dates be ISO 8601 or the account's locale format?\n4. Is there a row limit? I'd cap it at 100,000 rows, like the PDF export.\n5. Should the export run in the background and email a link, or download right away?"
+    },
+    "checks": [
+      {
+        "new": "archived"
+      },
+      {
+        "new": "separator|comma|semicolon"
+      },
+      {
+        "new": "date|ISO|locale"
+      },
+      {
+        "new": "row limit|limit|cap|100,000"
+      },
+      {
+        "new": "background|email|download"
+      }
+    ]
+  },
+  {
+    "name": "reload-step-is-task",
+    "about": "A step only the person can take in their own session becomes a task.",
+    "ledger": {
+      "turn": 3,
+      "nextId": 3,
+      "card": {
+        "goal": "Add the lint skill",
+        "done": [],
+        "now": "Skill installed",
+        "running": []
+      },
+      "items": []
+    },
+    "exchange": {
+      "person": "add the lint skill to my setup",
+      "turn": 3,
+      "activity": ["edited /Users/me/.claude/skills/lint/SKILL.md"],
+      "reply": "Added the lint skill at ~/.claude/skills/lint/SKILL.md. It runs the repo's linter and fixes what it can.\n\nRun `/reload-plugins` in this session to pick it up."
+    },
+    "checks": [
+      {
+        "new": "reload",
+        "kind": "task"
+      }
+    ]
   }
 ]
