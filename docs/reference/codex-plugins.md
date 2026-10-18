@@ -458,6 +458,13 @@ upload doesn't mean the listing is ready to submit."
   assumption: it cannot be told apart while both names are "inbox".
   [inference] The regex ignores the version segment, so a switch to `local`
   would not break it. A change to the `data/` naming would.
+- **Session files.** The folder holds one `sessions/<id>.json` per session.
+  The server keeps the newest `KEPT_SESSIONS` (40, the Claude Code mod's count)
+  by last save time and deletes older ones, once per session per server
+  process, after that session's first tool call
+  (codex/src/state.ts:pruneSessions). It never deletes the calling session, a
+  file whose lock is held, or a file it cannot read or that a newer build
+  wrote.
 
 ### Updates
 

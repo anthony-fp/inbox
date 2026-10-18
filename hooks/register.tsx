@@ -71,6 +71,7 @@ import {
 } from './prs'
 import {
   EMPTY,
+  KEPT_SESSIONS,
   applyUpdate,
   applyExchangeUpdate,
   closeItem,
@@ -534,7 +535,6 @@ const NEEDS_YOU_GROUPS: { kind: Item['kind']; title: string; list: 'questions' |
 const FOLD_KINDS: FoldKind[] = [...NEEDS_YOU_GROUPS.map(g => g.kind), 'issue', 'opportunity']
 const MODEL = 'sonnet'
 const AWAY_MS = 15 * 60_000
-const KEPT_SESSIONS = 40
 const LOCAL_URL = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|[\w.-]+\.localhost)(?::\d+)?[^\s"'`)\]]*/g
 
 let activity: string[] = []

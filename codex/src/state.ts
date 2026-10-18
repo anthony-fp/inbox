@@ -9,6 +9,7 @@ import {
   realpath,
   rename,
   rmdir,
+  stat,
   symlink,
   unlink,
   writeFile,
@@ -16,7 +17,7 @@ import {
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 
-import { EMPTY, pruneClosed, upgradeLedger } from '../../hooks/ledger'
+import { EMPTY, KEPT_SESSIONS, pruneClosed, upgradeLedger } from '../../hooks/ledger'
 import type { Exchange, Press } from '../../hooks/ledger'
 import { TOLD_NOTHING } from '../../hooks/model-text'
 import type { Told } from '../../hooks/model-text'
@@ -424,4 +425,40 @@ export async function updateState(
 
     return next
   })
+}
+
+/**
+ * Deletes the oldest saved sessions beyond the newest `KEPT_SESSIONS`, ranked by when the file was last saved.
+ * Only readable files of a version this build supports count and can go, and the `keep` session never does. A file
+ * whose lock or update lock is held, or that was saved again since the ranking, stays.
+ */
+export async function pruneSessions(dir: string, keep: string): Promise<void> {
+  const folder = join(dir, 'sessions')
+  const names = (await readdir(folder)).filter(name => /^[\w-]{1,100}\.json$/.test(name))
+  if (names.length <= KEPT_SESSIONS) return
+  const saved = await Promise.all(
+    names.map(async name => {
+      const path = join(folder, name)
+      try {
+        const { mtimeMs } = await stat(path)
+        upgraded(JSON.parse(await readFile(path, 'utf8')), name.slice(0, -'.json'.length))
+        return { name, path, mtimeMs }
+      } catch {
+        return null
+      }
+    }),
+  )
+  const readable = saved.filter(s => s !== null).sort((a, b) => a.mtimeMs - b.mtimeMs || a.name.localeCompare(b.name))
+  const stale = readable.filter(s => s.name !== `${keep}.json`).slice(0, Math.max(0, readable.length - KEPT_SESSIONS))
+  for (const { path, mtimeMs } of stale) {
+    try {
+      await tryWithLock(`${path}.updating`, () =>
+        tryWithLock(`${path}.lock`, async () => {
+          if ((await stat(path)).mtimeMs === mtimeMs) await unlink(path)
+        }),
+      )
+    } catch {
+      continue
+    }
+  }
 }

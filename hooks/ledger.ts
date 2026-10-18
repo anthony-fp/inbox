@@ -2,6 +2,9 @@ import type { Card, Closed, ClosedFinding, Finding, Help, Item, Ledger } from '.
 import type { Host } from './model-text'
 import { codeBlocks } from './text'
 
+/** How many saved sessions each host keeps; the newest by save time. */
+export const KEPT_SESSIONS = 40
+
 export const EMPTY: Ledger = {
   card: null,
   items: [],

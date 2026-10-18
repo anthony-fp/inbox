@@ -2,12 +2,26 @@ import assert from 'node:assert/strict'
 import { fork } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { lstat, mkdir, readlink, rename, rm, rmdir, stat, symlink, unlink, utimes, writeFile } from 'node:fs/promises'
+import {
+  lstat,
+  mkdir,
+  readdir,
+  readlink,
+  rename,
+  rm,
+  rmdir,
+  stat,
+  symlink,
+  unlink,
+  utimes,
+  writeFile,
+} from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { readState, statePath, tryWithLock, updateState, withLock } from '../src/state'
+import { KEPT_SESSIONS } from '../../hooks/ledger'
+import { pruneSessions, readState, statePath, tryWithLock, updateState, withLock } from '../src/state'
 import { notePrompt } from '../src/core'
 import { tempDir } from './helpers'
 
@@ -321,4 +335,65 @@ test('older queued messages upgrade without inventing a press time or confirming
   assert.equal(observed.lastActions.i3?.delivery?.state, 'queued')
   assert.equal(observed.sent.length, 0)
   assert.equal(observed.ledger.turn, old.ledger.turn + 1)
+})
+
+async function savedSessions(dir: string, count: number) {
+  const ids = Array.from({ length: count }, (_, i) => `s${String(i).padStart(3, '0')}`)
+  for (const [i, id] of ids.entries()) {
+    await updateState(dir, id, s => s)
+    await utimes(statePath(dir, id), 1000 + i, 1000 + i)
+  }
+
+  return ids
+}
+
+const remaining = async (dir: string) => (await readdir(join(dir, 'sessions'))).sort()
+
+test('pruning keeps the newest saved sessions and the current one', async t => {
+  const dir = tempDir()
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const ids = await savedSessions(dir, KEPT_SESSIONS + 5)
+  await pruneSessions(dir, ids[0]!)
+  const kept = ids.slice(6).map(id => `${id}.json`)
+  assert.deepEqual(await remaining(dir), [`${ids[0]}.json`, ...kept].sort())
+})
+
+test('pruning leaves a session whose lock is held', async t => {
+  const dir = tempDir()
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const ids = await savedSessions(dir, KEPT_SESSIONS + 2)
+  await withLock(`${statePath(dir, ids[0]!)}.lock`, () =>
+    withLock(`${statePath(dir, ids[1]!)}.updating`, () => pruneSessions(dir, ids[5]!)),
+  )
+  assert.deepEqual(
+    await remaining(dir),
+    ids.map(id => `${id}.json`),
+  )
+})
+
+test('pruning leaves unreadable and newer-version files and does not count them', async t => {
+  const dir = tempDir()
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const ids = await savedSessions(dir, KEPT_SESSIONS + 1)
+  await writeFile(statePath(dir, 'broken'), '{')
+  await writeFile(statePath(dir, 'future'), JSON.stringify({ version: 2 }))
+  await utimes(statePath(dir, 'broken'), 1, 1)
+  await utimes(statePath(dir, 'future'), 1, 1)
+  await pruneSessions(dir, ids.at(-1)!)
+  const names = await remaining(dir)
+  assert.ok(names.includes('broken.json'))
+  assert.ok(names.includes('future.json'))
+  assert.ok(!names.includes(`${ids[0]}.json`))
+  assert.equal(names.length, KEPT_SESSIONS + 2)
+})
+
+test('pruning leaves no lock files behind', async t => {
+  const dir = tempDir()
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const ids = await savedSessions(dir, KEPT_SESSIONS + 1)
+  await pruneSessions(dir, ids.at(-1)!)
+  assert.deepEqual(
+    (await remaining(dir)).filter(name => !name.endsWith('.json')),
+    [],
+  )
 })

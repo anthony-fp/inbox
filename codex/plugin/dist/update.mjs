@@ -16,6 +16,7 @@ import {
   realpath,
   rename,
   rmdir,
+  stat,
   symlink,
   unlink,
   writeFile

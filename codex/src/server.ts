@@ -46,7 +46,7 @@ import { pruneClosed } from '../../hooks/ledger'
 import { NO_HOLDS, SETTLED_MS } from '../../hooks/view'
 import type { ReplyHolds } from '../../hooks/view'
 import { SETTLE_WINDOW_MS } from './settle'
-import { readState, updateState } from './state'
+import { pruneSessions, readState, updateState } from './state'
 import { reconcileUpdateStatus } from './update'
 import type { SessionState } from './state'
 import { CODEX, INBOX_DESCRIPTION, inboxToolText, VIEW_DESCRIPTION } from './texts'
@@ -198,6 +198,7 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
   const tools = toolsFor(uri)
   const findGh = ghFinder(deps.exec)
   const fetchingPrs = new Set<string>()
+  const prunedFor = new Set<string>()
   const prsFetchedAt = new Map<string, number>()
   let isGhMissing = false
 
@@ -641,8 +642,14 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
       case 'tools/call': {
         const name = String(params?.name ?? '')
         const args = (params?.arguments ?? {}) as Record<string, unknown>
+        const session = sessionOf(params)
         try {
-          return ok(await callTool(name, args, sessionOf(params), turnOf(params)))
+          const result = ok(await callTool(name, args, session, turnOf(params)))
+          if (session && !prunedFor.has(session)) {
+            prunedFor.add(session)
+            void pruneSessions(dir, session).catch(() => undefined)
+          }
+          return result
         } catch (err) {
           return ok({ ...text(`Failed: ${err instanceof Error ? err.message : String(err)}`), isError: true })
         }
