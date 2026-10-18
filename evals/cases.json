@@ -1636,5 +1636,189 @@
         "kind": "question"
       }
     ]
+  },
+  {
+    "name": "on-screen-question-not-new",
+    "about": "With the pane open, a reply that repeats a question the pane already lists adds nothing.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 6,
+      "card": {
+        "goal": "Add caching to the product API",
+        "done": ["Profiled slow endpoints"],
+        "now": "Working on the cache layer",
+        "running": []
+      },
+      "items": [
+        {
+          "id": "i5",
+          "kind": "question",
+          "label": null,
+          "ask": "Which cache should the product API use?",
+          "options": ["Redis", "In-memory"],
+          "rec": null,
+          "helps": [],
+          "turn": 5,
+          "at": 5
+        }
+      ]
+    },
+    "exchange": {
+      "person": "ok, carry on",
+      "turn": 6,
+      "screen": "The /inbox pane is open beside the conversation, listing every open item.",
+      "reply": "The cache layer is wired in behind a flag. Tests pass.\n\nStill open: which cache should the product API use, Redis or in-memory?"
+    },
+    "checks": [
+      {
+        "open": "i5"
+      },
+      {
+        "added": 0
+      }
+    ]
+  },
+  {
+    "name": "rhetorical-question-not-new",
+    "about": "A rhetorical question in the reply adds nothing.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 6,
+      "card": {
+        "goal": "Add caching to the product API",
+        "done": ["Profiled slow endpoints"],
+        "now": "Working on the cache layer",
+        "running": []
+      },
+      "items": []
+    },
+    "exchange": {
+      "person": "why did the import script fail?",
+      "turn": 6,
+      "reply": "It failed because the input file had a byte-order mark in front of the header row. The parser read it as part of the first column name.\n\nWho puts a byte-order mark in a CSV? Plenty of spreadsheet exports do. I now strip it before parsing, and the script passes."
+    },
+    "checks": [
+      {
+        "added": 0
+      }
+    ]
+  },
+  {
+    "name": "offer-to-continue-not-new",
+    "about": "An offer to continue, when continuing is the obvious default, adds nothing.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 6,
+      "card": {
+        "goal": "Add caching to the product API",
+        "done": ["Profiled slow endpoints"],
+        "now": "Working on the cache layer",
+        "running": []
+      },
+      "items": []
+    },
+    "exchange": {
+      "person": "migrate the config loaders to the new schema",
+      "turn": 6,
+      "activity": ["edited src/config/auth.ts", "ran: npm test -- config"],
+      "reply": "Migrated the auth config loader to the new schema. Its tests pass.\n\nThe cache and logging loaders are next, and they follow the same pattern. Want me to start on the next file?"
+    },
+    "checks": [
+      {
+        "added": 0
+      }
+    ]
+  },
+  {
+    "name": "describe-what-you-saw-not-new",
+    "about": "A question asking the person to describe what they saw adds nothing.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 6,
+      "card": {
+        "goal": "Add caching to the product API",
+        "done": ["Profiled slow endpoints"],
+        "now": "Working on the cache layer",
+        "running": []
+      },
+      "items": []
+    },
+    "exchange": {
+      "person": "the save button does nothing for me",
+      "turn": 6,
+      "reply": "I can't reproduce it: in my run the button saves and shows the toast. The handler only fires when the form is valid, so a hidden required field could block it.\n\nWhat happens when you click it? Do you see an error, or nothing at all?"
+    },
+    "checks": [
+      {
+        "added": 0
+      }
+    ]
+  },
+  {
+    "name": "look-at-finished-work-not-new",
+    "about": "An invitation to look at finished work adds nothing.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 6,
+      "card": {
+        "goal": "Add caching to the product API",
+        "done": ["Profiled slow endpoints"],
+        "now": "Working on the cache layer",
+        "running": []
+      },
+      "items": []
+    },
+    "exchange": {
+      "person": "build the settings page",
+      "turn": 6,
+      "activity": ["edited src/pages/settings.tsx", "ran: npm run dev"],
+      "reply": "The settings page is done. It has the profile form and the notification toggles, and the tests pass.\n\nOpen http://localhost:3000/settings to see it."
+    },
+    "checks": [
+      {
+        "added": 0
+      }
+    ]
+  },
+  {
+    "name": "real-question-with-pane-open-new",
+    "about": "With the pane open, a real question the pane does not list is added.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 6,
+      "card": {
+        "goal": "Add caching to the product API",
+        "done": ["Profiled slow endpoints"],
+        "now": "Working on the cache layer",
+        "running": []
+      },
+      "items": [
+        {
+          "id": "i5",
+          "kind": "question",
+          "label": null,
+          "ask": "Should cache keys include the locale?",
+          "options": ["Yes", "No"],
+          "rec": null,
+          "helps": [],
+          "turn": 5,
+          "at": 5
+        }
+      ]
+    },
+    "exchange": {
+      "person": "ok, carry on",
+      "turn": 6,
+      "screen": "The /inbox pane is open beside the conversation, listing every open item.",
+      "reply": "The cache layer is wired in behind a flag. Tests pass.\n\nOne decision blocks the rollout: should the cache expire entries after 5 minutes or after 1 hour? Prices change a few times a day, so I lean toward 5 minutes. I will not pick without you."
+    },
+    "checks": [
+      {
+        "open": "i5"
+      },
+      {
+        "new": "expire|minutes|hour"
+      }
+    ]
   }
 ]
