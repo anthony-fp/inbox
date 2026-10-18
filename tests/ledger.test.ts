@@ -494,6 +494,23 @@ describe('reopening', () => {
     ])
   })
 
+  test('a finding the person dismissed is not recorded again, but an expired or fixed one is', () => {
+    const finding = { kind: 'issue' as const, title: 'Hotkeys vanish in ANSI mode', detail: 'd', path: null, at: 1 }
+    const open = addFinding(EMPTY, finding).ledger
+    const dismissed = closeFinding(open, 'f1', { how: 'dismissed', outcome: 'dismissed' }, 5)
+    const again = addFinding(dismissed, { ...finding, title: 'Hotkeys vanish in ANSI mode', at: 6 })
+    expect([again.isAdded, again.dismissed?.id, again.ledger]).toEqual([false, 'f1', dismissed])
+    expect(addFinding(dismissed, { ...finding, title: 'Hotkeys disappear in ANSI mode' }).isAdded).toBe(false)
+    expect(addFinding(dismissed, { ...finding, title: 'Tabs unreadable' }).isAdded).toBe(true)
+    for (const closing of [
+      { how: 'expired' as const, outcome: 'list full' },
+      { how: 'update' as const, outcome: 'fixed in the theme' },
+    ]) {
+      const r = addFinding(closeFinding(open, 'f1', closing, 5), finding)
+      expect([r.isAdded, r.dismissed]).toEqual([true, null])
+    }
+  })
+
   test('a finding an item asks about closes into that item', () => {
     const finding = { kind: 'issue' as const, title: 'Research folder sits in the app', detail: 'd', path: null, at: 1 }
     const open = addFinding(addFinding(EMPTY, finding).ledger, { ...finding, title: 'Tabs unreadable' }).ledger

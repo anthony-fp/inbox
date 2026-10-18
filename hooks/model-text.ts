@@ -219,7 +219,6 @@ function ledgerBlocks(ledger: Ledger): string[] {
   const findings = ledger.findings.map(f => `${f.id} | ${f.kind}: ${f.title}`).join(NL)
   const closed = ledger.closed
     .filter(d => d.how !== 'expired')
-    .slice(-8)
     .map(d => `${d.ask} → ${outcomeText(d)}`)
     .join(NL)
 
@@ -382,7 +381,7 @@ export function carryText(ledger: Ledger, title: string): string | null {
   }
   if (ledger.closed.length > 0) {
     out.push('Recently closed:')
-    for (const d of ledger.closed.slice(-6)) out.push(`- "${d.ask}" → ${outcomeText(d)}`)
+    for (const d of ledger.closed) out.push(`- "${d.ask}" → ${outcomeText(d)}`)
   }
 
   return out.join(NL)

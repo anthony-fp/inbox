@@ -625,16 +625,23 @@ function withUpdate(item: Item, updated: Update['updated']): Item {
 
 /**
  * Adds a finding Claude recorded. One whose title matches an open finding, or
- * rewords an open item's ask, is skipped, so one thing shows in one list. When
- * the list is full, the oldest finding closes as expired to make room.
+ * rewords an open item's ask, is skipped, so one thing shows in one list. So is
+ * one the person dismissed (`dismissed` is that record); a finding that expired
+ * or was closed as fixed can be recorded again. When the list is full, the
+ * oldest finding closes as expired to make room.
  */
 export function addFinding(
   ledger: Ledger,
   finding: Omit<Finding, 'id'>,
-): { ledger: Ledger; id: string; isAdded: boolean; expired: Finding | null } {
+): { ledger: Ledger; id: string; isAdded: boolean; expired: Finding | null; dismissed: ClosedFinding | null } {
   const same =
     ledger.findings.find(f => sameAsk(f.title, finding.title)) ?? ledger.items.find(i => restates(i.ask, finding.title))
-  if (same) return { ledger, id: same.id, isAdded: false, expired: null }
+  if (same) return { ledger, id: same.id, isAdded: false, expired: null, dismissed: null }
+  const dismissed =
+    ledger.closedFindings.findLast(
+      f => f.how === 'dismissed' && (sameAsk(f.title, finding.title) || restates(f.title, finding.title)),
+    ) ?? null
+  if (dismissed) return { ledger, id: dismissed.id, isAdded: false, expired: null, dismissed }
   const id = `f${ledger.nextId}`
   const expired = ledger.findings.length >= MAX_FINDINGS ? ledger.findings[0]! : null
   const room = expired ? closeFinding(ledger, expired.id, { how: 'expired', outcome: 'list full' }, finding.at) : ledger
@@ -644,6 +651,7 @@ export function addFinding(
     id,
     isAdded: true,
     expired,
+    dismissed: null,
   }
 }
 

@@ -193,7 +193,7 @@ function carryText(ledger, title) {
   }
   if (ledger.closed.length > 0) {
     out.push("Recently closed:");
-    for (const d of ledger.closed.slice(-6)) out.push(`- "${d.ask}" \u2192 ${outcomeText(d)}`);
+    for (const d of ledger.closed) out.push(`- "${d.ask}" \u2192 ${outcomeText(d)}`);
   }
   return out.join(NL);
 }

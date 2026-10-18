@@ -150,6 +150,12 @@ function recordFinding(
     at: now,
   })
 
+  if (r.dismissed)
+    return {
+      ledger,
+      result: `Not recorded: the user already closed this (${r.dismissed.outcome}). Record it again only if they bring it up.`,
+    }
+
   return {
     ledger: r.ledger,
     result: !r.isAdded

@@ -57,8 +57,11 @@ that updates the inbox after each reply, reads two.
   adding the asks Claude did not record. An item Claude
   recorded is in `<open>`, so the model does not add the reply's same ask
   again. `evals/cases.json` has cases for it.
-- Every way a finding leaves goes to Closed with its outcome, and the inbox
-  line tells Claude, so a dismissed finding is not recorded again.
+- Every way a finding leaves goes to Closed with its outcome. The code
+  refuses a finding that restates one the person dismissed, and `record` answers
+  why. A finding that expired or that Claude closed as fixed can be recorded
+  again. The ledger keeps the newest 12 closed findings, so a dismissal older
+  than that is forgotten.
 - Fix, File issue, Discuss and Reply keep the finding open until Claude
   closes it. Dismiss closes it.
 - The inbox model closes a finding only with a `FIXED` line, when the

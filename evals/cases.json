@@ -211,6 +211,125 @@
     ]
   },
   {
+    "name": "old-dismissed-question-stays-closed",
+    "about": "A question dismissed before more than eight later closes is not added when the reply asks it again.",
+    "ledger": {
+      "turn": 14,
+      "nextId": 12,
+      "card": {
+        "goal": "Speed up the importer",
+        "done": ["Profiled the importer"],
+        "now": "Waiting on the next step",
+        "running": []
+      },
+      "items": [],
+      "closed": [
+        {
+          "id": "i1",
+          "kind": "question",
+          "ask": "Should I rewrite the importer in a separate package?",
+          "how": "dismissed",
+          "outcome": "dismissed",
+          "at": 1
+        },
+        {
+          "id": "i2",
+          "kind": "question",
+          "ask": "Which log level should the worker use?",
+          "how": "answered",
+          "outcome": "debug",
+          "at": 2
+        },
+        {
+          "id": "i3",
+          "kind": "question",
+          "ask": "Rename the helper module?",
+          "how": "claude",
+          "outcome": "closed by Claude: moot",
+          "at": 3
+        },
+        {
+          "id": "i4",
+          "kind": "question",
+          "ask": "Run the migration before deploy?",
+          "how": "answered",
+          "outcome": "yes, before",
+          "at": 4
+        },
+        {
+          "id": "i5",
+          "kind": "question",
+          "ask": "Pin the parser version?",
+          "how": "answered",
+          "outcome": "pin it",
+          "at": 5
+        },
+        {
+          "id": "i6",
+          "kind": "question",
+          "ask": "Split the config loader into two files?",
+          "how": "claude",
+          "outcome": "closed by Claude: replaced by a simpler change",
+          "at": 6
+        },
+        {
+          "id": "i7",
+          "kind": "question",
+          "ask": "Keep the old retry setting?",
+          "how": "answered",
+          "outcome": "remove it",
+          "at": 7
+        },
+        {
+          "id": "i8",
+          "kind": "question",
+          "ask": "Use the shared queue client?",
+          "how": "answered",
+          "outcome": "yes",
+          "at": 8
+        },
+        {
+          "id": "i9",
+          "kind": "question",
+          "ask": "Add a timeout to the export job?",
+          "how": "answered",
+          "outcome": "30 seconds",
+          "at": 9
+        },
+        {
+          "id": "i10",
+          "kind": "question",
+          "ask": "Delete the unused fixtures?",
+          "how": "claude",
+          "outcome": "closed by Claude: no longer applies",
+          "at": 10
+        },
+        {
+          "id": "i11",
+          "kind": "question",
+          "ask": "Which port should the preview use?",
+          "how": "answered",
+          "outcome": "4000",
+          "at": 11
+        }
+      ]
+    },
+    "exchange": {
+      "person": "fine, go ahead with the in-place speedup",
+      "turn": 14,
+      "activity": ["ran: npm test"],
+      "reply": "The speedup is in and tests pass. Should I rewrite the importer in a separate package, so other tools can reuse it?"
+    },
+    "checks": [
+      {
+        "notNew": "package"
+      },
+      {
+        "added": 0
+      }
+    ]
+  },
+  {
     "name": "stated-recommendation-kept",
     "about": "A stated recommendation becomes the item's rec.",
     "ledger": {

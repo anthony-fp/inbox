@@ -479,7 +479,7 @@ function ledgerBlocks(ledger) {
     (i) => `${i.id} | ${MODEL_KIND[i.kind]} | ${i.label ?? "-"} | ${i.ask} | ${i.options.join(" / ") || "-"} | ${i.rec ?? "-"}`
   ).join(NL3);
   const findings = ledger.findings.map((f) => `${f.id} | ${f.kind}: ${f.title}`).join(NL3);
-  const closed = ledger.closed.filter((d) => d.how !== "expired").slice(-8).map((d) => `${d.ask} \u2192 ${outcomeText(d)}`).join(NL3);
+  const closed = ledger.closed.filter((d) => d.how !== "expired").map((d) => `${d.ask} \u2192 ${outcomeText(d)}`).join(NL3);
   return [
     `<card>${NL3}${card}${NL3}</card>`,
     `<open>${NL3}${open}${NL3}</open>`,
