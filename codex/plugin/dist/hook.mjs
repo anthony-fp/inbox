@@ -33,7 +33,7 @@ These are not findings. Handle them in the task and your reply instead:
 - Progress, status, or an approach you tried and dropped: say it.
 - Something only the user can do or decide, such as an approval, a sign-in or a choice: ask it, and record it as a question or task.
 
-The latest "inbox:" text beside the user's prompt is the current state. It lists every open item and finding with its id, such as [i35] or [f12], and anything it does not list is closed. Check it before telling the user that something is open or waits on them. The ids are for the inbox tools only. The user never sees them, so never write one to the user, not even in parentheses: name an item or finding by what it says, as "the deploy task" or "the migration finding".
+The latest "inbox:" text beside the user's prompt is the current state. It lists every open item and finding with its id, such as (close id: i35), and anything it does not list is closed. Check it before telling the user that something is open or waits on them. The ids are for the inbox tools only. The user never sees them, so never write one to the user, not even in parentheses: name an item or finding by what it says, as "the deploy task" or "the migration finding".
 
 Close with mcp__inbox__close:
 - When the user's message answers an open item, close it first, before other work, with their answer.
@@ -168,10 +168,10 @@ function answerNote(ledger, text) {
   return lines.length === 0 ? null : ["inbox: the user's message answers these open items from your earlier replies:", ...lines].join(NL);
 }
 function itemLine(item) {
-  return `- [${item.id}] ${item.label ? `(${item.label}) ` : ""}${describe(item)}`;
+  return `- ${item.label ? `(${item.label}) ` : ""}${describe(item)} (close id: ${item.id})`;
 }
 function findingLine(finding) {
-  return `- [${finding.id}] ${finding.kind}: ${finding.title}`;
+  return `- ${finding.kind}: ${finding.title} (close id: ${finding.id})`;
 }
 function carryText(ledger, title) {
   const findings = ledger.findings;
@@ -197,8 +197,11 @@ function carryText(ledger, title) {
   }
   return out.join(NL);
 }
+var CLOSE_ID_RULE = "A close id is only for the close tool. Never write one in a reply.";
 function inboxText(host, ledger, isOpen) {
-  const out = ["inbox: what waits on the user, as of your last reply. Anything not listed here is closed."];
+  const out = [
+    `inbox: what waits on the user, as of your last reply. Anything not listed here is closed. ${CLOSE_ID_RULE}`
+  ];
   if (ledger.items.length > 0) {
     out.push("Waiting on the user:");
     for (const item of ledger.items) out.push(itemLine(item));

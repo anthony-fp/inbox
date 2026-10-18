@@ -2,6 +2,8 @@ import { addAgentItem, addFinding, closeByAgent, recommendedOption, stepHelp } f
 import type { Host } from './model-text'
 import type { Closed, Ledger } from '../types'
 
+const NAME_BY_CONTENT = 'Name it by what it says, never by its id.'
+
 export const RECORD_SCHEMA = {
   type: 'object',
   properties: {
@@ -196,8 +198,11 @@ export function recordClose(
     return { ledger, result: "Not closed: give the id, and the user's answer or a reason." }
   const r = closeByAgent(host, ledger, id, answer ? { answer } : { reason }, now)
   if (r.closed === 'item')
-    return { ledger: r.ledger, result: `Closed. The user sees it in ${host.surface} with its outcome.` }
-  if (r.closed === 'finding') return { ledger: r.ledger, result: 'Closed the finding.' }
+    return {
+      ledger: r.ledger,
+      result: `Closed. The user sees it in ${host.surface} with its outcome. ${NAME_BY_CONTENT}`,
+    }
+  if (r.closed === 'finding') return { ledger: r.ledger, result: `Closed the finding. ${NAME_BY_CONTENT}` }
   const earlier = [...ledger.closed, ...ledger.closedFindings].findLast(c => c.id === id)
   if (earlier) return { ledger, result: `Already closed: ${closedHow(earlier)}.` }
 

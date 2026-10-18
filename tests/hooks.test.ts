@@ -292,7 +292,9 @@ test('a reply becomes a card and open items, and "1. yes" carries the question',
 
   const answered = await $.prompt.submit({ text: '1. node\n2. yes', wait: false, origin: { kind: 'composer' } })
   expect(answered.context?.join('\n')).toContain('1 → "Use Node or Python?"')
-  expect(answered.context?.join('\n')).toContain('Waiting on the user:\n- [i1] (1) "Use Node or Python?"')
+  expect(answered.context?.join('\n')).toContain(
+    'Waiting on the user:\n- (1) "Use Node or Python?"; options: Node / Python; recommended: Node (close id: i1)',
+  )
   const unchanged = await $.prompt.submit({ text: 'also add a --loud flag', wait: false, origin: { kind: 'composer' } })
   expect(unchanged.context?.join('\n') ?? '').not.toContain('Waiting on the user')
 
@@ -1569,8 +1571,8 @@ test('Claude closes an item or finding that no longer applies, by the id it read
     detail: 'It names the old command.',
   })
   const told = await $.prompt.submit({ text: 'where are we?', wait: false, origin: { kind: 'composer' } })
-  expect(told.context?.join('\n')).toContain('- [i2] (2) "Name the command greet?"')
-  expect(told.context?.join('\n')).toContain('- [f3] issue: README is stale')
+  expect(told.context?.join('\n')).toContain('- (2) "Name the command greet?" (close id: i2)')
+  expect(told.context?.join('\n')).toContain('- issue: README is stale (close id: f3)')
 
   const close = (input: Record<string, string>) => $.tool.call({ tool: 'mcp__inbox__close', ...input } as never)
   const pane = await $.ui.mount(PANE)
@@ -1590,15 +1592,17 @@ test('Claude closes an item or finding that no longer applies, by the id it read
   await clock.advance(QUEUED_AFTER_MS)
   expect(await pane.find({ text: /^\u2007·\sQueued:\sExplain/ })).toBeDefined()
   expect((await close({ id: 'i1', answer: 'Deno' })).result).toBe(
-    'Closed. The user sees it in the /inbox pane with its outcome.',
+    'Closed. The user sees it in the /inbox pane with its outcome. Name it by what it says, never by its id.',
   )
   expect(await pane.find({ key: 'row-i1' })).toBeUndefined()
   expect(await pane.find({ key: 'settled-i1' })).toBeDefined()
   expect(await pane.find({ text: /^Deno$/ })).toBeDefined()
   expect((await close({ id: 'i2', reason: 'no longer applies' })).result).toBe(
-    'Closed. The user sees it in the /inbox pane with its outcome.',
+    'Closed. The user sees it in the /inbox pane with its outcome. Name it by what it says, never by its id.',
   )
-  expect((await close({ id: 'f3', reason: 'fixed' })).result).toBe('Closed the finding.')
+  expect((await close({ id: 'f3', reason: 'fixed' })).result).toBe(
+    'Closed the finding. Name it by what it says, never by its id.',
+  )
   expect((await close({ id: 'i9', reason: 'done' })).result).toContain(
     'Not closed: no open item or finding has the id i9.',
   )
@@ -3048,7 +3052,7 @@ test('a tool call after a hot reload, before the load converts the ledger, still
   })
   strip = false
   const r = await $.tool.call({ tool: 'mcp__inbox__close', id: 'f1', reason: 'fixed' } as never)
-  expect(r.result).toBe('Closed the finding.')
+  expect(r.result).toBe('Closed the finding. Name it by what it says, never by its id.')
 })
 
 const inOrder = (drawn: string[], plan: string[]) => {
@@ -3250,15 +3254,15 @@ test('a forked conversation keeps the parent’s findings and closed records, an
     ((await $.prompt.submit({ text: 'where are we?', wait: false, origin: { kind: 'composer' } })).context ?? []).join(
       '\n',
     )
-  expect(await contextOf()).not.toContain('[f1]')
+  expect(await contextOf()).not.toContain('(close id: f1)')
 
   await $.session.end({ reason: 'resume', sessionId: 'session-1', resume: { id: 'session-1' } })
   await $.classic.SessionStart({ source: 'fork', session_id: 'session-2' })
   await clock.settle()
-  expect(await contextOf()).toContain('[i2] (1) "Add a backoff to the retry loop?"')
-  expect(await contextOf()).not.toContain('[f1]')
+  expect(await contextOf()).toContain('(close id: i2)')
+  expect(await contextOf()).not.toContain('(close id: f1)')
   await pane.press({ key: 'dismiss-i2' })
   await clock.settle()
   await clock.advance(SETTLED_MS)
-  expect(await contextOf()).toContain('- [f1] issue: Retry loop never backs off')
+  expect(await contextOf()).toContain('- issue: Retry loop never backs off (close id: f1)')
 })

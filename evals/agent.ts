@@ -53,6 +53,7 @@ const PROBE = 'probe'
 const { values } = parseArgs({
   options: {
     agent: { type: 'string', default: 'both' },
+    'claude-model': { type: 'string', default: 'opus' },
     runs: { type: 'string', default: '5' },
     case: { type: 'string' },
     out: { type: 'string' },
@@ -67,7 +68,7 @@ const cases: Case[] = JSON.parse(readFileSync(values.cases, 'utf8')).filter((c: 
 const probeServer = values.probe ?? fileURLToPath(new URL('./probe.mjs', import.meta.url))
 
 const CODEX_EFFORT = 'medium'
-const CLAUDE_MODEL = 'opus'
+const CLAUDE_MODEL = values['claude-model']
 const TIMEOUT_MS = 300_000
 
 /**

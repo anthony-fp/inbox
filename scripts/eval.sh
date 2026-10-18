@@ -12,8 +12,9 @@
 #
 # Needs the claude CLI for Sonnet and Opus and the codex CLI, or CODEX_CLI_PATH, for Codex.
 #
-# Usage: ./scripts/eval.sh [--suite model|agent] [--agent claude|codex|both] [--runs N] [--case name,name]
-#                          [--out results.json]
+# Usage: ./scripts/eval.sh [--suite model|agent] [--agent claude|codex|both] [--claude-model opus|haiku|...]
+#                          [--runs N] [--case name,name] [--out results.json]
+# --claude-model sets the model of the Claude agent in the agent suite. It defaults to opus.
 # Runs default to 8 for the model suite and 5 for the agent suite.
 
 set -eu

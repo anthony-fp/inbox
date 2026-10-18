@@ -1,3 +1,4 @@
+import { CLOSE_ID_RULE } from '../../hooks/model-text'
 import type { Host } from '../../hooks/model-text'
 import type { InboxView, RowView } from '../../hooks/view'
 
@@ -30,7 +31,7 @@ export function inboxToolText(v: InboxView): string {
     needs > 0 ? `${needs} ${needs === 1 ? 'waits' : 'wait'} on the user` : null,
     findings > 0 ? (findings === 1 ? '1 finding' : `${findings} findings`) : null,
   ].filter(x => x !== null)
-  const out = [counts.join(' · ')]
+  const out = [counts.join(' · '), CLOSE_ID_RULE]
   for (const [title, rows] of groups) {
     if (rows.length === 0) continue
     out.push(title)
@@ -42,10 +43,10 @@ export function inboxToolText(v: InboxView): string {
 }
 
 function rowLine(r: RowView): string {
-  if (r.finding) return `${r.handle} [${r.id}] ${r.finding.kind}: ${r.title}`
+  if (r.finding) return `${r.handle} ${r.finding.kind}: ${r.title} (close id: ${r.id})`
   const item = r.item
   const options = item && item.options.length > 0 ? `; options: ${item.options.join(' / ')}` : ''
   const rec = item?.rec ? `; recommended: ${item.rec}` : ''
 
-  return `${r.handle} [${r.id}] "${r.title}"${options}${rec}`
+  return `${r.handle} "${r.title}"${options}${rec} (close id: ${r.id})`
 }

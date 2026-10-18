@@ -439,12 +439,13 @@ test('the inbox tool answers in text: the count, each row that waits, and where 
     r.result.content[0]?.text,
     [
       '2 wait on the user · 1 finding',
+      'A close id is only for the close tool. Never write one in a reply.',
       'Questions:',
-      '1) [i1] "Ship it?"; options: Yes / No',
+      '1) "Ship it?"; options: Yes / No (close id: i1)',
       'Tasks:',
-      '• [i2] "Add the API key to .env"',
+      '• "Add the API key to .env" (close id: i2)',
       'Findings:',
-      '• [f3] issue: No lint script',
+      '• issue: No lint script (close id: f3)',
       'Open the Inbox tab to act on these.',
     ].join('\n'),
   )
@@ -455,8 +456,9 @@ test('the inbox tool answers in text: the count, each row that waits, and where 
     one.result.content[0]?.text,
     [
       '1 waits on the user',
+      'A close id is only for the close tool. Never write one in a reply.',
       'Questions:',
-      '1) [i1] "Ship it?"; options: Yes / No',
+      '1) "Ship it?"; options: Yes / No (close id: i1)',
       'Open the Inbox tab to act on these.',
     ].join('\n'),
   )
