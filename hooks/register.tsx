@@ -37,6 +37,7 @@ import type { Exchange, Press, Update } from './ledger'
 import {
   applyPrPress,
   checkActions,
+  checkRunText,
   drawnPrs,
   fetchTracked,
   itemPrSteps,
@@ -44,6 +45,7 @@ import {
   isTracked,
   linkedPrs,
   olderPrsText,
+  PR_GROUP_TITLES,
   PR_TONES,
   prBlockActions,
   prCheckId,
@@ -52,8 +54,8 @@ import {
   prRowWaits,
   prThreadId,
   threadActions,
+  threadRowText,
   threadSentIn,
-  threadShowsCheckIn,
 } from './pr-tab'
 import type { Applied, GhRun, PrAction, PrPress } from './pr-tab'
 import {
@@ -64,9 +66,7 @@ import {
   prNeedsYou,
   readableComment,
   readiness,
-  THREAD_TITLE_CHARS,
   threadWhere,
-  took,
   waitingThreads,
 } from './prs'
 import {
@@ -3297,7 +3297,6 @@ export const register: Register = on => {
       moreKeys: () => rowKeyActions($, r, true).more,
     })
     const isThreadSent = threadSentIn(lastActions)
-    const threadShowsCheck = threadShowsCheckIn(lastActions)
     const prPress = (p: PrPress) => (press: UiPressArgument) => runPress($, p, press.surface)
     const prKeyAction = (a: PrAction, row: string): KeyAction => ({
       key: `${a.icon === 'retry' ? 'retry' : PR_KEYS[a.press.action]}-${row}`,
@@ -3318,10 +3317,7 @@ export const register: Register = on => {
       keys: () => checkActions(pr, c, lastActions).map(a => prKeyAction(a, `${pr.ref}-${c.name}`)),
     })
     const checkRow = (pr: PrView, c: PrCheck): Row => {
-      const ran =
-        c.startedAt !== undefined && c.finishedAt !== undefined
-          ? `Failed after ${took(c.finishedAt - c.startedAt)}`
-          : 'Failed'
+      const ran = checkRunText(c)
       return {
         ...checkRowBase(pr, c),
         ...(c.finishedAt !== undefined ? { at: c.finishedAt } : {}),
@@ -3331,7 +3327,7 @@ export const register: Register = on => {
     }
     const threadRow = (pr: PrView, t: PrThread): Row => {
       const id = prThreadId(pr, t)
-      const { head, rest } = commentParts(t.body)
+      const { rest } = commentParts(t.body)
       const where = (
         <Text color={pal.muted} wrap="wrap">
           <Link href={t.reply?.url || t.url}>
@@ -3371,29 +3367,19 @@ export const register: Register = on => {
           </Box>
         )
       }
-      const isSent = isThreadSent(pr, t)
-      const showsCheck = threadShowsCheck(pr, t)
-      const isChanged = !isSent && t.isLinesChanged
+      const text = threadRowText(pr, t, lastActions)
 
       return {
         id,
-        handle: showsCheck ? '✓' : '◦',
-        handleTone: showsCheck ? 'done' : undefined,
-        ...(isSent || isChanged
-          ? { fold: t.isLinesChanged ? { note: `Lines changed since this comment${DOT}still open on GitHub` } : {} }
-          : {}),
-        title: clipLabel(head, THREAD_TITLE_CHARS),
+        handle: text.showsCheck ? '✓' : '◦',
+        handleTone: text.showsCheck ? 'done' : undefined,
+        ...(text.fold ? { fold: text.fold } : {}),
+        title: text.title,
         ...(t.at === null ? {} : { at: t.at }),
         line: {
           before: '',
           text: commentLine(t.body),
-          after: [
-            threadWhere(t, baseName(t.path)),
-            isChanged ? 'Lines changed' : '',
-            t.reply ? `@${t.reply.author}: ${commentLine(t.reply.body)}` : `@${t.author}`,
-          ]
-            .filter(Boolean)
-            .join(DOT),
+          after: text.meta,
         },
         body: comment,
         clippedBody: clippedComment,
@@ -4938,8 +4924,8 @@ export const register: Register = on => {
               desktopFrame({ key: `pr-status-${pr.ref}`, padY: 0, children: statusBlock }),
             ]
           : [<Box paddingLeft={1}>{titleLine}</Box>, <Box paddingLeft={1}>{statusBlock}</Box>]),
-        ...prRowGroup('Review threads', threads, `${pr.ref}-threads`),
-        ...prRowGroup('Failing checks', checks, `${pr.ref}-checks`),
+        ...prRowGroup(PR_GROUP_TITLES.threads, threads, `${pr.ref}-threads`),
+        ...prRowGroup(PR_GROUP_TITLES.checks, checks, `${pr.ref}-checks`),
       ])
     }
     const olderPrs = () => {

@@ -7,7 +7,7 @@ import { closedState } from '../../hooks/ledger'
 import { ago } from '../../hooks/text'
 import type { ClosedState } from '../../hooks/ledger'
 import { CLOSED_MARKS } from '../../hooks/view'
-import { baseName, capitalized, clipLabel, noteText, pendingResult, stepEffects } from '../../hooks/presses'
+import { capitalized, clipLabel, noteText, pendingResult, stepEffects } from '../../hooks/presses'
 import type { RowPress } from '../../hooks/presses'
 import {
   allRows,
@@ -48,6 +48,8 @@ import { ROW_PAD_PT } from '../../hooks/layout'
 import type { ActionEmphasis, DrawnEntry, DrawnLists, Feedback, ReplyHolds, RowView, RowWait } from '../../hooks/view'
 import {
   checkActions,
+  checkRunText,
+  PR_GROUP_TITLES,
   PR_TONES,
   prBlockActions,
   prCheckId,
@@ -55,21 +57,11 @@ import {
   prRowWaits,
   prThreadId,
   threadActions,
-  threadShowsCheckIn,
+  threadRowText,
   threadSentIn,
 } from '../../hooks/pr-tab'
 import type { PrAction, PrPress } from '../../hooks/pr-tab'
-import {
-  commentLine,
-  commentParts,
-  failingChecks,
-  readableComment,
-  readiness,
-  THREAD_TITLE_CHARS,
-  threadWhere,
-  took,
-  waitingThreads,
-} from '../../hooks/prs'
+import { commentParts, failingChecks, readableComment, readiness, threadWhere, waitingThreads } from '../../hooks/prs'
 import type { Draft, Finding, PrCheck, PrThread, PrView } from '../../types'
 import { followTo } from '../../hooks/arrivals'
 import { parseInline } from '../../hooks/inline'
@@ -792,30 +784,20 @@ function opening(name: string): string {
 
 function prThreadRow(v: View, pr: PrView, t: PrThread): Row {
   const id = prThreadId(pr, t)
-  const isSent = threadSentIn(v.lastActions)(pr, t)
-  const showsCheck = threadShowsCheckIn(v.lastActions)(pr, t)
-  const isChanged = !isSent && t.isLinesChanged
+  const text = threadRowText(pr, t, v.lastActions)
   const press =
     (action: 'thread-address' | 'thread-draft' | 'thread-discuss' | 'thread-open', pending?: string) => () =>
       void act(id, { action, ref: pr.ref, thread: t.id }, undefined, pending)
   const where = threadWhere(t)
-  const { head, rest } = commentParts(t.body)
+  const { rest } = commentParts(t.body)
 
   return {
     id,
-    handle: showsCheck ? '✓' : '◦',
-    handleTone: showsCheck ? 'done' : undefined,
-    ...(isSent || isChanged
-      ? { fold: t.isLinesChanged ? { note: `Lines changed since this comment${DOT}still open on GitHub` } : {} }
-      : {}),
-    title: clipLabel(head, THREAD_TITLE_CHARS),
-    meta: [
-      threadWhere(t, baseName(t.path)),
-      isChanged ? 'Lines changed' : '',
-      t.reply ? `@${t.reply.author}: ${commentLine(t.reply.body)}` : `@${t.author}`,
-    ]
-      .filter(Boolean)
-      .join(DOT),
+    handle: text.showsCheck ? '✓' : '◦',
+    handleTone: text.showsCheck ? 'done' : undefined,
+    ...(text.fold ? { fold: text.fold } : {}),
+    title: text.title,
+    meta: text.meta,
     age: t.at === null ? undefined : shortAgo(v.at - t.at),
     body: (
       <div>
@@ -843,10 +825,7 @@ function prThreadRow(v: View, pr: PrView, t: PrThread): Row {
 
 function prCheckRow(v: View, pr: PrView, c: PrCheck): Row {
   const id = prCheckId(pr, c)
-  const ran =
-    c.startedAt !== undefined && c.finishedAt !== undefined
-      ? `Failed after ${took(c.finishedAt - c.startedAt)}`
-      : 'Failed'
+  const ran = checkRunText(c)
   const target = c.url ? 'the log' : `PR #${pr.number}`
 
   return {
@@ -1596,8 +1575,8 @@ function PrBlock({
       </div>
       {last ? <div class={last.isError ? 'pr-last tone-error' : 'pr-last muted'}>{last.text}</div> : null}
       <div class="pr-groups">
-        <PrRows title="Review threads" rows={threads} all={all} openId={openId} now={now} />
-        <PrRows title="Failing checks" rows={checks} all={all} openId={openId} now={now} />
+        <PrRows title={PR_GROUP_TITLES.threads} rows={threads} all={all} openId={openId} now={now} />
+        <PrRows title={PR_GROUP_TITLES.checks} rows={checks} all={all} openId={openId} now={now} />
       </div>
     </section>
   )

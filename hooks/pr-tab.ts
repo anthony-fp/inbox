@@ -1,7 +1,18 @@
 import type { Item, LastAction, Ledger, PressKind, PrCheck, PrThread, PrView, PrViews } from '../types'
-import { isFoldingPress, localLast, pendingResult, prSteps, recordPress, withQueued } from './presses'
+import {
+  baseName,
+  clipLabel,
+  isFoldingPress,
+  localLast,
+  pendingResult,
+  prSteps,
+  recordPress,
+  withQueued,
+} from './presses'
 import type { Effect, HelpStep, PrActionId } from './presses'
 import {
+  commentLine,
+  commentParts,
   failingChecks,
   inPrOrder,
   parseRef,
@@ -10,13 +21,16 @@ import {
   readiness,
   readThreads,
   readView,
+  THREAD_TITLE_CHARS,
   threadsOnYou,
   THREADS_QUERY,
+  threadWhere,
+  took,
   VIEW_FIELDS,
   waitingThreads,
 } from './prs'
 import type { IsThreadSent, PrStatus } from './prs'
-import { SETTLED_MS } from './view'
+import { DOT, SETTLED_MS } from './view'
 import type { ActionEmphasis, RowWait } from './view'
 
 export const MAX_PRS = 12
@@ -145,6 +159,46 @@ export function checkRowId(ref: string, check: string): string {
 
 export function prMarkId(ref: string): string {
   return `pr:${ref}`
+}
+
+export const PR_GROUP_TITLES = { threads: 'Review threads', checks: 'Failing checks' }
+
+/** What a review thread's row says, for each look to draw in its own controls. */
+export type ThreadRowText = {
+  showsCheck: boolean
+  /** Null while the thread waits on the person. */
+  fold: { note?: string } | null
+  title: string
+  meta: string
+}
+
+export function threadRowText(pr: PrView, t: PrThread, lastActions: Record<string, LastAction>): ThreadRowText {
+  const isSent = threadSentIn(lastActions)(pr, t)
+  const isChanged = !isSent && t.isLinesChanged
+
+  return {
+    showsCheck: threadShowsCheckIn(lastActions)(pr, t),
+    fold:
+      isSent || isChanged
+        ? t.isLinesChanged
+          ? { note: `Lines changed since this comment${DOT}still open on GitHub` }
+          : {}
+        : null,
+    title: clipLabel(commentParts(t.body).head, THREAD_TITLE_CHARS),
+    meta: [
+      threadWhere(t, baseName(t.path)),
+      isChanged ? 'Lines changed' : '',
+      t.reply ? `@${t.reply.author}: ${commentLine(t.reply.body)}` : `@${t.author}`,
+    ]
+      .filter(Boolean)
+      .join(DOT),
+  }
+}
+
+export function checkRunText(c: PrCheck): string {
+  return c.startedAt !== undefined && c.finishedAt !== undefined
+    ? `Failed after ${took(c.finishedAt - c.startedAt)}`
+    : 'Failed'
 }
 
 /**
