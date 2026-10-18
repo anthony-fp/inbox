@@ -1255,7 +1255,11 @@ test('a held row stays in place, and its reply still sends, after more items clo
   await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'typekey-i2' })
   await pane.input({ key: 'type-i2', text: 'Call it hello', kind: 'change' })
-  await $.tool.call({ tool: 'mcp__inbox__close', id: 'i2', reason: 'settled in chat' } as never)
+  await $.tool.call({
+    tool: 'mcp__inbox__close',
+    id: 'i2',
+    reason: 'settled in chat, since the team already picked the name for the command in this morning’s standup',
+  } as never)
   await clock.settle()
   ledgerReply = tasks.map(t => `NEW: do | - | ${t} | - | -`).join('\n')
   await reply('keep going', 't2')
@@ -1267,6 +1271,7 @@ test('a held row stays in place, and its reply still sends, after more items clo
   expect(await pane.find({ text: /Renew the domain/ })).toBeUndefined()
   expect(await pane.find({ key: 'type-i2' })).toBeDefined()
   expect((await pane.find({ key: 'row-i2' }))?.text).toMatch(/Closed\sby\sClaude:\ssettled\sin\schat/)
+  expect((await pane.find({ key: 'row-i2' }))?.text).toContain('Claude: settled in chat, since the team')
 
   await pane.press({ key: 'send-i2' })
   await clock.settle()

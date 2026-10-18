@@ -3160,7 +3160,15 @@ export const register: Register = on => {
     const isNarrowDesktop = look === 'desktop' && e.props.bodyColumns < DESKTOP_WIDE_AT
     const isAgeInSide = look === 'terminal'
     const isAgeDropped = isNarrowDesktop || isAgeInSide
-    const unbroken = (after: string) => after.replace(/(?<=.)[ \u2002]/gs, c => (c === ' ' ? '\u00a0' : '\u2007'))
+    const glued = (after: string) => after.replace(/(?<=.)[ \u2002]/gs, c => (c === ' ' ? '\u00a0' : '\u2007'))
+    // The Codex tab wraps a suffix too long for one line between words, so this does too.
+    const unbroken = (after: string, width: number) => {
+      const firstBreak = after.indexOf(' ')
+
+      return after.length <= width || firstBreak < 0
+        ? glued(after)
+        : glued(after.slice(0, firstBreak)) + after.slice(firstBreak)
+    }
     const isInline = e.props.placement === 'inline'
     isInlinePane = isInline
     if (e.surface === 'terminal') {
@@ -3923,11 +3931,14 @@ export const register: Register = on => {
       ]
 
       const textWidth = listColumns - 1 - columns.textAt
+      const titleWidth =
+        look === 'desktop' ? Math.floor(textWidth * DESKTOP_CHARS_PER_CELL) : textWidth - TERMINAL_SIDE_CELLS
+      const shownAfter = titleAfter ? unbroken(titleAfter, titleWidth) : ''
       const bodyLines =
         isSelected && isInline && look === 'terminal' && row.clippedBody
           ? e.props.scroll.bodyRows -
             2 * space.rowPad -
-            lineCount(`${row.title}${titleAfter ?? ''}`, textWidth - TERMINAL_SIDE_CELLS) -
+            lineCount(`${row.title}${shownAfter}`, titleWidth) -
             status.length -
             keyLines(keys, more, textWidth)
           : null
@@ -3971,7 +3982,7 @@ export const register: Register = on => {
             <Box key={`view-${row.id}`} position="absolute" top={0} bottom={0} left={0} width={1} />,
             <Text wrap="wrap">
               <Text bold>{row.title}</Text>
-              {f?.age ? <Text color={pal.muted}>{unbroken(`${DOT}${f.text}`)}</Text> : null}
+              {f?.age ? <Text color={pal.muted}>{unbroken(`${DOT}${f.text}`, titleWidth)}</Text> : null}
             </Text>,
             row.subtitle ?? null,
             row.body ? <Box marginTop={blankLine}>{row.body}</Box> : null,
@@ -4022,7 +4033,7 @@ export const register: Register = on => {
                 row,
                 <Text wrap="wrap">
                   <Text bold>{row.title}</Text>
-                  {titleAfter ? <Text color={pal.muted}>{unbroken(titleAfter)}</Text> : null}
+                  {titleAfter ? <Text color={pal.muted}>{shownAfter}</Text> : null}
                 </Text>,
               )}
               {row.subtitle}
