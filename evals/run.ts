@@ -39,7 +39,7 @@ const NOW = 100
 const { values } = parseArgs({
   options: {
     agent: { type: 'string', default: 'both' },
-    runs: { type: 'string', default: '4' },
+    runs: { type: 'string', default: '8' },
     case: { type: 'string' },
     out: { type: 'string' },
     cases: { type: 'string', default: 'evals/cases.json' },
@@ -55,7 +55,7 @@ function claude(prompt: string): Promise<string | null> {
     const child = execFile(
       'claude',
       ['-p', '--model', 'sonnet', '--tools', '', '--system-prompt', systemText(CLAUDE_CODE)],
-      { maxBuffer: 1 << 22, timeout: 300_000 },
+      { maxBuffer: 1 << 22, timeout: 300_000, cwd: mkdtempSync(join(tmpdir(), 'inbox-eval-claude-')) },
       (err, out) => resolve(err ? null : out),
     )
     child.stdin?.end(prompt)
