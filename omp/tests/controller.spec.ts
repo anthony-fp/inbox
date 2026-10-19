@@ -126,3 +126,17 @@ test('a change in the saved state redraws the panel', async () => {
   await flush()
   expect(calls.renders).toBeGreaterThan(before)
 })
+
+test('a refused Resume shows why on the stop row', async () => {
+  const demo = demoSource({ now: () => 0, after: () => {}, settleWindowMs: SETTLED_MS })
+  const stop = { kind: 'api-error' as const, detail: 'overloaded', resets: null, at: 1_700_000_000_000 }
+  const { panel } = open({
+    screen: async holds => ({ ...(await demo.screen(holds)), stop }),
+    resume: async () => 'no session to send to',
+  })
+  await panel.start()
+  panel.handleInput('enter')
+  await flush()
+  await flush()
+  expect(panel.render(200).join('\n')).toContain('Not sent: no session to send to')
+})

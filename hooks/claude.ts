@@ -140,36 +140,6 @@ export function resetTime(message: string): string | null {
   return message.match(/\bresets\s+(?:at\s+)?([^·(\n]+?)\s*(?:\(|·|$)/i)?.[1]?.trim() ?? null
 }
 
-export function stopText(stop: Stop): string {
-  switch (stop.kind) {
-    case 'sign-in':
-      return 'sign-in expired'
-    case 'billing':
-      return 'billing problem'
-    case 'usage-limit':
-      return 'usage limit reached'
-    default:
-      return stop.detail === 'rate_limit'
-        ? 'the API is limiting requests'
-        : stop.detail === 'overloaded'
-          ? 'the API is overloaded'
-          : `API error (${stop.detail})`
-  }
-}
-
-export function stopFix(stop: Stop): string {
-  switch (stop.kind) {
-    case 'sign-in':
-      return 'Run /login, then send a message to resume.'
-    case 'billing':
-      return 'Check billing in the Claude console, then resume.'
-    case 'usage-limit':
-      return stop.resets ? `Resume after ${stop.resets}.` : 'Resume when the limit resets.'
-    default:
-      return 'Send a message to resume.'
-  }
-}
-
 function stopShort(stop: Stop): string {
   switch (stop.kind) {
     case 'sign-in':

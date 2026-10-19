@@ -1653,6 +1653,12 @@ var FINDING_GROUPS = {
   issue: { title: "Issues", mark: "\u25B2", tone: "issue" },
   opportunity: { title: "Opportunities", mark: "\u2726", tone: "done" }
 };
+var NEEDS_YOU_GROUPS = [
+  { kind: "question", title: "Questions", list: "questions" },
+  { kind: "task", title: "Tasks", list: "tasks" }
+];
+var CLOSED_MARKS = { handled: "\u2713", dismissed: "\u2715", lapsed: "\u2013" };
+var CLOSED_SHOWN = 3;
 var SETTLED_MS = 5120;
 var QUEUED_AFTER_MS = 1000;
 function isQueuedAt(last, now) {
@@ -1695,11 +1701,45 @@ function rowFeedbackText(row, look) {
   const f = row.feedback;
   return f ? f.is === "done" && row.state.is === "handedOff" ? f.label : feedbackText(f, look) : null;
 }
+function closedShown(closed, drawnSettled) {
+  return closed.filter((d) => !drawnSettled.has(d.id)).slice(0, CLOSED_SHOWN);
+}
 function closedTotal(closed, drawnSettled) {
   return closed.filter((d) => !drawnSettled.has(d.id)).length;
 }
 function foldLabel(total) {
   return `${total} closed`;
+}
+function earlierLabel(total, shown) {
+  return total > shown ? `${total - shown} earlier` : null;
+}
+function groupEmptyText(title) {
+  return `No open ${title.toLowerCase()}`;
+}
+var RESUME_TEXT = "Continue";
+function stopText(stop) {
+  switch (stop.kind) {
+    case "sign-in":
+      return "sign-in expired";
+    case "billing":
+      return "billing problem";
+    case "usage-limit":
+      return "usage limit reached";
+    default:
+      return stop.detail === "rate_limit" ? "the API is limiting requests" : stop.detail === "overloaded" ? "the API is overloaded" : `API error (${stop.detail})`;
+  }
+}
+function stopFix(stop) {
+  switch (stop.kind) {
+    case "sign-in":
+      return "Run /login, then send a message to resume.";
+    case "billing":
+      return "Check billing in the Claude console, then resume.";
+    case "usage-limit":
+      return stop.resets ? `Resume after ${stop.resets}.` : "Resume when the limit resets.";
+    default:
+      return "Send a message to resume.";
+  }
 }
 var DEMO_NOTICE = "Sample entries. Presses send nothing.";
 var UPDATE_FAILED = "Last update failed. Items from that reply may be missing.";
@@ -1881,6 +1921,9 @@ function actionsOf(row, last, state) {
 }
 function firstWaiting(rows) {
   return rows.find((r) => r.isWaiting)?.id ?? null;
+}
+function keptOpen(rows, added) {
+  return firstWaiting(rows.filter((r) => !added.includes(r.id)));
 }
 function rowAfterClose(rows, closedId) {
   const at = rows.findIndex((r) => r.id === closedId);
@@ -3072,6 +3115,31 @@ async function openTarget(run, target, root, home) {
   return retry.code === 0 ? null : failure(retry);
 }
 
+// ../hooks/arrivals.ts
+function recordRows(seen, listed) {
+  const next = { ...seen };
+  const added = {};
+  for (const tab of Object.keys(listed)) {
+    const ids = listed[tab];
+    const before = seen[tab];
+    added[tab] = ids && before ? ids.filter((id) => !before.has(id)) : [];
+    if (ids)
+      next[tab] = new Set(ids);
+  }
+  return { seen: next, added };
+}
+function isTabEmpty({
+  rows,
+  settled,
+  closed,
+  hasBlocker
+}) {
+  return !hasBlocker && !rows.some((r) => r.state.is !== "settled" || settled.has(r.id)) && !closed.some((g) => g.isUnfolded && g.rows.some((r) => !settled.has(r.id)));
+}
+function followTo(tabs, shown, isShownEmpty, rows) {
+  return isShownEmpty ? tabs.find((t) => t !== shown && rows[t].length > 0) ?? null : null;
+}
+
 // src/panel.ts
 var INITIAL_UI = {
   tab: "needsYou",
@@ -3080,7 +3148,9 @@ var INITIAL_UI = {
   typing: null,
   drafts: {},
   discarded: {},
-  notice: null
+  notice: null,
+  unfolded: [],
+  resuming: null
 };
 function holdsOf(ui) {
   return { replies: heldReplies(ui.typing, ui.drafts), discarded: ui.discarded };
@@ -3088,6 +3158,26 @@ function holdsOf(ui) {
 var AGENT = "omp";
 var REPLY_KEY = "r";
 var INDENT = 7;
+var STOP_ID = "stop";
+var blankLine = (id) => ({
+  id,
+  depth: 0,
+  lead: { text: "", tone: null },
+  title: "",
+  isDim: false,
+  status: null,
+  age: null,
+  detail: null,
+  file: null,
+  feedback: null,
+  settled: null,
+  buttons: [],
+  row: null,
+  fold: null,
+  isStatic: false,
+  isWaiting: true,
+  isDetailShown: false
+});
 var wrapIndex = (i, n) => (i % n + n) % n;
 function feedbackTone(f) {
   if (isFailure(f))
@@ -3140,65 +3230,135 @@ function lineOfRow(row) {
   const state = row.state;
   const undo = row.actions.find((a) => a.press.action === "undo");
   return {
-    id: row.id,
-    depth: 0,
+    ...blankLine(row.id),
     lead: leadOf(row),
     title: row.title,
     isDim: state.is === "settled",
-    status: null,
     age: row.at,
     detail: row.detail,
     file: row.fileName,
     feedback: feedbackLabel && f ? { text: feedbackLabel, tone: feedbackTone(f) } : null,
     settled: state.is === "settled" ? { label: settledLabel(state.label, state.delivery), undo: state.canUndo && undo ? undo.press : null } : null,
     buttons: state.is === "settled" ? [] : rowButtons(row),
-    row
+    row,
+    isWaiting: isWaitingRow(row)
   };
 }
-function rowEntries(screen, tab) {
-  const { view } = screen;
-  const out = [];
-  const rows = tab === "needsYou" ? [...view.needsYou.questions, ...view.needsYou.tasks] : view.findings.rows;
-  const lineOf = (row) => ({ kind: "row", line: lineOfRow(row) });
-  if (tab === "needsYou")
-    out.push(...rows.map(lineOf));
-  else
-    for (const kind of Object.keys(FINDING_GROUPS)) {
-      const group = rows.filter((r) => r.finding?.kind === kind);
-      if (group.length === 0)
-        continue;
-      out.push({ kind: "heading", text: FINDING_GROUPS[kind].title }, ...group.map(lineOf));
+var settledIn = (g) => new Set(g.rows.filter((r) => r.state.is === "settled").map((r) => r.id));
+var isGroupEmpty = (g) => g.rows.length === 0 && closedTotal(g.closed, settledIn(g)) === 0;
+var closedId = (id) => `closed ${id}`;
+var foldId = (kind) => `fold ${kind}`;
+function closedLines(d) {
+  const canUndo = d.delivery !== null && typeof d.delivery === "object" && d.delivery.canUndo;
+  const undo = {
+    label: "Undo",
+    key: null,
+    press: { id: d.id, action: "undo" },
+    isRecommended: false,
+    isFollowUp: false
+  };
+  return {
+    ...blankLine(closedId(d.id)),
+    depth: 1,
+    lead: { text: d.delivery === null ? CLOSED_MARKS[closedState(d)] : "", tone: null },
+    title: d.title,
+    isDim: true,
+    age: d.at,
+    feedback: { text: settledLabel(capitalized(d.outcome), d.delivery), tone: null },
+    buttons: canUndo ? [undo] : [],
+    isStatic: !canUndo,
+    isWaiting: false
+  };
+}
+function groupEntries(g, unfolded) {
+  const settled = settledIn(g);
+  const total = closedTotal(g.closed, settled);
+  const out = [{ kind: "heading", text: g.title }];
+  out.push(...g.rows.map((row) => ({ kind: "row", line: lineOfRow(row) })));
+  if (g.rows.length === 0)
+    out.push({ kind: "note", text: groupEmptyText(g.title), indent: 3 });
+  if (total === 0)
+    return out;
+  const isUnfolded = unfolded.includes(g.kind);
+  out.push({
+    kind: "row",
+    line: {
+      ...blankLine(foldId(g.kind)),
+      lead: { text: isUnfolded ? "\u25BE" : "\u25B8", tone: "sep" },
+      title: foldLabel(total),
+      isDim: true,
+      fold: g.kind,
+      isWaiting: false
     }
-  if (rows.length === 0) {
-    const empty = emptyText(tab, AGENT);
-    out.push({ kind: "note", text: empty.title, isStrong: true }, { kind: "note", text: empty.hint });
-  }
-  const settledIds = new Set(rows.filter((r) => r.state.is === "settled").map((r) => r.id));
-  const closed = tab === "needsYou" ? [...view.needsYou.closed.questions, ...view.needsYou.closed.tasks] : view.findings.closed;
-  const total = closedTotal(closed, settledIds);
-  if (total > 0)
-    out.push({ kind: "note", text: foldLabel(total) });
+  });
+  if (!isUnfolded)
+    return out;
+  const shown = closedShown(g.closed, settled);
+  out.push(...shown.map((d) => ({ kind: "row", line: closedLines(d) })));
+  const earlier = earlierLabel(total, shown.length);
+  if (earlier)
+    out.push({ kind: "note", text: earlier, indent: 7 });
   return out;
+}
+function stopEntries(screen, ui) {
+  const { stop } = screen;
+  if (!stop)
+    return [];
+  const isResumable = stop.kind === "api-error";
+  const resuming = ui.resuming?.stopAt === stop.at ? ui.resuming : null;
+  const resume = {
+    label: resuming?.is === "sending" ? "Resuming\u2026" : "Resume",
+    key: null,
+    press: { action: "resume" },
+    isRecommended: true,
+    isFollowUp: false
+  };
+  return [
+    {
+      kind: "row",
+      line: {
+        ...blankLine(STOP_ID),
+        lead: { text: "!", tone: "error" },
+        title: "Stopped",
+        status: { text: `${capitalized(stopText(stop))}.`, tone: "error", rest: "" },
+        age: stop.at,
+        detail: isResumable ? null : stopFix(stop),
+        feedback: resuming?.is === "refused" ? { text: `Not sent: ${resuming.why}`, tone: "error" } : null,
+        buttons: isResumable ? [resume] : [],
+        isStatic: !isResumable,
+        isWaiting: isResumable,
+        isDetailShown: true
+      }
+    }
+  ];
+}
+function rowEntries(screen, ui, tab) {
+  const { view } = screen;
+  const groups = tab === "needsYou" ? NEEDS_YOU_GROUPS.map((g) => ({
+    kind: g.kind,
+    title: g.title,
+    rows: view.needsYou[g.list],
+    closed: view.needsYou.closed[g.list].map((d) => ({ ...d, title: d.ask }))
+  })) : Object.keys(FINDING_GROUPS).map((kind) => ({
+    kind,
+    title: FINDING_GROUPS[kind].title,
+    rows: view.findings.rows.filter((r) => r.finding?.kind === kind),
+    closed: view.findings.closed.filter((f) => f.kind === kind).map((f) => ({ ...f, at: f.closedAt }))
+  }));
+  const stops = tab === "needsYou" ? stopEntries(screen, ui) : [];
+  if (groups.every(isGroupEmpty)) {
+    const empty = emptyText(tab, AGENT);
+    return stops.length > 0 ? stops : [
+      { kind: "note", text: empty.title, isStrong: true },
+      { kind: "note", text: empty.hint }
+    ];
+  }
+  return [...stops, ...groups.flatMap((g) => groupEntries(g, ui.unfolded))];
 }
 function prEntries(screen, now) {
   const { prs, lastActions } = screen.view;
   const isSent = threadSentIn(lastActions);
   const out = [];
-  const plain = (id) => ({
-    id,
-    depth: 0,
-    lead: { text: "", tone: null },
-    title: "",
-    isDim: false,
-    status: null,
-    age: null,
-    detail: null,
-    file: null,
-    feedback: null,
-    settled: null,
-    buttons: [],
-    row: null
-  });
   if (screen.isGhMissing)
     out.push({ kind: "note", text: GH_MISSING_TEXT });
   for (const { pr, isSettled } of prs.drawn) {
@@ -3208,7 +3368,7 @@ function prEntries(screen, now) {
       out.push({
         kind: "row",
         line: {
-          ...plain(markId),
+          ...blankLine(markId),
           lead,
           title: pr.title,
           isDim: true,
@@ -3223,7 +3383,7 @@ function prEntries(screen, now) {
     out.push({
       kind: "row",
       line: {
-        ...plain(markId),
+        ...blankLine(markId),
         lead,
         title: pr.title,
         status: { text: head, tone: PR_TONES[status], rest: unlisted.map((r) => ` \xB7 ${r}`).join("") },
@@ -3241,7 +3401,7 @@ function prEntries(screen, now) {
       out.push({
         kind: "row",
         line: {
-          ...plain(id),
+          ...blankLine(id),
           depth: 1,
           lead: { text: "\u2022", tone: "sep" },
           title: text.title,
@@ -3260,7 +3420,7 @@ function prEntries(screen, now) {
       out.push({
         kind: "row",
         line: {
-          ...plain(id),
+          ...blankLine(id),
           depth: 1,
           lead: { text: "\u2022", tone: "sep" },
           title: c.name,
@@ -3281,17 +3441,18 @@ function pressFeedback(screen, id, now) {
   const f = feedbackOf(id, screen.view.lastActions[id], undefined, screen.view.turns, now);
   return f ? { text: feedbackText(f, AGENT), tone: feedbackTone(f) } : null;
 }
-function entriesOf(screen, tab, now) {
-  return tab === "prs" ? prEntries(screen, now) : rowEntries(screen, tab);
+function entriesOf(screen, ui, tab, now) {
+  return tab === "prs" ? prEntries(screen, now) : rowEntries(screen, ui, tab);
 }
 var linesOf = (entries) => entries.flatMap((e) => e.kind === "row" ? [e.line] : []);
-var isSelectable = (line) => line.settled === null;
+var waitsOf = (lines) => lines.map((l) => ({ id: l.id, isWaiting: isSelectable(l) && l.isWaiting }));
+var isSelectable = (line) => line.settled === null && !line.isStatic;
 function resolveSelected(lines, selectedId) {
   const selectable = lines.filter(isSelectable);
   const current = lines.find((l) => l.id === selectedId);
   if (current && isSelectable(current))
     return current;
-  const waits = lines.map((l) => ({ id: l.id, isWaiting: l.row ? isWaitingRow(l.row) : isSelectable(l) }));
+  const waits = waitsOf(lines);
   const nextId = (current ? rowAfterClose(waits, current.id) : null) ?? firstWaiting(waits);
   return lines.find((l) => l.id === nextId) ?? selectable[0] ?? null;
 }
@@ -3302,8 +3463,15 @@ var focusOf = (line, ui) => ui.focus?.rowId === line.id ? Math.min(ui.focus.inde
 function withSelection(ui, id) {
   return { ...ui, selectedId: id, focus: null };
 }
-function activate(ui, line, button, now) {
+function activate(screen, ui, line, button, now) {
   const { press: press2 } = button;
+  if (press2.action === "resume") {
+    const { stop } = screen;
+    const isSending = ui.resuming?.is === "sending" && ui.resuming.stopAt === stop?.at;
+    if (!stop || isSending)
+      return { ui };
+    return { ui: { ...ui, focus: null, resuming: { stopAt: stop.at, is: "sending" } }, press: press2 };
+  }
   if (!("ref" in press2) && press2.action === "type") {
     const draft = ui.drafts[line.id] ?? { text: "", since: now };
     return { ui: { ...ui, typing: line.id, focus: null, drafts: { ...ui.drafts, [line.id]: draft } } };
@@ -3335,7 +3503,7 @@ function typingKey(ui, id, key, now, text) {
   return { ui };
 }
 function handleKey(screen, ui, key, now, text) {
-  const lines = linesOf(entriesOf(screen, ui.tab, now));
+  const lines = linesOf(entriesOf(screen, ui, ui.tab, now));
   const selected = resolveSelected(lines, ui.selectedId);
   const base = { ...ui, selectedId: selected?.id ?? null };
   if (base.typing !== null)
@@ -3363,6 +3531,11 @@ function handleKey(screen, ui, key, now, text) {
       return { ui: withSelection(base, undoable.id), press: press2 };
     return { ui: base };
   }
+  if (selected?.fold && key === "enter") {
+    const kind = selected.fold;
+    const unfolded = base.unfolded.includes(kind) ? base.unfolded.filter((k) => k !== kind) : [...base.unfolded, kind];
+    return { ui: { ...base, unfolded } };
+  }
   if (!selected || selected.buttons.length === 0)
     return { ui: base };
   if (key === "left" || key === "right") {
@@ -3370,7 +3543,49 @@ function handleKey(screen, ui, key, now, text) {
     return { ui: { ...base, focus: { rowId: selected.id, index } } };
   }
   const button = key === "enter" ? selected.buttons[focusOf(selected, base)] : selected.buttons.find((b) => b.key === key);
-  return button ? activate(base, selected, button, now) : { ui: base };
+  return button ? activate(screen, base, selected, button, now) : { ui: base };
+}
+function tabRows(screen, now) {
+  const { view } = screen;
+  const needsYou = [...view.needsYou.questions, ...view.needsYou.tasks];
+  const openIds = (rows) => rows.filter((r) => r.state.is !== "settled").map((r) => r.id);
+  return {
+    listed: {
+      needsYou: needsYou.map((r) => r.id),
+      findings: view.findings.rows.map((r) => r.id),
+      prs: screen.isFetchingPrs ? null : linesOf(prEntries(screen, now)).map((l) => l.id)
+    },
+    open: { needsYou: openIds(needsYou), findings: openIds(view.findings.rows), prs: [] }
+  };
+}
+function isShownEmpty(screen, ui) {
+  const { view } = screen;
+  if (ui.tab === "prs")
+    return view.prs.drawn.length === 0 && !screen.isFetchingPrs;
+  const rows = ui.tab === "needsYou" ? [...view.needsYou.questions, ...view.needsYou.tasks] : view.findings.rows;
+  const closed = ui.tab === "needsYou" ? NEEDS_YOU_GROUPS.map((g) => ({ isUnfolded: ui.unfolded.includes(g.kind), rows: view.needsYou.closed[g.list] })) : Object.keys(FINDING_GROUPS).map((kind) => ({
+    isUnfolded: ui.unfolded.includes(kind),
+    rows: view.findings.closed.filter((f) => f.kind === kind)
+  }));
+  return isTabEmpty({
+    rows,
+    settled: new Set(rows.filter((r) => r.state.is === "settled").map((r) => r.id)),
+    closed,
+    hasBlocker: ui.tab === "needsYou" && screen.stop !== null
+  });
+}
+function followRows(screen, ui, seen, isOpening, now) {
+  const { listed, open } = tabRows(screen, now);
+  const recorded2 = recordRows(seen, listed);
+  const tabs = TABS.map((t) => t.id);
+  const to = followTo(tabs, ui.tab, isShownEmpty(screen, ui), isOpening ? open : recorded2.added);
+  if (to)
+    return { ui: { ...withSelection(ui, null), tab: to }, seen: recorded2.seen };
+  const arrived = recorded2.added[ui.tab];
+  if (ui.selectedId !== null || arrived.length === 0)
+    return { ui, seen: recorded2.seen };
+  const kept = keptOpen(waitsOf(linesOf(entriesOf(screen, ui, ui.tab, now))), arrived);
+  return { ui: kept === null ? ui : { ...ui, selectedId: kept }, seen: recorded2.seen };
 }
 function isAnimating(screen, ui, now) {
   const { view } = screen;
@@ -3479,11 +3694,13 @@ function drawLine(line, isSelected, d) {
   const cursor = isSelected ? s.tone("accent", "\u25B8") : " ";
   const age = line.age !== null && line.settled === null ? s.dim(ago(now - line.age)) : "";
   out.push(spread(` ${" ".repeat(pad)}${cursor} ${leadText(line.lead, s)} ${title}${status}${after}`, `${age} `, width));
-  if (!isSelected || line.settled)
+  if (line.settled)
     return out;
   const indent = INDENT + pad;
-  if (line.detail)
+  if (line.detail && (isSelected || line.isDetailShown))
     out.push(...indented(line.detail, indent, width, 4, s.dim));
+  if (!isSelected)
+    return out;
   if (line.file)
     out.push(" ".repeat(indent) + s.tone("accent", line.file));
   if (line.buttons.length > 0)
@@ -3526,7 +3743,7 @@ function footer(d) {
 }
 function render(screen, ui, width, now, style, height) {
   const d = { screen, ui, width, now, style };
-  const entries = entriesOf(screen, ui.tab, now);
+  const entries = entriesOf(screen, ui, ui.tab, now);
   const selected = resolveSelected(linesOf(entries), ui.selectedId);
   const head = [tabBar(d), style.dim("\u2500".repeat(width))];
   const body = [];
@@ -3535,7 +3752,7 @@ function render(screen, ui, width, now, style, height) {
     if (e.kind === "heading")
       body.push(` ${style.bold(e.text)}`);
     else if (e.kind === "note")
-      body.push(...indented(e.text, 1, width, 3, e.isStrong ? style.bold : style.dim));
+      body.push(...indented(e.text, e.indent ?? 1, width, 3, e.isStrong ? style.bold : style.dim));
     else {
       const isSelected = e.line.id === selected?.id;
       const start = body.length;
@@ -3562,11 +3779,16 @@ function scrolled(body, selectedAt, room, s) {
     clip2[clip2.length - 1] = s.dim(`  \u2193 ${body.length - end} more lines`);
   return clip2;
 }
-function bandLine(screen, width, style) {
+function bandLines(screen, width, now, style) {
   const { needsYou, findings } = screen.view;
   const counts = TABS.filter((t) => t.id !== "prs").map((t) => ({ t, count: t.id === "needsYou" ? needsYou.count : findings.count })).filter((x) => x.count > 0).map((x) => `${style.dim(x.t.label)} ${style.tone(x.t.id, String(x.count))}`);
   const left = ` ${counts.length > 0 ? counts.join(` ${style.tone("sep", "\xB7")} `) : style.dim("Nothing needs you")}`;
-  return spread(left, style.dim("/inbox to open "), width);
+  const countLine = spread(left, style.dim("/inbox to open "), width);
+  const { stop } = screen;
+  if (!stop)
+    return [countLine];
+  const stopLine = ` ${style.tone("error", `Stopped ${ago(now - stop.at)}:`)} ${stopText(stop)}. ${style.dim(stopFix(stop))}`;
+  return [countLine, fit(stopLine, width)];
 }
 
 // src/controller.ts
@@ -3578,6 +3800,8 @@ function createPanel(deps) {
   let screen = null;
   let animation = null;
   let version = 0;
+  let seen = {};
+  let isOpening = true;
   const stops = [];
   const syncAnimation = () => {
     const isMoving = screen !== null && isAnimating(screen, ui, deps.now());
@@ -3594,10 +3818,22 @@ function createPanel(deps) {
     if (mine !== version || next === null)
       return;
     screen = next;
+    const followed = followRows(next, ui, seen, isOpening, deps.now());
+    ui = followed.ui;
+    seen = followed.seen;
+    isOpening = false;
     syncAnimation();
     deps.requestRender();
   }
+  async function resume() {
+    const why = await source.resume().catch((err) => err instanceof Error ? err.message : String(err));
+    if (why !== null && ui.resuming?.is === "sending")
+      ui = { ...ui, resuming: { stopAt: ui.resuming.stopAt, is: "refused", why } };
+    await refresh();
+  }
   async function press2(p) {
+    if (p.action === "resume")
+      return resume();
     const outcome = await source.press(p, holdsOf(ui)).catch((err) => ({
       error: err instanceof Error ? err.message : String(err),
       note: null
@@ -4026,7 +4262,7 @@ function demoView(now) {
 import { mkdir, readdir, readFile, rename, stat as stat2, unlink, writeFile } from "fs/promises";
 import { join } from "path";
 function emptyState(sessionId) {
-  return { version: 1, sessionId, ...emptySession() };
+  return { version: 1, sessionId, ...emptySession(), stop: null };
 }
 function fileName(sessionId) {
   if (!/^[\w-]{1,100}$/.test(sessionId))
@@ -4060,7 +4296,8 @@ function upgraded(saved, sessionId) {
     })),
     lastActions: upgradeLastActions(saved.lastActions ?? {}),
     heldRows: saved.heldRows ?? [],
-    prViews: { ...NO_PRS, ...saved.prViews, isFetching: false }
+    prViews: { ...NO_PRS, ...saved.prViews, isFetching: false },
+    stop: saved.stop ?? null
   };
 }
 async function readState(dir, sessionId) {
@@ -4165,6 +4402,7 @@ function demoSource(deps) {
       modelName: null,
       isGhMissing: false,
       isFetchingPrs: false,
+      stop: null,
       isDemo: true
     }),
     press: async (p, holds) => {
@@ -4187,6 +4425,7 @@ function demoSource(deps) {
       changed();
       return { error: null, note: isSample ? "sample" : null };
     },
+    resume: async () => null,
     fetchPrsWhenDue: () => {},
     onChange: (listener) => {
       listeners.add(listener);
@@ -4216,6 +4455,10 @@ async function defaultComplete(model, context, options) {
   const { completeSimple } = await import("@oh-my-pi/pi-ai");
   return completeSimple(model, context, options);
 }
+async function isUsageLimitOutcome(status, message) {
+  const ai = await import("@oh-my-pi/pi-ai");
+  return ai.isUsageLimitOutcome(status, message);
+}
 async function copyToClipboard(text) {
   const candidates = process.platform === "darwin" ? [["pbcopy"]] : process.platform === "win32" ? [["clip"]] : [["wl-copy"], ["xclip", "-selection", "clipboard"]];
   for (const argv of candidates) {
@@ -4239,7 +4482,8 @@ var defaultDeps = {
   copy: copyToClipboard,
   background: (work) => void work.catch(() => {
     return;
-  })
+  }),
+  isUsageLimit: isUsageLimitOutcome
 };
 var messageOf = (err) => err instanceof Error ? err.message : String(err);
 function isUnattended(ctx) {
@@ -4258,14 +4502,35 @@ function textOfBlocks(content) {
   return content.flatMap((b) => b.type === "text" && typeof b.text === "string" ? [b.text] : []).join(`
 `);
 }
-function lastAssistantText(messages2) {
+function lastAssistant(messages2) {
   for (let i = messages2.length - 1;i >= 0; i -= 1) {
     const m = messages2[i];
-    if (m?.role !== "assistant" || !Array.isArray(m.content))
-      continue;
-    return textOfBlocks(m.content);
+    if (m?.role === "assistant" && Array.isArray(m.content))
+      return m;
   }
-  return "";
+  return null;
+}
+function apiErrorDetail(status, message) {
+  if (status === 429)
+    return "rate_limit";
+  if (status === 503 || status === 529)
+    return "overloaded";
+  if (status !== undefined)
+    return String(status);
+  return clip(message.split(`
+`)[0]?.trim() || "no status", 60);
+}
+async function stopOf(reply, isUsageLimit, at) {
+  if (reply?.stopReason !== "error")
+    return null;
+  const message = typeof reply.errorMessage === "string" ? reply.errorMessage : "";
+  const status = typeof reply.errorStatus === "number" ? reply.errorStatus : undefined;
+  const detail = status === undefined ? "" : String(status);
+  if (await isUsageLimit(status, message).catch(() => false))
+    return { kind: "usage-limit", detail, resets: null, at };
+  if (status === 401 || status === 403)
+    return { kind: "sign-in", detail, resets: null, at };
+  return { kind: "api-error", detail: apiErrorDetail(status, message), resets: null, at };
 }
 function userText(content) {
   return typeof content === "string" ? content : textOfBlocks(content);
@@ -4328,6 +4593,14 @@ function createInbox(pi, deps = defaultDeps) {
     }
   };
   const gh = ghFinder(run);
+  const sendToAgent = (ctx, text) => {
+    try {
+      pi.sendUserMessage(text, ctx.isIdle() ? undefined : { deliverAs: "followUp" });
+      return null;
+    } catch (err) {
+      return messageOf(err);
+    }
+  };
   function askFor(ctx, id) {
     return async (prompt) => {
       const model = inboxModel(ctx);
@@ -4359,12 +4632,8 @@ function createInbox(pi, deps = defaultDeps) {
       exclusive: (fn) => exclusiveRun(dir, id, fn),
       ask: askFor(ctx, id),
       deliver: async (_s, text) => {
-        try {
-          pi.sendUserMessage(text, ctx.isIdle() ? undefined : { deliverAs: "followUp" });
-          return { state: "accepted", queuedId: null };
-        } catch (err) {
-          return { state: "rejected", reason: messageOf(err) };
-        }
+        const why = sendToAgent(ctx, text);
+        return why === null ? { state: "accepted", queuedId: null } : { state: "rejected", reason: why };
       },
       perform: async (_s, effect) => effect.kind === "copy" ? deps.copy(effect.text) : openTarget(run, effect.target, ctx.cwd, deps.home),
       gh: {
@@ -4465,8 +4734,13 @@ function createInbox(pi, deps = defaultDeps) {
       } : {}
     };
   });
-  pi.on("turn_start", () => {
+  pi.on("turn_start", async (_event, ctx) => {
     noted = null;
+    if (isUnattended(ctx))
+      return;
+    await change(sessionIdOf(ctx), (s) => s.stop ? { ...s, stop: null } : s).catch(() => {
+      return;
+    });
   });
   const noteQuietly = async (ctx, line) => {
     if (!line)
@@ -4516,8 +4790,10 @@ function createInbox(pi, deps = defaultDeps) {
       return;
     prepare(ctx);
     const id = sessionIdOf(ctx);
-    const reply = lastAssistantText(event.messages);
-    const written = await change(id, (s) => endTurn(OMP, s, reply, openPanels.has(id))).catch(() => null);
+    const last = lastAssistant(event.messages);
+    const reply = last ? textOfBlocks(last.content) : "";
+    const stop = await stopOf(last, deps.isUsageLimit, deps.now());
+    const written = await change(id, (s) => ({ ...endTurn(OMP, s, reply, openPanels.has(id)), stop })).catch(() => null);
     if (!written)
       return;
     const host = hostFor(ctx);
@@ -4555,11 +4831,13 @@ function createInbox(pi, deps = defaultDeps) {
   const inbox = {
     screen: async (ctx, holds = NO_HOLDS) => {
       const id = sessionIdOf(ctx);
+      const s = await readState(dir, id);
       return {
-        view: sessionView(await readState(dir, id), deps.now(), deps.settleWindowMs, holds),
+        view: sessionView(s, deps.now(), deps.settleWindowMs, holds),
         modelName: modelNameOf(ctx),
         isGhMissing,
-        isFetchingPrs: fetchingPrs.has(id)
+        isFetchingPrs: fetchingPrs.has(id),
+        stop: s.stop
       };
     },
     openPanel: async (ctx) => {
@@ -4585,7 +4863,8 @@ function createInbox(pi, deps = defaultDeps) {
       if (outcome.wakesForDone)
         wakeLater(ctx);
       return outcome;
-    }
+    },
+    resume: (ctx) => sendToAgent(ctx, RESUME_TEXT)
   };
   const liveSource = (ctx) => ({
     screen: (holds) => inbox.screen(ctx, holds),
@@ -4593,6 +4872,7 @@ function createInbox(pi, deps = defaultDeps) {
       const outcome = await inbox.press(ctx, p, holds);
       return { error: outcome.error, note: outcome.note };
     },
+    resume: async () => inbox.resume(ctx),
     fetchPrsWhenDue: () => inbox.fetchPrsWhenDue(ctx),
     onChange: (listener) => inbox.onChange(ctx, listener)
   });
@@ -4612,7 +4892,7 @@ function createInbox(pi, deps = defaultDeps) {
       refresh();
       const stop = inbox.onChange(ctx, () => void refresh());
       return {
-        render: (width) => screen ? [bandLine(screen, width, style)] : [],
+        render: (width) => screen ? bandLines(screen, width, deps.now(), style) : [],
         invalidate: () => {},
         dispose: stop
       };
@@ -4674,6 +4954,7 @@ function host_default(pi) {
 }
 export {
   styleOf,
+  stopOf,
   inboxModel,
   host_default as default,
   createInbox

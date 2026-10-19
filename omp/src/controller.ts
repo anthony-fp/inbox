@@ -1,6 +1,8 @@
+import type { PrPress } from '../../hooks/pr-tab'
+import type { RowPress } from '../../hooks/presses'
 import type { ReplyHolds } from '../../hooks/view'
-import { INITIAL_UI, handleKey, holdsOf, isAnimating, noticeFor, render } from './panel'
-import type { PanelPress, PanelScreen, PanelUi, Style } from './panel'
+import { INITIAL_UI, followRows, handleKey, holdsOf, isAnimating, noticeFor, render } from './panel'
+import type { PanelPress, PanelScreen, PanelUi, SeenRows, Style } from './panel'
 
 const ANIMATION_MS = 200
 const PRS_CHECK_MS = 120_000
@@ -8,7 +10,9 @@ const PRS_CHECK_MS = 120_000
 /** What the panel needs from a session, so the live inbox and the demo can both supply it. */
 export type PanelSource = {
   screen(holds: ReplyHolds): Promise<PanelScreen>
-  press(p: PanelPress, holds: ReplyHolds): Promise<{ error: string | null; note: 'stale' | 'sample' | null }>
+  press(p: RowPress | PrPress, holds: ReplyHolds): Promise<{ error: string | null; note: 'stale' | 'sample' | null }>
+  /** Sends the message that resumes a stopped turn. Returns why it could not, or null. */
+  resume(): Promise<string | null>
   fetchPrsWhenDue(): void
   /** Calls `listener` after the session's saved state changes. Returns how to stop. */
   onChange(listener: () => void): () => void
@@ -44,6 +48,8 @@ export function createPanel(deps: PanelDeps): Panel {
   let screen: PanelScreen | null = null
   let animation: unknown = null
   let version = 0
+  let seen: SeenRows = {}
+  let isOpening = true
   const stops: (() => void)[] = []
 
   const syncAnimation = () => {
@@ -60,11 +66,23 @@ export function createPanel(deps: PanelDeps): Panel {
     const next = await source.screen(holdsOf(ui)).catch(() => null)
     if (mine !== version || next === null) return
     screen = next
+    const followed = followRows(next, ui, seen, isOpening, deps.now())
+    ui = followed.ui
+    seen = followed.seen
+    isOpening = false
     syncAnimation()
     deps.requestRender()
   }
 
+  async function resume(): Promise<void> {
+    const why = await source.resume().catch((err: unknown) => (err instanceof Error ? err.message : String(err)))
+    if (why !== null && ui.resuming?.is === 'sending')
+      ui = { ...ui, resuming: { stopAt: ui.resuming.stopAt, is: 'refused', why } }
+    await refresh()
+  }
+
   async function press(p: PanelPress): Promise<void> {
+    if (p.action === 'resume') return resume()
     const outcome = await source.press(p, holdsOf(ui)).catch((err: unknown) => ({
       error: err instanceof Error ? err.message : String(err),
       note: null,

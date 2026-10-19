@@ -49,13 +49,14 @@ Capture each result and read the capture. A ✓ on a row lasts a few seconds bef
 | Resume | Resume the session in Claude Code, or reopen the thread in Codex. Then ask a new question. | The rows come back, and the agent can still record. |
 | Agent replies | Read the agent's replies throughout the pass. | No reply shows an inbox id, such as `i3` or `f4`. |
 
-In omp, run the pass with a fresh `HOME` set on each command, so it cannot touch your real `~/.omp`. Install from the marketplace instead of with `-e`: `omp plugin marketplace add <repo path or GitHub repo>`, then `omp plugin install inbox@inbox-omp`. Run the Question, Task, Finding, Reply while closing, PRs, Resume and Agent replies rows, and these:
+In omp, run the pass with a fresh `HOME` set on each command, so it cannot touch your real `~/.omp`. Install from the marketplace instead of with `-e`: `omp plugin marketplace add <repo path or GitHub repo>`, then `omp plugin install inbox@inbox-omp`. A fresh `HOME` opens omp's setup first: press Escape until the prompt shows. Run the Question, Task, Finding, Reply while closing, PRs, Resume and Agent replies rows, and these:
 
 | Check | Do | Expect |
 | --- | --- | --- |
 | Band | Start omp in the sample project. | The band shows above the prompt and names `/inbox`. |
 | Panel | Run `/inbox`, switch tabs with Tab and `1`, `2` and `3`, and close with Escape. | The panel opens over the band and shows each tab. The band returns on close. |
 | Press that sends | Press an answer on a question row. | The agent receives your message, and the row shows its ✓. |
+| Closed list | Close a question, select its group's Closed line, and press Enter twice. | The closed row shows under the line, then folds away. |
 
 In Codex, also check that old session files are deleted. Put more than 40 session files in a copy of the data folder, start a session, and confirm that only the oldest ones are gone.
 

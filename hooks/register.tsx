@@ -107,9 +107,7 @@ import {
   resetTime,
   readCommandRow,
   statusLine,
-  stopFix,
   stopKindOf,
-  stopText,
   transcriptText,
   TURN_BOX_TOOL,
   turnBoxText,
@@ -140,6 +138,10 @@ import type { Effect, EffectHost, RowPress } from './presses'
 import {
   closedShown,
   DOT,
+  NEEDS_YOU_GROUPS,
+  RESUME_TEXT,
+  stopFix,
+  stopText,
   drawnLists,
   emptyText,
   ROW_TABS,
@@ -529,10 +531,6 @@ function paletteFor(theme: string, look: ModLook): Palette {
 const TAB_PAD = '  '
 const INLINE_RAIL_AT = 80
 const RAIL_GUTTER = 2
-const NEEDS_YOU_GROUPS: { kind: Item['kind']; title: string; list: 'questions' | 'tasks' }[] = [
-  { kind: 'question', title: 'Questions', list: 'questions' },
-  { kind: 'task', title: 'Tasks', list: 'tasks' },
-]
 const FOLD_KINDS: FoldKind[] = [...NEEDS_YOU_GROUPS.map(g => g.kind), 'issue', 'opportunity']
 const MODEL = 'sonnet'
 const AWAY_MS = 15 * 60_000
@@ -753,7 +751,7 @@ async function resume($: EngineInterface) {
   resuming = { is: 'sending' }
   await redraw()
   if (id !== sessionId || at !== conversation || generation !== stopGeneration) return
-  const sent = await send($, 'Continue')
+  const sent = await send($, RESUME_TEXT)
   if ('notSent' in sent && id === sessionId && at === conversation && generation === stopGeneration) {
     resuming = { is: 'refused', why: sent.notSent }
     await redraw()

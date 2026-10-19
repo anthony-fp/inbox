@@ -9,6 +9,7 @@ import type {
   LocalResult,
   PressKind,
   RowNote,
+  Stop,
   Tab,
   Turns,
 } from '../types'
@@ -49,6 +50,11 @@ export const FINDING_GROUPS: Record<Finding['kind'], { title: string; mark: stri
   issue: { title: 'Issues', mark: '▲', tone: 'issue' },
   opportunity: { title: 'Opportunities', mark: '✦', tone: 'done' },
 }
+
+export const NEEDS_YOU_GROUPS: { kind: Item['kind']; title: string; list: 'questions' | 'tasks' }[] = [
+  { kind: 'question', title: 'Questions', list: 'questions' },
+  { kind: 'task', title: 'Tasks', list: 'tasks' },
+]
 
 export const CLOSED_MARKS: Record<ClosedState, string> = { handled: '✓', dismissed: '✕', lapsed: '–' }
 
@@ -246,6 +252,39 @@ export function shortAgo(ms: number): string {
 
 export function groupEmptyText(title: string): string {
   return `No open ${title.toLowerCase()}`
+}
+
+/** The message Resume sends after an API error stopped a turn. */
+export const RESUME_TEXT = 'Continue'
+
+export function stopText(stop: Stop): string {
+  switch (stop.kind) {
+    case 'sign-in':
+      return 'sign-in expired'
+    case 'billing':
+      return 'billing problem'
+    case 'usage-limit':
+      return 'usage limit reached'
+    default:
+      return stop.detail === 'rate_limit'
+        ? 'the API is limiting requests'
+        : stop.detail === 'overloaded'
+          ? 'the API is overloaded'
+          : `API error (${stop.detail})`
+  }
+}
+
+export function stopFix(stop: Stop): string {
+  switch (stop.kind) {
+    case 'sign-in':
+      return 'Run /login, then send a message to resume.'
+    case 'billing':
+      return 'Check billing in the Claude console, then resume.'
+    case 'usage-limit':
+      return stop.resets ? `Resume after ${stop.resets}.` : 'Resume when the limit resets.'
+    default:
+      return 'Send a message to resume.'
+  }
 }
 
 export const DEMO_NOTICE = 'Sample entries. Presses send nothing.'

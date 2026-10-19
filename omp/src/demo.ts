@@ -35,6 +35,7 @@ export function demoSource(deps: {
       modelName: null,
       isGhMissing: false,
       isFetchingPrs: false,
+      stop: null,
       isDemo: true,
     }),
     press: async (p, holds) => {
@@ -57,6 +58,7 @@ export function demoSource(deps: {
 
       return { error: null, note: isSample ? 'sample' : null }
     },
+    resume: async () => null,
     fetchPrsWhenDue: () => {},
     onChange: listener => {
       listeners.add(listener)

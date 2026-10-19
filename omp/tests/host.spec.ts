@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { guidanceText, systemText } from '../../hooks/model-text'
 import { NO_HOLDS } from '../../hooks/view'
-import { createInbox } from '../src/host'
+import { createInbox, stopOf } from '../src/host'
 import type { HostDeps } from '../src/host'
 import { OMP } from '../src/texts'
 
@@ -103,6 +103,7 @@ const deps = (): HostDeps => ({
   background: work => {
     background.push(work.catch(() => undefined))
   },
+  isUsageLimit: async (_status, message) => /usage limit/i.test(message),
 })
 
 const settle = async () => {
@@ -660,4 +661,46 @@ test('/inbox demo draws the shared demo data and sends nothing', async () => {
   panel.handleInput('\x1b')
   await opened
   panel.dispose()
+})
+
+const endOnError = (fields: Record<string, unknown>) =>
+  call('agent_end', {
+    type: 'agent_end',
+    messages: [{ role: 'assistant', content: [], stopReason: 'error', ...fields }],
+  })
+
+test('a turn that ends on an error saves why it stopped, and the next turn clears it', async () => {
+  const inbox = createInbox(pi(), deps())
+  await prompt('Add a greeting CLI')
+  await endOnError({ errorStatus: 401, errorMessage: 'invalid x-api-key' })
+  await settle()
+  expect((await inbox.screen(makeCtx())).stop).toMatchObject({ kind: 'sign-in', detail: '401' })
+  await call('turn_start', { type: 'turn_start' })
+  expect(state().stop).toBeNull()
+})
+
+test('a stop is a usage limit, a sign-in or an API error, from the failed message', async () => {
+  const isUsageLimit = deps().isUsageLimit
+  const kindOf = async (fields: Record<string, unknown>) =>
+    stopOf({ role: 'assistant', content: [], stopReason: 'error', ...fields }, isUsageLimit, 5)
+  expect(await kindOf({ errorStatus: 429, errorMessage: 'You have hit your usage limit' })).toMatchObject({
+    kind: 'usage-limit',
+  })
+  expect(await kindOf({ errorStatus: 403, errorMessage: 'forbidden' })).toMatchObject({ kind: 'sign-in' })
+  expect(await kindOf({ errorStatus: 529, errorMessage: 'Overloaded' })).toMatchObject({
+    kind: 'api-error',
+    detail: 'overloaded',
+  })
+  expect(await kindOf({ errorMessage: 'socket hang up\nat fetch' })).toMatchObject({
+    kind: 'api-error',
+    detail: 'socket hang up',
+  })
+  expect(await stopOf({ role: 'assistant', content: [], stopReason: 'aborted' }, isUsageLimit, 5)).toBeNull()
+})
+
+test('Resume sends Continue to the agent', () => {
+  const inbox = createInbox(pi(), deps())
+  isIdle = true
+  expect(inbox.resume(makeCtx())).toBeNull()
+  expect(sent).toEqual([{ text: 'Continue', options: undefined }])
 })

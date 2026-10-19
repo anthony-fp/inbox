@@ -17,17 +17,19 @@ import { fetchPrs, isPrFetchDue, press, reconcileUpdateStatus, runUpdates, wakeF
 import type { PressOutcome, SessionHost } from '../../hooks/session-host'
 import { CLOSE_DESCRIPTION, CLOSE_SCHEMA, RECORD_SCHEMA, recordDescription } from '../../hooks/tools'
 import { DARK_TONES, LIGHT_TONES } from '../../hooks/tones'
-import { NO_HOLDS, SETTLED_MS } from '../../hooks/view'
+import { clip } from '../../hooks/text'
+import { NO_HOLDS, RESUME_TEXT, SETTLED_MS } from '../../hooks/view'
 import type { ReplyHolds } from '../../hooks/view'
 import { openTarget } from './commands'
 import { createPanel } from './controller'
 import type { PanelSource } from './controller'
 import { demoSource } from './demo'
-import { bandLine } from './panel'
+import { bandLines } from './panel'
 import type { Style, Tone } from './panel'
 import { exclusiveRun, pruneSessions, readState, updateState } from './state'
 import type { OmpState } from './state'
 import { OMP } from './texts'
+import type { Stop } from '../../types'
 
 const INBOX_MODEL_TIMEOUT_MS = 120_000
 /** Added to the settle window so the timer fires after the window has fully passed. */
@@ -55,6 +57,8 @@ export type HostDeps = {
   copy: (text: string) => Promise<string | null>
   /** Runs work the handler that started it does not wait for. */
   background: (work: Promise<unknown>) => void
+  /** Whether a failed request hit the account's usage limit, by omp's own rule. */
+  isUsageLimit: (status: number | undefined, message: string) => Promise<boolean>
 }
 
 /** The view a look draws, with the facts about the host that the shared view does not hold. */
@@ -64,6 +68,7 @@ export type InboxScreen = {
   modelName: string | null
   isGhMissing: boolean
   isFetchingPrs: boolean
+  stop: Stop | null
 }
 
 /** What a panel needs from the host. */
@@ -77,6 +82,8 @@ export type Inbox = {
   onChange(ctx: ExtensionContext, listener: () => void): () => void
   /** Applies a press for the session. `isStale` is true when the panel drew the press for another session. */
   press(ctx: ExtensionContext, p: RowPress | PrPress, holds: ReplyHolds, isStale?: boolean): Promise<PressOutcome>
+  /** Sends the message that resumes a stopped turn. Returns why it could not, or null. */
+  resume(ctx: ExtensionContext): string | null
 }
 
 async function defaultComplete(
@@ -87,6 +94,12 @@ async function defaultComplete(
   const { completeSimple } = await import('@oh-my-pi/pi-ai')
 
   return completeSimple(model, context, options)
+}
+
+async function isUsageLimitOutcome(status: number | undefined, message: string): Promise<boolean> {
+  const ai = await import('@oh-my-pi/pi-ai')
+
+  return ai.isUsageLimitOutcome(status, message)
 }
 
 async function copyToClipboard(text: string): Promise<string | null> {
@@ -117,6 +130,7 @@ const defaultDeps: HostDeps = {
   complete: defaultComplete,
   copy: copyToClipboard,
   background: work => void work.catch(() => undefined),
+  isUsageLimit: isUsageLimitOutcome,
 }
 
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err))
@@ -155,16 +169,39 @@ function textOfBlocks(content: unknown): string {
     .join('\n')
 }
 
-/** The last assistant message's text. */
-function lastAssistantText(messages: readonly unknown[]): string {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const m = messages[i] as { role?: unknown; content?: unknown } | undefined
-    if (m?.role !== 'assistant' || !Array.isArray(m.content)) continue
+type Reply = { role?: unknown; content?: unknown; stopReason?: unknown; errorMessage?: unknown; errorStatus?: unknown }
 
-    return textOfBlocks(m.content)
+function lastAssistant(messages: readonly unknown[]): Reply | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i] as Reply | undefined
+    if (m?.role === 'assistant' && Array.isArray(m.content)) return m
   }
 
-  return ''
+  return null
+}
+
+function apiErrorDetail(status: number | undefined, message: string): string {
+  if (status === 429) return 'rate_limit'
+  if (status === 503 || status === 529) return 'overloaded'
+  if (status !== undefined) return String(status)
+
+  return clip(message.split('\n')[0]?.trim() || 'no status', 60)
+}
+
+/** Why a turn stopped, from its last assistant message. Null when the turn did not end on an error. */
+export async function stopOf(
+  reply: Reply | null,
+  isUsageLimit: HostDeps['isUsageLimit'],
+  at: number,
+): Promise<Stop | null> {
+  if (reply?.stopReason !== 'error') return null
+  const message = typeof reply.errorMessage === 'string' ? reply.errorMessage : ''
+  const status = typeof reply.errorStatus === 'number' ? reply.errorStatus : undefined
+  const detail = status === undefined ? '' : String(status)
+  if (await isUsageLimit(status, message).catch(() => false)) return { kind: 'usage-limit', detail, resets: null, at }
+  if (status === 401 || status === 403) return { kind: 'sign-in', detail, resets: null, at }
+
+  return { kind: 'api-error', detail: apiErrorDetail(status, message), resets: null, at }
 }
 
 /** The text of a user message. */
@@ -263,6 +300,17 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
   }
   const gh = ghFinder(run)
 
+  /** Sends text to the agent as if the person typed it. Returns why it could not, or null. */
+  const sendToAgent = (ctx: ExtensionContext, text: string): string | null => {
+    try {
+      pi.sendUserMessage(text, ctx.isIdle() ? undefined : { deliverAs: 'followUp' })
+
+      return null
+    } catch (err) {
+      return messageOf(err)
+    }
+  }
+
   function askFor(ctx: ExtensionContext, id: string): SessionHost<OmpState>['ask'] {
     return async prompt => {
       const model = inboxModel(ctx)
@@ -298,13 +346,9 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
       exclusive: fn => exclusiveRun(dir, id, fn),
       ask: askFor(ctx, id),
       deliver: async (_s, text) => {
-        try {
-          pi.sendUserMessage(text, ctx.isIdle() ? undefined : { deliverAs: 'followUp' })
+        const why = sendToAgent(ctx, text)
 
-          return { state: 'accepted', queuedId: null }
-        } catch (err) {
-          return { state: 'rejected', reason: messageOf(err) }
-        }
+        return why === null ? { state: 'accepted', queuedId: null } : { state: 'rejected', reason: why }
       },
       perform: async (_s, effect) =>
         effect.kind === 'copy' ? deps.copy(effect.text) : openTarget(run, effect.target, ctx.cwd, deps.home),
@@ -414,8 +458,10 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
     }
   })
 
-  pi.on('turn_start', () => {
+  pi.on('turn_start', async (_event, ctx) => {
     noted = null
+    if (isUnattended(ctx)) return
+    await change(sessionIdOf(ctx), s => (s.stop ? { ...s, stop: null } : s)).catch(() => undefined)
   })
 
   /** Activity notes are best effort. A failed write must not reject, because omp blocks the tool call when a tool_call handler throws. */
@@ -469,8 +515,10 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
     if (isUnattended(ctx) || event.willContinue) return
     prepare(ctx)
     const id = sessionIdOf(ctx)
-    const reply = lastAssistantText(event.messages)
-    const written = await change(id, s => endTurn(OMP, s, reply, openPanels.has(id))).catch(() => null)
+    const last = lastAssistant(event.messages)
+    const reply = last ? textOfBlocks(last.content) : ''
+    const stop = await stopOf(last, deps.isUsageLimit, deps.now())
+    const written = await change(id, s => ({ ...endTurn(OMP, s, reply, openPanels.has(id)), stop })).catch(() => null)
     if (!written) return
     const host = hostFor(ctx)
     if (written.pending.length > 0) deps.background(runUpdates(host))
@@ -511,12 +559,14 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
   const inbox: Inbox = {
     screen: async (ctx, holds = NO_HOLDS) => {
       const id = sessionIdOf(ctx)
+      const s = await readState(dir, id)
 
       return {
-        view: sessionView(await readState(dir, id), deps.now(), deps.settleWindowMs, holds),
+        view: sessionView(s, deps.now(), deps.settleWindowMs, holds),
         modelName: modelNameOf(ctx),
         isGhMissing,
         isFetchingPrs: fetchingPrs.has(id),
+        stop: s.stop,
       }
     },
     openPanel: async ctx => {
@@ -542,6 +592,7 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
 
       return outcome
     },
+    resume: ctx => sendToAgent(ctx, RESUME_TEXT),
   }
 
   const liveSource = (ctx: ExtensionContext): PanelSource => ({
@@ -551,6 +602,7 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
 
       return { error: outcome.error, note: outcome.note }
     },
+    resume: async () => inbox.resume(ctx),
     fetchPrsWhenDue: () => inbox.fetchPrsWhenDue(ctx),
     onChange: listener => inbox.onChange(ctx, listener),
   })
@@ -576,7 +628,7 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
         const stop = inbox.onChange(ctx, () => void refresh())
 
         return {
-          render: width => (screen ? [bandLine(screen, width, style)] : []),
+          render: width => (screen ? bandLines(screen, width, deps.now(), style) : []),
           invalidate: () => {},
           dispose: stop,
         }

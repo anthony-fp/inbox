@@ -1,4 +1,7 @@
-import type { Draft, Tab } from '../../types'
+import type { Closed, Draft, FoldKind, Stop, Tab } from '../../types'
+import { followTo, isTabEmpty, recordRows } from '../../hooks/arrivals'
+import type { RowRecord } from '../../hooks/arrivals'
+import { closedState } from '../../hooks/ledger'
 import {
   GH_MISSING_TEXT,
   PR_GROUP_TITLES,
@@ -15,37 +18,46 @@ import {
 } from '../../hooks/pr-tab'
 import type { PrAction, PrPress } from '../../hooks/pr-tab'
 import { failingChecks, readiness, waitingThreads } from '../../hooks/prs'
-import { noteText } from '../../hooks/presses'
+import { capitalized, noteText } from '../../hooks/presses'
 import type { RowPress } from '../../hooks/presses'
 import type { SessionView } from '../../hooks/session'
 import type { ToneName } from '../../hooks/tones'
 import { ago } from '../../hooks/text'
 import {
+  CLOSED_MARKS,
   DEMO_NOTICE,
   FINDING_GROUPS,
+  NEEDS_YOU_GROUPS,
   QUEUED_AFTER_MS,
   ROW_COPY,
   SETTLED_MS,
   TABS,
+  closedShown,
   closedTotal,
+  earlierLabel,
   emptyText,
   feedbackOf,
   feedbackText,
   firstWaiting,
   foldLabel,
+  groupEmptyText,
   heldReplies,
   isFailure,
   isWaitingRow,
+  keptOpen,
   replyHint,
   rowAfterClose,
   rowFeedbackText,
   rowKeyPlan,
   rowMark,
   settledLabel,
+  stopFix,
+  stopText,
 } from '../../hooks/view'
-import type { Feedback, ReplyHolds, RowView } from '../../hooks/view'
+import type { ClosedDelivery, Feedback, ReplyHolds, RowView } from '../../hooks/view'
 
-export type PanelPress = RowPress | PrPress
+export type ResumePress = { action: 'resume' }
+export type PanelPress = RowPress | PrPress | ResumePress
 
 /** What the panel draws: the session's view and the host facts the shared view does not hold. */
 export type PanelScreen = {
@@ -54,6 +66,8 @@ export type PanelScreen = {
   modelName: string | null
   isGhMissing: boolean
   isFetchingPrs: boolean
+  /** Why the last turn stopped, until the next turn starts. */
+  stop: Stop | null
   isDemo?: boolean
 }
 
@@ -81,6 +95,10 @@ export type PanelUi = {
   discarded: Record<string, number>
   /** A line about the last press that the row itself cannot show, until `at` + SETTLED_MS. */
   notice: { text: string; at: number } | null
+  /** The groups whose closed rows show. Each starts folded. */
+  unfolded: FoldKind[]
+  /** A Resume press for the stop that began at `stopAt`. */
+  resuming: { stopAt: number; is: 'sending' } | { stopAt: number; is: 'refused'; why: string } | null
 }
 
 export const INITIAL_UI: PanelUi = {
@@ -91,6 +109,8 @@ export const INITIAL_UI: PanelUi = {
   drafts: {},
   discarded: {},
   notice: null,
+  unfolded: [],
+  resuming: null,
 }
 
 export function holdsOf(ui: Pick<PanelUi, 'typing' | 'drafts' | 'discarded'>): ReplyHolds {
@@ -100,6 +120,7 @@ export function holdsOf(ui: Pick<PanelUi, 'typing' | 'drafts' | 'discarded'>): R
 const AGENT = 'omp'
 const REPLY_KEY = 'r'
 const INDENT = 7
+const STOP_ID = 'stop'
 
 type Button = {
   label: string
@@ -128,10 +149,40 @@ type Line = {
   settled: { label: string; undo: PanelPress | null } | null
   buttons: Button[]
   row: RowView | null
+  /** The group a Closed line folds. Enter unfolds or folds it. */
+  fold: FoldKind | null
+  /** A line the selection skips: a closed row with nothing to press, or a stop with no Resume. */
+  isStatic: boolean
+  /** Whether the line waits on the person, so a default selection may land on it. */
+  isWaiting: boolean
+  /** Shows the detail when the line is not selected. */
+  isDetailShown: boolean
 }
 
 type Entry =
-  { kind: 'heading'; text: string } | { kind: 'note'; text: string; isStrong?: boolean } | { kind: 'row'; line: Line }
+  | { kind: 'heading'; text: string }
+  | { kind: 'note'; text: string; isStrong?: boolean; indent?: number }
+  | { kind: 'row'; line: Line }
+
+const blankLine = (id: string): Line => ({
+  id,
+  depth: 0,
+  lead: { text: '', tone: null },
+  title: '',
+  isDim: false,
+  status: null,
+  age: null,
+  detail: null,
+  file: null,
+  feedback: null,
+  settled: null,
+  buttons: [],
+  row: null,
+  fold: null,
+  isStatic: false,
+  isWaiting: true,
+  isDetailShown: false,
+})
 
 const wrapIndex = (i: number, n: number) => ((i % n) + n) % n
 
@@ -190,12 +241,10 @@ function lineOfRow(row: RowView): Line {
   const undo = row.actions.find(a => a.press.action === 'undo')
 
   return {
-    id: row.id,
-    depth: 0,
+    ...blankLine(row.id),
     lead: leadOf(row),
     title: row.title,
     isDim: state.is === 'settled',
-    status: null,
     age: row.at,
     detail: row.detail,
     file: row.fileName,
@@ -206,53 +255,147 @@ function lineOfRow(row: RowView): Line {
         : null,
     buttons: state.is === 'settled' ? [] : rowButtons(row),
     row,
+    isWaiting: isWaitingRow(row),
   }
 }
 
-function rowEntries(screen: PanelScreen, tab: 'needsYou' | 'findings'): Entry[] {
-  const { view } = screen
-  const out: Entry[] = []
-  const rows = tab === 'needsYou' ? [...view.needsYou.questions, ...view.needsYou.tasks] : view.findings.rows
-  const lineOf = (row: RowView): Entry => ({ kind: 'row', line: lineOfRow(row) })
-  if (tab === 'needsYou') out.push(...rows.map(lineOf))
-  else
-    for (const kind of Object.keys(FINDING_GROUPS) as (keyof typeof FINDING_GROUPS)[]) {
-      const group = rows.filter(r => r.finding?.kind === kind)
-      if (group.length === 0) continue
-      out.push({ kind: 'heading', text: FINDING_GROUPS[kind].title }, ...group.map(lineOf))
-    }
-  if (rows.length === 0) {
-    const empty = emptyText(tab, AGENT)
-    out.push({ kind: 'note', text: empty.title, isStrong: true }, { kind: 'note', text: empty.hint })
+type ClosedLine = {
+  id: string
+  title: string
+  at: number
+  how: Closed['how']
+  outcome: string
+  delivery: ClosedDelivery
+}
+
+type Group = { kind: FoldKind; title: string; rows: RowView[]; closed: ClosedLine[] }
+
+const settledIn = (g: Group) => new Set(g.rows.filter(r => r.state.is === 'settled').map(r => r.id))
+const isGroupEmpty = (g: Group) => g.rows.length === 0 && closedTotal(g.closed, settledIn(g)) === 0
+
+const closedId = (id: string) => `closed ${id}`
+const foldId = (kind: FoldKind) => `fold ${kind}`
+
+function closedLines(d: ClosedLine): Line {
+  const canUndo = d.delivery !== null && typeof d.delivery === 'object' && d.delivery.canUndo
+  const undo: Button = {
+    label: 'Undo',
+    key: null,
+    press: { id: d.id, action: 'undo' },
+    isRecommended: false,
+    isFollowUp: false,
   }
-  const settledIds = new Set(rows.filter(r => r.state.is === 'settled').map(r => r.id))
-  const closed =
-    tab === 'needsYou' ? [...view.needsYou.closed.questions, ...view.needsYou.closed.tasks] : view.findings.closed
-  const total = closedTotal(closed, settledIds)
-  if (total > 0) out.push({ kind: 'note', text: foldLabel(total) })
+
+  return {
+    ...blankLine(closedId(d.id)),
+    depth: 1,
+    lead: { text: d.delivery === null ? CLOSED_MARKS[closedState(d)] : '', tone: null },
+    title: d.title,
+    isDim: true,
+    age: d.at,
+    feedback: { text: settledLabel(capitalized(d.outcome), d.delivery), tone: null },
+    buttons: canUndo ? [undo] : [],
+    isStatic: !canUndo,
+    isWaiting: false,
+  }
+}
+
+function groupEntries(g: Group, unfolded: readonly FoldKind[]): Entry[] {
+  const settled = settledIn(g)
+  const total = closedTotal(g.closed, settled)
+  const out: Entry[] = [{ kind: 'heading', text: g.title }]
+  out.push(...g.rows.map((row): Entry => ({ kind: 'row', line: lineOfRow(row) })))
+  if (g.rows.length === 0) out.push({ kind: 'note', text: groupEmptyText(g.title), indent: 3 })
+  if (total === 0) return out
+  const isUnfolded = unfolded.includes(g.kind)
+  out.push({
+    kind: 'row',
+    line: {
+      ...blankLine(foldId(g.kind)),
+      lead: { text: isUnfolded ? '▾' : '▸', tone: 'sep' },
+      title: foldLabel(total),
+      isDim: true,
+      fold: g.kind,
+      isWaiting: false,
+    },
+  })
+  if (!isUnfolded) return out
+  const shown = closedShown(g.closed, settled)
+  out.push(...shown.map((d): Entry => ({ kind: 'row', line: closedLines(d) })))
+  const earlier = earlierLabel(total, shown.length)
+  if (earlier) out.push({ kind: 'note', text: earlier, indent: 7 })
 
   return out
+}
+
+function stopEntries(screen: PanelScreen, ui: PanelUi): Entry[] {
+  const { stop } = screen
+  if (!stop) return []
+  const isResumable = stop.kind === 'api-error'
+  const resuming = ui.resuming?.stopAt === stop.at ? ui.resuming : null
+  const resume: Button = {
+    label: resuming?.is === 'sending' ? 'Resuming…' : 'Resume',
+    key: null,
+    press: { action: 'resume' },
+    isRecommended: true,
+    isFollowUp: false,
+  }
+
+  return [
+    {
+      kind: 'row',
+      line: {
+        ...blankLine(STOP_ID),
+        lead: { text: '!', tone: 'error' },
+        title: 'Stopped',
+        status: { text: `${capitalized(stopText(stop))}.`, tone: 'error', rest: '' },
+        age: stop.at,
+        detail: isResumable ? null : stopFix(stop),
+        feedback: resuming?.is === 'refused' ? { text: `Not sent: ${resuming.why}`, tone: 'error' } : null,
+        buttons: isResumable ? [resume] : [],
+        isStatic: !isResumable,
+        isWaiting: isResumable,
+        isDetailShown: true,
+      },
+    },
+  ]
+}
+
+function rowEntries(screen: PanelScreen, ui: PanelUi, tab: 'needsYou' | 'findings'): Entry[] {
+  const { view } = screen
+  const groups: Group[] =
+    tab === 'needsYou'
+      ? NEEDS_YOU_GROUPS.map(g => ({
+          kind: g.kind,
+          title: g.title,
+          rows: view.needsYou[g.list],
+          closed: view.needsYou.closed[g.list].map(d => ({ ...d, title: d.ask })),
+        }))
+      : (Object.keys(FINDING_GROUPS) as (keyof typeof FINDING_GROUPS)[]).map(kind => ({
+          kind,
+          title: FINDING_GROUPS[kind].title,
+          rows: view.findings.rows.filter(r => r.finding?.kind === kind),
+          closed: view.findings.closed.filter(f => f.kind === kind).map(f => ({ ...f, at: f.closedAt })),
+        }))
+  const stops = tab === 'needsYou' ? stopEntries(screen, ui) : []
+  if (groups.every(isGroupEmpty)) {
+    const empty = emptyText(tab, AGENT)
+
+    return stops.length > 0
+      ? stops
+      : [
+          { kind: 'note', text: empty.title, isStrong: true },
+          { kind: 'note', text: empty.hint },
+        ]
+  }
+
+  return [...stops, ...groups.flatMap(g => groupEntries(g, ui.unfolded))]
 }
 
 function prEntries(screen: PanelScreen, now: number): Entry[] {
   const { prs, lastActions } = screen.view
   const isSent = threadSentIn(lastActions)
   const out: Entry[] = []
-  const plain = (id: string): Line => ({
-    id,
-    depth: 0,
-    lead: { text: '', tone: null },
-    title: '',
-    isDim: false,
-    status: null,
-    age: null,
-    detail: null,
-    file: null,
-    feedback: null,
-    settled: null,
-    buttons: [],
-    row: null,
-  })
   if (screen.isGhMissing) out.push({ kind: 'note', text: GH_MISSING_TEXT })
   for (const { pr, isSettled } of prs.drawn) {
     const markId = prMarkId(pr.ref)
@@ -261,7 +404,7 @@ function prEntries(screen: PanelScreen, now: number): Entry[] {
       out.push({
         kind: 'row',
         line: {
-          ...plain(markId),
+          ...blankLine(markId),
           lead,
           title: pr.title,
           isDim: true,
@@ -276,7 +419,7 @@ function prEntries(screen: PanelScreen, now: number): Entry[] {
     out.push({
       kind: 'row',
       line: {
-        ...plain(markId),
+        ...blankLine(markId),
         lead,
         title: pr.title,
         status: { text: head, tone: PR_TONES[status], rest: unlisted.map(r => ` · ${r}`).join('') },
@@ -293,7 +436,7 @@ function prEntries(screen: PanelScreen, now: number): Entry[] {
       out.push({
         kind: 'row',
         line: {
-          ...plain(id),
+          ...blankLine(id),
           depth: 1,
           lead: { text: '•', tone: 'sep' },
           title: text.title,
@@ -311,7 +454,7 @@ function prEntries(screen: PanelScreen, now: number): Entry[] {
       out.push({
         kind: 'row',
         line: {
-          ...plain(id),
+          ...blankLine(id),
           depth: 1,
           lead: { text: '•', tone: 'sep' },
           title: c.name,
@@ -335,18 +478,19 @@ function pressFeedback(screen: PanelScreen, id: string, now: number): Line['feed
   return f ? { text: feedbackText(f, AGENT), tone: feedbackTone(f) } : null
 }
 
-function entriesOf(screen: PanelScreen, tab: Tab, now: number): Entry[] {
-  return tab === 'prs' ? prEntries(screen, now) : rowEntries(screen, tab)
+function entriesOf(screen: PanelScreen, ui: PanelUi, tab: Tab, now: number): Entry[] {
+  return tab === 'prs' ? prEntries(screen, now) : rowEntries(screen, ui, tab)
 }
 
 const linesOf = (entries: Entry[]): Line[] => entries.flatMap(e => (e.kind === 'row' ? [e.line] : []))
-const isSelectable = (line: Line) => line.settled === null
+const waitsOf = (lines: Line[]) => lines.map(l => ({ id: l.id, isWaiting: isSelectable(l) && l.isWaiting }))
+const isSelectable = (line: Line) => line.settled === null && !line.isStatic
 
 function resolveSelected(lines: Line[], selectedId: string | null): Line | null {
   const selectable = lines.filter(isSelectable)
   const current = lines.find(l => l.id === selectedId)
   if (current && isSelectable(current)) return current
-  const waits = lines.map(l => ({ id: l.id, isWaiting: l.row ? isWaitingRow(l.row) : isSelectable(l) }))
+  const waits = waitsOf(lines)
   const nextId = (current ? rowAfterClose(waits, current.id) : null) ?? firstWaiting(waits)
 
   return lines.find(l => l.id === nextId) ?? selectable[0] ?? null
@@ -368,8 +512,15 @@ function withSelection(ui: PanelUi, id: string | null): PanelUi {
   return { ...ui, selectedId: id, focus: null }
 }
 
-function activate(ui: PanelUi, line: Line, button: Button, now: number): KeyResult {
+function activate(screen: PanelScreen, ui: PanelUi, line: Line, button: Button, now: number): KeyResult {
   const { press } = button
+  if (press.action === 'resume') {
+    const { stop } = screen
+    const isSending = ui.resuming?.is === 'sending' && ui.resuming.stopAt === stop?.at
+    if (!stop || isSending) return { ui }
+
+    return { ui: { ...ui, focus: null, resuming: { stopAt: stop.at, is: 'sending' } }, press }
+  }
   if (!('ref' in press) && press.action === 'type') {
     const draft = ui.drafts[line.id] ?? { text: '', since: now }
 
@@ -408,7 +559,7 @@ function typingKey(ui: PanelUi, id: string, key: string, now: number, text: stri
  * key types, which only a reply field reads.
  */
 export function handleKey(screen: PanelScreen, ui: PanelUi, key: string, now: number, text?: string): KeyResult {
-  const lines = linesOf(entriesOf(screen, ui.tab, now))
+  const lines = linesOf(entriesOf(screen, ui, ui.tab, now))
   const selected = resolveSelected(lines, ui.selectedId)
   const base: PanelUi = { ...ui, selectedId: selected?.id ?? null }
   if (base.typing !== null) return typingKey(base, base.typing, key, now, text)
@@ -435,6 +586,12 @@ export function handleKey(screen: PanelScreen, ui: PanelUi, key: string, now: nu
 
     return { ui: base }
   }
+  if (selected?.fold && key === 'enter') {
+    const kind = selected.fold
+    const unfolded = base.unfolded.includes(kind) ? base.unfolded.filter(k => k !== kind) : [...base.unfolded, kind]
+
+    return { ui: { ...base, unfolded } }
+  }
   if (!selected || selected.buttons.length === 0) return { ui: base }
   if (key === 'left' || key === 'right') {
     const index = wrapIndex(focusOf(selected, base) + (key === 'left' ? -1 : 1), selected.buttons.length)
@@ -443,7 +600,72 @@ export function handleKey(screen: PanelScreen, ui: PanelUi, key: string, now: nu
   }
   const button = key === 'enter' ? selected.buttons[focusOf(selected, base)] : selected.buttons.find(b => b.key === key)
 
-  return button ? activate(base, selected, button, now) : { ui: base }
+  return button ? activate(screen, base, selected, button, now) : { ui: base }
+}
+
+export type SeenRows = RowRecord<Tab>
+
+/** Each tab's row ids: every row it lists, and the open rows a freshly opened panel moves for. PRs are null while they load. */
+function tabRows(
+  screen: PanelScreen,
+  now: number,
+): { listed: Record<Tab, string[] | null>; open: Record<Tab, string[]> } {
+  const { view } = screen
+  const needsYou = [...view.needsYou.questions, ...view.needsYou.tasks]
+  const openIds = (rows: RowView[]) => rows.filter(r => r.state.is !== 'settled').map(r => r.id)
+
+  return {
+    listed: {
+      needsYou: needsYou.map(r => r.id),
+      findings: view.findings.rows.map(r => r.id),
+      prs: screen.isFetchingPrs ? null : linesOf(prEntries(screen, now)).map(l => l.id),
+    },
+    open: { needsYou: openIds(needsYou), findings: openIds(view.findings.rows), prs: [] },
+  }
+}
+
+function isShownEmpty(screen: PanelScreen, ui: PanelUi): boolean {
+  const { view } = screen
+  if (ui.tab === 'prs') return view.prs.drawn.length === 0 && !screen.isFetchingPrs
+  const rows = ui.tab === 'needsYou' ? [...view.needsYou.questions, ...view.needsYou.tasks] : view.findings.rows
+  const closed =
+    ui.tab === 'needsYou'
+      ? NEEDS_YOU_GROUPS.map(g => ({ isUnfolded: ui.unfolded.includes(g.kind), rows: view.needsYou.closed[g.list] }))
+      : (Object.keys(FINDING_GROUPS) as (keyof typeof FINDING_GROUPS)[]).map(kind => ({
+          isUnfolded: ui.unfolded.includes(kind),
+          rows: view.findings.closed.filter(f => f.kind === kind),
+        }))
+
+  return isTabEmpty({
+    rows,
+    settled: new Set(rows.filter(r => r.state.is === 'settled').map(r => r.id)),
+    closed,
+    hasBlocker: ui.tab === 'needsYou' && screen.stop !== null,
+  })
+}
+
+/**
+ * Records which rows are new since `seen`, and where the panel moves for them. While the shown tab is empty, it moves
+ * to the first other tab with new rows, or as the panel opens, with open rows. A default selection stays on the row it
+ * was on when new rows arrive above it.
+ */
+export function followRows(
+  screen: PanelScreen,
+  ui: PanelUi,
+  seen: SeenRows,
+  isOpening: boolean,
+  now: number,
+): { ui: PanelUi; seen: SeenRows } {
+  const { listed, open } = tabRows(screen, now)
+  const recorded = recordRows(seen, listed)
+  const tabs = TABS.map(t => t.id)
+  const to = followTo(tabs, ui.tab, isShownEmpty(screen, ui), isOpening ? open : recorded.added)
+  if (to) return { ui: { ...withSelection(ui, null), tab: to }, seen: recorded.seen }
+  const arrived = recorded.added[ui.tab]
+  if (ui.selectedId !== null || arrived.length === 0) return { ui, seen: recorded.seen }
+  const kept = keptOpen(waitsOf(linesOf(entriesOf(screen, ui, ui.tab, now))), arrived)
+
+  return { ui: kept === null ? ui : { ...ui, selectedId: kept }, seen: recorded.seen }
 }
 
 /**
@@ -593,9 +815,10 @@ function drawLine(line: Line, isSelected: boolean, d: Draw): string[] {
   const cursor = isSelected ? s.tone('accent', '▸') : ' '
   const age = line.age !== null && line.settled === null ? s.dim(ago(now - line.age)) : ''
   out.push(spread(` ${' '.repeat(pad)}${cursor} ${leadText(line.lead, s)} ${title}${status}${after}`, `${age} `, width))
-  if (!isSelected || line.settled) return out
+  if (line.settled) return out
   const indent = INDENT + pad
-  if (line.detail) out.push(...indented(line.detail, indent, width, 4, s.dim))
+  if (line.detail && (isSelected || line.isDetailShown)) out.push(...indented(line.detail, indent, width, 4, s.dim))
+  if (!isSelected) return out
   if (line.file) out.push(' '.repeat(indent) + s.tone('accent', line.file))
   if (line.buttons.length > 0) out.push(...buttonLines(line, ui, indent - 1, width, s))
   if (ui.typing === line.id) {
@@ -655,14 +878,15 @@ export function render(
   height?: number,
 ): string[] {
   const d: Draw = { screen, ui, width, now, style }
-  const entries = entriesOf(screen, ui.tab, now)
+  const entries = entriesOf(screen, ui, ui.tab, now)
   const selected = resolveSelected(linesOf(entries), ui.selectedId)
   const head = [tabBar(d), style.dim('─'.repeat(width))]
   const body: string[] = []
   let selectedAt = [0, 0]
   for (const e of entries) {
     if (e.kind === 'heading') body.push(` ${style.bold(e.text)}`)
-    else if (e.kind === 'note') body.push(...indented(e.text, 1, width, 3, e.isStrong ? style.bold : style.dim))
+    else if (e.kind === 'note')
+      body.push(...indented(e.text, e.indent ?? 1, width, 3, e.isStrong ? style.bold : style.dim))
     else {
       const isSelected = e.line.id === selected?.id
       const start = body.length
@@ -689,14 +913,18 @@ function scrolled(body: string[], selectedAt: number[], room: number, s: Style):
   return clip
 }
 
-/** The two counts the band above the prompt shows, or null when nothing needs the person. */
-export function bandLine(screen: PanelScreen, width: number, style: Style): string {
+/** The band above the prompt: the two counts, and under them why the last turn stopped. */
+export function bandLines(screen: PanelScreen, width: number, now: number, style: Style): string[] {
   const { needsYou, findings } = screen.view
   const counts = TABS.filter(t => t.id !== 'prs')
     .map(t => ({ t, count: t.id === 'needsYou' ? needsYou.count : findings.count }))
     .filter(x => x.count > 0)
     .map(x => `${style.dim(x.t.label)} ${style.tone(x.t.id, String(x.count))}`)
   const left = ` ${counts.length > 0 ? counts.join(` ${style.tone('sep', '·')} `) : style.dim('Nothing needs you')}`
+  const countLine = spread(left, style.dim('/inbox to open '), width)
+  const { stop } = screen
+  if (!stop) return [countLine]
+  const stopLine = ` ${style.tone('error', `Stopped ${ago(now - stop.at)}:`)} ${stopText(stop)}. ${style.dim(stopFix(stop))}`
 
-  return spread(left, style.dim('/inbox to open '), width)
+  return [countLine, fit(stopLine, width)]
 }
