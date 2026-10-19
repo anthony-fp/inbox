@@ -1,8 +1,8 @@
 // Codex starts this process once per app launch and keeps it. So it only reads lines and passes each to the
-// handler module, which it imports again whenever that module's file changes: a reinstalled plugin, or the build
-// `npm --prefix codex run dev` keeps while it runs. A change to this file itself still needs Codex restarted.
+// handler module, which it imports again whenever that module's file changes: a reinstalled plugin, an update, or
+// the build `npm --prefix codex run dev` keeps while it runs. A change to this file itself still needs Codex restarted.
 
-import { stat } from 'node:fs/promises'
+import { readdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -13,26 +13,65 @@ import { dataDir, devBuild } from './state'
 type Handler = ReturnType<typeof createHandler>
 
 const here = dirname(fileURLToPath(import.meta.url))
-const dir = dataDir(process.env, dirname(here))
+const pluginRoot = dirname(here)
+const dir = dataDir(process.env, pluginRoot)
+const BUNDLE = join('dist', 'server-handler.mjs')
 
-async function handlerPath(): Promise<string> {
+const exists = (path: string) =>
+  stat(path).then(
+    () => true,
+    () => false,
+  )
+
+const versionParts = (version: string) => version.split('.').map(n => Number.parseInt(n, 10) || 0)
+
+function compareVersions(a: string, b: string): number {
+  const [pa, pb] = [versionParts(a), versionParts(b)]
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0)
+    if (diff !== 0) return diff
+  }
+
+  return 0
+}
+
+/**
+ * Codex installs each version of a plugin in its own folder, named for the version, and an update deletes the
+ * folder of the version before. Once this process's own folder is gone, the newest version beside it is the one
+ * installed.
+ */
+async function installedBundle(): Promise<string | null> {
+  const own = join(pluginRoot, BUNDLE)
+  if (await exists(own)) return own
+  const versions = (await readdir(dirname(pluginRoot)).catch(() => [])).filter(name => /^\d/.test(name))
+  for (const version of versions.sort(compareVersions).reverse()) {
+    const bundle = join(dirname(pluginRoot), version, BUNDLE)
+    if (await exists(bundle)) return bundle
+  }
+
+  return null
+}
+
+async function handlerPath(): Promise<string | null> {
   const server = (await devBuild(dir))?.server
-  const isBuilt = server
-    ? await stat(server).then(
-        () => true,
-        () => false,
-      )
-    : false
+  if (server && (await exists(server))) return server
 
-  return server && isBuilt ? server : join(here, 'server-handler.mjs')
+  return installedBundle()
 }
 
 let current: { key: string; handle: Promise<Handler> } | null = null
 let lastLoaded: Handler | null = null
 let loadError: string | null = null
+let isPluginFolderGone = false
 
 function load(url: string, path: string): Promise<Handler> {
-  const handle = import(url).then((m: { createHandler: typeof createHandler }) => m.createHandler(dir, () => loadError))
+  const handle = import(url).then((m: { createHandler: typeof createHandler }) =>
+    m.createHandler(
+      dir,
+      () => loadError,
+      () => isPluginFolderGone,
+    ),
+  )
   handle.then(
     h => {
       lastLoaded = h
@@ -55,6 +94,11 @@ function load(url: string, path: string): Promise<Handler> {
  */
 async function currentHandler(): Promise<Handler> {
   const path = await handlerPath()
+  isPluginFolderGone = path === null
+  if (path === null) {
+    if (lastLoaded) return lastLoaded
+    throw new Error(`no ${BUNDLE} in ${dirname(pluginRoot)}`)
+  }
   const { mtimeMs } = await stat(path).catch(() => ({ mtimeMs: -1 }))
   const key = `${pathToFileURL(path).href}?v=${mtimeMs}`
   if (current?.key !== key) current = { key, handle: load(key, path) }

@@ -32,10 +32,15 @@ function devPageIn(dir: string): () => Promise<string | null> {
 
 /**
  * `loadError` says why the loader could not
- * load a newer build of this module, while this one keeps running. A loader that is already running calls this
- * signature, so a change to it needs Codex restarted.
+ * load a newer build of this module, while this one keeps running. `isPluginFolderGone` says the loader found no
+ * installed copy of this module at all. A loader that is already running calls this signature, so a change to it
+ * needs Codex restarted, and a loader from before `isPluginFolderGone` passes only the first two.
  */
-export function createHandler(dir: string, loadError: () => string | null = () => null): ReturnType<typeof makeServer> {
+export function createHandler(
+  dir: string,
+  loadError: () => string | null = () => null,
+  isPluginFolderGone: () => boolean = () => false,
+): ReturnType<typeof makeServer> {
   return makeServer({
     dir,
     now: Date.now,
@@ -45,5 +50,6 @@ export function createHandler(dir: string, loadError: () => string | null = () =
     devPage: devPageIn(dir),
     build: SERVER_BUILD,
     loadError,
+    isPluginFolderGone,
   })
 }

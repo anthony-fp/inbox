@@ -148,6 +148,7 @@ export type ServerDeps = {
   devPage?: () => Promise<string | null>
   build?: string
   loadError?: () => string | null
+  isPluginFolderGone?: () => boolean
 }
 
 type Message = { jsonrpc: '2.0'; id?: number | string; method?: string; params?: Record<string, unknown> }
@@ -400,6 +401,7 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
       devPage: tabUri(await currentPage()),
       ...(deps.build ? { serverBuild: deps.build } : {}),
       ...(loadError ? { serverLoadError: loadError } : {}),
+      ...(deps.isPluginFolderGone?.() ? { isPluginFolderGone: true } : {}),
     }
   }
 

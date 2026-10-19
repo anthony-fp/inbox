@@ -390,14 +390,19 @@ async function read() {
     if (updateError?.page !== requestedPage) updateError = null
     const isPageOld = requestedPage !== PAGE
     if (isPageOld && !updateError) void swapPage(requestedPage)
-    serverNote = next.serverLoadError
+    serverNote = next.isPluginFolderGone
       ? {
-          text: `The inbox server could not load its new build, so it still runs the last one. ${next.serverLoadError}`,
+          text: "The inbox plugin's files were moved or removed, so the server still runs the version Codex started with. Quit and reopen Codex to load the installed plugin.",
           isReloadable: false,
         }
-      : next.serverBuild !== SERVER_BUILD && !isPageOld
-        ? { text: 'This tab and the inbox server are from different builds.', isReloadable: true }
-        : null
+      : next.serverLoadError
+        ? {
+            text: `The inbox server could not load its new build, so it still runs the last one. ${next.serverLoadError}`,
+            isReloadable: false,
+          }
+        : next.serverBuild !== SERVER_BUILD && !isPageOld
+          ? { text: 'This tab and the inbox server are from different builds.', isReloadable: true }
+          : null
     applyView(next, seq)
   } catch (err) {
     if (isDisposed || generation !== viewGeneration || seq < shown) return

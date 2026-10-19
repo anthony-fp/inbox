@@ -224,13 +224,15 @@ export type View = InboxView & {
  * `devPage` is the address of the page the server serves now. A tab showing another page replaces itself with it.
  * Tabs open from older builds read it by this name.
  * `serverBuild` is the fingerprint build.mjs stamped into the running server. `serverLoadError` says why a newer
- * build of the server did not load.
+ * build of the server did not load. `isPluginFolderGone` says the server found no installed copy of itself, as after
+ * an uninstall.
  */
 export type TabView = View & {
   thread: string
   devPage: string
   serverBuild?: string
   serverLoadError?: string
+  isPluginFolderGone?: boolean
   isFetchingPrs: boolean
   isGhMissing: boolean
 }

@@ -69,8 +69,11 @@ tab can swap only if its own page came from a build that has this feature.
 
 Codex keeps a plugin's server process running across reinstalls and new
 chats. That process is a small loader, `src/server-main.ts`, which imports the
-handler, `dist/server-handler.mjs`, again whenever its file changes. So a
-build and a reinstall take effect without restarting Codex. Codex still asks
+handler, `dist/server-handler.mjs`, again whenever its file changes. Codex
+installs each version in its own folder and deletes the old one on update, so
+once the loader's own folder is gone it imports the handler from the newest
+version's folder. So a build, a reinstall and an update take effect without
+restarting Codex. Codex still asks
 for the page by the address it read when the process started, and it drops a
 tab whose page comes back under a different address. So the server answers
 under the address Codex asked for. Only a change to the loader itself needs
