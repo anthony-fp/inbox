@@ -1,0 +1,406 @@
+import { expect, test } from 'bun:test'
+
+import { GH_MISSING_TEXT, checkActions, prBlockActions, threadActions, threadSentIn } from '../../hooks/pr-tab'
+import { failingChecks, waitingThreads } from '../../hooks/prs'
+import type { LastAction } from '../../types'
+import { closeItem } from '../../hooks/ledger'
+import { SETTLED_MS, NO_HOLDS, allRows, rowKeyPlan } from '../../hooks/view'
+import type { RowView } from '../../hooks/view'
+import { sessionView } from '../../hooks/session'
+import { demoSource, demoState } from '../src/demo'
+import { INITIAL_UI, bandLine, handleKey, holdsOf, render } from '../src/panel'
+import type { PanelScreen, PanelUi, Style } from '../src/panel'
+import { emptyState } from '../src/state'
+
+const NOW = 1_700_000_000_000
+const ESC = '\x1b['
+const style: Style = {
+  bold: s => `${ESC}1m${s}${ESC}22m`,
+  dim: s => `${ESC}2m${s}${ESC}22m`,
+  inverse: s => `${ESC}7m${s}${ESC}27m`,
+  underline: s => `${ESC}4m${s}${ESC}24m`,
+  tone: (_name, s) => `${ESC}35m${s}${ESC}39m`,
+}
+const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '')
+
+const screenOf = (overrides: Partial<PanelScreen> = {}, holds = NO_HOLDS): PanelScreen => ({
+  view: sessionView(demoState(NOW), NOW, SETTLED_MS, holds),
+  modelName: 'Claude Sonnet 4.5',
+  isGhMissing: false,
+  isFetchingPrs: false,
+  ...overrides,
+})
+
+const drawn = (screen: PanelScreen, ui: PanelUi, width = 200) => render(screen, ui, width, NOW, style)
+const text = (screen: PanelScreen, ui: PanelUi, width = 200) => drawn(screen, ui, width).map(strip).join('\n')
+const keys = (screen: PanelScreen, ui: PanelUi, ...names: string[]) =>
+  names.reduce((u, name) => handleKey(screen, u, name, NOW).ui, ui)
+
+const waiting = (screen: PanelScreen, id: string) => allRows(screen.view).find(r => r.id === id)!
+const firstQuestion = (screen: PanelScreen) =>
+  screen.view.needsYou.questions.find(r => r.state.is === 'open' && r.item?.rec)!
+const onRow = (row: RowView): PanelUi => ({ ...INITIAL_UI, selectedId: row.id })
+
+function plannedLabels(row: RowView): string[] {
+  const { keys: planned, more } = rowKeyPlan(row, true)
+
+  return [...planned, ...more].flatMap(k =>
+    k.slot === 'allOptions' ? [] : [k.slot === 'retry' ? k.label : k.action.label],
+  )
+}
+
+function buttonLine(screen: PanelScreen, ui: PanelUi): string {
+  return text(screen, ui)
+    .split('\n')
+    .find(l => l.includes('↵ ') && !l.includes('↵ press'))!
+}
+
+test('a selected row draws its buttons in the shared key plan order', () => {
+  const screen = screenOf()
+  const rows = [...screen.view.needsYou.questions, ...screen.view.needsYou.tasks, ...screen.view.findings.rows].filter(
+    r => r.state.is !== 'settled',
+  )
+  expect(rows.length).toBeGreaterThan(5)
+  for (const row of rows) {
+    const tab = row.type === 'finding' ? 'findings' : 'needsYou'
+    const line = buttonLine(screen, { ...onRow(row), tab })
+    let from = 0
+    for (const label of plannedLabels(row)) {
+      const at = line.indexOf(label, from)
+      expect(at).toBeGreaterThanOrEqual(from)
+      from = at + label.length
+    }
+  }
+})
+
+test('a question opens with its recommended option focused and underlined', () => {
+  const screen = screenOf()
+  const row = firstQuestion(screen)
+  const lines = drawn(screen, onRow(row))
+  expect(lines.some(l => l.includes(`${ESC}7m${ESC}1m ↵ ${row.item!.rec} `))).toBe(true)
+  const other = row.item!.options.find(o => o !== row.item!.rec)!
+  expect(lines.some(l => l.includes(`${ESC}4m${other}${ESC}24m`))).toBe(false)
+})
+
+test('the recommended option is underlined when another button has focus', () => {
+  const screen = screenOf()
+  const row = firstQuestion(screen)
+  const ui = keys(screen, onRow(row), 'right')
+  expect(drawn(screen, ui).some(l => l.includes(`${ESC}4m${row.item!.rec}${ESC}24m`))).toBe(true)
+})
+
+test('Enter on the opening focus answers with the recommended option', () => {
+  const screen = screenOf()
+  const row = firstQuestion(screen)
+  const result = handleKey(screen, onRow(row), 'enter', NOW)
+  expect(result.press).toEqual({ action: 'answer', id: row.id, option: row.item!.rec! })
+})
+
+test('focus wraps at both ends of the buttons', () => {
+  const screen = screenOf()
+  const row = firstQuestion(screen)
+  const labels = plannedLabels(row)
+  const last = labels.at(-1)!
+  expect(buttonLine(screen, keys(screen, onRow(row), 'left'))).toContain(`↵ ${last}`)
+  const around = keys(screen, onRow(row), ...labels.map(() => 'right'))
+  expect(buttonLine(screen, around)).toContain(`↵ ${row.item!.rec}`)
+})
+
+test('a button letter presses that button', () => {
+  const screen = screenOf()
+  const row = firstQuestion(screen)
+  const flick = row.item!.options.find(o => o !== row.item!.rec)!
+  expect(handleKey(screen, onRow(row), 'b', NOW).press).toEqual({ action: 'answer', id: row.id, option: flick })
+  expect(handleKey(screen, onRow(row), 'x', NOW).press).toEqual({ action: 'dismiss', id: row.id })
+})
+
+test('Tab, Shift+Tab and the digits switch tabs', () => {
+  const screen = screenOf()
+  expect(keys(screen, INITIAL_UI, 'tab').tab).toBe('findings')
+  expect(keys(screen, INITIAL_UI, 'tab', 'tab').tab).toBe('prs')
+  expect(keys(screen, INITIAL_UI, 'tab', 'tab', 'tab').tab).toBe('needsYou')
+  expect(keys(screen, INITIAL_UI, 'shift+tab').tab).toBe('prs')
+  expect(keys(screen, INITIAL_UI, '2').tab).toBe('findings')
+  expect(keys(screen, INITIAL_UI, '3').tab).toBe('prs')
+  expect(keys(screen, keys(screen, INITIAL_UI, '3'), '1').tab).toBe('needsYou')
+})
+
+test('the selected tab draws inverse and the others draw their counts', () => {
+  const screen = screenOf()
+  const bar = drawn(screen, keys(screen, INITIAL_UI, '2'))[0]!
+  expect(bar).toContain(`${ESC}7m${ESC}1m [2] Findings ${screen.view.findings.count} `)
+  expect(strip(bar)).toContain(`[1] Needs you ${screen.view.needsYou.count}`)
+  expect(strip(bar)).toContain(`[3] PRs ${screen.view.prs.count}`)
+  expect(strip(bar)).toContain('esc to close')
+})
+
+test('moving through rows wraps from the last to the first', () => {
+  const screen = screenOf()
+  const open = screen.view.needsYou.questions.concat(screen.view.needsYou.tasks).filter(r => r.state.is !== 'settled')
+  const first = open[0]!
+  const atFirst = keys(screen, INITIAL_UI, 'down')
+  expect(atFirst.selectedId).toBe(open[1]!.id)
+  const wrapped = keys(screen, INITIAL_UI, ...open.map(() => 'down'))
+  expect(wrapped.selectedId).toBe(first.id)
+  expect(keys(screen, INITIAL_UI, 'up').selectedId).toBe(open.at(-1)!.id)
+  expect(keys(screen, INITIAL_UI, 'j').selectedId).toBe(open[1]!.id)
+  expect(keys(screen, INITIAL_UI, 'k').selectedId).toBe(open.at(-1)!.id)
+})
+
+test('r opens a reply field and Enter sends the typed words as a type press', () => {
+  const screen = screenOf()
+  const row = firstQuestion(screen)
+  let ui = handleKey(screen, onRow(row), 'r', NOW).ui
+  expect(ui.typing).toBe(row.id)
+  for (const ch of 'hi!') ui = handleKey(screen, ui, ch, NOW, ch).ui
+  ui = handleKey(screen, ui, 'backspace', NOW).ui
+  ui = handleKey(screen, ui, 'space', NOW, ' ').ui
+  ui = handleKey(screen, ui, 'a', NOW, 'a').ui
+  expect(text(screen, ui)).toContain('hi a')
+  const sent = handleKey(screen, ui, 'enter', NOW)
+  expect(sent.press).toEqual({ action: 'type', id: row.id, text: 'hi a' })
+  expect(sent.ui.typing).toBeNull()
+  expect(sent.ui.drafts[row.id]).toBeUndefined()
+})
+
+test('Enter in an empty reply field sends nothing', () => {
+  const screen = screenOf()
+  const ui = handleKey(screen, onRow(firstQuestion(screen)), 'r', NOW).ui
+  const result = handleKey(screen, ui, 'enter', NOW)
+  expect(result.press).toBeUndefined()
+  expect(result.ui.typing).not.toBeNull()
+})
+
+test('Esc in the reply field closes the field and keeps the draft held', () => {
+  const screen = screenOf()
+  const row = firstQuestion(screen)
+  let ui = handleKey(screen, onRow(row), 'r', NOW).ui
+  ui = handleKey(screen, ui, 'o', NOW, 'o').ui
+  const cancelled = handleKey(screen, ui, 'escape', NOW)
+  expect(cancelled.close).toBeUndefined()
+  expect(cancelled.ui.typing).toBeNull()
+  expect(cancelled.ui.drafts[row.id]?.text).toBe('o')
+  expect(Object.keys(holdsOf(cancelled.ui).replies)).toEqual([row.id])
+  expect(handleKey(screen, cancelled.ui, 'escape', NOW).close).toBe(true)
+})
+
+test('keys in the reply field never switch tabs or move the selection', () => {
+  const screen = screenOf()
+  const row = firstQuestion(screen)
+  const ui = handleKey(screen, onRow(row), 'r', NOW).ui
+  const typed = handleKey(screen, ui, '2', NOW, '2').ui
+  expect(typed.tab).toBe('needsYou')
+  expect(typed.drafts[row.id]?.text).toBe('2')
+  expect(handleKey(screen, typed, 'down', NOW).ui.selectedId).toBe(row.id)
+})
+
+test('Discard on a held row drops the draft and records the discard', () => {
+  const state = demoState(NOW)
+  state.ledger = closeItem(state.ledger, 'd11', { how: 'claude', outcome: 'closed by omp: answered in chat' }, NOW)
+  const holds = { replies: { d11: NOW }, discarded: {} }
+  const held = { ...screenOf(), view: sessionView(state, NOW, SETTLED_MS, holds) }
+  const heldRow = waiting(held, 'd11')
+  expect(heldRow.state.is).toBe('held')
+  expect(plannedLabels(heldRow)).toEqual(['Reply', 'Discard'])
+  const result = handleKey(held, onRow(heldRow), 'x', NOW)
+  expect(result.press).toBeUndefined()
+  expect(result.ui.discarded.d11).toBe(NOW)
+})
+
+async function afterPresses(...presses: Parameters<ReturnType<typeof demoSource>['press']>[0][]) {
+  let now = NOW
+  const later: (() => void)[] = []
+  const source = demoSource({ now: () => now, after: fn => later.push(fn), settleWindowMs: SETTLED_MS })
+  for (const p of presses) await source.press(p, NO_HOLDS)
+  const screen = async () => ({ ...(await source.screen(NO_HOLDS)), modelName: null })
+
+  return {
+    screen,
+    advance: async () => {
+      now += SETTLED_MS + 1
+      later.forEach(fn => fn())
+      return screen()
+    },
+    source,
+  }
+}
+
+test('a press that waits on the agent reads Explaining and its button reads again', async () => {
+  const demo = await afterPresses({ action: 'explain', id: 'd11' })
+  const screen = await demo.screen()
+  const row = waiting(screen, 'd11')
+  const out = text(screen, onRow(row))
+  expect(out).toContain('Explaining…')
+  expect(out).toContain('Explain again')
+})
+
+test('after the reply, an explained row that stays open reads its result', async () => {
+  const demo = await afterPresses({ action: 'explain', id: 'd11' })
+  const screen = await demo.advance()
+  expect(text(screen, onRow(waiting(screen, 'd11')))).toContain('✓ Explained')
+})
+
+test('a row closed with Done shows its label and Undo, and u returns the undo press', async () => {
+  const demo = await afterPresses({ action: 'done', id: 'd14' })
+  const screen = await demo.screen()
+  const out = text(screen, INITIAL_UI)
+  expect(out).toMatch(/Put on the glasses and pair them with this Mac\s+Done\s+u Undo/)
+  expect(handleKey(screen, INITIAL_UI, 'u', NOW).press).toEqual({ action: 'undo', id: 'd14' })
+  const gone = await demo.advance()
+  expect(text(gone, INITIAL_UI)).not.toContain('u Undo')
+})
+
+test('a settled row is skipped when moving and the selection leaves it', async () => {
+  const demo = await afterPresses({ action: 'done', id: 'd14' })
+  const screen = await demo.screen()
+  const ui = onRow(waiting(screen, 'd14'))
+  const next = keys(screen, ui, 'down')
+  expect(next.selectedId).not.toBe('d14')
+  expect(
+    drawn(screen, ui)
+      .filter(l => strip(l).includes('▸'))
+      .every(l => !strip(l).includes('Put on the glasses')),
+  ).toBe(true)
+})
+
+test('a handed-off row keeps its mark and reads Still open when nothing changed', async () => {
+  const demo = await afterPresses({ action: 'explain', id: 'd11' })
+  expect(text(await demo.advance(), INITIAL_UI)).toContain('Still open')
+})
+
+test('a dismissed PR shows its label and Undo, and u returns pr-undo', async () => {
+  const demo = await afterPresses({ action: 'pr-dismiss', ref: 'acme/visor#29' })
+  const screen = await demo.screen()
+  const ui = { ...INITIAL_UI, tab: 'prs' as const }
+  expect(text(screen, ui)).toMatch(/#29 Show the battery level as a glance\s+Dismissed\s+u Undo/)
+  expect(handleKey(screen, ui, 'u', NOW).press).toEqual({ action: 'pr-undo', ref: 'acme/visor#29' })
+})
+
+function withLast(screen: PanelScreen, id: string, last: LastAction): PanelScreen {
+  return { ...screen, view: { ...screen.view, lastActions: { ...screen.view.lastActions, [id]: last } } }
+}
+
+test('a local press reads its pending and failed results on the PR block', () => {
+  const screen = screenOf()
+  const block = screen.view.prs.drawn[0]!.pr
+  const id = `pr:${block.ref}`
+  const ui = { ...INITIAL_UI, tab: 'prs' as const }
+  const pending = withLast(screen, id, {
+    kind: 'local',
+    action: 'pr-open',
+    text: 'Open PR',
+    at: NOW,
+    result: {
+      state: 'pending',
+      at: NOW,
+      parts: [{ kind: 'open', name: `PR #${block.number}`, error: null, isCommand: false }],
+    },
+  })
+  expect(text(pending, ui)).toContain(`Opening PR #${block.number}…`)
+  const failed = withLast(screen, id, {
+    kind: 'local',
+    action: 'pr-open',
+    text: 'Open PR',
+    at: NOW,
+    result: {
+      state: 'failed',
+      at: NOW,
+      parts: [{ kind: 'open', name: `PR #${block.number}`, error: 'no browser', isCommand: false }],
+    },
+  })
+  expect(text(failed, ui)).toContain(`Could not open PR #${block.number}: no browser`)
+})
+
+test('a failed send shows why and offers Try again first', () => {
+  const state = demoState(NOW)
+  state.ledger = {
+    ...state.ledger,
+    items: state.ledger.items.map(i => (i.id === 'd11' ? { ...i, id: 'i11' } : i)),
+  }
+  state.lastActions.i11 = {
+    kind: 'talk',
+    action: 'explain',
+    text: 'Explain',
+    at: NOW,
+    delivery: { state: 'failed', reason: 'omp is busy' },
+  }
+  const screen = { ...screenOf(), view: sessionView(state, NOW, SETTLED_MS) }
+  const row = waiting(screen, 'i11')
+  expect(text(screen, onRow(row))).toContain('Not sent: omp is busy')
+  expect(buttonLine(screen, onRow(row))).toContain('Try again')
+})
+
+test('PR buttons follow the shared plan order for the block, its threads and its checks', () => {
+  const screen = screenOf()
+  const { lastActions, prs } = screen.view
+  const { pr } = prs.drawn[0]!
+  const isSent = threadSentIn(lastActions)
+  const plans = [
+    prBlockActions(pr, isSent, prs.branchRef, lastActions),
+    ...waitingThreads(pr).map(t => threadActions(pr, t, lastActions)),
+    ...failingChecks(pr).map(c => checkActions(pr, c, lastActions)),
+  ]
+  expect(plans.length).toBeGreaterThan(3)
+  let ui: PanelUi = { ...INITIAL_UI, tab: 'prs' }
+  for (const plan of plans) {
+    const line = buttonLine(screen, ui)
+    let from = 0
+    for (const { label } of plan) {
+      const at = line.indexOf(label, from)
+      expect(at).toBeGreaterThanOrEqual(from)
+      from = at + label.length
+    }
+    ui = keys(screen, ui, 'down')
+  }
+})
+
+test('a PR thread press goes through the PR press', () => {
+  const screen = screenOf()
+  const ui = { ...INITIAL_UI, tab: 'prs' as const }
+  const down = keys(screen, ui, 'down')
+  const result = handleKey(screen, down, 'a', NOW)
+  expect(result.press).toMatchObject({ action: 'thread-address' })
+  expect(handleKey(screen, down, 'enter', NOW).press).toMatchObject({ action: 'thread-address' })
+})
+
+test('the PRs tab says when gh is missing and when there are no PRs', () => {
+  const screen = screenOf({ isGhMissing: true })
+  const ui = { ...INITIAL_UI, tab: 'prs' as const }
+  expect(text(screen, ui)).toContain(GH_MISSING_TEXT)
+  const empty = { ...screenOf(), view: sessionView(emptyState('s'), NOW, SETTLED_MS) }
+  expect(text(empty, ui)).toContain('No PRs')
+  expect(text({ ...empty, isFetchingPrs: true }, ui)).toContain('Checking for PRs…')
+})
+
+test('an empty Needs you tab explains itself', () => {
+  const empty = { ...screenOf(), view: sessionView(emptyState('s'), NOW, SETTLED_MS) }
+  expect(text(empty, INITIAL_UI)).toContain('Nothing needs you.')
+})
+
+test('the footer names the inbox model, or says there is none', () => {
+  expect(text(screenOf(), INITIAL_UI)).toContain('inbox model Claude Sonnet 4.5')
+  expect(text(screenOf({ modelName: null }), INITIAL_UI)).toContain('no inbox model')
+})
+
+test('the demo says its presses send nothing', () => {
+  expect(text(screenOf({ isDemo: true }), INITIAL_UI)).toContain('Presses send nothing.')
+})
+
+test('the band shows both counts and how to open the inbox', () => {
+  const screen = screenOf()
+  const band = strip(bandLine(screen, 80, style))
+  expect(band).toContain(`Needs you ${screen.view.needsYou.count}`)
+  expect(band).toContain(`Findings ${screen.view.findings.count}`)
+  expect(band).toContain('/inbox to open')
+})
+
+test('no drawn line is wider than the panel, and a short panel keeps the selected row in view', () => {
+  const screen = screenOf()
+  for (const width of [30, 60, 120])
+    for (const line of drawn(screen, INITIAL_UI, width)) expect([...strip(line)].length).toBeLessThanOrEqual(width)
+  const rows = [...screen.view.needsYou.questions, ...screen.view.needsYou.tasks].filter(r => r.state.is !== 'settled')
+  const last = rows.at(-1)!
+  const short = render(screen, onRow(last), 80, NOW, style, 12).map(strip)
+  expect(short.length).toBeLessThanOrEqual(12)
+  expect(short.some(l => l.includes('▸') && l.includes(last.title.slice(0, 20)))).toBe(true)
+})

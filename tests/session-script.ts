@@ -6,13 +6,13 @@ import type { Ask, SessionHost } from '../hooks/session-host'
 import { allRows, NO_HOLDS } from '../hooks/view'
 import type { Effect } from '../hooks/presses'
 
-export type ScriptedHost = {
-  host: SessionHost<Session>
+export type ScriptedHost<S extends Session = Session> = {
+  host: SessionHost<S>
   delivered: string[]
   performed: Exclude<Effect, { kind: 'send' }>[]
 }
 
-export type MakeHost = (ask: Ask) => ScriptedHost
+export type MakeHost<S extends Session = Session> = (ask: Ask) => ScriptedHost<S>
 
 export type Equal = (actual: unknown, expected: unknown, label: string) => void
 
@@ -25,7 +25,7 @@ const MODEL_ANSWER = [
   'NEW: decide | 1 | Use Node or Python? | Node / Python | Node',
 ].join('\n')
 
-export async function runSessionScript(makeHost: MakeHost, equal: Equal): Promise<void> {
+export async function runSessionScript<S extends Session>(makeHost: MakeHost<S>, equal: Equal): Promise<void> {
   const { host, delivered, performed } = makeHost(async () => MODEL_ANSWER)
   const snapshot = async () => {
     const s = await host.read()

@@ -110,7 +110,7 @@ omp and pi change their extension API often. Keeping every omp import in `host.t
 | Send a press's message | `pi.sendUserMessage`, delivered as a follow-up while a turn runs |
 | `/inbox` and the band | `registerCommand('inbox')`, `ctx.ui.custom` for the panel, `ctx.ui.setWidget` above the editor for the band |
 | PRs | `pi.exec('gh', …)` through `fetchTracked` |
-| Session id | `ctx.sessionManager.getSessionId()`. Subagents, which `ctx.agent.kind` names, are skipped. |
+| Session id | `ctx.sessionManager.getSessionId()`. A session with no UI (`ctx.hasUI` false) is skipped. That covers subagents, which omp 18.1.17 starts with no UI and gives an extension no agent kind for, and it also skips print mode. |
 
 ### The omp look
 

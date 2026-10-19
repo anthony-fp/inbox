@@ -1,0 +1,662 @@
+import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { guidanceText, systemText } from '../../hooks/model-text'
+import { NO_HOLDS } from '../../hooks/view'
+import { createInbox } from '../src/host'
+import type { HostDeps } from '../src/host'
+import { OMP } from '../src/texts'
+
+type Handler = (event: any, ctx: any) => unknown
+
+const MODEL_ANSWER = [
+  'GOAL: Add a greeting CLI',
+  'DONE: Plan written',
+  'NOW: Waiting on one choice',
+  'NEW: decide | 1 | Use Node or Python? | Node / Python | Node',
+].join('\n')
+
+type Model = { id: string; name: string; provider: string }
+const sonnet: Model = { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5', provider: 'anthropic' }
+const smol: Model = { id: 'gpt-mini', name: 'GPT Mini', provider: 'openai' }
+
+let dir: string
+let clock: number
+let handlers: Map<string, Handler>
+let tools: Map<string, any>
+let commands: Map<string, any>
+let sent: { text: string; options: unknown }[]
+let hidden: { content: string; options: unknown }[]
+let timers: { fn: () => void; ms: number }[]
+let notices: string[]
+let completions: { model: Model; system: string[]; prompt: string }[]
+let background: Promise<unknown>[]
+let models: Model[]
+let smolModel: Model | undefined
+let reply: string | Error
+let isIdle: boolean
+let execResults: Map<string, { code: number; stdout?: string; stderr?: string; killed?: boolean } | Error>
+let execCalls: { command: string; args: string[] }[]
+let copied: string[]
+let agentKind: string | undefined
+let hasUI: boolean
+
+const pi = () =>
+  ({
+    on: (name: string, handler: Handler) => handlers.set(name, handler),
+    registerTool: (tool: any) => tools.set(tool.name, tool),
+    registerCommand: (name: string, command: any) => commands.set(name, command),
+    sendMessage: (message: { content: string }, options: unknown) => {
+      hidden.push({ content: message.content, options })
+    },
+    sendUserMessage: (text: string, options: unknown) => {
+      sent.push({ text, options })
+    },
+    exec: async (command: string, args: string[]) => {
+      execCalls.push({ command, args })
+      const result = execResults.get(command) ?? { code: 0 }
+      if (result instanceof Error) throw result
+
+      return { stdout: '', stderr: '', killed: false, ...result }
+    },
+  }) as never
+
+const makeCtx = (id = 's1') =>
+  ({
+    sessionManager: { getSessionId: () => id },
+    cwd: '/work',
+    hasUI,
+    isIdle: () => isIdle,
+    setTimeout: (fn: () => void, ms: number) => timers.push({ fn, ms }),
+    models: { list: () => models, resolve: (spec: string) => (spec === '@smol' ? smolModel : undefined) },
+    modelRegistry: { getApiKey: async () => 'key' },
+    ui: { notify: (message: string) => notices.push(message) },
+    ...(agentKind ? { agent: { kind: agentKind } } : {}),
+  }) as never
+
+const deps = (): HostDeps => ({
+  stateDir: () => dir,
+  now: () => (clock += 10),
+  newId: (() => {
+    let n = 0
+    return () => `id${++n}`
+  })(),
+  settleWindowMs: 1000,
+  home: '/home/me',
+  complete: async (model, context) => {
+    completions.push({
+      model: model as never,
+      system: context.systemPrompt ?? [],
+      prompt: String((context.messages[0] as { content: unknown }).content),
+    })
+    if (reply instanceof Error) throw reply
+
+    return { stopReason: 'stop', content: [{ type: 'text', text: reply }] } as never
+  },
+  copy: async text => {
+    copied.push(text)
+
+    return null
+  },
+  background: work => {
+    background.push(work.catch(() => undefined))
+  },
+})
+
+const settle = async () => {
+  for (let seen = 0; seen < background.length;) {
+    seen = background.length
+    await Promise.all(background)
+  }
+}
+
+const state = (id = 's1') => JSON.parse(readFileSync(join(dir, 'sessions', `${id}.json`), 'utf8'))
+const call = (name: string, event: unknown, ctx: unknown = makeCtx()) => handlers.get(name)!(event, ctx)
+const record = (args: Record<string, unknown>, ctx: unknown = makeCtx()) =>
+  tools.get('record').execute('call', args, undefined, undefined, ctx)
+const prompt = (text: string, ctx: unknown = makeCtx()) =>
+  call('before_agent_start', { type: 'before_agent_start', prompt: text, systemPrompt: ['base'] }, ctx) as Promise<any>
+const endAgent = (text: string, extra: Record<string, unknown> = {}, ctx: unknown = makeCtx()) =>
+  call(
+    'agent_end',
+    { type: 'agent_end', messages: [{ role: 'assistant', content: [{ type: 'text', text }] }], ...extra },
+    ctx,
+  )
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), 'inbox-omp-host-'))
+  clock = 1_000_000
+  handlers = new Map()
+  tools = new Map()
+  commands = new Map()
+  sent = []
+  hidden = []
+  timers = []
+  notices = []
+  completions = []
+  background = []
+  models = [smol, sonnet]
+  smolModel = smol
+  reply = MODEL_ANSWER
+  isIdle = false
+  execResults = new Map()
+  execCalls = []
+  copied = []
+  agentKind = undefined
+  hasUI = true
+})
+
+afterEach(() => {
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('a prompt adds the guidance once and counts one turn even when omp runs the handler again', async () => {
+  createInbox(pi(), deps())
+  const first = await prompt('Add a greeting CLI')
+  const again = await prompt('Add a greeting CLI')
+  expect(first.systemPrompt).toEqual(['base', guidanceText(OMP)])
+  expect(again.systemPrompt).toEqual(['base', guidanceText(OMP)])
+  expect(state().presence.turnsStarted).toBe(1)
+
+  const withGuidance = (await call('before_agent_start', {
+    prompt: 'next',
+    systemPrompt: ['base', guidanceText(OMP)],
+  })) as { systemPrompt: string[] }
+  expect(withGuidance.systemPrompt).toEqual(['base', guidanceText(OMP)])
+})
+
+test('the same prompt text typed again after a turn counts as a new turn', async () => {
+  createInbox(pi(), deps())
+  await prompt('continue')
+  await call('turn_start', { type: 'turn_start' })
+  await prompt('continue')
+  expect(state().presence.turnsStarted).toBe(2)
+})
+
+test('a record call shows in the next prompt as a hidden message', async () => {
+  createInbox(pi(), deps())
+  await prompt('Add a greeting CLI')
+  const answer = await record({ kind: 'task', ask: 'Try the CLI by hand' })
+  expect(answer.content[0].text).toBe('Recorded. The user sees it in the /inbox panel.')
+  expect(state().ledger.items.map((i: { ask: string }) => i.ask)).toEqual(['Try the CLI by hand'])
+
+  const next = await prompt('How is it going?')
+  expect(next.message).toMatchObject({ display: false, attribution: 'agent' })
+  expect(next.message.content).toContain('Try the CLI by hand')
+})
+
+test('a prompt with nothing to tell the agent returns no message', async () => {
+  createInbox(pi(), deps())
+  const first = await prompt('hello')
+  expect(first.message).toBeUndefined()
+})
+
+test('record and close are registered with the shared schemas and stay in the tool list', () => {
+  createInbox(pi(), deps())
+  expect([...tools.keys()]).toEqual(['record', 'close'])
+  expect(tools.get('record')).toMatchObject({ loadMode: 'essential', approval: 'read' })
+  expect(tools.get('record').parameters.properties.kind.enum).toEqual(['question', 'task', 'finding'])
+})
+
+test('a close call closes the recorded item', async () => {
+  createInbox(pi(), deps())
+  await record({ kind: 'task', ask: 'Try the CLI by hand' })
+  const id = state().ledger.items[0].id
+  const answer = await tools
+    .get('close')
+    .execute('call', { id, reason: 'done by the agent' }, undefined, undefined, makeCtx())
+  expect(answer.content[0].text).not.toContain('Not done')
+  expect(state().ledger.items).toEqual([])
+  expect(state().ledger.closed).toHaveLength(1)
+})
+
+test('bash, edit and write calls become turn activity and other tools do not', async () => {
+  createInbox(pi(), deps())
+  await call('tool_call', { toolName: 'bash', input: { command: 'npm test' } })
+  await call('tool_call', { toolName: 'bash', input: { command: 'sleep 9', async: true } })
+  await call('tool_call', { toolName: 'edit', input: { path: '/work/a.ts' } })
+  await call('tool_call', { toolName: 'write', input: { path: '/work/b.ts', content: '' } })
+  await call('tool_call', { toolName: 'read', input: { path: '/work/c.ts' } })
+  expect(state().turn.activity).toEqual([
+    'ran: npm test',
+    'started in background: sleep 9',
+    'edited /work/a.ts',
+    'edited /work/b.ts',
+  ])
+})
+
+test('a turn that ends queues the exchange and the inbox model fills the ledger', async () => {
+  createInbox(pi(), deps())
+  await prompt('Add a greeting CLI')
+  await endAgent('Plan written. Which runtime?')
+  await settle()
+  expect(state().pending).toEqual([])
+  expect(state().presence).toMatchObject({ turnsStarted: 1, turnsApplied: 1, isUpdating: false })
+  expect(state().ledger.items.map((i: { ask: string }) => i.ask)).toEqual(['Use Node or Python?'])
+  expect(completions).toHaveLength(1)
+  expect(completions[0]!.prompt).toContain('Plan written. Which runtime?')
+})
+
+test('a settle that will continue does not end the turn', async () => {
+  createInbox(pi(), deps())
+  await prompt('Add a greeting CLI')
+  await endAgent('Retrying', { willContinue: true })
+  await settle()
+  expect(state().pending).toEqual([])
+  expect(state().turn.person).toBe('Add a greeting CLI')
+  expect(completions).toEqual([])
+})
+
+test('a turn with no reply text queues nothing', async () => {
+  createInbox(pi(), deps())
+  await prompt('hello')
+  await call('agent_end', { type: 'agent_end', messages: [{ role: 'assistant', content: [{ type: 'toolCall' }] }] })
+  await settle()
+  expect(completions).toEqual([])
+  expect(state().turn.person).toBeNull()
+})
+
+test('a failing inbox model marks the update failed, and the next turn retries the exchange', async () => {
+  createInbox(pi(), deps())
+  reply = new Error('offline')
+  await prompt('hello')
+  await endAgent('Done.')
+  await settle()
+  expect(state().presence.ledgerState).toBe('failed')
+  expect(state().pending).toMatchObject([{ failed: true }])
+  expect(completions).toHaveLength(1)
+
+  reply = MODEL_ANSWER
+  await prompt('again')
+  await endAgent('Done again.')
+  await settle()
+  expect(state().presence.ledgerState).toBe('current')
+  expect(state().pending).toEqual([])
+})
+
+test('the inbox model is a Sonnet model when the providers offer one, with the inbox system prompt', async () => {
+  createInbox(pi(), deps())
+  await prompt('hello')
+  await endAgent('Done.')
+  await settle()
+  expect(completions[0]!.model).toBe(sonnet)
+  expect(completions[0]!.system).toEqual([systemText(OMP)])
+})
+
+test('the inbox model falls back to the smol role and the panel names it', async () => {
+  models = [smol]
+  const inbox = createInbox(pi(), deps())
+  await prompt('hello')
+  await endAgent('Done.')
+  await settle()
+  expect(completions[0]!.model).toBe(smol)
+  expect((await inbox.screen(makeCtx())).modelName).toBe('GPT Mini')
+})
+
+test('with no usable model the update fails and the panel shows no model', async () => {
+  models = []
+  smolModel = undefined
+  const inbox = createInbox(pi(), deps())
+  await prompt('hello')
+  await endAgent('Done.')
+  await settle()
+  expect(completions).toEqual([])
+  expect(state().presence.ledgerState).toBe('failed')
+  expect((await inbox.screen(makeCtx())).modelName).toBeNull()
+})
+
+test('a session with no UI leaves no state, as an omp without an agent kind runs a subagent', async () => {
+  hasUI = false
+  createInbox(pi(), deps())
+  const result = await prompt('hello')
+  await call('tool_call', { toolName: 'bash', input: { command: 'ls' } })
+  await endAgent('Done.')
+  const recorded = await record({ kind: 'task', ask: 'Try it' })
+  await settle()
+  expect(result).toBeUndefined()
+  expect(completions).toEqual([])
+  expect(recorded.content[0].text).toBe('The inbox is not shown in this session.')
+  expect(() => state()).toThrow()
+})
+
+test('a subagent that omp marks with an agent kind leaves no state', async () => {
+  agentKind = 'sub'
+  createInbox(pi(), deps())
+  await prompt('hello')
+  await endAgent('Done.')
+  await settle()
+  expect(completions).toEqual([])
+  expect(() => state()).toThrow()
+})
+
+test('the guidance names the tools as omp registers them', () => {
+  expect(guidanceText(OMP)).toContain('with record,')
+  expect(guidanceText(OMP)).toContain('Close with close:')
+  expect(guidanceText(OMP)).not.toContain('mcp__')
+})
+
+test('a tool call still goes through when the session file cannot be written', async () => {
+  createInbox(pi(), deps())
+  await prompt('hello')
+  writeFileSync(join(dir, 'sessions', 's1.json'), '{not json')
+  expect(await call('tool_call', { toolName: 'bash', input: { command: 'ls' } })).toBeUndefined()
+  expect(await call('tool_result', { toolName: 'ask', input: {}, content: [], isError: false })).toBeUndefined()
+})
+
+test('an ask dialog becomes turn activity with the answer', async () => {
+  createInbox(pi(), deps())
+  await prompt('hello')
+  const input = { questions: [{ question: 'Node or Python?', options: [{ label: 'Node' }, { label: 'Python' }] }] }
+  await call('tool_result', {
+    toolName: 'ask',
+    input,
+    content: [{ type: 'text', text: 'User selected: Node' }],
+    isError: false,
+  })
+  expect(state().turn.activity).toEqual([
+    'asked the user in a dialog: "Node or Python?" (options: Node / Python); answer: User selected: Node',
+  ])
+})
+
+async function withQuestion() {
+  const inbox = createInbox(pi(), deps())
+  await prompt('Add a greeting CLI')
+  await endAgent('Plan written. Which runtime?')
+  await settle()
+  const [item] = state().ledger.items
+  return { inbox, id: item.id as string }
+}
+
+test('an answer press sends one follow-up while a turn runs, and the arriving prompt matches it', async () => {
+  const { inbox, id } = await withQuestion()
+  const outcome = await inbox.press(makeCtx(), { action: 'answer', id, option: 'Node' }, NO_HOLDS)
+  expect(outcome).toEqual({ copy: null, error: null, note: null, isUnconfirmed: false, wakesForDone: false })
+  expect(sent).toEqual([{ text: 'Re "Use Node or Python?": Node', options: { deliverAs: 'followUp' } }])
+  expect(state().sent.map((x: { phase: string }) => x.phase)).toEqual(['accepted'])
+
+  await prompt(sent[0]!.text)
+  expect(state().sent).toEqual([])
+  expect(state().turn.press).toMatchObject({ id, action: 'answer' })
+  const screen = await inbox.screen(makeCtx())
+  expect(screen.view.lastActions[id]?.delivery?.state).toBe('arrived')
+})
+
+test('a follow-up that starts inside a running turn matches its press once', async () => {
+  const { inbox, id } = await withQuestion()
+  await inbox.press(makeCtx(), { action: 'answer', id, option: 'Node' }, NO_HOLDS)
+  const started = { type: 'message_start', message: { role: 'user', content: [{ type: 'text', text: sent[0]!.text }] } }
+  await call('message_start', started)
+  expect(state().sent).toEqual([])
+  expect(state().presence.turnsStarted).toBe(2)
+  expect(state().turn.press).toMatchObject({ id, action: 'answer' })
+  expect((await inbox.screen(makeCtx())).view.lastActions[id]?.delivery?.state).toBe('arrived')
+
+  await call('message_start', started)
+  expect(state().presence.turnsStarted).toBe(2)
+})
+
+test('a user message that no press sent is left to before_agent_start', async () => {
+  createInbox(pi(), deps())
+  await prompt('hello')
+  await call('message_start', { type: 'message_start', message: { role: 'user', content: 'hello' } })
+  await call('message_start', { type: 'message_start', message: { role: 'assistant', content: [] } })
+  expect(state().presence.turnsStarted).toBe(1)
+})
+
+test('a press while the agent is idle sends the message with no delivery option', async () => {
+  const { inbox, id } = await withQuestion()
+  isIdle = true
+  await inbox.press(makeCtx(), { action: 'answer', id, option: 'Node' }, NO_HOLDS)
+  expect(sent[0]!.options).toBeUndefined()
+})
+
+test('a press for a row that is gone reports it stale and sends nothing', async () => {
+  const { inbox } = await withQuestion()
+  const outcome = await inbox.press(makeCtx(), { action: 'answer', id: 'nope', option: 'Node' }, NO_HOLDS)
+  expect(outcome.note).toBe('stale')
+  expect(sent).toEqual([])
+})
+
+test('a press the panel drew for another session is stale', async () => {
+  const { inbox, id } = await withQuestion()
+  const outcome = await inbox.press(makeCtx(), { action: 'answer', id, option: 'Node' }, NO_HOLDS, true)
+  expect(outcome.note).toBe('stale')
+  expect(sent).toEqual([])
+})
+
+test('Done schedules the wake and the wake tells the agent after the settle window', async () => {
+  const inbox = createInbox(pi(), deps())
+  await prompt('hello')
+  await record({ kind: 'task', ask: 'Try the CLI by hand' })
+  await endAgent('Done.')
+  await settle()
+  const id = state().ledger.items[0].id
+  const outcome = await inbox.press(makeCtx(), { action: 'done', id }, NO_HOLDS)
+  expect(outcome.wakesForDone).toBe(true)
+  expect(timers).toHaveLength(1)
+  expect(timers[0]!.ms).toBeGreaterThan(1000)
+  expect(sent).toEqual([])
+
+  clock += 5000
+  timers[0]!.fn()
+  await settle()
+  expect(sent).toHaveLength(1)
+  expect(sent[0]!.text).toContain('Try the CLI by hand')
+  expect(state().sent.map((x: { phase: string }) => x.phase)).toEqual(['accepted'])
+})
+
+async function withSteps() {
+  const inbox = createInbox(pi(), deps())
+  await record({ kind: 'task', ask: 'Run it and read the page', steps: ['npm start', 'https://example.com/x'] })
+  const screen = await inbox.screen(makeCtx())
+  const row = screen.view.needsYou.tasks[0]!
+  const stepPress = (index: number) => ({
+    action: 'step' as const,
+    id: row.id,
+    step: index,
+    label: row.steps[index]!.label,
+  })
+  return { inbox, stepPress }
+}
+
+test('a copy step hands the command to the clipboard and reports the copy', async () => {
+  const { inbox, stepPress } = await withSteps()
+  const outcome = await inbox.press(makeCtx(), stepPress(0), NO_HOLDS)
+  expect(copied).toEqual(['npm start'])
+  expect(outcome.copy).toMatchObject({ text: 'npm start' })
+  expect(outcome.error).toBeNull()
+})
+
+test('an open step for a link runs open on it', async () => {
+  const { inbox, stepPress } = await withSteps()
+  const outcome = await inbox.press(makeCtx(), stepPress(1), NO_HOLDS)
+  expect(execCalls).toEqual([{ command: 'open', args: ['https://example.com/x'] }])
+  expect(outcome.error).toBeNull()
+})
+
+test('an open that fails leaves the reason on the row', async () => {
+  const { inbox, stepPress } = await withSteps()
+  execResults.set('open', { code: 1, stderr: 'no browser' })
+  await inbox.press(makeCtx(), stepPress(1), NO_HOLDS)
+  const screen = await inbox.screen(makeCtx())
+  const last = screen.view.lastActions[screen.view.needsYou.tasks[0]!.id]
+  expect(JSON.stringify(last?.result)).toContain('no browser')
+})
+
+test('the screen carries the view, the model and the gh state', async () => {
+  const inbox = createInbox(pi(), deps())
+  await record({ kind: 'task', ask: 'Try the CLI by hand' })
+  const screen = await inbox.screen(makeCtx())
+  expect(screen.view.needsYou.count).toBe(1)
+  expect(screen.modelName).toBe('Claude Sonnet 4.5')
+  expect(screen.isGhMissing).toBe(false)
+  expect(screen.isFetchingPrs).toBe(false)
+})
+
+test('opening the panel finds gh missing when no gh starts', async () => {
+  const inbox = createInbox(pi(), deps())
+  for (const gh of ['gh', '/opt/homebrew/bin/gh', '/usr/local/bin/gh']) execResults.set(gh, new Error('spawn failed'))
+  await record({ kind: 'task', ask: 'Try the CLI by hand' })
+  await inbox.openPanel(makeCtx())
+  await settle()
+  expect((await inbox.screen(makeCtx())).isGhMissing).toBe(true)
+})
+
+test('opening the panel finds gh and fetches PRs again only after the refresh interval', async () => {
+  const inbox = createInbox(pi(), deps())
+  await record({ kind: 'task', ask: 'Try the CLI by hand' })
+  const ghCalls = (sub: string) => execCalls.filter(c => c.args[0] === sub).length
+  await inbox.openPanel(makeCtx())
+  await settle()
+  expect(ghCalls('--version')).toBe(1)
+  expect(ghCalls('pr')).toBe(1)
+  expect((await inbox.screen(makeCtx())).isGhMissing).toBe(false)
+
+  inbox.fetchPrsWhenDue(makeCtx())
+  await settle()
+  expect(ghCalls('pr')).toBe(1)
+
+  clock += 130_000
+  inbox.fetchPrsWhenDue(makeCtx())
+  await settle()
+  expect(ghCalls('pr')).toBe(2)
+  expect(ghCalls('--version')).toBe(1)
+})
+
+test('the panel being open is told to the agent beside the prompt', async () => {
+  const inbox = createInbox(pi(), deps())
+  await prompt('hello')
+  await record({ kind: 'task', ask: 'Try the CLI by hand' })
+  await inbox.openPanel(makeCtx())
+  await settle()
+  const open = await prompt('next')
+  inbox.closePanel(makeCtx())
+  await call('turn_start', { type: 'turn_start' })
+  const closed = await prompt('after')
+  expect(open.message.content).toContain('/inbox panel open')
+  expect(closed.message.content).toContain('/inbox panel is closed')
+})
+
+test('the /inbox command reports the counts, and /inbox demo reports the demo counts', async () => {
+  createInbox(pi(), deps())
+  await record({ kind: 'task', ask: 'Try the CLI by hand' })
+  await commands.get('inbox').handler('', makeCtx())
+  await commands.get('inbox').handler('demo', makeCtx())
+  expect(notices[0]).toBe('Needs you 1, Findings 0')
+  expect(notices[1]).not.toBe(notices[0])
+})
+
+test('state from a crashed process that left an update running is cleared when the session starts', async () => {
+  createInbox(pi(), deps())
+  await prompt('hello')
+  await endAgent('Done.')
+  await settle()
+  const file = join(dir, 'sessions', 's1.json')
+  const saved = state()
+  const { writeFileSync } = await import('node:fs')
+  writeFileSync(file, JSON.stringify({ ...saved, presence: { ...saved.presence, isUpdating: true } }))
+
+  handlers = new Map()
+  createInbox(pi(), deps())
+  await call('session_start', { type: 'session_start' })
+  await settle()
+  expect(state().presence.isUpdating).toBe(false)
+})
+
+const theme = {
+  isLight: false,
+  bold: (s: string) => s,
+  inverse: (s: string) => s,
+  underline: (s: string) => s,
+  fg: (_color: string, s: string) => s,
+}
+
+function tuiCtx() {
+  const widgets: { key: string; content: unknown; options: unknown }[] = []
+  const components: any[] = []
+  const renders = { count: 0 }
+  const base = makeCtx() as any
+  const ctx = {
+    ...base,
+    mode: 'tui',
+    setInterval: () => 0,
+    clearTimer: () => {},
+    ui: {
+      ...base.ui,
+      setWidget: (key: string, content: unknown, options: unknown) => widgets.push({ key, content, options }),
+      custom: (factory: any) =>
+        new Promise(resolve => {
+          const tui = { requestRender: () => renders.count++, terminal: { rows: 40 } }
+          Promise.resolve(factory(tui, theme, {}, resolve)).then(component => components.push(component))
+        }),
+    },
+  }
+
+  return { ctx, widgets, components, renders }
+}
+
+const tick = () => new Promise(resolve => setTimeout(resolve, 5))
+const until = async (isReady: () => boolean) => {
+  for (let n = 0; n < 400 && !isReady(); n++) await tick()
+}
+
+test('the band shows above the editor and redraws with the counts after a change', async () => {
+  createInbox(pi(), deps())
+  const { ctx, widgets, renders } = tuiCtx()
+  await call('session_start', { type: 'session_start' }, ctx)
+  expect(widgets).toHaveLength(1)
+  expect(widgets[0]).toMatchObject({ key: 'inbox-band', options: { placement: 'aboveEditor' } })
+  const band = (widgets[0]!.content as any)({ requestRender: () => renders.count++ }, theme)
+  await tick()
+  expect(band.render(80).join('')).toContain('Nothing needs you')
+  const before = renders.count
+  await record({ kind: 'task', ask: 'Try the CLI by hand' }, ctx)
+  await tick()
+  expect(renders.count).toBeGreaterThan(before)
+  expect(band.render(80).join('')).toContain('Needs you')
+  expect(band.render(80).join('')).toContain('/inbox to open')
+})
+
+test('the band is not drawn without a terminal UI', async () => {
+  createInbox(pi(), deps())
+  const { ctx, widgets } = tuiCtx()
+  await call('session_start', { type: 'session_start' }, { ...ctx, mode: 'print' })
+  expect(widgets).toHaveLength(0)
+})
+
+test('/inbox hides the band while the panel shows, draws the session, presses, and brings the band back', async () => {
+  createInbox(pi(), deps())
+  const { ctx, widgets, components } = tuiCtx()
+  await record({ kind: 'task', ask: 'Try the CLI by hand' }, ctx)
+  const opened = commands.get('inbox').handler('', ctx)
+  await until(() => components.length > 0)
+  expect(widgets.at(-1)).toMatchObject({ key: 'inbox-band', content: undefined })
+  const panel = components[0]
+  expect(panel.render(80).join('\n')).toContain('Try the CLI by hand')
+  await tick()
+  panel.handleInput('d')
+  await until(() => state().ledger.closed.length > 0)
+  expect(state().ledger.closed.map((c: { ask: string }) => c.ask)).toEqual(['Try the CLI by hand'])
+  panel.handleInput('\x1b')
+  await opened
+  panel.dispose()
+  expect(widgets.at(-1)!.content).toBeInstanceOf(Function)
+})
+
+test('/inbox demo draws the shared demo data and sends nothing', async () => {
+  createInbox(pi(), deps())
+  const { ctx, components } = tuiCtx()
+  const opened = commands.get('inbox').handler('demo', ctx)
+  await until(() => components.length > 0)
+  await tick()
+  const panel = components[0]
+  expect(panel.render(100).join('\n')).toContain('Presses send nothing.')
+  panel.handleInput('enter')
+  await tick()
+  expect(sent).toEqual([])
+  panel.handleInput('\x1b')
+  await opened
+  panel.dispose()
+})

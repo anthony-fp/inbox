@@ -125,8 +125,10 @@ export type Feedback =
   | { is: 'note'; note: RowNote['note']; at: number }
   | { is: 'closed'; label: string; at: number }
 
-export type Look = 'terminal' | 'desktop' | 'codex'
-export type ModLook = Exclude<Look, 'codex'>
+export type Look = 'terminal' | 'desktop' | 'codex' | 'omp'
+export type ModLook = Exclude<Look, 'codex' | 'omp'>
+
+const isTerminalLike = (look: Look) => look === 'terminal' || look === 'omp'
 
 export type ActionEmphasis = 'primary' | 'normal' | 'quiet'
 export type ActionIcon = 'done' | 'retry' | 'open' | 'copy' | 'run'
@@ -175,7 +177,7 @@ export function rowMark(row: RowView, look: Look): { text: string; tone?: 'done'
     const group = FINDING_GROUPS[row.finding.kind]
     return { text: group.mark, tone: group.tone }
   }
-  return { text: look === 'terminal' ? row.handle : '' }
+  return { text: isTerminalLike(look) ? row.handle : '' }
 }
 
 export function replyHint(row: RowView, agent: string): string {
@@ -331,7 +333,7 @@ export function hasAge(
 }
 
 const runIt = (look: Look) =>
-  look === 'terminal' ? 'Run it in a terminal, or type ! and paste.' : 'Run it in Terminal.'
+  isTerminalLike(look) ? 'Run it in a terminal, or type ! and paste.' : 'Run it in Terminal.'
 const VERBS = {
   open: { pending: 'Opening', done: 'Opened', failed: 'open' },
   copy: { pending: 'Copying', done: 'Copied', failed: 'copy' },
