@@ -10,10 +10,11 @@ import { CLAUDE_CODE, closedText, guidanceText, inboxText } from '../hooks/model
 import type { Host } from '../hooks/model-text'
 import type { Ledger } from '../types'
 import { CODEX } from '../codex/src/texts'
+import { OMP } from '../omp/src/texts'
 import { MODEL } from '../codex/src/update'
 import { codexCli } from './codex-cli'
 
-type Agent = 'claude' | 'codex'
+type Agent = 'claude' | 'codex' | 'omp'
 
 /** Patterns are case-insensitive regular expressions. */
 type Check =
@@ -49,26 +50,41 @@ type Call = { tool: string; args: Record<string, unknown>; result: string }
 
 const MIN = 0.75
 const PROBE = 'probe'
+/** The newest Claude Opus on OpenRouter in omp 18.1.17's model list, without the `-fast` and `:batch` variants. */
+const OMP_MODEL = 'openrouter/anthropic/claude-opus-5.5'
 
 const { values } = parseArgs({
   options: {
     agent: { type: 'string', default: 'both' },
     'claude-model': { type: 'string', default: 'opus' },
+    'omp-model': { type: 'string', default: OMP_MODEL },
     runs: { type: 'string', default: '5' },
     case: { type: 'string' },
     out: { type: 'string' },
     cases: { type: 'string', default: 'evals/agent-cases.json' },
     probe: { type: 'string' },
+    'omp-probe': { type: 'string' },
   },
 })
-const agents: Agent[] = values.agent === 'both' ? ['claude', 'codex'] : [values.agent as Agent]
+const AGENTS: Record<string, Agent[]> = {
+  both: ['claude', 'codex'],
+  all: ['claude', 'codex', 'omp'],
+  claude: ['claude'],
+  codex: ['codex'],
+  omp: ['omp'],
+}
+const selected = AGENTS[values.agent]
+if (!selected) throw new Error(`Unknown --agent ${values.agent}. Use claude, codex, omp, both or all.`)
+const agents: Agent[] = selected
 const runs = Number(values.runs)
 const wanted = values.case ? new Set(values.case.split(',')) : null
 const cases: Case[] = JSON.parse(readFileSync(values.cases, 'utf8')).filter((c: Case) => !wanted || wanted.has(c.name))
 const probeServer = values.probe ?? fileURLToPath(new URL('./probe.mjs', import.meta.url))
+const ompProbe = values['omp-probe'] ?? fileURLToPath(new URL('./omp-probe.mjs', import.meta.url))
 
 const CODEX_EFFORT = 'medium'
 const CLAUDE_MODEL = values['claude-model']
+const OMP_RUN_MODEL = values['omp-model']
 const TIMEOUT_MS = 300_000
 
 /**
@@ -124,13 +140,13 @@ function sandbox(c: Case, agent: Agent) {
   mkdirSync(work)
   const state = join(dir, 'state.json')
   const log = join(dir, 'calls.jsonl')
-  writeFileSync(state, JSON.stringify({ agent, ledger: c.toolLedger ?? c.ledger ?? {} }))
+  writeFileSync(state, JSON.stringify({ agent, shown: c.ledger ?? {}, ledger: c.toolLedger ?? c.ledger ?? {} }))
   writeFileSync(log, '')
   const serverArgs = [probeServer, '--state', state, '--log', log]
   const calls = (): Call[] =>
     lines(readFileSync(log, 'utf8')).map(l => ({ tool: l.tool, args: l.args, result: l.result }))
 
-  return { dir, work, serverArgs, calls }
+  return { dir, work, state, log, serverArgs, calls }
 }
 
 const PROBE_TOOLS = [`mcp__${PROBE}__record`, `mcp__${PROBE}__close`]
@@ -258,6 +274,94 @@ async function codexIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome>
   return { reply, calls: s.calls(), error: r.code === 0 ? null : `codex exited ${r.code}: ${r.stderr.slice(0, 300)}` }
 }
 
+/** Throws unless the omp session offers exactly the probe's `record` and `close`, and no MCP server's tools. */
+function assertOnlyOmpProbe(toolsFile: string) {
+  if (!existsSync(toolsFile)) throw new Error('the omp probe wrote no tool list')
+  const seen: { active: string[]; all: { name: string; source: string }[] } = JSON.parse(
+    readFileSync(toolsFile, 'utf8'),
+  )
+  const wanted = ['close', 'record']
+  if (seen.active.toSorted().join() !== wanted.join())
+    throw new Error(`omp's active tools are not just ${wanted.join(' and ')}: ${seen.active.join(', ')}`)
+  const mcp = seen.all.filter(t => /mcp/i.test(t.source))
+  if (mcp.length > 0) throw new Error(`omp offers MCP tools: ${mcp.map(t => t.name).join(', ')}`)
+}
+
+/**
+ * Runs omp in print mode with only the probe extension, in a fresh HOME that holds nothing of the person's omp
+ * config. The API key reaches omp through the environment of this one command.
+ */
+async function ompIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome> {
+  const home = join(s.dir, 'omp-home')
+  mkdirSync(home)
+  const toolsFile = join(s.dir, 'tools.json')
+  const r = await exec(
+    [
+      'omp',
+      '-p',
+      '--mode',
+      'json',
+      '--no-session',
+      '--no-extensions',
+      '-e',
+      ompProbe,
+      '--no-tools',
+      '--no-lsp',
+      '--no-skills',
+      '--no-rules',
+      '--no-title',
+      '--model',
+      OMP_RUN_MODEL,
+      c.prompt,
+    ],
+    {
+      cwd: s.work,
+      env: {
+        PATH: process.env.PATH,
+        HOME: home,
+        OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+        INBOX_EVAL_STATE: s.state,
+        INBOX_EVAL_LOG: s.log,
+        INBOX_EVAL_TOOLS: toolsFile,
+      },
+    },
+  )
+  const events = lines(r.stdout)
+  if (!existsSync(toolsFile) && r.code !== 0) {
+    const why = r.code === -1 ? `timed out after ${TIMEOUT_MS / 1000}s or was killed` : `exited ${r.code}`
+    return { reply: '', calls: s.calls(), error: `omp ${why} before it listed its tools: ${r.stderr.slice(0, 300)}` }
+  }
+  assertOnlyOmpProbe(toolsFile)
+  // Like the Claude run, the reply is every assistant message's text, since the text after a tool call is not the whole reply.
+  const reply = events
+    .filter(e => e.type === 'message_end' && e.message?.role === 'assistant')
+    .flatMap(e => e.message.content as { type: string; text?: string }[])
+    .filter(b => b.type === 'text')
+    .map(b => b.text)
+    .join('\n')
+  const end = events.findLast(e => e.type === 'agent_end')
+  const lastAssistant = end?.messages?.findLast((m: { role: string }) => m.role === 'assistant')
+  const failed =
+    r.code !== 0 || !end || lastAssistant?.stopReason === 'error' || lastAssistant?.stopReason === 'aborted'
+
+  return {
+    reply,
+    calls: s.calls(),
+    error: failed
+      ? `omp ${r.code === -1 ? 'timed out or was killed' : `exited ${r.code}`}${end ? '' : ' without agent_end'}: ${lastAssistant?.errorMessage ?? r.stderr.slice(0, 300)}`
+      : null,
+  }
+}
+
+async function runOmp(c: Case): Promise<Outcome> {
+  const s = sandbox(c, 'omp')
+  try {
+    return await ompIn(c, s)
+  } finally {
+    rmSync(s.dir, { recursive: true, force: true })
+  }
+}
+
 function failures(o: Outcome, checks: Check[]): string[] {
   const has = (pattern: string, text: string) => new RegExp(pattern, 'i').test(text)
   const out: string[] = []
@@ -297,7 +401,8 @@ function failures(o: Outcome, checks: Check[]): string[] {
 type Result = Outcome & { agent: Agent; name: string; run: number; failed: string[] }
 
 async function once(agent: Agent, c: Case, n: number): Promise<Result> {
-  const o = await (agent === 'codex' ? runCodex(c) : runClaude(c)).catch((e): Outcome => ({
+  const run = agent === 'codex' ? runCodex : agent === 'omp' ? runOmp : runClaude
+  const o = await run(c).catch((e): Outcome => ({
     reply: '',
     calls: [],
     error: String(e),
@@ -322,7 +427,16 @@ async function assertNoInboxServer() {
   rmSync(probe.dir, { recursive: true, force: true })
 }
 
+/** One trivial omp run, which fails when the session offers any tool besides the probe's, or any MCP server's. */
+async function assertOnlyOmpProbeSession() {
+  if (!agents.includes('omp')) return
+  if (!process.env.OPENROUTER_API_KEY) throw new Error('The omp agent needs OPENROUTER_API_KEY in the environment.')
+  const o = await runOmp({ name: 'preflight', about: '', prompt: 'Reply with the word ok.', checks: [] })
+  if (o.error) throw new Error(`omp preflight failed: ${o.error}`)
+}
+
 await assertNoInboxServer()
+await assertOnlyOmpProbeSession()
 const jobs = agents.flatMap(a => cases.flatMap(c => Array.from({ length: runs }, (_, n) => () => once(a, c, n))))
 const results: Result[] = []
 let next = 0
