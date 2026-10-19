@@ -1,21 +1,9 @@
-import { EMPTY } from '../../hooks/ledger'
-import type { Exchange, Press } from '../../hooks/ledger'
-import {
-  addActivity,
-  carryText,
-  guidanceText,
-  promptNotes,
-  screenText,
-  START_TITLE,
-  toolActivity,
-} from '../../hooks/model-text'
-import { inboxView, NO_HOLDS, perTurnStatus } from '../../hooks/view'
-import type { InboxView, ReplyHolds } from '../../hooks/view'
-import { drawnPrs, itemPrSteps, linkedPrs, olderPrsText, threadSentIn } from '../../hooks/pr-tab'
-import { withArrival, withUnconfirmed } from '../../hooks/presses'
-import { prNeedsYou, prRefs } from '../../hooks/prs'
-import type { LastAction, PrView, Turns } from '../../types'
-import { PRESS_TIMEOUT_MS, SETTLE_WINDOW_MS } from './settle'
+import { toolActivity } from '../../hooks/model-text'
+import { endTurn as endSessionTurn, notePrompt as notePromptIn, sessionView } from '../../hooks/session'
+import type { SessionView } from '../../hooks/session'
+import { NO_HOLDS } from '../../hooks/view'
+import type { ReplyHolds } from '../../hooks/view'
+import { SETTLE_WINDOW_MS } from './settle'
 import type { Heard, SessionState } from './state'
 import { CODEX } from './texts'
 
@@ -25,91 +13,8 @@ export function isTabOpen(s: SessionState, now: number): boolean {
   return now - s.tabSeenAt < TAB_OPEN_MS
 }
 
-/**
- * A resumed conversation still holds the guidance from
- * its start, so it gets only where the session stands. Null when that is empty.
- */
-export function startContext(s: SessionState, source: string | undefined): string | null {
-  const carried = carryText(s.ledger, START_TITLE)
-  const parts = [source === 'resume' ? null : guidanceText(CODEX), carried].filter((x): x is string => x !== null)
-
-  return parts.length > 0 ? parts.join('\n\n') : null
-}
-
-export function cleared(s: SessionState): SessionState {
-  return {
-    ...s,
-    ledger: EMPTY,
-    turn: { person: null, activity: [], press: null },
-    told: { inbox: null, closed: [] },
-    pending: [],
-    lastActions: {},
-  }
-}
-
-/**
- * Records a prompt and returns what Codex reads beside it: the questions a
- * numbered answer refers to, and the inbox when it changed. A message the
- * tab sent is matched by its text, since UserPromptSubmit carries only that.
- * An uncertain earlier attempt blocks a same-text match with a later send.
- */
 export function notePrompt(s: SessionState, text: string, now: number): { state: SessionState; notes: string[] } {
-  const matchingAt = s.sent.findIndex(x => x.text === text)
-  const matching = matchingAt >= 0 ? s.sent[matchingAt] : undefined
-  const sentAt = matching && (matching.phase === undefined || matching.phase === 'accepted') ? matchingAt : -1
-  const sentBy: Press | null = sentAt >= 0 ? (s.sent[sentAt]?.press ?? null) : null
-  const sent = sentAt >= 0 ? s.sent[sentAt] : undefined
-  const eligible =
-    sent?.deliveryId === null
-      ? Object.fromEntries(
-          Object.entries(s.lastActions).filter(
-            ([_id, last]) =>
-              (last.delivery?.state === 'queued' || last.delivery?.state === 'unconfirmed') &&
-              last.delivery.id === undefined,
-          ),
-        )
-      : s.lastActions
-  const arrived =
-    sent && sent.row !== null
-      ? {
-          ...s.lastActions,
-          ...(sent.deliveryId === null
-            ? withUnconfirmed(eligible, text)
-            : withArrival(eligible, text, sent.pressedAt ?? undefined, sent.deliveryId)),
-        }
-      : s.lastActions
-  const lastActions = s.sent
-    .slice(matchingAt + 1)
-    .reduce(
-      (actions, later) =>
-        later.text === text && later.row !== null
-          ? withUnconfirmed(actions, text, later.pressedAt ?? undefined, later.deliveryId)
-          : actions,
-      arrived,
-    )
-  const ledger = { ...s.ledger, turn: s.ledger.turn + 1 }
-  const r = promptNotes(CODEX, ledger, { text, isPress: sentAt >= 0, isOpen: isTabOpen(s, now) }, s.told)
-  const person = s.turn.person === null ? text : `${s.turn.person}\n\n${text}`
-
-  return {
-    state: {
-      ...s,
-      ledger,
-      told: r.told,
-      lastActions,
-      sent: sentAt >= 0 ? s.sent.filter((_x, i) => i !== sentAt) : s.sent,
-      turn: { ...s.turn, person, press: sentBy ?? s.turn.press },
-      presence: { ...s.presence, turnsStarted: s.presence.turnsStarted + 1 },
-    },
-    notes: r.notes,
-  }
-}
-
-export function noteActivity(s: SessionState, line: string | null): SessionState {
-  const activity = addActivity(s.turn.activity, line)
-  if (activity === s.turn.activity) return s
-
-  return { ...s, turn: { ...s.turn, activity } }
+  return notePromptIn(CODEX, s, text, isTabOpen(s, now))
 }
 
 export function activityOf(tool: string, input: Record<string, unknown>): string | null {
@@ -123,24 +28,7 @@ export function patchFiles(patch: string): string[] {
 }
 
 export function endTurn(s: SessionState, reply: string, now: number): SessionState {
-  const refs = prRefs(reply)
-  const base = {
-    ...s,
-    ledger: refs.length > 0 ? { ...s.ledger, prs: linkedPrs(s.ledger.prs, refs) } : s.ledger,
-    turn: { person: null, activity: [], press: null },
-  }
-  if (reply.trim() === '') return base
-  const ex: Exchange = {
-    person: s.turn.person,
-    trigger: s.turn.person === null ? 'unknown' : null,
-    activity: s.turn.activity,
-    reply,
-    turn: s.ledger.turn,
-    press: s.turn.press,
-    screen: screenText(CODEX, isTabOpen(s, now), null),
-  }
-
-  return { ...base, pending: [...base.pending, { ex, turnsStarted: s.presence.turnsStarted }] }
+  return endSessionTurn(CODEX, s, reply, isTabOpen(s, now))
 }
 
 const MAX_PROMPT_TURNS = 10
@@ -200,22 +88,8 @@ export function heardState(h: Heard): HeardState {
   return h.startAt === null || isMissed || (turns >= 2 && h.stops === 0) ? 'partial' : 'heard'
 }
 
-export type PrTab = {
-  drawn: { pr: PrView; isSettled: boolean }[]
-  branchRef: string | null
-  /** How many open PRs wait on the person. */
-  count: number
-  /** Names the linked PRs too old for the tab to show, or null. */
-  olderText: string | null
-}
-
-export type View = InboxView & {
+export type View = SessionView & {
   heard: HeardState
-  /** Each row's last press, by row id, which the tab reads for its PR rows and blocks. */
-  lastActions: Record<string, LastAction>
-  /** The turn counts each row's feedback reads, as "Explaining…" until the reply to its press. */
-  turns: Turns
-  prs: PrTab
   at: number
 }
 
@@ -237,56 +111,6 @@ export type TabView = View & {
   isGhMissing: boolean
 }
 
-function withoutStalePending(lastActions: Record<string, LastAction>, now: number): Record<string, LastAction> {
-  const isStale = (last: LastAction) => last.result?.state === 'pending' && now - last.result.at > PRESS_TIMEOUT_MS
-
-  return Object.fromEntries(
-    Object.entries(lastActions).map(([id, last]) => {
-      if (!isStale(last)) return [id, last]
-      const { result: _result, ...rest } = last
-      return [id, rest]
-    }),
-  )
-}
-
 export function viewOf(s: SessionState, now: number, holds: ReplyHolds = NO_HOLDS): View {
-  const l = s.ledger
-  const lastActions = withoutStalePending(s.lastActions, now)
-  const awaitsRetry = s.pending.length > 0 && (s.pending[0]?.failed === true || s.presence.ledgerState === 'failed')
-  const update = {
-    isUpdating: s.presence.isUpdating,
-    isFailed: s.presence.ledgerState === 'failed',
-    retries: awaitsRetry,
-  }
-
-  return {
-    ...inboxView({
-      ledger: l,
-      lastActions,
-      notes: {},
-      turns: s.presence,
-      extraSteps: Object.fromEntries(l.items.map(item => [item.id, itemPrSteps(item, s.prViews, l.prs)])),
-      settleWindowMs: SETTLE_WINDOW_MS,
-      status: perTurnStatus(update),
-      now,
-      ...holds,
-    }),
-    heard: heardState(s.heard),
-    lastActions,
-    turns: { turnsStarted: s.presence.turnsStarted, turnsApplied: s.presence.turnsApplied },
-    prs: prTabOf(s, lastActions, now),
-    at: now,
-  }
-}
-
-function prTabOf(s: SessionState, lastActions: Record<string, LastAction>, now: number): PrTab {
-  const drawn = drawnPrs(s.prViews, s.ledger.prs, lastActions, now)
-  const isSent = threadSentIn(lastActions)
-
-  return {
-    drawn,
-    branchRef: s.prViews.branchRef,
-    count: drawn.filter(d => !d.isSettled && prNeedsYou(d.pr, isSent)).length,
-    olderText: olderPrsText(s.ledger.prs),
-  }
+  return { ...sessionView(s, now, SETTLE_WINDOW_MS, holds), heard: heardState(s.heard), at: now }
 }

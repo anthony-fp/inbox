@@ -16,6 +16,8 @@ const SHARED = [
   'pr-tab',
   'presses',
   'prs',
+  'session',
+  'session-host',
   'text',
   'tones',
   'tools',

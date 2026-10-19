@@ -2,9 +2,11 @@ import { spawn } from 'node:child_process'
 import { resolve } from 'node:path'
 
 import { dialogActivity } from '../../hooks/model-text'
-import { activityOf, cleared, endTurn, noteActivity, noteHook, notePrompt, patchFiles, startContext } from './core'
+import { cleared, noteActivity, startContext } from '../../hooks/session'
+import { activityOf, endTurn, noteHook, notePrompt, patchFiles } from './core'
 import { updateState } from './state'
 import type { SessionState } from './state'
+import { CODEX } from './texts'
 import { dialogsInTurn, isNonInteractiveRun } from './transcript'
 
 export type HookInput = {
@@ -44,7 +46,7 @@ export async function handleHook(input: HookInput, deps: HookDeps): Promise<Reco
         noteHook(withCli({ ...(input.source === 'clear' ? cleared(s) : s), root }), 'start', now()),
       )
 
-      const context = startContext(s, input.source)
+      const context = startContext(CODEX, s, input.source)
 
       return context ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } } : null
     }

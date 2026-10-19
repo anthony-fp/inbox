@@ -2,9 +2,10 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { applyExchangeUpdate, parseReply } from '../../hooks/ledger'
-import { buildPrompt, systemText } from '../../hooks/model-text'
-import { readState, statePath, tryWithLock, updateState } from './state'
+import { systemText } from '../../hooks/model-text'
+import { reconcileUpdateStatus as reconcileStatus, runUpdates as runSessionUpdates } from '../../hooks/session-host'
+import type { Ask } from '../../hooks/session-host'
+import { codexStore } from './host'
 import type { SessionState } from './state'
 import { CODEX } from './texts'
 import type { Run } from './run'
@@ -32,8 +33,6 @@ const OFF = [
   'sleep_tool',
   'personality',
 ]
-
-export type Ask = (prompt: string) => Promise<string | null>
 
 /** Null when it fails. */
 export function codexAsk(exec: Run, cli: string, dir: string): Ask {
@@ -90,85 +89,8 @@ export function codexAsk(exec: Run, cli: string, dir: string): Ask {
   }
 }
 
-/**
- * Applies the model's answer for the oldest pending exchange, and drops that exchange. One whose first update
- * failed stays pending, marked failed, for the next update to try again.
- */
-export function applied(s: SessionState, reply: string | null, now: number, promptAt: number): SessionState {
-  const next = s.pending[0]
-  if (!next) return s
-  const { ex } = next
-  const parsed = reply === null ? null : parseReply(reply, [ex.reply, ...ex.activity].join('\n'))
-  if (!parsed && !next.failed)
-    return {
-      ...s,
-      pending: [{ ...next, failed: true }, ...s.pending.slice(1)],
-      presence: { ...s.presence, ledgerState: 'failed' },
-    }
-  const ledger = parsed ? applyExchangeUpdate(s.ledger, parsed, ex, now, promptAt) : s.ledger
+export const reconcileUpdateStatus = (dir: string, sessionId: string): Promise<SessionState> =>
+  reconcileStatus(codexStore(dir, sessionId, Date.now))
 
-  return {
-    ...s,
-    ledger,
-    pending: s.pending.slice(1),
-    presence: {
-      ...s.presence,
-      ledgerState: parsed ? 'current' : 'failed',
-      turnsApplied: Math.max(s.presence.turnsApplied, next.turnsStarted),
-    },
-  }
-}
-
-export async function reconcileUpdateStatus(dir: string, sessionId: string): Promise<SessionState> {
-  const state = await readState(dir, sessionId)
-  if (!state.presence.isUpdating) return state
-  const checked = await tryWithLock(`${statePath(dir, sessionId)}.updating`, () =>
-    updateState(dir, sessionId, current =>
-      current.presence.isUpdating
-        ? {
-            ...current,
-            presence: {
-              ...current.presence,
-              isUpdating: false,
-              ledgerState: current.pending.length > 0 ? 'failed' : current.presence.ledgerState,
-            },
-          }
-        : current,
-    ),
-  )
-  return checked.acquired ? checked.value : state
-}
-
-/**
- * Runs the pending exchanges, oldest first, while this process holds the
- * update lock. An update started meanwhile finds the lock held and exits, so
- * the pending list is read again after the lock is released.
- */
-export async function runUpdates(dir: string, sessionId: string, ask: Ask, now: () => number): Promise<void> {
-  const lock = `${statePath(dir, sessionId)}.updating`
-  while ((await readState(dir, sessionId)).pending.length > 0) {
-    const held = await tryWithLock(lock, async () => {
-      try {
-        for (;;) {
-          const s = await updateState(dir, sessionId, x => ({
-            ...x,
-            presence: { ...x.presence, isUpdating: x.pending.length > 0 },
-          }))
-          const next = s.pending[0]
-          if (!next) break
-          const promptAt = now()
-          const reply = await ask(buildPrompt(s.ledger, next.ex)).catch(() => null)
-          const after = await updateState(dir, sessionId, x =>
-            x.pending[0]?.turnsStarted === next.turnsStarted && x.pending[0].ex.turn === next.ex.turn
-              ? applied(x, reply, now(), promptAt)
-              : x,
-          )
-          if (after.pending[0]?.failed && !next.failed) return 'retry' as const
-        }
-      } finally {
-        await updateState(dir, sessionId, x => ({ ...x, presence: { ...x.presence, isUpdating: false } }))
-      }
-    })
-    if (!held.acquired || held.value === 'retry') return
-  }
-}
+export const runUpdates = (dir: string, sessionId: string, ask: Ask, now: () => number): Promise<void> =>
+  runSessionUpdates({ ...codexStore(dir, sessionId, now), ask })

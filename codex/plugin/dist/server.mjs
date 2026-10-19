@@ -1,28 +1,15 @@
 // Built by codex/build.mjs from codex/src and hooks/. Do not edit.
 
 // src/server-main.ts
-import { readdir as readdir2, stat as stat2 } from "node:fs/promises";
-import { dirname as dirname2, join as join2 } from "node:path";
+import { readdir, stat } from "node:fs/promises";
+import { dirname, join as join2 } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-// src/state.ts
-import {
-  lstat,
-  mkdir,
-  readFile,
-  readdir,
-  readlink,
-  realpath,
-  rename,
-  rmdir,
-  stat,
-  symlink,
-  unlink,
-  writeFile
-} from "node:fs/promises";
+// src/data-dir.ts
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { join } from "node:path";
 function dataDir(env, pluginRoot2) {
   const fromEnv = env.INBOX_DATA || env.PLUGIN_DATA;
   if (fromEnv) return fromEnv;
@@ -42,11 +29,11 @@ async function devBuild(dir2) {
 }
 
 // src/server-main.ts
-var here = dirname2(fileURLToPath(import.meta.url));
-var pluginRoot = dirname2(here);
+var here = dirname(fileURLToPath(import.meta.url));
+var pluginRoot = dirname(here);
 var dir = dataDir(process.env, pluginRoot);
 var BUNDLE = join2("dist", "server-handler.mjs");
-var exists = (path) => stat2(path).then(
+var exists = (path) => stat(path).then(
   () => true,
   () => false
 );
@@ -62,9 +49,9 @@ function compareVersions(a, b) {
 async function installedBundle() {
   const own = join2(pluginRoot, BUNDLE);
   if (await exists(own)) return own;
-  const versions = (await readdir2(dirname2(pluginRoot)).catch(() => [])).filter((name) => /^\d/.test(name));
+  const versions = (await readdir(dirname(pluginRoot)).catch(() => [])).filter((name) => /^\d/.test(name));
   for (const version of versions.sort(compareVersions).reverse()) {
-    const bundle = join2(dirname2(pluginRoot), version, BUNDLE);
+    const bundle = join2(dirname(pluginRoot), version, BUNDLE);
     if (await exists(bundle)) return bundle;
   }
   return null;
@@ -104,9 +91,9 @@ async function currentHandler() {
   isPluginFolderGone = path === null;
   if (path === null) {
     if (lastLoaded) return lastLoaded;
-    throw new Error(`no ${BUNDLE} in ${dirname2(pluginRoot)}`);
+    throw new Error(`no ${BUNDLE} in ${dirname(pluginRoot)}`);
   }
-  const { mtimeMs } = await stat2(path).catch(() => ({ mtimeMs: -1 }));
+  const { mtimeMs } = await stat(path).catch(() => ({ mtimeMs: -1 }));
   const key = `${pathToFileURL(path).href}?v=${mtimeMs}`;
   if (current?.key !== key) current = { key, handle: load(key, path) };
   const { handle } = current;

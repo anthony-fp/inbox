@@ -72,7 +72,8 @@ import type { TabView as View } from './core'
 import type { PressReply } from './server'
 import { ENTER_MS, EXIT_MS, isMoving, MOVE_MS, ROW_STATE_MS, stepRow } from './rows'
 import type { RowState, RowTarget, RowTrack } from './rows'
-import { drawnSettled, POLL_MS, PRESS_TIMEOUT_MS, settledIds, settledSeen } from './settle'
+import { PRESS_TIMEOUT_MS } from '../../hooks/session'
+import { drawnSettled, POLL_MS, settledIds, settledSeen } from './settle'
 
 type Tone = 'needsYou' | 'issue' | 'findings' | 'done' | 'error'
 

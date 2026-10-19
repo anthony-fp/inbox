@@ -17,62 +17,19 @@ import {
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 
-import { EMPTY, KEPT_SESSIONS, pruneClosed, upgradeLedger } from '../../hooks/ledger'
-import type { Exchange, Press } from '../../hooks/ledger'
-import { TOLD_NOTHING } from '../../hooks/model-text'
-import type { Told } from '../../hooks/model-text'
+import { KEPT_SESSIONS, pruneClosed, upgradeLedger } from '../../hooks/ledger'
+import type { Exchange } from '../../hooks/ledger'
 import { upgradeLastActions } from '../../hooks/presses'
-import type { LastAction, Ledger, PrViews } from '../../types'
+import { emptySession, NO_PRS } from '../../hooks/session'
+import type { Session } from '../../hooks/session'
 
-export type SessionState = {
+export type SessionState = Session & {
   version: 1
   sessionId: string
   root: string
   home: string
   /** The codex binary the desktop app runs, from the hooks' CODEX_CLI_PATH. */
   cliPath: string | null
-  ledger: Ledger
-  /** What the turn running now gathered for the per-reply update. */
-  turn: {
-    person: string | null
-    activity: string[]
-    press: Press | null
-  }
-  /** The inbox text Codex last read beside a prompt, and the closed items it was told about. */
-  told: Told
-  presence: {
-    /** Prompts that started a turn, and how many of those turns the inbox model has summarized. */
-    turnsStarted: number
-    turnsApplied: number
-    ledgerState: 'current' | 'failed'
-    isUpdating: boolean
-  }
-  /**
-   * Exchanges waiting for the inbox model, oldest first, with the turns started when each ended. `failed` marks
-   * one whose first update failed: the next update tries it once more, then drops it.
-   */
-  pending: { ex: Exchange; turnsStarted: number; failed?: true }[]
-  /**
-   * Queue attempts saved before dispatch. UserPromptSubmit can match an accepted
-   * record by text; an uncertain one stays to block false matches with later presses.
-   */
-  sent: {
-    text: string
-    press: Press | null
-    at: number
-    row: string | null
-    queuedId: string | null
-    /** The row press's time in milliseconds; null for older records or messages without a row. */
-    pressedAt: number | null
-    /** The local press identity; null for older records or messages without a row. */
-    deliveryId: string | null
-    phase?: 'attempting' | 'accepted' | 'uncertain'
-  }[]
-  lastActions: Record<string, LastAction>
-  /** The rows the tab's replies in progress held at its latest request. Every write keeps their closed records. */
-  heldRows: string[]
-  /** The PRs tab's data: each PR's latest view and the current branch's PR. `isFetching` is always false here; the server knows what runs. */
-  prViews: PrViews
   tabSeenAt: number
   heard: Heard
 }
@@ -104,8 +61,6 @@ export const NOTHING_HEARD: Heard = {
   promptMissedAt: null,
 }
 
-export const NO_PRS: PrViews = { views: {}, branchRef: null, isFetching: false }
-
 export function emptyState(sessionId: string): SessionState {
   return {
     version: 1,
@@ -113,54 +68,9 @@ export function emptyState(sessionId: string): SessionState {
     root: '',
     home: homedir(),
     cliPath: null,
-    ledger: EMPTY,
-    turn: { person: null, activity: [], press: null },
-    told: TOLD_NOTHING,
-    presence: { turnsStarted: 0, turnsApplied: 0, ledgerState: 'current', isUpdating: false },
-    pending: [],
-    sent: [],
-    lastActions: {},
-    heldRows: [],
-    prViews: NO_PRS,
+    ...emptySession(),
     tabSeenAt: 0,
     heard: NOTHING_HEARD,
-  }
-}
-
-/**
- * The plugin's data folder. Hooks get it as PLUGIN_DATA. MCP server
- * processes get no PLUGIN_DATA, so they take the folder Codex gives
- * hooks for the installed copy they run from: the cache path
- * `<codex home>/plugins/cache/<market>/<plugin>/<version>` maps to
- * `<codex home>/plugins/data/<plugin>-<market>`.
- */
-export function dataDir(env: NodeJS.ProcessEnv, pluginRoot: string): string {
-  const fromEnv = env.INBOX_DATA || env.PLUGIN_DATA
-  if (fromEnv) return fromEnv
-  const m = pluginRoot.match(/^(.*)\/plugins\/cache\/([^/]+)\/([^/]+)\/[^/]+$/)
-  if (m) return `${m[1]}/plugins/data/${m[3]}-${m[2]}`
-
-  return join(homedir(), '.codex', 'inbox-dev')
-}
-
-/**
- * What `npm --prefix codex run dev` builds, from the dev.json it writes into the data folder while it runs: the tab's
- * page and the server's handler. Null when no dev build runs, including once the process that wrote the file is
- * gone, as one killed before it could delete it.
- */
-export async function devBuild(dir: string): Promise<{ tab: string; server?: string } | null> {
-  try {
-    const d = JSON.parse(await readFile(join(dir, 'dev.json'), 'utf8')) as {
-      tab: string
-      server?: string
-      pid?: number
-    }
-    if (typeof d.pid !== 'number') return null
-    // Signal 0 checks that the process exists and sends nothing.
-    process.kill(d.pid, 0)
-    return d
-  } catch {
-    return null
   }
 }
 

@@ -3,8 +3,6 @@ import type { InboxView } from '../../hooks/view'
 
 export const POLL_MS = 3000
 
-export const PRESS_TIMEOUT_MS = 60_000
-
 export const SETTLE_WINDOW_MS = SETTLED_MS + 2 * POLL_MS
 
 export function settledIds(v: InboxView): string[] {

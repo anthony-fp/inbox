@@ -15,6 +15,8 @@ Shared modules are in `hooks/`. Both hosts consume them, directly or through the
 | `hooks/arrivals.ts` | Shared module. Which rows are new, and where a look moves for them. |
 | `hooks/ledger.ts` | Shared module. Saved ledger, upgrades, reply parsing and ledger writes. |
 | `hooks/model-text.ts` | Shared module. Guidance, prompts, inbox notes, question numbers and the `Host` and `Told` types. |
+| `hooks/session.ts` | Shared module. The session state shape, and its pure functions: `notePrompt`, `endTurn`, `recorded`, `pressOn` and `sessionView`. |
+| `hooks/session-host.ts` | Shared module. The `SessionHost` flows that run on a host's store: `runUpdates`, `reconcileUpdateStatus`, `wakeForDone`, `press` and `fetchPrs`. |
 | `hooks/text.ts` | Shared module. Clipping, code-block formatting and relative ages. |
 | `hooks/claude.ts` | Mod only. Claude transcript, command, dialog, stop and sidebar helpers. |
 | `hooks/prs.ts` | Shared module. PR parsing, readiness and prompts. |
@@ -37,13 +39,15 @@ Shared modules are in `hooks/`. Both hosts consume them, directly or through the
 | `codex/src/arrivals.ts` | Codex adapter. The tab's rows, tabs and empty-tab rule, built on `hooks/arrivals.ts`. |
 | `codex/src/settle.ts` | Codex adapter. Polling and settle-window timing for the tab. |
 | `codex/src/texts.ts` | Codex adapter. Texts only Codex reads, and the `CODEX` host. |
-| `codex/src/core.ts` | Codex host. Session logic as pure functions on the session state. |
-| `codex/src/state.ts` | Codex host. One JSON state file per session, under a lock. |
-| `codex/src/server.ts` | Codex host. The MCP server: tools, presses, open, queue, and the background fetch of the session's PRs. |
+| `codex/src/core.ts` | Codex host. Codex bindings over `hooks/session.ts`, the tab view and tab helpers. |
+| `codex/src/data-dir.ts` | Codex host. The data folder and the dev build, which the loader reads. It imports no shared module, so a shared-module change leaves the loader's bundle unchanged. |
+| `codex/src/state.ts` | Codex host. One JSON state file per session, under a lock. `SessionState` extends the shared `Session` from `hooks/session.ts`. |
+| `codex/src/host.ts` | Codex host. `codexStore`, the Codex store that `hooks/session-host.ts` runs on. |
+| `codex/src/server.ts` | Codex host. The MCP server: tools, and the host bindings for presses, open, queue and the background fetch of the session's PRs, which run in `hooks/session-host.ts`. |
 | `codex/src/gh.ts` | Codex host. Finds a gh the server can start, and runs it for the shared PR fetch. |
 | `codex/src/server-main.ts` | Codex host. The loader that Codex starts once per app launch. |
 | `codex/src/server-handler.ts` | Codex host. The request handler the loader reloads. |
-| `codex/src/update.ts` | Codex host. The per-reply update through `codex exec`. |
+| `codex/src/update.ts` | Codex host. Binds `hooks/session-host.ts` update flows to `codex exec`. |
 | `codex/src/update-main.ts` | Codex host. Entry point for the update process. |
 | `codex/src/hook.ts` | Codex host. The hook logic that changes session state. |
 | `codex/src/hook-main.ts` | Codex host. Entry point for the hooks. |
@@ -82,9 +86,9 @@ Change a rule in its owner. Do not change it in a reader.
 | PR readiness and prompts | `hooks/prs.ts:readiness`, `hooks/prs.ts:prompts` | The mod and the Codex tab |
 | Tracked-PR help steps | `hooks/pr-tab.ts:itemPrSteps` | Both hosts, in views and press validation |
 | Exchange application and activity | `hooks/ledger.ts:applyExchangeUpdate`, `hooks/model-text.ts:addActivity` | Both hosts; retry scheduling remains with the host |
-| Codex worker activity | `codex/src/update.ts:reconcileUpdateStatus`, `codex/src/core.ts:viewOf` | The Codex server checks ownership before clearing abandoned activity. Pending exchanges alone do not imply an active worker. |
+| Codex worker activity | `hooks/session-host.ts:reconcileUpdateStatus`, `codex/src/core.ts:viewOf` | The Codex server checks ownership before clearing abandoned activity. Pending exchanges alone do not imply an active worker. |
 | Claude Done notifications | `hooks/register.tsx:wakeForDone`, `hooks/register.tsx:recordDoneRefusal`, `hooks/presses.ts:refuseDoneNotification` | Persist the notification identity before submission. An explicit refusal keeps the task Done, records the reason and restores Undo. Session switches preserve the result in its original session. Refused attempts are not sent again automatically. |
-| Codex Done notifications | `codex/src/server.ts:wakeForDone`, shared delivery reducers in `hooks/presses.ts` | Checkpoint each batch before queue submission. Unknown outcomes remain unconfirmed in settled rows and Closed folds, without an automatic resend. |
+| Codex Done notifications | `hooks/session-host.ts:wakeForDone`, shared delivery reducers in `hooks/presses.ts` | Checkpoint each batch before queue submission. Unknown outcomes remain unconfirmed in settled rows and Closed folds, without an automatic resend. |
 | Undo result | `hooks/presses.ts:applyPress`, `hooks/pr-tab.ts:applyPrPress` | Both hosts clear their closed-note acknowledgement when the result names an actual reopen |
 | Arrival acknowledgement | `hooks/presses.ts:withArrival` | Both hosts; one bulk press can affect several rows |
 | PR presses, which PRs the tab draws, and how a PR is fetched | `hooks/pr-tab.ts:applyPrPress`, `hooks/pr-tab.ts:drawnPrs`, `hooks/pr-tab.ts:fetchTracked` | The mod and the Codex server |
@@ -97,7 +101,7 @@ Some content and host bookkeeping still have two copies. These are remaining wor
 | --- | --- | --- |
 | PR block and row composition | `hooks/register.tsx` and `codex/src/tab.tsx` | Both use shared PR rules and button plans, but compose their own content. |
 | Host notices and some closed-row composition | `hooks/register.tsx` and `codex/src/tab.tsx` | Share identical decisions while keeping native fitting and decoration local. |
-| Local effects and demo presses | `hooks/register.tsx:openPath`, `hooks/register.tsx:runDemoPress`, `codex/src/server.ts:makeServer` | Shared effect descriptions still have host execution and demo wiring. |
+| Local effects and demo presses | `hooks/register.tsx:openPath`, `hooks/register.tsx:runDemoPress`, `hooks/session-host.ts:press`, `codex/src/server.ts:makeServer` | Shared effect descriptions still have host execution and demo wiring. |
 
 A `deliveryId` identifies one local press. Each host keeps a sent-prompt record
 before an arrival can change its rows. Arrival events provide message text but
@@ -127,11 +131,11 @@ A difference is on purpose when a look cannot do something or the product decide
 | Redraw and polling | Redraws in steps while a row leaves. | Redraws once when a row leaves. A timer redraw loop made clicks fail. | The tab polls the server every 3 seconds. | Only the mod gets pushed events. | `hooks/register.tsx:redrawWhileLeaving`, `codex/src/settle.ts:POLL_MS` |
 | Hot reload | Mod handlers reload. | Same as terminal. | The handler reloads. The tab stages a candidate before replacing its root, style and script. Failed startup keeps the working page; successful replacement waits for active presses. The loader needs Codex restarted. | Each instance owns its timers, listeners and animations. Staging preserves the working UI and host state until the candidate can take over. | `codex/src/server-main.ts:load`, `codex/src/server-handler.ts:createHandler`, `codex/src/tab.tsx:swapPage`, `codex/src/tab.tsx:dispose` |
 | Storage | Engine atoms hold the live session. The engine store keeps a saved ledger per session. | Same as terminal. | One JSON file per session, under a lock. | Codex has no engine store. Its hooks run as separate short-lived processes beside the server. | `hooks/register.tsx:save`, `codex/src/state.ts:withLock` |
-| How a press sends, opens and copies | Sends with the engine's prompt submit. Opens and copies in process. | Same as terminal. | Sends with `codex queue` from the server. Opens in the server. The tab copies. | Codex's server cannot reach the page's clipboard. | `hooks/presses.ts:EffectHost`, `codex/src/server.ts:makeServer` |
+| How a press sends, opens and copies | Sends with the engine's prompt submit. Opens and copies in process. | Same as terminal. | Sends with `codex queue` from the server. Opens in the server. The tab copies. | Codex's server cannot reach the page's clipboard. | `hooks/presses.ts:EffectHost`, `hooks/session-host.ts:press`, `codex/src/server.ts:makeServer` |
 | Band, stop and dialog rows | Yes. | Yes. | No. | Codex has no line above its prompt. | `hooks/view.ts:TABS`, `hooks/view.ts:ROW_TABS` |
-| PR data | The mod runs gh through the engine, on a timer while the person is around. | Same as terminal. | The server runs gh through `deps.exec` in the session's folder, and refetches on a view when the last fetch is over 2 minutes old. It tries `gh`, then the Homebrew folders. | The ChatGPT app may start the Codex server without Homebrew on its PATH. A Claude Code session, in the terminal or the Claude app, gets the login shell's PATH. | `hooks/register.tsx:fetchPrsNow`, `codex/src/server.ts:fetchPrs`, `codex/src/gh.ts:ghFinder` |
+| PR data | The mod runs gh through the engine, on a timer while the person is around. | Same as terminal. | The server runs gh through `deps.exec` in the session's folder, and refetches on a view when the last fetch is over 2 minutes old. It tries `gh`, then the Homebrew folders. | The ChatGPT app may start the Codex server without Homebrew on its PATH. A Claude Code session, in the terminal or the Claude app, gets the login shell's PATH. | `hooks/register.tsx:fetchPrsNow`, `hooks/session-host.ts:fetchPrs`, `codex/src/gh.ts:ghFinder` |
 | Settle window | A row stays in place for `SETTLED_MS` from the close. | Same as terminal. | The server lists a row as settled for `SETTLED_MS` plus two polls from the close. The tab draws it in place for `SETTLED_MS` from the first poll that lists it. | The tab only learns of a close at its next poll. | `codex/src/settle.ts:SETTLE_WINDOW_MS`, `codex/src/settle.ts:drawnSettled` |
-| Failed per-reply update | Shows failure after work stops, advances applied turns and catches up after the next message. | Same as terminal. | Retains the first failed exchange for the next Stop. An active retry shows Updating. A second failure drops the exchange. | Both hosts end hand-offs after a reply. Their recovery events and retry schedules differ. | `hooks/register.tsx:queueUpdate`, `codex/src/update.ts:runUpdates`, `codex/src/core.ts:viewOf` |
+| Failed per-reply update | Shows failure after work stops, advances applied turns and catches up after the next message. | Same as terminal. | Retains the first failed exchange for the next Stop. An active retry shows Updating. A second failure drops the exchange. | Both hosts end hand-offs after a reply. Their recovery events and retry schedules differ. | `hooks/register.tsx:queueUpdate`, `hooks/session-host.ts:runUpdates`, `codex/src/core.ts:viewOf` |
 | Primary buttons | None. A plain terminal Button ignores `variant`. The recommended option ends "(recommended)". | The recommended option, Done, Fix or Do it. On the PRs tab, Address, Fix, or a PR's first move. | Same as desktop. | `docs/plans/inbox-ui.md` says the desktop pane makes the recommended option, or else Done, Fix or Do it, the primary button. | `hooks/register.tsx:keyedButton`, `codex/src/tab.tsx:KeyButton` |
 | Reply control | A labeled action with its key. | A follow-up in a Client region. | A normal button. | Desktop native Buttons fill and pad only their labels. The Client keeps the follow-up's hit area and spacing with the other links. The shared action keeps normal emphasis and its place in the order. | `hooks/links-client.tsx:LinksProps`, `codex/src/row-actions.tsx:ActionButton` |
 | Reply focus | The reply field receives typing. | On desktop 2.42304.0 with engine 2.1.299, the first Reply click leaves typing in the chat composer even when it is empty. Clicking the field enables typing and preserves the composer draft. | The reply field receives typing after Reply. Built-page and native MCP-panel checks pass. | The desktop host reports successful `ui.focus` without transferring typing to its Input. See the verified limits in `docs/reference/claude-desktop-app.md`. | `hooks/register.tsx:focusField`, `codex/src/tab.tsx:draw` |

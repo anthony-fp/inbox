@@ -139,7 +139,7 @@ const entries = {
 if (mode === '--dev') {
   const page = join(here, '.dev', 'tab.html')
   const handler = join(here, '.dev', 'server-handler.mjs')
-  // The data folder Codex gives the installed plugin, as dataDir in src/state.ts maps it.
+  // The data folder Codex gives the installed plugin, as dataDir in src/data-dir.ts maps it.
   const pointer = join(
     process.env.CODEX_HOME || join(homedir(), '.codex'),
     'plugins',

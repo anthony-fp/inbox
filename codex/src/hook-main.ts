@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 
 import { detachedUpdate, handleHook } from './hook'
 import type { HookInput } from './hook'
-import { dataDir } from './state'
+import { dataDir } from './data-dir'
 
 async function main() {
   let raw = ''

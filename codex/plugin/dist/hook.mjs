@@ -1,7 +1,7 @@
 // Built by codex/build.mjs from codex/src and hooks/. Do not edit.
 
 // src/hook-main.ts
-import { dirname as dirname2, join as join2 } from "node:path";
+import { dirname as dirname2, join as join3 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/hook.ts
@@ -403,27 +403,24 @@ function linkedPrs(prs, refs) {
   return [...prs.filter((r) => !refs.includes(r)), ...refs];
 }
 
-// src/settle.ts
-var POLL_MS = 3e3;
-var SETTLE_WINDOW_MS = SETTLED_MS + 2 * POLL_MS;
-
-// src/texts.ts
-var CODEX = {
-  agent: "Codex",
-  surface: "the Inbox tab",
-  band: null,
-  findingsIn: "the Findings section of the Inbox tab",
-  intro: "The inbox plugin shows the user what waits on them: your open questions and the tasks only they can do, and your findings, in the Inbox tab beside the conversation."
-};
-
-// src/core.ts
-var TAB_OPEN_MS = 15e3;
-function isTabOpen(s, now) {
-  return now - s.tabSeenAt < TAB_OPEN_MS;
+// ../hooks/session.ts
+var NO_PRS = { views: {}, branchRef: null, isFetching: false };
+function emptySession() {
+  return {
+    ledger: EMPTY,
+    turn: { person: null, activity: [], press: null },
+    told: TOLD_NOTHING,
+    presence: { turnsStarted: 0, turnsApplied: 0, ledgerState: "current", isUpdating: false },
+    pending: [],
+    sent: [],
+    lastActions: {},
+    heldRows: [],
+    prViews: NO_PRS
+  };
 }
-function startContext(s, source) {
+function startContext(host, s, source) {
   const carried = carryText(s.ledger, START_TITLE);
-  const parts = [source === "resume" ? null : guidanceText(CODEX), carried].filter((x) => x !== null);
+  const parts = [source === "resume" ? null : guidanceText(host), carried].filter((x) => x !== null);
   return parts.length > 0 ? parts.join("\n\n") : null;
 }
 function cleared(s) {
@@ -436,7 +433,7 @@ function cleared(s) {
     lastActions: {}
   };
 }
-function notePrompt(s, text, now) {
+function notePrompt(host, s, text, isOpen) {
   const matchingAt = s.sent.findIndex((x) => x.text === text);
   const matching = matchingAt >= 0 ? s.sent[matchingAt] : void 0;
   const sentAt = matching && (matching.phase === void 0 || matching.phase === "accepted") ? matchingAt : -1;
@@ -456,7 +453,7 @@ function notePrompt(s, text, now) {
     arrived
   );
   const ledger = { ...s.ledger, turn: s.ledger.turn + 1 };
-  const r = promptNotes(CODEX, ledger, { text, isPress: sentAt >= 0, isOpen: isTabOpen(s, now) }, s.told);
+  const r = promptNotes(host, ledger, { text, isPress: sentAt >= 0, isOpen }, s.told);
   const person = s.turn.person === null ? text : `${s.turn.person}
 
 ${text}`;
@@ -478,13 +475,7 @@ function noteActivity(s, line) {
   if (activity === s.turn.activity) return s;
   return { ...s, turn: { ...s.turn, activity } };
 }
-function activityOf(tool, input) {
-  return toolActivity(tool, input);
-}
-function patchFiles(patch) {
-  return [...patch.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)].map((m) => (m[1] ?? "").trim()).filter(Boolean);
-}
-function endTurn(s, reply, now) {
+function endTurn(host, s, reply, isOpen) {
   const refs = prRefs(reply);
   const base = {
     ...s,
@@ -499,9 +490,40 @@ function endTurn(s, reply, now) {
     reply,
     turn: s.ledger.turn,
     press: s.turn.press,
-    screen: screenText(CODEX, isTabOpen(s, now), null)
+    screen: screenText(host, isOpen, null)
   };
   return { ...base, pending: [...base.pending, { ex, turnsStarted: s.presence.turnsStarted }] };
+}
+
+// src/settle.ts
+var POLL_MS = 3e3;
+var SETTLE_WINDOW_MS = SETTLED_MS + 2 * POLL_MS;
+
+// src/texts.ts
+var CODEX = {
+  agent: "Codex",
+  surface: "the Inbox tab",
+  band: null,
+  findingsIn: "the Findings section of the Inbox tab",
+  intro: "The inbox plugin shows the user what waits on them: your open questions and the tasks only they can do, and your findings, in the Inbox tab beside the conversation."
+};
+
+// src/core.ts
+var TAB_OPEN_MS = 15e3;
+function isTabOpen(s, now) {
+  return now - s.tabSeenAt < TAB_OPEN_MS;
+}
+function notePrompt2(s, text, now) {
+  return notePrompt(CODEX, s, text, isTabOpen(s, now));
+}
+function activityOf(tool, input) {
+  return toolActivity(tool, input);
+}
+function patchFiles(patch) {
+  return [...patch.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)].map((m) => (m[1] ?? "").trim()).filter(Boolean);
+}
+function endTurn2(s, reply, now) {
+  return endTurn(CODEX, s, reply, isTabOpen(s, now));
 }
 var MAX_PROMPT_TURNS = 10;
 function noteHook(s, hook, now, turnId) {
@@ -543,7 +565,6 @@ var NOTHING_HEARD = {
   stops: 0,
   promptMissedAt: null
 };
-var NO_PRS = { views: {}, branchRef: null, isFetching: false };
 function emptyState(sessionId) {
   return {
     version: 1,
@@ -551,25 +572,10 @@ function emptyState(sessionId) {
     root: "",
     home: homedir(),
     cliPath: null,
-    ledger: EMPTY,
-    turn: { person: null, activity: [], press: null },
-    told: TOLD_NOTHING,
-    presence: { turnsStarted: 0, turnsApplied: 0, ledgerState: "current", isUpdating: false },
-    pending: [],
-    sent: [],
-    lastActions: {},
-    heldRows: [],
-    prViews: NO_PRS,
+    ...emptySession(),
     tabSeenAt: 0,
     heard: NOTHING_HEARD
   };
-}
-function dataDir(env, pluginRoot) {
-  const fromEnv = env.INBOX_DATA || env.PLUGIN_DATA;
-  if (fromEnv) return fromEnv;
-  const m = pluginRoot.match(/^(.*)\/plugins\/cache\/([^/]+)\/([^/]+)\/[^/]+$/);
-  if (m) return `${m[1]}/plugins/data/${m[3]}-${m[2]}`;
-  return join(homedir(), ".codex", "inbox-dev");
 }
 function fileName(sessionId) {
   if (!/^[\w-]{1,100}$/.test(sessionId)) throw new Error(`Not a session id: ${sessionId}`);
@@ -846,13 +852,13 @@ async function handleHook(input, deps) {
         id,
         (s2) => noteHook(withCli({ ...input.source === "clear" ? cleared(s2) : s2, root }), "start", now())
       );
-      const context = startContext(s, input.source);
+      const context = startContext(CODEX, s, input.source);
       return context ? { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context } } : null;
     }
     case "UserPromptSubmit": {
       let notes = [];
       await updateState(dir, id, (s) => {
-        const r = notePrompt(withCli(s), input.prompt ?? "", now());
+        const r = notePrompt2(withCli(s), input.prompt ?? "", now());
         notes = r.notes;
         return input.agent_id ? r.state : noteHook(r.state, "prompt", now(), input.turn_id);
       });
@@ -879,7 +885,7 @@ async function handleHook(input, deps) {
         dir,
         id,
         (s) => noteHook(
-          endTurn(
+          endTurn2(
             lines.reduce((x, line) => noteActivity(x, line), withCli(s)),
             reply,
             now()
@@ -905,6 +911,17 @@ function detachedUpdate(dir, env, script) {
   };
 }
 
+// src/data-dir.ts
+import { homedir as homedir2 } from "node:os";
+import { join as join2 } from "node:path";
+function dataDir(env, pluginRoot) {
+  const fromEnv = env.INBOX_DATA || env.PLUGIN_DATA;
+  if (fromEnv) return fromEnv;
+  const m = pluginRoot.match(/^(.*)\/plugins\/cache\/([^/]+)\/([^/]+)\/[^/]+$/);
+  if (m) return `${m[1]}/plugins/data/${m[3]}-${m[2]}`;
+  return join2(homedir2(), ".codex", "inbox-dev");
+}
+
 // src/hook-main.ts
 async function main() {
   let raw = "";
@@ -915,7 +932,7 @@ async function main() {
     dir,
     env: process.env,
     now: Date.now,
-    startUpdate: detachedUpdate(dir, process.env, join2(dist, "update.mjs"))
+    startUpdate: detachedUpdate(dir, process.env, join3(dist, "update.mjs"))
   });
   if (out) process.stdout.write(JSON.stringify(out));
 }

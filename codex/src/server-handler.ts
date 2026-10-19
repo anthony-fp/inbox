@@ -1,7 +1,7 @@
 import { readFile, stat } from 'node:fs/promises'
 
 import { makeServer } from './server'
-import { devBuild } from './state'
+import { devBuild } from './data-dir'
 import TAB_HTML from './tab.html'
 import { run } from './run'
 
