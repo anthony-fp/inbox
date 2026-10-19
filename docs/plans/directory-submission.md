@@ -1,6 +1,6 @@
 # Submitting the inbox to the Claude Code plugin directory
 
-Status: building. The second validation left 4 blocks, both fixed below. Only a re-validate confirms them.
+Status: built. Validation passes with no blocks. Pete is filling in the submission form.
 
 The directory scans a submitted plugin and reports findings at four levels
 ([pre-submission checklist](https://claude.com/docs/plugins/pre-submission-checklist)):
@@ -19,6 +19,7 @@ The directory scans a submitted plugin and reports findings at four levels
 | Permission hook answers `allow` (`hooks/register.tsx`, the two `tool.check` hooks) | Delete both hooks. They never run: the mod answers `record_finding` and `close` in `tool.call`, which settles the call before the permission check. Checked on Claude Code 2.1.300 with a probe mod under `claude -p --permission-mode default`: a `tool.check` that denies changes nothing, and with no `tool.check` the tool runs with no prompt. That holds with a catch-all `tool.call` hook that passes calls on, registered before or after, as the mod has. Not checked in the desktop app, which answers permission prompts through the Agent SDK. |
 | Directory couldn't confirm the `PermissionRequest` hook leaves the decision with the user (`MOD_PERMISSION_ANSWER_UNREAD`) | The scan needs the hook's parameter names, `$`, `e` and `next`, bound nowhere else in `hooks/register.tsx`. Rename the other bindings of `e` and `next` in the file, and drop the hook's `.catch`, which bound all three again. Without a `.catch`, a hook that throws before `next` is skipped, so the prompt still reaches the user. |
 | `$` or `on` used in a way the directory couldn't follow (`MOD_CAPABILITY_USE_NOT_PLAIN`, 10) | The scan forbids the name `h` in a `.tsx` file, since elements compile to calls of `h`. Rename the SVG builders' `w` and `h` to `width` and `height`, and the fold-hover updater's `h`. Also keep the `on('session.append', …)` registration on one line, under `// prettier-ignore`. |
+| No privacy policy link, after "Reads and stores" personal data | Set `privacyPolicyUrl` to the README's `#what-it-runs-sends-and-changes`, and say there what the inbox keeps: the 40 most recent sessions, in local plugin storage. Renaming that heading breaks the link. |
 | No `author` in plugin.json | Add `{ "name": "Pete Petrash" }`, plus `repository` and `license`. |
 | No `version` in plugin.json | Add a version that matches the Codex plugin's, now `0.2.5`. Installs update only when the version goes up, so each release raises it in both manifests. |
 
@@ -39,8 +40,10 @@ Each of these is a policy hold. The README's "What it runs, sends and changes" s
 - **CLAUDE.md at the plugin root**, **the oversized `docs/reference/claude-code-mods.md`**, and **`npx -y` in `scripts/check.sh`** (the download-and-run findings). These exist because the plugin is the whole repo (`"source": "./"`). Each is a warning or a hold. Pete chose to keep shipping the whole repo.
 - **Mod adds tools, commands or agents**: a note.
 
-## Open questions for Pete
+## Decisions
 
-1. **Which findings block?** Confirm in the portal which of the unlabeled findings are blocks, and where the 3 `$` findings and the 7 credential findings point.
-2. **Icon.** `.claude-plugin/icon.png`, 1024 px square: a white Geist Mono `i` and a block cursor as tall as the `i`, on a dark background with an indigo glow, after the launch video's end card. The directory takes the icon only the first time the plugin is saved or submitted, so it must be on main before the first portal save.
-3. **Name.** `inbox` may be confused with other listings (4 findings). Pete chose to keep `inbox` for now. A later rename can change `displayName` alone, which changes only what people see. Changing `name` also changes the install command, the tool names Claude calls, and the key the saved state is stored under.
+1. **Blocks.** The third validation had none. The holds and warnings left are listed above.
+2. **Icon.** `.claude-plugin/icon.png`, 1024 px square: a white Geist Mono `i` and a block cursor as tall as the `i`, on a dark background with an indigo glow, after the launch video's end card. The directory takes the icon only the first time the plugin is saved or submitted.
+3. **Name.** `inbox` may be confused with other listings (4 holds). Pete chose to keep `inbox` for now. A later rename can change `displayName` alone, which changes only what people see. Changing `name` also changes the install command, the tool names Claude calls, and the key the saved state is stored under.
+4. **Data questions.** Personal data: reads and stores. Sends data to another service: yes, listed in the README. Retention by our service: not retained. For users under 18: no.
+5. **Updates.** The directory follows `main` and checks it about every 6 hours, with no push webhook. Every commit it picks up becomes a new version that it scans. Following a release branch or tag instead would keep everyday pushes out of the directory.
