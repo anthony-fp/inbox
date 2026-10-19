@@ -5,30 +5,42 @@ const CANDIDATES = ['gh', '/opt/homebrew/bin/gh', '/usr/local/bin/gh']
 
 const GH_TIMEOUT_MS = 20_000
 
+const UNSTARTABLE_CODE = -1
+
 /**
- * Finds the first gh that starts: `exec` ends with code -1 for a command it cannot start. The first one found is
- * kept; while none starts, each call looks again, since the person may install gh without restarting Codex.
+ * Finds the first gh that starts: `exec` ends with code -1 for a command it cannot start. The one found is kept
+ * until `forget` is called; while none starts, each call looks again, since the person may install gh without
+ * restarting Codex.
  */
-export function ghFinder(exec: Run): () => Promise<string | null> {
+export function ghFinder(exec: Run): { find: () => Promise<string | null>; forget: () => void } {
   let found: string | null = null
 
-  return async () => {
-    if (found) return found
-    for (const candidate of CANDIDATES) {
-      const r = await exec([candidate, '--version'], { cwd: '/', timeoutMs: 5000 })
-      if (r.code !== -1) {
-        found = candidate
-        return found
+  return {
+    find: async () => {
+      if (found) return found
+      for (const candidate of CANDIDATES) {
+        const r = await exec([candidate, '--version'], { cwd: '/', timeoutMs: 5000 })
+        if (r.code !== UNSTARTABLE_CODE) {
+          found = candidate
+          return found
+        }
       }
-    }
 
-    return null
+      return null
+    },
+    forget: () => {
+      found = null
+    },
   }
 }
 
-export function ghIn(exec: Run, bin: string, cwd: string): GhRun {
+/**
+ * `onUnstartable` is called when a run ends with code -1, which also covers a timeout kill and an output overflow.
+ */
+export function ghIn(exec: Run, bin: string, cwd: string, onUnstartable: () => void): GhRun {
   return async args => {
     const r = await exec([bin, ...args], { cwd: cwd || '/', timeoutMs: GH_TIMEOUT_MS })
+    if (r.code === UNSTARTABLE_CODE) onUnstartable()
 
     return { exitCode: r.code, stdout: r.stdout, stderr: r.stderr }
   }

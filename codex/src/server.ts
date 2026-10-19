@@ -196,7 +196,7 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
   const { dir, now } = deps
   const uri = tabUri(deps.tabHtml)
   const tools = toolsFor(uri)
-  const findGh = ghFinder(deps.exec)
+  const gh = ghFinder(deps.exec)
   const fetchingPrs = new Set<string>()
   const prunedFor = new Set<string>()
   const prsFetchedAt = new Map<string, number>()
@@ -333,15 +333,28 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
 
   async function fetchPrs(id: string) {
     const s = await readState(dir, id)
-    const bin = await findGh()
+    const bin = await gh.find()
     isGhMissing = bin === null
     if (bin === null) return
-    const { views: fetched, branchRef } = await fetchTracked(
-      ghIn(deps.exec, bin, s.root),
-      s.prViews,
-      s.ledger.prs,
-      true,
-    )
+    let sawUnstartable = false
+    const fetchWith = (path: string) =>
+      fetchTracked(
+        ghIn(deps.exec, path, s.root, () => {
+          sawUnstartable = true
+        }),
+        s.prViews,
+        s.ledger.prs,
+        true,
+      )
+    let fetch = await fetchWith(bin)
+    if (sawUnstartable) {
+      gh.forget()
+      const refound = await gh.find()
+      isGhMissing = refound === null
+      if (refound === null) return
+      if (refound !== bin) fetch = await fetchWith(refound)
+    }
+    const { views: fetched, branchRef } = fetch
     await updateState(dir, id, cur => {
       const at = now()
       const views = Object.fromEntries(

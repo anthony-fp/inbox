@@ -745,7 +745,7 @@ const GH_THREADS = JSON.stringify({
 })
 
 type PrView = {
-  prs: { drawn: { pr: { ref: string; threads: unknown[] } }[]; count: number }
+  prs: { drawn: { pr: { ref: string; threads: unknown[]; error?: string | null } }[]; count: number }
   isFetchingPrs: boolean
   isGhMissing: boolean
   lastActions: Record<string, { action: string }>
@@ -816,6 +816,50 @@ test('gh is found in the Homebrew folder when it is not on the PATH', async () =
   const next = await call('inbox_view', {})
   assert.equal(next.result.structuredContent.isGhMissing, false)
   assert.equal(next.result.structuredContent.prs.drawn.length, 1)
+  assert.ok(calls.some(c => c[0] === '/opt/homebrew/bin/gh' && c[1] === 'pr'))
+})
+
+const PRS_STALE_MS = 3 * 60_000
+
+async function viewAfterFetch(call: (name: string, args: Record<string, unknown>) => Promise<PrReply>) {
+  await call('inbox_view', {})
+  await new Promise(resolve => setTimeout(resolve, 50))
+
+  return call('inbox_view', {})
+}
+
+test('a view says gh was not found when gh worked once and then stops starting', async () => {
+  let at = 100
+  let isGone = false
+  const { call } = await prServer(
+    args => (isGone && args[0] !== 'codex' ? { code: -1, stdout: '', stderr: '' } : ghAnswer(args)),
+    () => at,
+  )
+  const first = await viewAfterFetch(call)
+  assert.equal(first.result.structuredContent.isGhMissing, false)
+  assert.equal(first.result.structuredContent.prs.drawn.length, 1)
+  isGone = true
+  at += PRS_STALE_MS
+  const next = await viewAfterFetch(call)
+  assert.equal(next.result.structuredContent.isGhMissing, true)
+  assert.equal(next.result.structuredContent.prs.drawn.length, 1)
+  assert.equal(next.result.structuredContent.prs.drawn[0]?.pr.error ?? null, null)
+})
+
+test('gh is found again at another path after the first one stops starting', async () => {
+  let at = 100
+  let hasMoved = false
+  const { calls, call } = await prServer(
+    args => (hasMoved && args[0] === 'gh' ? { code: -1, stdout: '', stderr: '' } : ghAnswer(['gh', ...args.slice(1)])),
+    () => at,
+  )
+  await viewAfterFetch(call)
+  hasMoved = true
+  at += PRS_STALE_MS
+  const next = await viewAfterFetch(call)
+  assert.equal(next.result.structuredContent.isGhMissing, false)
+  assert.equal(next.result.structuredContent.prs.drawn.length, 1)
+  assert.equal(next.result.structuredContent.prs.drawn[0]?.pr.error ?? null, null)
   assert.ok(calls.some(c => c[0] === '/opt/homebrew/bin/gh' && c[1] === 'pr'))
 })
 

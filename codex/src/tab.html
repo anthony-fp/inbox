@@ -114,6 +114,7 @@
       }
       .error-strip .key {
         flex: none;
+        white-space: nowrap;
         color: var(--text);
       }
 
@@ -397,11 +398,13 @@
         min-height: 26px;
         padding: 3px 11px;
         border: 1px solid color-mix(in oklab, var(--text) 28%, transparent);
-        border-radius: 999px;
+        border-radius: 13px;
         background: transparent;
         font-weight: 400;
         text-align: center;
-        white-space: nowrap;
+        max-width: 100%;
+        white-space: normal;
+        overflow-wrap: anywhere;
       }
       .key:not(:disabled):hover {
         background: var(--soft);
@@ -409,7 +412,7 @@
       .key:focus-visible {
         outline-width: 2px;
         outline-offset: 2px;
-        border-radius: 999px;
+        border-radius: 13px;
       }
       .key.primary {
         border-color: transparent;
@@ -554,6 +557,7 @@
       /* The pill keeps the line's height, so the row does not grow. */
       .key.undo {
         flex: none;
+        white-space: nowrap;
         border-color: transparent;
         position: relative;
         isolation: isolate;
@@ -643,6 +647,7 @@
       }
       .demo-note .key {
         flex: none;
+        white-space: nowrap;
         padding: 0;
       }
       .demo-note span {
