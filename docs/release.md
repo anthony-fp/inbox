@@ -8,9 +8,9 @@ Send each command's output to a log file and check its exit status. Each must ex
 
 | Command | What it checks |
 | --- | --- |
-| `./scripts/check.sh` | Formatting, plugin validation, structure, type checks, both test suites and Codex bundle consistency. |
+| `./scripts/check.sh` | Formatting, plugin validation, structure, type checks, all test suites, and that the Codex and omp bundles match their sources. |
 | `./scripts/eval.sh` | The inbox model on every case in `evals/cases.json`, on Sonnet and on Codex. |
-| `./scripts/eval.sh --suite agent` | How Claude and Codex use the `record` and `close` tools under the inbox's guidance, on every case in `evals/agent-cases.json`. |
+| `./scripts/eval.sh --suite agent --agent all` | How Claude, Codex and omp use the `record` and `close` tools under the inbox's guidance, on every case in `evals/agent-cases.json`. The omp runs need `OPENROUTER_API_KEY` in the environment. |
 
 The evals call models, so they take a while and use your plans.
 
@@ -20,7 +20,7 @@ Run `git log --oneline v<last version>..main`. For each change, find its row in 
 
 ## 3. Prepare a test machine
 
-Use a Mac or a macOS VM other than the one you work on, so the pass cannot touch your real inbox. It needs Claude Code, the Claude desktop app and the ChatGPT app, each signed in, and `gh` installed and signed in. It also needs a sample project whose GitHub remote has an open PR, for the PRs check. Install the previous release there and use it in at least three sessions, so each look can open a different one with saved state.
+Use a Mac or a macOS VM other than the one you work on, so the pass cannot touch your real inbox. It needs Claude Code, the Claude desktop app and the ChatGPT app, each signed in, and `gh` installed and signed in. It also needs a sample project whose GitHub remote has an open PR, for the PRs check. Install the previous release there and use it in at least four sessions, so each look can open a different one with saved state. omp needs to be installed and signed in to a provider.
 
 1. Copy the saved state aside. The mod keeps it in `~/.claude/plugins/store/`, in the file whose name starts with `inbox`. Codex keeps one file per session in `~/.codex/plugins/data/inbox-inbox/sessions/`. Note which version wrote them.
 2. Install `main` as the README's Install section says. Remove the plugin first in both agents, since an install with the same version label does not update.
@@ -31,7 +31,7 @@ An agent on the test machine may have real connectors, such as an issue tracker.
 
 ## 4. Run the live pass in each look
 
-Run the pass in three looks, one at a time: Claude Code in a terminal, a Code session in the Claude desktop app, and the Inbox tab in the ChatGPT app. Quit the other desktop app first. Use a small sample project in Git.
+Run the pass in four looks, one at a time: Claude Code in a terminal, a Code session in the Claude desktop app, the Inbox tab in the ChatGPT app, and omp in a terminal. Quit the other desktop app first. Use a small sample project in Git. The omp pass is described below the table.
 
 Note the model each agent runs. A new install of Claude Code may default to a smaller model than the evals use, and the agent's side of a check can differ with the model.
 
@@ -49,13 +49,21 @@ Capture each result and read the capture. A ✓ on a row lasts a few seconds bef
 | Resume | Resume the session in Claude Code, or reopen the thread in Codex. Then ask a new question. | The rows come back, and the agent can still record. |
 | Agent replies | Read the agent's replies throughout the pass. | No reply shows an inbox id, such as `i3` or `f4`. |
 
+In omp, run the pass with a fresh `HOME` set on each command, so it cannot touch your real `~/.omp`. Install from the marketplace instead of with `-e`: `omp plugin marketplace add <repo path or GitHub repo>`, then `omp plugin install inbox@inbox-omp`. Run the Question, Task, Finding, Reply while closing, PRs, Resume and Agent replies rows, and these:
+
+| Check | Do | Expect |
+| --- | --- | --- |
+| Band | Start omp in the sample project. | The band shows above the prompt and names `/inbox`. |
+| Panel | Run `/inbox`, switch tabs with Tab and `1`, `2` and `3`, and close with Escape. | The panel opens over the band and shows each tab. The band returns on close. |
+| Press that sends | Press an answer on a question row. | The agent receives your message, and the row shows its ✓. |
+
 In Codex, also check that old session files are deleted. Put more than 40 session files in a copy of the data folder, start a session, and confirm that only the oldest ones are gone.
 
 Fix what the pass finds before you bump. A problem you ship anyway goes in the release notes.
 
 ## 5. Bump and release
 
-1. Set the new version in `.claude-plugin/plugin.json`, `codex/plugin/.codex-plugin/plugin.json`, `serverInfo` in `codex/src/server.ts` and `appInfo` in `codex/src/tab.tsx`.
-2. Run `npm --prefix codex run build`, then `./scripts/check.sh`.
+1. Set the new version in `.claude-plugin/plugin.json`, `codex/plugin/.codex-plugin/plugin.json`, `serverInfo` in `codex/src/server.ts`, `appInfo` in `codex/src/tab.tsx` and `version` in `omp/package.json`.
+2. Run `npm --prefix codex run build` and `npm --prefix omp run build`, then `./scripts/check.sh`.
 3. Commit as "Bump to x.y.z", tag it `vx.y.z`, and push both.
 4. Publish a GitHub release for the tag. Follow the last release's notes: one line on what is new, how to update in each agent, then what changed, from the user's side.

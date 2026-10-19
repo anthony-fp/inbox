@@ -14,6 +14,39 @@ export type ScriptedHost<S extends Session = Session> = {
 
 export type MakeHost<S extends Session = Session> = (ask: Ask) => ScriptedHost<S>
 
+export function fakeHostWith<S extends Session>(
+  storage: Pick<SessionHost<S>, 'read' | 'update' | 'exclusive'>,
+): MakeHost<S> {
+  return ask => {
+    let clock = 1_000_000
+    let ids = 0
+    const delivered: string[] = []
+    const performed: Exclude<Effect, { kind: 'send' }>[] = []
+    const host: SessionHost<S> = {
+      ...storage,
+      now: () => (clock += 10),
+      ask,
+      deliver: async (_s, text) => {
+        delivered.push(text)
+        return { state: 'accepted', queuedId: null }
+      },
+      perform: async (_s, effect) => {
+        performed.push(effect)
+        return null
+      },
+      gh: {
+        find: async () => null,
+        forget: () => {},
+        run: () => async () => ({ exitCode: 1, stdout: '', stderr: '' }),
+        noteMissing: () => {},
+      },
+      settleWindowMs: 1000,
+      newId: () => `id${++ids}`,
+    }
+    return { host, delivered, performed }
+  }
+}
+
 export type Equal = (actual: unknown, expected: unknown, label: string) => void
 
 const SETTLE_WINDOW_MS = 1000

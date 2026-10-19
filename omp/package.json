@@ -6,10 +6,12 @@
   "description": "The inbox extension for omp, built on the mod's shared modules in ../hooks",
   "omp": {
     "extensions": [
-      "src/host.ts"
+      "dist/host.js"
     ]
   },
   "scripts": {
+    "build": "bun build.ts",
+    "check": "bun build.ts --check",
     "test": "bun test tests",
     "types": "tsc --noEmit -p ."
   },

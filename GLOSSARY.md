@@ -2,7 +2,7 @@
 
 The inbox gathers what an agent session needs from the person, and what the
 agent noticed along the way, into one place beside the conversation. The agent
-is Claude, in Claude Code, or Codex.
+runs in Claude Code, in Codex, or in omp.
 
 ## Language
 
@@ -42,11 +42,13 @@ _Avoid_: note
 **Band**:
 In Claude Code, the line above the prompt with the Needs you and Findings
 counts and [Open inbox]. When the session stops, a second line says why, with
-[Resume] after an API error. Codex has no band.
+[Resume] after an API error. Codex has no band. omp has a band with the same
+counts and no button, which says `/inbox` opens the panel.
 
 **Pane**:
 The `/inbox` panel beside the conversation in Claude Code, with its Needs
-you, Findings and PRs tabs. Codex shows the same tabs in its Inbox tab.
+you, Findings and PRs tabs. Codex shows the same tabs in its Inbox tab. omp
+shows them in an overlay that `/inbox` opens.
 
 **Card**:
 The short summary of where the session stands: its goal, what's done, and
@@ -69,23 +71,24 @@ open". Each keeps only its latest.
 ### Looks and hosts
 
 **Look**:
-One of the three ways the inbox is drawn: `terminal` in the Claude Code
-terminal, `desktop` in the pane of the Claude desktop app's Code sessions, and
-`codex` in the Codex tab. `Look` in `hooks/view.ts`.
+One of the four ways the inbox is drawn: `terminal` in the Claude Code
+terminal, `desktop` in the pane of the Claude desktop app's Code sessions,
+`codex` in the Codex tab, and `omp` in omp's panel. `Look` in `hooks/view.ts`.
 _Avoid_: client, surface
 
 **Host**:
 The program that runs the inbox code. Claude Code runs the mod, which draws
 the terminal and desktop looks. Codex runs the plugin, which draws the Codex
-tab.
+tab. omp runs the extension in `omp/`, which draws the omp panel.
 
 **Shared module**:
-A file in `hooks/` that both hosts consume, directly or through the build.
+A file in `hooks/` that every host consumes, directly or through a build.
 It imports only other shared modules and the shared types.
 
 **Adapter**:
 The code that draws the shared view in one look: `hooks/register.tsx` for the
-terminal and desktop looks, `codex/src/tab.tsx` for the Codex tab.
+terminal and desktop looks, `codex/src/tab.tsx` for the Codex tab,
+`omp/src/panel.ts` for the omp panel.
 
 **Difference on purpose**:
 A behavior that differs between looks because one look cannot do something,

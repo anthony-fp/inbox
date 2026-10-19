@@ -7,22 +7,22 @@ import type { ExtensionAPI, ExtensionContext } from '@oh-my-pi/pi-coding-agent'
 
 import { dialogActivity, dialogQuestions, guidanceText, systemText, toolActivity } from '../../hooks/model-text'
 import type { DialogOutcome } from '../../hooks/model-text'
-import { splitLinked } from '../../hooks/pr-tab'
 import type { PrPress } from '../../hooks/pr-tab'
+import { ghFinder, ghIn } from '../../hooks/gh'
+import type { Run } from '../../hooks/gh'
 import type { RowPress } from '../../hooks/presses'
 import { endTurn, noteActivity, notePrompt, recorded, sessionView } from '../../hooks/session'
 import type { SessionView } from '../../hooks/session'
-import { fetchPrs, press, reconcileUpdateStatus, runUpdates, wakeForDone } from '../../hooks/session-host'
+import { fetchPrs, isPrFetchDue, press, reconcileUpdateStatus, runUpdates, wakeForDone } from '../../hooks/session-host'
 import type { PressOutcome, SessionHost } from '../../hooks/session-host'
 import { CLOSE_DESCRIPTION, CLOSE_SCHEMA, RECORD_SCHEMA, recordDescription } from '../../hooks/tools'
 import { DARK_TONES, LIGHT_TONES } from '../../hooks/tones'
 import { NO_HOLDS, SETTLED_MS } from '../../hooks/view'
 import type { ReplyHolds } from '../../hooks/view'
-import { ghFinder, ghIn, openTarget } from './commands'
-import type { Run } from './commands'
+import { openTarget } from './commands'
 import { createPanel } from './controller'
 import type { PanelSource } from './controller'
-import { demoSource, demoState } from './demo'
+import { demoSource } from './demo'
 import { bandLine } from './panel'
 import type { Style, Tone } from './panel'
 import { exclusiveRun, pruneSessions, readState, updateState } from './state'
@@ -30,8 +30,6 @@ import type { OmpState } from './state'
 import { OMP } from './texts'
 
 const INBOX_MODEL_TIMEOUT_MS = 120_000
-const PRS_REFRESH_MS = 120_000
-const NEW_PR_FETCH_MS = 15_000
 /** Added to the settle window so the timer fires after the window has fully passed. */
 const WAKE_MARGIN_MS = 250
 const SONNET = /sonnet/i
@@ -71,7 +69,6 @@ export type InboxScreen = {
 /** What a panel needs from the host. */
 export type Inbox = {
   screen(ctx: ExtensionContext, holds?: ReplyHolds): Promise<InboxScreen>
-  demoScreen(): InboxScreen
   /** Marks the panel open, and runs what a freshly opened panel needs: Done messages due, and a PR fetch when due. */
   openPanel(ctx: ExtensionContext): Promise<void>
   closePanel(ctx: ExtensionContext): void
@@ -147,25 +144,8 @@ export function inboxModel(ctx: ExtensionContext): Model | null {
   return sonnet ?? ctx.models.resolve('@smol') ?? null
 }
 
-/** The last assistant message's text. */
-function lastAssistantText(messages: readonly unknown[]): string {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const m = messages[i] as { role?: unknown; content?: unknown } | undefined
-    if (m?.role !== 'assistant' || !Array.isArray(m.content)) continue
-
-    return m.content
-      .flatMap((b: { type?: unknown; text?: unknown }) =>
-        b.type === 'text' && typeof b.text === 'string' ? [b.text] : [],
-      )
-      .join('\n')
-  }
-
-  return ''
-}
-
-/** The text of a user message. */
-function userText(content: unknown): string {
-  if (typeof content === 'string') return content
+/** The text blocks of a message's content, joined. */
+function textOfBlocks(content: unknown): string {
   if (!Array.isArray(content)) return ''
 
   return content
@@ -173,6 +153,23 @@ function userText(content: unknown): string {
       b.type === 'text' && typeof b.text === 'string' ? [b.text] : [],
     )
     .join('\n')
+}
+
+/** The last assistant message's text. */
+function lastAssistantText(messages: readonly unknown[]): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i] as { role?: unknown; content?: unknown } | undefined
+    if (m?.role !== 'assistant' || !Array.isArray(m.content)) continue
+
+    return textOfBlocks(m.content)
+  }
+
+  return ''
+}
+
+/** The text of a user message. */
+function userText(content: unknown): string {
+  return typeof content === 'string' ? content : textOfBlocks(content)
 }
 
 /** The activity line for an omp tool call, through the names the shared `toolActivity` knows. */
@@ -236,7 +233,6 @@ export function styleOf(theme: OmpTheme): Style {
 
 export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inbox {
   const dir = deps.stateDir(pi)
-  const contexts = new Map<string, ExtensionContext>()
   const openPanels = new Set<string>()
   const prepared = new Set<string>()
   const fetchingPrs = new Set<string>()
@@ -310,7 +306,6 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
           return { state: 'rejected', reason: messageOf(err) }
         }
       },
-      prepare: async () => {},
       perform: async (_s, effect) =>
         effect.kind === 'copy' ? deps.copy(effect.text) : openTarget(run, effect.target, ctx.cwd, deps.home),
       gh: {
@@ -328,7 +323,6 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
 
   /** Runs once for each session in this process: clears an update flag a crashed process left, and prunes old sessions. */
   function prepare(ctx: ExtensionContext): void {
-    contexts.set(sessionIdOf(ctx), ctx)
     const id = sessionIdOf(ctx)
     if (prepared.has(id)) return
     prepared.add(id)
@@ -347,11 +341,7 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
           const host = hostFor(ctx)
           const s = await host.read()
           const last = prsFetchedAt.get(id)
-          const now = deps.now()
-          const hasNewPr = splitLinked(s.ledger.prs).tracked.some(ref => !(ref in s.prViews.views))
-          const isDue =
-            last === undefined || now - last >= PRS_REFRESH_MS || (hasNewPr && now - last >= NEW_PR_FETCH_MS)
-          if (!isDue) return
+          if (!isPrFetchDue(s, last, deps.now())) return
           try {
             await fetchPrs(host)
           } finally {
@@ -382,19 +372,15 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
     return notes
   }
 
-  pi.on('session_start', (_event, ctx) => {
+  const start = (_event: unknown, ctx: ExtensionContext) => {
     if (isUnattended(ctx)) return
     prepare(ctx)
     showBand(ctx)
-  })
-  pi.on('session_switch', (_event, ctx) => {
-    if (isUnattended(ctx)) return
-    prepare(ctx)
-    showBand(ctx)
-  })
+  }
+  pi.on('session_start', start)
+  pi.on('session_switch', start)
   pi.on('session_shutdown', (_event, ctx) => {
     const id = sessionIdOf(ctx)
-    contexts.delete(id)
     openPanels.delete(id)
     prepared.delete(id)
     if (noted?.id === id) noted = null
@@ -533,14 +519,7 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
         isFetchingPrs: fetchingPrs.has(id),
       }
     },
-    demoScreen: () => ({
-      view: sessionView(demoState(deps.now()), deps.now(), deps.settleWindowMs),
-      modelName: null,
-      isGhMissing: false,
-      isFetchingPrs: false,
-    }),
     openPanel: async ctx => {
-      contexts.set(sessionIdOf(ctx), ctx)
       openPanels.add(sessionIdOf(ctx))
       await wakeForDone(hostFor(ctx)).catch(() => undefined)
       fetchPrsWhenDue(ctx)
@@ -651,7 +630,9 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
     handler: async (args, ctx) => {
       const isDemo = args.trim() === 'demo'
       if (ctx.mode === 'tui') return openPanelUi(ctx, isDemo)
-      const screen = isDemo ? inbox.demoScreen() : await inbox.screen(ctx)
+      const screen = isDemo
+        ? await demoSource({ now: deps.now, after: () => {}, settleWindowMs: deps.settleWindowMs }).screen(NO_HOLDS)
+        : await inbox.screen(ctx)
       const { needsYou, findings } = screen.view
       ctx.ui.notify(`Needs you ${needsYou.count}, Findings ${findings.count}`, 'info')
     },

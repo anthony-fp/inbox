@@ -2,7 +2,8 @@ import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
 
-import { isDismissing, isTracked, splitLinked } from '../../hooks/pr-tab'
+import { ghFinder, ghIn } from '../../hooks/gh'
+import { isDismissing, isTracked } from '../../hooks/pr-tab'
 import type { PrPress } from '../../hooks/pr-tab'
 import { demoRecord, demoTurns, localPath, noteText, openCommands, withLasts } from '../../hooks/presses'
 import type { RowPress } from '../../hooks/presses'
@@ -10,12 +11,11 @@ import { CLOSE_DESCRIPTION, CLOSE_SCHEMA, RECORD_SCHEMA, recordDescription } fro
 import { noteToolCall, viewOf } from './core'
 import type { TabView } from './core'
 import { demoState } from './demo'
-import { ghFinder, ghIn } from './gh'
 import { codexStore } from './host'
 import { pruneClosed } from '../../hooks/ledger'
 import { pressOn, recorded } from '../../hooks/session'
 import type { SendOutcome } from '../../hooks/session'
-import { fetchPrs, press, wakeForDone as wakeSessionForDone } from '../../hooks/session-host'
+import { fetchPrs, isPrFetchDue, press, wakeForDone as wakeSessionForDone } from '../../hooks/session-host'
 import type { SessionHost } from '../../hooks/session-host'
 import { NO_HOLDS, SETTLED_MS } from '../../hooks/view'
 import type { ReplyHolds } from '../../hooks/view'
@@ -34,8 +34,6 @@ export function tabUri(tabHtml: string): string {
 const TAB_MIME = 'text/html;profile=mcp-app'
 
 const APP_ONLY = { ui: { visibility: ['app'] } }
-const PRS_REFRESH_MS = 120_000
-const NEW_PR_FETCH_MS = 15_000
 
 function viewsStillShown(
   prs: PrViews,
@@ -223,9 +221,7 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
   function fetchPrsWhenDue(id: string, s: SessionState) {
     if (fetchingPrs.has(id)) return
     const last = prsFetchedAt.get(id)
-    const hasNewPr = splitLinked(s.ledger.prs).tracked.some(ref => !(ref in s.prViews.views))
-    const isDue = last === undefined || now() - last >= PRS_REFRESH_MS || (hasNewPr && now() - last >= NEW_PR_FETCH_MS)
-    if (!isDue) return
+    if (!isPrFetchDue(s, last, now())) return
     fetchingPrs.add(id)
     void fetchPrs(hostFor(id))
       .catch(() => undefined)

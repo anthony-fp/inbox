@@ -1,55 +1,10 @@
 import { constants } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
 
-import type { GhRun } from '../../hooks/pr-tab'
+import type { Run } from '../../hooks/gh'
 import { localPath, openCommands } from '../../hooks/presses'
 
-/** Runs a command and never throws: a command that cannot start, times out or is killed ends with code -1. */
-export type Run = (
-  args: string[],
-  opts: { cwd: string; timeoutMs: number },
-) => Promise<{ code: number; stdout: string; stderr: string }>
-
-const UNSTARTABLE_CODE = -1
-const GH_CANDIDATES = ['gh', '/opt/homebrew/bin/gh', '/usr/local/bin/gh']
-const GH_TIMEOUT_MS = 20_000
 const OPEN_TIMEOUT_MS = 10_000
-
-/**
- * Finds the first gh that starts. The one found is kept until `forget` is called. While none starts, each call
- * looks again, since the person may install gh without restarting omp.
- */
-export function ghFinder(run: Run): { find: () => Promise<string | null>; forget: () => void } {
-  let found: string | null = null
-
-  return {
-    find: async () => {
-      if (found) return found
-      for (const candidate of GH_CANDIDATES) {
-        const r = await run([candidate, '--version'], { cwd: '/', timeoutMs: 5000 })
-        if (r.code !== UNSTARTABLE_CODE) {
-          found = candidate
-          return found
-        }
-      }
-
-      return null
-    },
-    forget: () => {
-      found = null
-    },
-  }
-}
-
-/** `onUnstartable` is called when a run ends with code -1, which also covers a timeout kill. */
-export function ghIn(run: Run, bin: string, cwd: string, onUnstartable: () => void): GhRun {
-  return async args => {
-    const r = await run([bin, ...args], { cwd: cwd || '/', timeoutMs: GH_TIMEOUT_MS })
-    if (r.code === UNSTARTABLE_CODE) onUnstartable()
-
-    return { exitCode: r.code, stdout: r.stdout, stderr: r.stderr }
-  }
-}
 
 /** Opens a link, or a path as `openCommands` decides. Returns why it could not, or null. */
 export async function openTarget(run: Run, target: string, root: string, home: string): Promise<string | null> {

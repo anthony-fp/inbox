@@ -634,6 +634,7 @@ test('/inbox hides the band while the panel shows, draws the session, presses, a
   await until(() => components.length > 0)
   expect(widgets.at(-1)).toMatchObject({ key: 'inbox-band', content: undefined })
   const panel = components[0]
+  await until(() => !panel.render(80).join('\n').includes('Loading'))
   expect(panel.render(80).join('\n')).toContain('Try the CLI by hand')
   await tick()
   panel.handleInput('d')

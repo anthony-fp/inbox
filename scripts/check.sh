@@ -68,7 +68,7 @@ else
     status=1
 fi
 
-# The omp extension in omp/: its types and its tests. omp runs on Bun, and its
+# The omp extension in omp/: its committed bundle matches its sources, its types and its tests. omp runs on Bun, and its
 # types come from omp's own packages in omp/node_modules.
 if ! command -v bun >/dev/null 2>&1; then
     echo "  x omp: not checked. Install Bun: https://bun.sh"
@@ -77,6 +77,7 @@ elif [ ! -d "$DIR/omp/node_modules" ]; then
     echo "  x omp: not checked. Install its tools once: bun install --cwd $DIR/omp --frozen-lockfile --ignore-scripts"
     status=1
 else
+    check "omp bundle" npm --prefix "$DIR/omp" run --silent check
     check "omp types" npm --prefix "$DIR/omp" run --silent types
     check "omp tests" bun test --cwd "$DIR/omp" tests
 fi

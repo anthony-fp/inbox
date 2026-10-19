@@ -1,5 +1,5 @@
 import { buildPrompt } from './model-text'
-import { fetchTracked, prRowId } from './pr-tab'
+import { fetchTracked, prRowId, splitLinked } from './pr-tab'
 import type { GhRun, PrPress } from './pr-tab'
 import {
   doneWake,
@@ -32,7 +32,7 @@ export type SessionHost<S extends Session> = {
   /** Sends a message to the agent as if the person typed it. */
   deliver(s: S, text: string): Promise<SendOutcome>
   /** Throws when `deliver` could not start. Run before a sent record is saved, so a message that cannot go leaves no record. */
-  prepare(s: S): Promise<void>
+  prepare?(s: S): Promise<void>
   /** Opens a link or path, or copies text. Returns why it could not, or null. */
   perform(s: S, effect: Exclude<Effect, { kind: 'send' }>): Promise<string | null>
   gh: {
@@ -121,7 +121,7 @@ export async function wakeForDone<S extends Session>(host: WakeHost<S>): Promise
   await host.update(async (s, checkpoint) => {
     const wake = check(s)
     if (!wake) return s
-    await host.prepare(s)
+    await host.prepare?.(s)
     const deliveryId = host.newId()
     const lastActions = { ...s.lastActions }
     for (const closed of s.ledger.closed) {
@@ -288,6 +288,17 @@ export async function press<S extends Session>(
     )
 
   return { copy, error, note, isUnconfirmed, wakesForDone }
+}
+
+const PRS_REFRESH_MS = 120_000
+const NEW_PR_FETCH_MS = 15_000
+
+/** True when the PRs are due for a fetch: none was fetched yet, the last is old, or a new tracked PR waits for its first. */
+export function isPrFetchDue(s: Session, lastFetchedAt: number | undefined, now: number): boolean {
+  if (lastFetchedAt === undefined) return true
+  const hasNewPr = splitLinked(s.ledger.prs).tracked.some(ref => !(ref in s.prViews.views))
+
+  return now - lastFetchedAt >= PRS_REFRESH_MS || (hasNewPr && now - lastFetchedAt >= NEW_PR_FETCH_MS)
 }
 
 /**

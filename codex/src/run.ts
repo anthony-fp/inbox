@@ -1,9 +1,8 @@
 import { execFile } from 'node:child_process'
 
-export type Run = (
-  args: string[],
-  opts: { cwd: string; timeoutMs: number },
-) => Promise<{ code: number; stdout: string; stderr: string }>
+import type { Run } from '../../hooks/gh'
+
+export type { Run }
 
 /** Runs a command, never throwing: a command that can't start ends with code -1. */
 export const run: Run = (args, { cwd, timeoutMs }) =>
