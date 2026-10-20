@@ -87,7 +87,10 @@ function failures(before: Ledger, after: Ledger, checks: Check[]): string[] {
           (c.rec === undefined || (c.rec === null ? i.rec === null : has(c.rec, i.rec))) &&
           (!c.help || i.helps.some(h => h.kind === c.help)),
       )
-      if (!match) out.push(`no new item like /${c.new}/: ${added.map(i => `"${i.ask}" rec=${i.rec}`).join(', ')}`)
+      if (!match)
+        out.push(
+          `no new item like /${c.new}/: ${added.map(i => `"${i.ask}" kind=${i.kind} rec=${i.rec} helps=${i.helps.map(h => h.kind).join('+') || '-'}`).join(', ')}`,
+        )
     } else if ('notNew' in c && added.some(i => has(c.notNew, i.ask))) out.push(`added an item like /${c.notNew}/`)
     else if ('noHelp' in c && added.some(i => i.helps.some(h => h.kind === c.noHelp))) out.push(`a ${c.noHelp} step`)
     else if ('waiting' in c) {
