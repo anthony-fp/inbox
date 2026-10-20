@@ -99,7 +99,13 @@ test('a file missing newer fields reads with their defaults', async () => {
   mkdirSync(join(dir, 'sessions'))
   writeFileSync(statePath(dir, 's1'), JSON.stringify({ version: 1, presence: { turnsStarted: 4 } }))
   const state = await readState(dir, 's1')
-  expect(state.presence).toEqual({ turnsStarted: 4, turnsApplied: 0, ledgerState: 'current', isUpdating: false })
+  expect(state.presence).toEqual({
+    turnsStarted: 4,
+    turnsApplied: 0,
+    ledgerState: 'current',
+    hasDroppedReply: false,
+    isUpdating: false,
+  })
   expect(state.pending).toEqual([])
   expect(state.prViews.isFetching).toBe(false)
 })

@@ -5,15 +5,34 @@ import { join } from 'node:path'
 import type { AssistantMessage, Context, Model } from '@oh-my-pi/pi-ai'
 import type { ExtensionAPI, ExtensionContext } from '@oh-my-pi/pi-coding-agent'
 
-import { dialogActivity, dialogQuestions, guidanceText, systemText, toolActivity } from '../../hooks/model-text'
+import { flattenConversation } from '../../hooks/conversation'
+import type { Turn } from '../../hooks/conversation'
+import {
+  dialogActivity,
+  dialogQuestions,
+  guidanceText,
+  screenText,
+  systemText,
+  toolActivity,
+} from '../../hooks/model-text'
 import type { DialogOutcome } from '../../hooks/model-text'
 import type { PrPress } from '../../hooks/pr-tab'
 import { ghFinder, ghIn } from '../../hooks/gh'
 import type { Run } from '../../hooks/gh'
 import type { RowPress } from '../../hooks/presses'
-import { endTurn, noteActivity, noteCommandOutput, notePrompt, recorded, sessionView } from '../../hooks/session'
+import {
+  endTurn,
+  isUnseen,
+  needsUpdate,
+  noteActivity,
+  noteCommandOutput,
+  notePrompt,
+  recorded,
+  sessionView,
+} from '../../hooks/session'
 import type { SessionView } from '../../hooks/session'
 import {
+  askOverConversation,
   fetchPrs,
   prFetchTracker,
   press,
@@ -21,7 +40,7 @@ import {
   runUpdates,
   wakeForDone,
 } from '../../hooks/session-host'
-import type { PressOutcome, SessionHost } from '../../hooks/session-host'
+import type { PressOutcome, SessionHost, UpdateHost } from '../../hooks/session-host'
 import { agentTools } from '../../hooks/tools'
 import { DARK_TONES, LIGHT_TONES } from '../../hooks/tones'
 import { clip } from '../../hooks/text'
@@ -242,6 +261,56 @@ function askOutcome(event: {
   return { kind: details.timedOut ? 'timed-out' : 'answered', answer }
 }
 
+type Entry = { type?: unknown; message?: unknown }
+
+type Message = {
+  role?: unknown
+  content?: unknown
+  synthetic?: unknown
+  command?: unknown
+  toolCallId?: unknown
+  isError?: unknown
+  details?: unknown
+}
+
+/** The conversation of a session branch as turns, from the last `/clear` on. omp's own `/new` starts another session. */
+export function conversationOf(entries: readonly unknown[]): Turn[] {
+  const path = entries as Entry[]
+  const messages = path
+    .slice(path.findLastIndex(e => e.type === 'reset_boundary') + 1)
+    .flatMap(e => (e.type === 'message' && e.message ? [e.message as Message] : []))
+  const results = new Map(
+    messages.flatMap(m => (m.role === 'toolResult' && typeof m.toolCallId === 'string' ? [[m.toolCallId, m]] : [])),
+  )
+
+  return messages.flatMap((m): Turn[] => {
+    if (m.role === 'user' && m.synthetic !== true) return [{ role: 'person', text: userText(m.content), activity: [] }]
+    if (m.role === 'bashExecution' && typeof m.command === 'string')
+      return [{ role: 'person', text: `$ ${m.command}`, activity: [] }]
+    if (m.role !== 'assistant' || !Array.isArray(m.content)) return []
+    const activity = m.content.flatMap(
+      (block: { type?: unknown; id?: unknown; name?: unknown; arguments?: unknown }) => {
+        if (block.type !== 'toolCall' || typeof block.name !== 'string') return []
+        const input = (block.arguments ?? {}) as Record<string, unknown>
+        const result = typeof block.id === 'string' ? results.get(block.id) : undefined
+        const line =
+          block.name === 'ask'
+            ? dialogActivity(
+                dialogQuestions(input.questions),
+                result
+                  ? askOutcome({ ...result, content: result.content as never, isError: result.isError === true })
+                  : { kind: 'open' },
+              )
+            : activityOf(block.name, input)
+
+        return line ? [line] : []
+      },
+    )
+
+    return [{ role: 'agent', text: textOfBlocks(m.content), activity }]
+  })
+}
+
 /** The slice of omp's theme the panel's style uses. */
 type OmpTheme = {
   isLight: boolean
@@ -377,6 +446,42 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
     }
   }
 
+  /** The session branch's conversation as the inbox model reads it. Empty when there is none or it cannot be read. */
+  const conversationText = (ctx: ExtensionContext): string => {
+    try {
+      return flattenConversation(conversationOf(ctx.sessionManager.getBranch()))
+    } catch {
+      return ''
+    }
+  }
+
+  /** The host for an update, which catches up over the branch's conversation when the ledger may have missed turns. */
+  function updateHostFor(ctx: ExtensionContext): UpdateHost<OmpState> {
+    const host = hostFor(ctx)
+    const id = sessionIdOf(ctx)
+
+    return {
+      ...host,
+      catchUp: s => askOverConversation(host.ask, s, screenText(OMP, openPanels.has(id), null), conversationText(ctx)),
+    }
+  }
+
+  /**
+   * A session that holds turns the inbox never saw, as when it is resumed or forked, or the extension was turned on
+   * in it, is marked `behind`, and its first update catches up over the branch.
+   */
+  async function catchUpUnseen(ctx: ExtensionContext): Promise<void> {
+    if (conversationText(ctx) === '') return
+    let isMarked = false
+    await change(sessionIdOf(ctx), s => {
+      if (!isUnseen(s)) return s
+      isMarked = true
+
+      return { ...s, presence: { ...s.presence, ledgerState: 'behind' } }
+    })
+    if (isMarked) await runUpdates(updateHostFor(ctx))
+  }
+
   /** Runs once for each session in this process: clears an update flag a crashed process left, and prunes old sessions. */
   function prepare(ctx: ExtensionContext): void {
     const id = sessionIdOf(ctx)
@@ -422,6 +527,7 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
     if (isUnattended(ctx)) return
     prepare(ctx)
     showBand(ctx)
+    deps.background(catchUpUnseen(ctx))
   }
   pi.on('session_start', start)
   pi.on('session_switch', start)
@@ -540,7 +646,7 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
     const written = await change(id, s => ({ ...endTurn(OMP, s, reply, openPanels.has(id)), stop })).catch(() => null)
     if (!written) return
     const host = hostFor(ctx)
-    if (written.pending.length > 0) deps.background(runUpdates(host))
+    if (needsUpdate(written)) deps.background(runUpdates(updateHostFor(ctx)))
     deps.background(wakeForDone(host))
   })
 

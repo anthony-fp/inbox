@@ -45,6 +45,9 @@ function numberBlocks(reply) {
   let n = 0;
   return reply.replace(FENCE, (block) => `[block ${n += 1}]${NL}${block}`);
 }
+function clip(text, max) {
+  return text.length <= max ? text : text.slice(0, max) + " \u2026[cut]";
+}
 function clipMiddle(text, max, head) {
   if (text.length <= max) return text;
   return `${text.slice(0, head)}${NL}\u2026[cut]${NL}${text.slice(text.length - (max - head))}`;
@@ -339,14 +342,14 @@ function leavesWorkOpen(c) {
 }
 function reopenAskedFindings(ledger, closes) {
   return closes.filter(leavesWorkOpen).reduce((l, c) => {
-    const record = l.closedFindings.findLast((f) => f.askedAs === c.id);
-    if (!record) return l;
-    const reopened = reopenFinding(l, record.id);
+    const record2 = l.closedFindings.findLast((f) => f.askedAs === c.id);
+    if (!record2) return l;
+    const reopened = reopenFinding(l, record2.id);
     return {
       ...reopened,
       findings: reopened.findings.map((f) => {
         const { askedAs: _askedAs, ...rest } = f;
-        return f.id === record.id ? rest : f;
+        return f.id === record2.id ? rest : f;
       })
     };
   }, ledger);
@@ -371,14 +374,14 @@ function pruneClosed(ledger, keep) {
 function idNumber(id) {
   return Number(id.match(/\d+/)?.[0] ?? Number.NaN);
 }
-function inIdOrder(open, entry) {
-  const at = open.findIndex((x) => idNumber(x.id) > idNumber(entry.id));
-  return at < 0 ? [...open, entry] : [...open.slice(0, at), entry, ...open.slice(at)];
+function inIdOrder(open2, entry) {
+  const at = open2.findIndex((x) => idNumber(x.id) > idNumber(entry.id));
+  return at < 0 ? [...open2, entry] : [...open2.slice(0, at), entry, ...open2.slice(at)];
 }
 function reopenFinding(ledger, id) {
-  const record = ledger.closedFindings.findLast((f) => f.id === id);
-  if (!record || ledger.findings.some((f) => f.id === id)) return ledger;
-  const { how: _how, outcome: _outcome, closedAt: _closedAt, ...finding } = record;
+  const record2 = ledger.closedFindings.findLast((f) => f.id === id);
+  if (!record2 || ledger.findings.some((f) => f.id === id)) return ledger;
+  const { how: _how, outcome: _outcome, closedAt: _closedAt, ...finding } = record2;
   return {
     ...ledger,
     findings: inIdOrder(ledger.findings, finding),
@@ -549,6 +552,79 @@ TODO: <work>
 
 Write plainly. No jargon, no filler, no markdown.`;
 }
+var CATCH_UP = "The ledger below may have missed turns. Write a CLOSED line for every item in <open> that the conversation shows answered, done, dealt with, or no longer relevant, and a FIXED line for every finding in <findings> that it shows was fixed. Add as NEW only what still waits on the user and is not already in <open> or <findings>.";
+function transcriptCatchUpPrompt(ledger, screen, transcript) {
+  return [
+    `Treat the conversation in <conversation> as the exchange. Its start may be cut. ${CATCH_UP}`,
+    ...ledgerBlocks(ledger),
+    `<conversation>${NL3}${numberBlocks(transcript)}${NL3}</conversation>`,
+    `<screen>${NL3}${screen}${NL3}</screen>`
+  ].join(NL3);
+}
+var MAX_ACTIVITY = 40;
+function addActivity(activity, line) {
+  return !line || activity.length >= MAX_ACTIVITY || activity.includes(line) ? activity : [...activity, line];
+}
+function toolActivity(tool, input) {
+  const text = (key) => typeof input[key] === "string" ? input[key] : "";
+  switch (tool) {
+    case "Bash":
+      return `${input.run_in_background ? "started in background" : "ran"}: ${text("command").slice(0, 140)}`;
+    case "Edit":
+    case "Write":
+      return `edited ${text("file_path")}`;
+    case "Skill":
+      return `used skill ${text("skill")}`;
+    case "Agent":
+      return `started agent: ${text("description")}`;
+  }
+  return tool.startsWith("mcp__") ? `called ${tool.slice(5)}` : null;
+}
+var DIALOG_QUESTIONS_SHOWN = 3;
+var DIALOG_QUESTION_MAX = 200;
+var DIALOG_OPTIONS_SHOWN = 6;
+var DIALOG_OPTION_MAX = 60;
+var DIALOG_ANSWER_MAX = 400;
+var RECOMMENDED_SUFFIX = /\s*\(recommended\)\s*$/i;
+function dialogQuestions(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((q) => {
+    const fields = q ?? {};
+    const text = [fields.question, fields.title].find((v) => typeof v === "string" && v.trim() !== "");
+    if (!text) return [];
+    const options = (Array.isArray(fields.options) ? fields.options : []).flatMap((o) => {
+      const label = typeof o === "string" ? o : o?.label;
+      return typeof label === "string" && label.trim() !== "" ? [label.trim()] : [];
+    });
+    return [{ question: text.trim(), options }];
+  });
+}
+function dialogQuestionText(q) {
+  const shown = q.options.slice(0, DIALOG_OPTIONS_SHOWN).map((label) => {
+    const plain = label.replace(RECOMMENDED_SUFFIX, "");
+    const text = clip(plain, DIALOG_OPTION_MAX);
+    return plain === label ? text : `${text} (recommended)`;
+  });
+  const more = q.options.length > shown.length ? ` / and ${q.options.length - shown.length} more` : "";
+  const options = shown.length > 0 ? ` (options: ${shown.join(" / ")}${more})` : "";
+  return `"${clip(q.question.replaceAll('"', "'"), DIALOG_QUESTION_MAX)}"${options}`;
+}
+function dialogActivity(questions, outcome) {
+  const shown = questions.slice(0, DIALOG_QUESTIONS_SHOWN).map(dialogQuestionText);
+  const more = questions.length - shown.length;
+  const asked = shown.length > 0 ? `: ${shown.join("; ")}${more > 0 ? `; and ${more} more` : ""}` : "";
+  const head = `asked the user in a dialog${asked}`;
+  switch (outcome.kind) {
+    case "answered":
+      return `${head}; answer: ${outcome.answer.slice(0, DIALOG_ANSWER_MAX)}`;
+    case "timed-out":
+      return `${head}; it timed out while the user was away, so the user did not answer; it went on with: ${outcome.answer.slice(0, DIALOG_ANSWER_MAX)}`;
+    case "dismissed":
+      return `${head}; the user dismissed it without answering`;
+    case "open":
+      return `${head}; still open, waiting on the user's answer`;
+  }
+}
 function ledgerBlocks(ledger) {
   const card = ledger.card ? [
     `GOAL: ${ledger.card.goal}`,
@@ -556,14 +632,14 @@ function ledgerBlocks(ledger) {
     `NOW: ${ledger.card.now}`,
     ...ledger.card.running.map((r) => `RUNNING: ${r}`)
   ].join(NL3) : "";
-  const open = ledger.items.map(
+  const open2 = ledger.items.map(
     (i) => `${i.id} | ${MODEL_KIND[i.kind]} | ${i.label ?? "-"} | ${i.ask} | ${i.options.join(" / ") || "-"} | ${i.rec ?? "-"}`
   ).join(NL3);
   const findings = ledger.findings.map((f) => `${f.id} | ${f.kind}: ${f.title}`).join(NL3);
   const closed = ledger.closed.filter((d) => d.how !== "expired").map((d) => `${d.ask} \u2192 ${outcomeText(d)}`).join(NL3);
   return [
     `<card>${NL3}${card}${NL3}</card>`,
-    `<open>${NL3}${open}${NL3}</open>`,
+    `<open>${NL3}${open2}${NL3}</open>`,
     `<findings>${NL3}${findings}${NL3}</findings>`,
     `<decided>${NL3}${closed}${NL3}</decided>`
   ];
@@ -577,6 +653,12 @@ function buildPrompt(ledger, ex) {
     `<reply>${NL3}${clipMiddle(numberBlocks(ex.reply), 12e3, 4e3)}${NL3}</reply>`,
     `<screen>${NL3}${ex.screen}${NL3}</screen>`
   ].join(NL3);
+}
+function surfaceAtStart(host) {
+  return host.surface.charAt(0).toUpperCase() + host.surface.slice(1);
+}
+function screenText(host, isOpen, tab) {
+  return isOpen ? `${surfaceAtStart(host)} is open beside the conversation, ${tab ? `on its ${tab} tab, ` : ""}listing every open item.` : `${surfaceAtStart(host)} is closed.`;
 }
 function outcomeText(d) {
   if (d.how === "dismissed") return "dismissed by the user";
@@ -636,6 +718,7 @@ function upgradeLastActions(saved) {
 
 // ../hooks/view.ts
 var CHOICE_KEYS = [..."abcfghilm"];
+var SETTLED_MS = 5120;
 var TABS = [
   { id: "needsYou", label: "Needs you", hotkey: "1" },
   { id: "findings", label: "Findings", hotkey: "2" },
@@ -651,7 +734,7 @@ function emptySession() {
     ledger: EMPTY,
     turn: NO_TURN,
     told: TOLD_NOTHING,
-    presence: { turnsStarted: 0, turnsApplied: 0, ledgerState: "current", isUpdating: false },
+    presence: { turnsStarted: 0, turnsApplied: 0, ledgerState: "current", hasDroppedReply: false, isUpdating: false },
     pending: [],
     sent: [],
     lastActions: {},
@@ -723,14 +806,36 @@ function applied(s, reply, now, promptAt) {
       presence: { ...s.presence, ledgerState: "failed" }
     };
   const ledger = parsed ? applyExchangeUpdate(s.ledger, parsed, ex, now, promptAt) : s.ledger;
+  const hasDroppedReply = s.presence.hasDroppedReply || !parsed;
   return {
     ...s,
     ledger,
     pending: s.pending.slice(1),
     presence: {
       ...s.presence,
-      ledgerState: parsed ? "current" : "failed",
+      ledgerState: hasDroppedReply ? "failed" : "current",
+      hasDroppedReply,
       turnsApplied: Math.max(s.presence.turnsApplied, next.turnsStarted)
+    }
+  };
+}
+function needsCatchUp(s) {
+  const { presence } = s;
+  const hasUnappliedTurn = s.pending.length === 0 && s.turn.person === null && presence.turnsStarted > presence.turnsApplied;
+  return presence.ledgerState !== "current" || hasUnappliedTurn;
+}
+var pendingKey = (p) => `${p.turnsStarted}:${p.ex.turn}`;
+function appliedCatchUp(s, begun, parsed, now) {
+  const covered = new Set(begun.pending.map(pendingKey));
+  return {
+    ...s,
+    ledger: parsed ? applyUpdate(s.ledger, parsed, now, s.ledger.turn) : s.ledger,
+    pending: s.pending.filter((p) => !covered.has(pendingKey(p))),
+    presence: {
+      ...s.presence,
+      ledgerState: parsed ? "current" : "failed",
+      hasDroppedReply: parsed ? false : s.presence.hasDroppedReply,
+      turnsApplied: Math.max(s.presence.turnsApplied, begun.presence.turnsStarted)
     }
   };
 }
@@ -750,6 +855,7 @@ function emptyState(sessionId) {
     version: 1,
     sessionId,
     root: "",
+    transcriptPath: null,
     home: homedir2(),
     cliPath: null,
     ...emptySession(),
@@ -794,7 +900,7 @@ async function readState(dir, sessionId) {
 }
 var LOCK_WAIT_MS = 1e4;
 var LOCK_CHILD = "held";
-var sleep = (ms) => new Promise((resolve2) => setTimeout(resolve2, ms));
+var sleep = (ms) => new Promise((resolve3) => setTimeout(resolve3, ms));
 var LockBusyError = class extends Error {
 };
 var bootSession = null;
@@ -948,7 +1054,7 @@ async function updateState(dir, sessionId, change) {
 
 // src/run.ts
 import { execFile } from "node:child_process";
-var run = (args, { cwd, timeoutMs }) => new Promise((resolve2) => {
+var run = (args, { cwd, timeoutMs }) => new Promise((resolve3) => {
   const [file = "", ...rest] = args;
   const child = execFile(
     file,
@@ -956,7 +1062,7 @@ var run = (args, { cwd, timeoutMs }) => new Promise((resolve2) => {
     { cwd, timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, encoding: "utf8" },
     (err, stdout, stderr) => {
       const code = err ? typeof err.code === "number" ? err.code : -1 : 0;
-      resolve2({ code, stdout: String(stdout), stderr: String(stderr) });
+      resolve3({ code, stdout: String(stdout), stderr: String(stderr) });
     }
   );
   child.stdin?.end();
@@ -968,30 +1074,74 @@ import { mkdir as mkdir2, readFile as readFile2, rm, writeFile as writeFile2 } f
 import { join as join3 } from "node:path";
 
 // ../hooks/session-host.ts
+async function askOverConversation(ask, s, screen, conversation) {
+  if (!conversation) return { kind: "unreadable" };
+  const text = await ask(transcriptCatchUpPrompt(s.ledger, screen, conversation)).catch(() => null);
+  return text === null ? { kind: "failed" } : { kind: "reply", text, source: conversation };
+}
 async function runUpdates(host) {
-  while ((await host.read()).pending.length > 0) {
+  let canCatchUp = host.catchUp !== void 0;
+  const wantsCatchUp = (s) => canCatchUp && needsCatchUp(s);
+  const hasWork = (s) => s.pending.length > 0 || wantsCatchUp(s);
+  while (hasWork(await host.read())) {
     const held = await host.exclusive(async () => {
       try {
         for (; ; ) {
-          const s = await host.update((x) => ({
-            ...x,
-            presence: { ...x.presence, isUpdating: x.pending.length > 0 }
-          }));
+          const s = await host.update((x) => ({ ...x, presence: { ...x.presence, isUpdating: hasWork(x) } }));
+          if (!hasWork(s)) break;
+          if (wantsCatchUp(s)) {
+            const reply2 = await host.catchUp(s).catch(() => ({ kind: "failed" }));
+            if (reply2.kind === "unreadable") {
+              canCatchUp = false;
+              continue;
+            }
+            const parsed = reply2.kind === "reply" ? parseReply(reply2.text, reply2.source) : null;
+            const at = await host.now();
+            await host.update((x) => appliedCatchUp(x, s, parsed, at));
+            if (!parsed) return "stop";
+            continue;
+          }
           const next = s.pending[0];
-          if (!next) break;
           const promptAt = await host.now();
           const reply = await host.ask(buildPrompt(s.ledger, next.ex)).catch(() => null);
           const after = await host.update(
             async (x) => x.pending[0]?.turnsStarted === next.turnsStarted && x.pending[0].ex.turn === next.ex.turn ? applied(x, reply, await host.now(), promptAt) : x
           );
-          if (after.pending[0]?.failed && !next.failed) return "retry";
+          if (after.pending[0]?.failed && !next.failed) return "stop";
         }
       } finally {
         await host.update((x) => ({ ...x, presence: { ...x.presence, isUpdating: false } }));
       }
     });
-    if (!held.acquired || held.value === "retry") return;
+    if (!held.acquired || held.value === "stop") return;
   }
+}
+
+// src/settle.ts
+var POLL_MS = 3e3;
+var SETTLE_WINDOW_MS = SETTLED_MS + 2 * POLL_MS;
+
+// src/texts.ts
+var CODEX = {
+  agent: "Codex",
+  surface: "the Inbox tab",
+  band: null,
+  findingsIn: "the Findings section of the Inbox tab",
+  recordTool: "mcp__inbox__record",
+  closeTool: "mcp__inbox__close",
+  intro: "The inbox plugin shows the user what waits on them: your open questions and the tasks only they can do, and your findings, in the Inbox tab beside the conversation."
+};
+
+// src/core.ts
+var TAB_OPEN_MS = 15e3;
+function isTabOpen(s, now) {
+  return now - s.tabSeenAt < TAB_OPEN_MS;
+}
+function activityOf(tool, input) {
+  return toolActivity(tool, input);
+}
+function patchFiles(patch) {
+  return [...patch.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)].map((m) => (m[1] ?? "").trim()).filter(Boolean);
 }
 
 // src/host.ts
@@ -1004,16 +1154,190 @@ function codexStore(dir, sessionId, now) {
   };
 }
 
-// src/texts.ts
-var CODEX = {
-  agent: "Codex",
-  surface: "the Inbox tab",
-  band: null,
-  findingsIn: "the Findings section of the Inbox tab",
-  recordTool: "mcp__inbox__record",
-  closeTool: "mcp__inbox__close",
-  intro: "The inbox plugin shows the user what waits on them: your open questions and the tasks only they can do, and your findings, in the Inbox tab beside the conversation."
+// src/transcript.ts
+import { open } from "node:fs/promises";
+import { resolve as resolve2 } from "node:path";
+
+// ../hooks/conversation.ts
+var NL4 = "\n";
+var TRANSCRIPT_MAX = 8e4;
+var MESSAGE_MAX = 6e3;
+function flattenConversation(turns) {
+  const lines = [];
+  for (const turn of turns) {
+    const text = turn.text.trim();
+    const shown = turn.isVerbatim ? text : clip(text, MESSAGE_MAX);
+    if (turn.role === "person") {
+      if (text && !text.startsWith("inbox:")) lines.push(`Person: ${shown}`);
+      continue;
+    }
+    if (text) lines.push(`Agent: ${shown}`);
+    for (const line of turn.activity) lines.push(`Agent ${line}`);
+  }
+  const kept = [];
+  let size = 0;
+  for (const line of lines.reverse()) {
+    size += line.length + 1;
+    if (size > TRANSCRIPT_MAX) {
+      kept.push("(earlier conversation left out)");
+      break;
+    }
+    kept.push(line);
+  }
+  return kept.reverse().join(NL4);
+}
+
+// src/transcript.ts
+var DIALOG_TOOL = "request_user_input_async";
+var TAIL_BYTES = 4 * 1024 * 1024;
+var SHELL_CALLS = /* @__PURE__ */ new Set(["shell", "shell_command", "exec_command", "container.exec"]);
+var isText = (v) => typeof v === "string";
+function commandText2(command) {
+  if (isText(command)) return command;
+  if (!Array.isArray(command)) return "";
+  const argv = command.filter(isText);
+  const [, flag, script] = argv;
+  return argv.length === 3 && flag?.startsWith("-") && flag.endsWith("c") && script !== void 0 ? script : argv.join(" ");
+}
+function callCommand(p) {
+  if (p.type === "local_shell_call") return commandText2(p.action?.command);
+  if (p.type !== "function_call" || !p.name || !SHELL_CALLS.has(p.name) || !isText(p.arguments)) return "";
+  try {
+    const args = JSON.parse(p.arguments);
+    return commandText2(args.command ?? args.cmd);
+  } catch {
+    return "";
+  }
+}
+async function tailLines(path, bytes) {
+  const file = await open(path, "r");
+  try {
+    const { size } = await file.stat();
+    const start = Math.max(0, size - bytes);
+    const buf = Buffer.alloc(size - start);
+    const { bytesRead } = await file.read(buf, 0, buf.length, start);
+    const lines = buf.subarray(0, bytesRead).toString("utf8").split("\n");
+    if (start > 0) lines.shift();
+    return lines;
+  } finally {
+    await file.close();
+  }
+}
+var ROLLOUT_BYTES = 8 * 1024 * 1024;
+var record = (v) => v && typeof v === "object" && !Array.isArray(v) ? v : {};
+var textOf = (v) => isText(v) ? v : "";
+var contentText = (content) => (Array.isArray(content) ? content : []).map((part) => textOf(record(part).text)).filter(Boolean).join("\n").trim();
+var jsonRecord = (raw) => {
+  try {
+    return record(JSON.parse(textOf(raw)));
+  } catch {
+    return {};
+  }
 };
+var literalValue = (literal) => {
+  if (literal === void 0) return null;
+  try {
+    return textOf(JSON.parse(literal));
+  } catch {
+    return null;
+  }
+};
+var PATCH_ARGUMENT = /tools\.apply_patch\(\s*("(?:[^"\\]|\\.)*")/;
+var COMMAND_ARGUMENT = /\bcmd:\s*("(?:[^"\\]|\\.)*")/;
+var shellLines = (command) => {
+  const line = command === "" ? null : activityOf("Bash", { command });
+  return line ? [line] : [];
+};
+var editLines = (patch, cwd) => patchFiles(patch).map((file) => `edited ${resolve2(cwd || "/", file)}`);
+function callLines(p, hasCommandRows, cwd) {
+  const name = textOf(p.name);
+  if (p.type === "local_shell_call") return hasCommandRows ? [] : shellLines(callCommand(p));
+  if (p.type === "custom_tool_call" && name === "exec") {
+    const input = textOf(p.input);
+    const patch = literalValue(PATCH_ARGUMENT.exec(input)?.[1]);
+    const command = literalValue(COMMAND_ARGUMENT.exec(input)?.[1]);
+    return [...patch ? editLines(patch, cwd) : [], ...command && !hasCommandRows ? shellLines(command) : []];
+  }
+  if (p.type !== "function_call") return [];
+  if (SHELL_CALLS.has(name)) return hasCommandRows ? [] : shellLines(callCommand(p));
+  const args = jsonRecord(p.arguments);
+  if (name === "apply_patch") return editLines(textOf(args.input ?? args.patch ?? args.command), cwd);
+  if (name === "spawn_agent") {
+    const line2 = activityOf("Agent", { description: textOf(args.task_name) });
+    return line2 ? [line2] : [];
+  }
+  if (name === DIALOG_TOOL) return [dialogActivity(dialogQuestions(args.questions), { kind: "open" })];
+  const line = activityOf(textOf(p.namespace).startsWith("mcp__") ? textOf(p.namespace) + name : name, {});
+  return line ? [line] : [];
+}
+var isItem = (row, ...kinds) => row.type === "event_msg" && record(row.payload).type === "item_completed" && kinds.includes(textOf(record(record(row.payload).item).type));
+function turnsOf(rows, cwd) {
+  const hasMessageRows = rows.some((row) => isItem(row, "UserMessage", "AgentMessage"));
+  const hasCommandRows = rows.some((row) => isItem(row, "CommandExecution"));
+  const turns = [];
+  const agentTurn = () => {
+    const last = turns.at(-1);
+    if (last?.role === "agent") return last;
+    const turn = { role: "agent", text: "", activity: [] };
+    turns.push(turn);
+    return turn;
+  };
+  const person = (text) => {
+    if (text && !text.startsWith("<")) turns.push({ role: "person", text, activity: [] });
+  };
+  const act = (lines) => {
+    if (lines.length === 0) return;
+    const turn = agentTurn();
+    turn.activity = lines.reduce((all, line) => addActivity(all, line), turn.activity);
+  };
+  for (const row of rows) {
+    const p = record(row.payload);
+    const item = record(p.item);
+    if (isItem(row, "UserMessage")) person(contentText(item.content));
+    else if (isItem(row, "AgentMessage")) turns.push({ role: "agent", text: contentText(item.content), activity: [] });
+    else if (isItem(row, "CommandExecution")) act(shellLines(commandText2(item.command)));
+    else if (row.type === "response_item") {
+      if (p.type === "message" && !hasMessageRows && p.role === "user") person(contentText(p.content));
+      else if (p.type === "message" && !hasMessageRows && p.role === "assistant")
+        turns.push({ role: "agent", text: contentText(p.content), activity: [] });
+      else act(callLines(p, hasCommandRows, cwd));
+    }
+  }
+  return turns;
+}
+function rolloutTurns(lines, cwd) {
+  const groups = [];
+  for (const line of lines) {
+    let row;
+    try {
+      row = record(JSON.parse(line));
+    } catch {
+      continue;
+    }
+    const p = record(row.payload);
+    if (row.type === "event_msg" && p.type === "task_started") {
+      groups.push({ id: textOf(p.turn_id) || textOf(record(p.turn_attribution).turn_id), isComplete: false, rows: [] });
+      continue;
+    }
+    if (groups.length === 0) groups.push({ id: "", isComplete: false, rows: [] });
+    const group = groups.at(-1);
+    if (row.type === "event_msg" && p.type === "task_complete") group.isComplete = true;
+    else group.rows.push(row);
+  }
+  return groups.map((g) => ({ id: g.id, isComplete: g.isComplete, turns: turnsOf(g.rows, cwd) }));
+}
+async function readRollout(path, cwd, currentTurnId) {
+  if (path === null) return null;
+  try {
+    const turns = rolloutTurns(await tailLines(path, ROLLOUT_BYTES), cwd);
+    const earlier = turns.filter(
+      (t) => t.id !== currentTurnId && (t.isComplete || t.turns.some((x) => x.role === "person"))
+    );
+    return { conversation: flattenConversation(turns.flatMap((t) => t.turns)), earlierTurns: earlier.length };
+  } catch {
+    return null;
+  }
+}
 
 // src/update.ts
 var MODEL = "gpt-6.1-sol";
@@ -1087,7 +1411,16 @@ function codexAsk(exec, cli, dir) {
     return null;
   };
 }
-var runUpdates2 = (dir, sessionId, ask, now) => runUpdates({ ...codexStore(dir, sessionId, now), ask });
+var runUpdates2 = (dir, sessionId, ask, now) => runUpdates({
+  ...codexStore(dir, sessionId, now),
+  ask,
+  catchUp: async (s) => askOverConversation(
+    ask,
+    s,
+    screenText(CODEX, isTabOpen(s, now()), null),
+    (await readRollout(s.transcriptPath, s.root))?.conversation ?? null
+  )
+});
 
 // src/update-main.ts
 async function main() {

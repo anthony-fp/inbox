@@ -2,6 +2,8 @@ import type { SessionMessage } from 'claude-code'
 import type { Dialog, Ledger, Stop } from '../types'
 import { dialogActivity, dialogQuestions, toolActivity } from './model-text'
 import type { DialogOutcome } from './model-text'
+import { flattenConversation } from './conversation'
+import type { Turn } from './conversation'
 import { clip } from './text'
 
 const NL = '\n'
@@ -51,42 +53,31 @@ export function turnBoxText(input: Record<string, unknown>): string | null {
   return [recap, buttons.length > 0 ? `${ask}${NL}Options: ${buttons.join(' / ')}` : ask].filter(Boolean).join(NL + NL)
 }
 
-const TRANSCRIPT_MAX = 80_000
-
-const MESSAGE_MAX = 6000
-
-export function transcriptText(messages: SessionMessage[]): string {
-  const lines: string[] = []
-  for (const m of messages) {
+/** The mod's conversation as turns. A shell or slash command row is already its line, so it is not cut. */
+export function transcriptTurns(messages: SessionMessage[]): Turn[] {
+  return messages.map((m): Turn => {
     const text = m.text.trim()
     if (m.role === 'user') {
-      if (!text || text.startsWith('inbox:')) continue
       const row = readCommandRow(text)
-      const line = row ? commandRowLine(row) : clip(text, MESSAGE_MAX)
-      if (line) lines.push(`Person: ${line}`)
-      continue
+      if (!row) return { role: 'person', text, activity: [] }
+
+      return { role: 'person', text: commandRowLine(row) ?? '', activity: [], isVerbatim: true }
     }
-    if (text) lines.push(`Agent: ${clip(text, MESSAGE_MAX)}`)
-    for (const use of m.toolUses) {
+    const activity = m.toolUses.flatMap(use => {
       const line =
         use.tool === 'AskUserQuestion'
           ? dialogActivity(dialogQuestions(use.input.questions), dialogOutcome(use))
           : toolActivity(use.tool, use.input)
-      if (line) lines.push(`Agent ${line}`)
-    }
-  }
-  const kept: string[] = []
-  let size = 0
-  for (const line of lines.reverse()) {
-    size += line.length + 1
-    if (size > TRANSCRIPT_MAX) {
-      kept.push('(earlier conversation left out)')
-      break
-    }
-    kept.push(line)
-  }
 
-  return kept.reverse().join(NL)
+      return line ? [line] : []
+    })
+
+    return { role: 'agent', text, activity }
+  })
+}
+
+export function transcriptText(messages: SessionMessage[]): string {
+  return flattenConversation(transcriptTurns(messages))
 }
 
 export type CommandRow =

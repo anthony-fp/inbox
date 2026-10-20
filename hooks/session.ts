@@ -1,5 +1,5 @@
-import { applyExchangeUpdate, EMPTY, KEPT_SESSIONS, parseReply, upgradeLedger } from './ledger'
-import type { Exchange, Press } from './ledger'
+import { applyExchangeUpdate, applyUpdate, EMPTY, KEPT_SESSIONS, parseReply, upgradeLedger } from './ledger'
+import type { Exchange, Press, Update } from './ledger'
 import { addActivity, carryText, guidanceText, promptNotes, screenText, START_TITLE, TOLD_NOTHING } from './model-text'
 import type { Host, Told } from './model-text'
 import {
@@ -32,7 +32,7 @@ export function emptySession(): Session {
     ledger: EMPTY,
     turn: NO_TURN,
     told: TOLD_NOTHING,
-    presence: { turnsStarted: 0, turnsApplied: 0, ledgerState: 'current', isUpdating: false },
+    presence: { turnsStarted: 0, turnsApplied: 0, ledgerState: 'current', hasDroppedReply: false, isUpdating: false },
     pending: [],
     sent: [],
     lastActions: {},
@@ -149,6 +149,7 @@ export function cleared<S extends Session>(s: S): S {
     turn: NO_TURN,
     told: { inbox: null, closed: [] },
     pending: [],
+    presence: { ...s.presence, ledgerState: 'current', hasDroppedReply: false, turnsApplied: s.presence.turnsStarted },
     lastActions: {},
     stop: null,
   }
@@ -340,6 +341,7 @@ export function applied<S extends Session>(s: S, reply: string | null, now: numb
       presence: { ...s.presence, ledgerState: 'failed' },
     }
   const ledger = parsed ? applyExchangeUpdate(s.ledger, parsed, ex, now, promptAt) : s.ledger
+  const hasDroppedReply = s.presence.hasDroppedReply || !parsed
 
   return {
     ...s,
@@ -347,8 +349,65 @@ export function applied<S extends Session>(s: S, reply: string | null, now: numb
     pending: s.pending.slice(1),
     presence: {
       ...s.presence,
-      ledgerState: parsed ? 'current' : 'failed',
+      ledgerState: hasDroppedReply ? 'failed' : 'current',
+      hasDroppedReply,
       turnsApplied: Math.max(s.presence.turnsApplied, next.turnsStarted),
+    },
+  }
+}
+
+/**
+ * Whether the ledger may have missed a turn: a failed or behind update, or turns that started with no exchange
+ * waiting. Not while a turn runs, since that turn has not ended yet.
+ */
+export function needsCatchUp(s: Session): boolean {
+  const { presence } = s
+  const hasUnappliedTurn =
+    s.pending.length === 0 && s.turn.person === null && presence.turnsStarted > presence.turnsApplied
+
+  return presence.ledgerState !== 'current' || hasUnappliedTurn
+}
+
+/** Whether a host that cannot read the whole conversation still has something to run: an exchange, or a ledger that is not current. */
+export function needsUpdate(s: Session): boolean {
+  return s.pending.length > 0 || s.presence.ledgerState !== 'current'
+}
+
+/** Whether the inbox has recorded nothing of the session: no turn counted, no exchange waiting, an empty ledger. */
+export function isUnseen(s: Session): boolean {
+  const { ledger } = s
+
+  return (
+    s.presence.turnsStarted === 0 &&
+    s.presence.ledgerState === 'current' &&
+    s.pending.length === 0 &&
+    ledger.card === null &&
+    ledger.items.length === 0 &&
+    ledger.findings.length === 0
+  )
+}
+
+/** The pending exchange `p` stands for, which a catch-up that began with it covers. */
+const pendingKey = (p: Session['pending'][number]) => `${p.turnsStarted}:${p.ex.turn}`
+
+/**
+ * Applies the model's answer to a catch-up over the whole conversation. `begun` is the session when the catch-up
+ * began. The answer covers the exchanges pending then and the turns started then, whether or not it applied, so
+ * an exchange that ended during the catch-up still waits. A catch-up that applied clears `failed`, including the
+ * warning for a dropped reply.
+ */
+export function appliedCatchUp<S extends Session>(s: S, begun: Session, parsed: Update | null, now: number): S {
+  const covered = new Set(begun.pending.map(pendingKey))
+
+  return {
+    ...s,
+    ledger: parsed ? applyUpdate(s.ledger, parsed, now, s.ledger.turn) : s.ledger,
+    pending: s.pending.filter(p => !covered.has(pendingKey(p))),
+    presence: {
+      ...s.presence,
+      ledgerState: parsed ? 'current' : 'failed',
+      hasDroppedReply: parsed ? false : s.presence.hasDroppedReply,
+      turnsApplied: Math.max(s.presence.turnsApplied, begun.presence.turnsStarted),
     },
   }
 }

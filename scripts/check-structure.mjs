@@ -9,6 +9,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SHARED = [
   'arrivals',
   'clients',
+  'conversation',
   'demo',
   'gh',
   'inline',

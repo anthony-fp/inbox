@@ -303,6 +303,19 @@ test('tryWithLock preserves a nested lock timeout after acquiring its own lock',
   }
 })
 
+test('a file saved before the rollout path and the dropped-reply flag existed reads with their defaults', async t => {
+  const dir = tempDir()
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const initial = await updateState(dir, 's1', s => s)
+  const { transcriptPath: _path, ...older } = initial
+  const { hasDroppedReply: _flag, ...presence } = initial.presence
+  await writeFile(statePath(dir, 's1'), JSON.stringify({ ...older, presence }))
+
+  const read = await readState(dir, 's1')
+  assert.equal(read.transcriptPath, null)
+  assert.equal(read.presence.hasDroppedReply, false)
+})
+
 test('older queued messages upgrade without inventing a press time or confirming same-time presses', async t => {
   const dir = tempDir()
   t.after(() => rm(dir, { recursive: true, force: true }))

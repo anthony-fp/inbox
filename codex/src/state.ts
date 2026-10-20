@@ -33,6 +33,8 @@ export type SessionState = Session & {
   version: 1
   sessionId: string
   root: string
+  /** The session's rollout file, from the latest hook input that named one. Null until a hook does. */
+  transcriptPath: string | null
   home: string
   /** The codex binary the desktop app runs, from the hooks' CODEX_CLI_PATH. */
   cliPath: string | null
@@ -72,6 +74,7 @@ export function emptyState(sessionId: string): SessionState {
     version: 1,
     sessionId,
     root: '',
+    transcriptPath: null,
     home: homedir(),
     cliPath: null,
     ...emptySession(),

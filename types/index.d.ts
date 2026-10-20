@@ -305,6 +305,11 @@ export type Session = {
     turnsApplied: number
     /** `behind`: the ledger may have missed a turn, and a host that can catch up does. Only `failed` shows. */
     ledgerState: 'current' | 'behind' | 'failed'
+    /**
+     * An exchange failed twice and was dropped, so its reply never reached the ledger. A later update that applies
+     * keeps `failed` until a catch-up covers it.
+     */
+    hasDroppedReply: boolean
     isUpdating: boolean
   }
   /**

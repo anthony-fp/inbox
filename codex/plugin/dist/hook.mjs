@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 // src/hook.ts
 import { spawn } from "node:child_process";
-import { resolve as resolve2 } from "node:path";
+import { resolve as resolve3 } from "node:path";
 
 // ../hooks/text.ts
 function clip(text, max) {
@@ -411,7 +411,7 @@ function emptySession() {
     ledger: EMPTY,
     turn: NO_TURN,
     told: TOLD_NOTHING,
-    presence: { turnsStarted: 0, turnsApplied: 0, ledgerState: "current", isUpdating: false },
+    presence: { turnsStarted: 0, turnsApplied: 0, ledgerState: "current", hasDroppedReply: false, isUpdating: false },
     pending: [],
     sent: [],
     lastActions: {},
@@ -483,6 +483,7 @@ function cleared(s) {
     turn: NO_TURN,
     told: { inbox: null, closed: [] },
     pending: [],
+    presence: { ...s.presence, ledgerState: "current", hasDroppedReply: false, turnsApplied: s.presence.turnsStarted },
     lastActions: {},
     stop: null
   };
@@ -576,6 +577,13 @@ function endTurn(host, s, reply, isOpen, { tab = null, queuesEmptyReply = false 
   };
   return { ...base, pending: [...base.pending, { ex, turnsStarted: s.presence.turnsStarted }] };
 }
+function needsUpdate(s) {
+  return s.pending.length > 0 || s.presence.ledgerState !== "current";
+}
+function isUnseen(s) {
+  const { ledger } = s;
+  return s.presence.turnsStarted === 0 && s.presence.ledgerState === "current" && s.pending.length === 0 && ledger.card === null && ledger.items.length === 0 && ledger.findings.length === 0;
+}
 
 // src/settle.ts
 var POLL_MS = 3e3;
@@ -620,6 +628,12 @@ function noteHook(s, hook, now, turnId) {
   } : { ...h, stopAt: now, stops: h.stops + 1 };
   return { ...s, heard };
 }
+function heardState(h) {
+  if (h.startAt === null && h.promptAt === null && h.stopAt === null) return "none";
+  const isMissed = h.promptMissedAt !== null && (h.promptAt === null || h.promptMissedAt >= h.promptAt);
+  const turns = h.promptTurns.length > 0 ? h.promptTurns.length : h.prompts;
+  return h.startAt === null || isMissed || turns >= 2 && h.stops === 0 ? "partial" : "heard";
+}
 
 // src/state.ts
 import { execFileSync } from "node:child_process";
@@ -654,6 +668,7 @@ function emptyState(sessionId) {
     version: 1,
     sessionId,
     root: "",
+    transcriptPath: null,
     home: homedir(),
     cliPath: null,
     ...emptySession(),
@@ -695,7 +710,7 @@ async function readSaved(dir, sessionId) {
 }
 var LOCK_WAIT_MS = 1e4;
 var LOCK_CHILD = "held";
-var sleep = (ms) => new Promise((resolve3) => setTimeout(resolve3, ms));
+var sleep = (ms) => new Promise((resolve4) => setTimeout(resolve4, ms));
 var LockBusyError = class extends Error {
 };
 var bootSession = null;
@@ -830,6 +845,38 @@ async function updateState(dir, sessionId, change) {
 
 // src/transcript.ts
 import { open } from "node:fs/promises";
+import { resolve as resolve2 } from "node:path";
+
+// ../hooks/conversation.ts
+var NL2 = "\n";
+var TRANSCRIPT_MAX = 8e4;
+var MESSAGE_MAX = 6e3;
+function flattenConversation(turns) {
+  const lines = [];
+  for (const turn of turns) {
+    const text = turn.text.trim();
+    const shown = turn.isVerbatim ? text : clip(text, MESSAGE_MAX);
+    if (turn.role === "person") {
+      if (text && !text.startsWith("inbox:")) lines.push(`Person: ${shown}`);
+      continue;
+    }
+    if (text) lines.push(`Agent: ${shown}`);
+    for (const line of turn.activity) lines.push(`Agent ${line}`);
+  }
+  const kept = [];
+  let size = 0;
+  for (const line of lines.reverse()) {
+    size += line.length + 1;
+    if (size > TRANSCRIPT_MAX) {
+      kept.push("(earlier conversation left out)");
+      break;
+    }
+    kept.push(line);
+  }
+  return kept.reverse().join(NL2);
+}
+
+// src/transcript.ts
 async function isNonInteractiveRun(path) {
   if (path === null) return true;
   try {
@@ -878,71 +925,190 @@ function callCommand(p) {
     return "";
   }
 }
+async function tailLines(path, bytes) {
+  const file = await open(path, "r");
+  try {
+    const { size } = await file.stat();
+    const start = Math.max(0, size - bytes);
+    const buf = Buffer.alloc(size - start);
+    const { bytesRead } = await file.read(buf, 0, buf.length, start);
+    const lines = buf.subarray(0, bytesRead).toString("utf8").split("\n");
+    if (start > 0) lines.shift();
+    return lines;
+  } finally {
+    await file.close();
+  }
+}
 async function turnIn(path, turnId) {
   const none = { dialogs: [], commands: [] };
   if (path === null) return none;
   try {
-    const file = await open(path, "r");
-    try {
-      const { size } = await file.stat();
-      const start = Math.max(0, size - TAIL_BYTES);
-      const buf = Buffer.alloc(size - start);
-      const { bytesRead } = await file.read(buf, 0, buf.length, start);
-      const lines = buf.subarray(0, bytesRead).toString("utf8").split("\n");
-      if (start > 0) lines.shift();
-      const byTurn = /* @__PURE__ */ new Map();
-      const newTurn = () => ({ dialogs: [], executions: [], calls: /* @__PURE__ */ new Map(), called: [] });
-      let current = "";
-      let newest = "";
-      for (const line of lines) {
-        if (!MARKERS.some((m) => line.includes(m))) continue;
-        let row;
+    const lines = await tailLines(path, TAIL_BYTES);
+    const byTurn = /* @__PURE__ */ new Map();
+    const newTurn = () => ({ dialogs: [], executions: [], calls: /* @__PURE__ */ new Map(), called: [] });
+    let current = "";
+    let newest = "";
+    for (const line of lines) {
+      if (!MARKERS.some((m) => line.includes(m))) continue;
+      let row;
+      try {
+        row = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const p = row.payload;
+      if (!p) continue;
+      if (row.type === "event_msg" && p.type === "task_started" && p.turn_id) {
+        current = p.turn_id;
+        newest = current;
+        if (!byTurn.has(current)) byTurn.set(current, newTurn());
+        continue;
+      }
+      const turn2 = byTurn.get(current) ?? newTurn();
+      byTurn.set(current, turn2);
+      if (row.type === "event_msg" && p.type === "item_completed" && p.item?.type === "CommandExecution") {
+        const output = p.item.aggregated_output;
+        turn2.executions.push({ command: commandText(p.item.command), output: isText(output) ? output : "" });
+      } else if (row.type === "response_item" && p.type === "function_call" && p.name === DIALOG_TOOL) {
+        let args;
         try {
-          row = JSON.parse(line);
+          args = JSON.parse(isText(p.arguments) ? p.arguments : "");
         } catch {
           continue;
         }
-        const p = row.payload;
-        if (!p) continue;
-        if (row.type === "event_msg" && p.type === "task_started" && p.turn_id) {
-          current = p.turn_id;
-          newest = current;
-          if (!byTurn.has(current)) byTurn.set(current, newTurn());
-          continue;
-        }
-        const turn2 = byTurn.get(current) ?? newTurn();
-        byTurn.set(current, turn2);
-        if (row.type === "event_msg" && p.type === "item_completed" && p.item?.type === "CommandExecution") {
-          const output = p.item.aggregated_output;
-          turn2.executions.push({ command: commandText(p.item.command), output: isText(output) ? output : "" });
-        } else if (row.type === "response_item" && p.type === "function_call" && p.name === DIALOG_TOOL) {
-          let args;
-          try {
-            args = JSON.parse(isText(p.arguments) ? p.arguments : "");
-          } catch {
-            continue;
-          }
-          turn2.dialogs.push(dialogQuestions(args.questions));
-        } else if (row.type === "response_item" && (p.type === "function_call" || p.type === "local_shell_call")) {
-          const command = callCommand(p);
-          if (command !== "" && p.call_id) turn2.calls.set(p.call_id, { command, output: "" });
-        } else if (row.type === "response_item" && p.type === "function_call_output" && p.call_id) {
-          const call = turn2.calls.get(p.call_id);
-          if (call) turn2.called.push({ command: call.command, output: outputText(p.output) });
-        }
+        turn2.dialogs.push(dialogQuestions(args.questions));
+      } else if (row.type === "response_item" && (p.type === "function_call" || p.type === "local_shell_call")) {
+        const command = callCommand(p);
+        if (command !== "" && p.call_id) turn2.calls.set(p.call_id, { command, output: "" });
+      } else if (row.type === "response_item" && p.type === "function_call_output" && p.call_id) {
+        const call = turn2.calls.get(p.call_id);
+        if (call) turn2.called.push({ command: call.command, output: outputText(p.output) });
       }
-      const wanted = newest === "" ? "" : turnId ?? newest;
-      const turn = byTurn.get(wanted);
-      if (!turn) return none;
-      return {
-        dialogs: turn.dialogs.filter((questions) => questions.length > 0),
-        commands: turn.executions.length > 0 ? turn.executions : turn.called
-      };
-    } finally {
-      await file.close();
     }
+    const wanted = newest === "" ? "" : turnId ?? newest;
+    const turn = byTurn.get(wanted);
+    if (!turn) return none;
+    return {
+      dialogs: turn.dialogs.filter((questions) => questions.length > 0),
+      commands: turn.executions.length > 0 ? turn.executions : turn.called
+    };
   } catch {
     return none;
+  }
+}
+var ROLLOUT_BYTES = 8 * 1024 * 1024;
+var record = (v) => v && typeof v === "object" && !Array.isArray(v) ? v : {};
+var textOf = (v) => isText(v) ? v : "";
+var contentText = (content) => (Array.isArray(content) ? content : []).map((part) => textOf(record(part).text)).filter(Boolean).join("\n").trim();
+var jsonRecord = (raw) => {
+  try {
+    return record(JSON.parse(textOf(raw)));
+  } catch {
+    return {};
+  }
+};
+var literalValue = (literal) => {
+  if (literal === void 0) return null;
+  try {
+    return textOf(JSON.parse(literal));
+  } catch {
+    return null;
+  }
+};
+var PATCH_ARGUMENT = /tools\.apply_patch\(\s*("(?:[^"\\]|\\.)*")/;
+var COMMAND_ARGUMENT = /\bcmd:\s*("(?:[^"\\]|\\.)*")/;
+var shellLines = (command) => {
+  const line = command === "" ? null : activityOf("Bash", { command });
+  return line ? [line] : [];
+};
+var editLines = (patch, cwd) => patchFiles(patch).map((file) => `edited ${resolve2(cwd || "/", file)}`);
+function callLines(p, hasCommandRows, cwd) {
+  const name = textOf(p.name);
+  if (p.type === "local_shell_call") return hasCommandRows ? [] : shellLines(callCommand(p));
+  if (p.type === "custom_tool_call" && name === "exec") {
+    const input = textOf(p.input);
+    const patch = literalValue(PATCH_ARGUMENT.exec(input)?.[1]);
+    const command = literalValue(COMMAND_ARGUMENT.exec(input)?.[1]);
+    return [...patch ? editLines(patch, cwd) : [], ...command && !hasCommandRows ? shellLines(command) : []];
+  }
+  if (p.type !== "function_call") return [];
+  if (SHELL_CALLS.has(name)) return hasCommandRows ? [] : shellLines(callCommand(p));
+  const args = jsonRecord(p.arguments);
+  if (name === "apply_patch") return editLines(textOf(args.input ?? args.patch ?? args.command), cwd);
+  if (name === "spawn_agent") {
+    const line2 = activityOf("Agent", { description: textOf(args.task_name) });
+    return line2 ? [line2] : [];
+  }
+  if (name === DIALOG_TOOL) return [dialogActivity(dialogQuestions(args.questions), { kind: "open" })];
+  const line = activityOf(textOf(p.namespace).startsWith("mcp__") ? textOf(p.namespace) + name : name, {});
+  return line ? [line] : [];
+}
+var isItem = (row, ...kinds) => row.type === "event_msg" && record(row.payload).type === "item_completed" && kinds.includes(textOf(record(record(row.payload).item).type));
+function turnsOf(rows, cwd) {
+  const hasMessageRows = rows.some((row) => isItem(row, "UserMessage", "AgentMessage"));
+  const hasCommandRows = rows.some((row) => isItem(row, "CommandExecution"));
+  const turns = [];
+  const agentTurn = () => {
+    const last = turns.at(-1);
+    if (last?.role === "agent") return last;
+    const turn = { role: "agent", text: "", activity: [] };
+    turns.push(turn);
+    return turn;
+  };
+  const person = (text) => {
+    if (text && !text.startsWith("<")) turns.push({ role: "person", text, activity: [] });
+  };
+  const act = (lines) => {
+    if (lines.length === 0) return;
+    const turn = agentTurn();
+    turn.activity = lines.reduce((all, line) => addActivity(all, line), turn.activity);
+  };
+  for (const row of rows) {
+    const p = record(row.payload);
+    const item = record(p.item);
+    if (isItem(row, "UserMessage")) person(contentText(item.content));
+    else if (isItem(row, "AgentMessage")) turns.push({ role: "agent", text: contentText(item.content), activity: [] });
+    else if (isItem(row, "CommandExecution")) act(shellLines(commandText(item.command)));
+    else if (row.type === "response_item") {
+      if (p.type === "message" && !hasMessageRows && p.role === "user") person(contentText(p.content));
+      else if (p.type === "message" && !hasMessageRows && p.role === "assistant")
+        turns.push({ role: "agent", text: contentText(p.content), activity: [] });
+      else act(callLines(p, hasCommandRows, cwd));
+    }
+  }
+  return turns;
+}
+function rolloutTurns(lines, cwd) {
+  const groups = [];
+  for (const line of lines) {
+    let row;
+    try {
+      row = record(JSON.parse(line));
+    } catch {
+      continue;
+    }
+    const p = record(row.payload);
+    if (row.type === "event_msg" && p.type === "task_started") {
+      groups.push({ id: textOf(p.turn_id) || textOf(record(p.turn_attribution).turn_id), isComplete: false, rows: [] });
+      continue;
+    }
+    if (groups.length === 0) groups.push({ id: "", isComplete: false, rows: [] });
+    const group = groups.at(-1);
+    if (row.type === "event_msg" && p.type === "task_complete") group.isComplete = true;
+    else group.rows.push(row);
+  }
+  return groups.map((g) => ({ id: g.id, isComplete: g.isComplete, turns: turnsOf(g.rows, cwd) }));
+}
+async function readRollout(path, cwd, currentTurnId) {
+  if (path === null) return null;
+  try {
+    const turns = rolloutTurns(await tailLines(path, ROLLOUT_BYTES), cwd);
+    const earlier = turns.filter(
+      (t) => t.id !== currentTurnId && (t.isComplete || t.turns.some((x) => x.role === "person"))
+    );
+    return { conversation: flattenConversation(turns.flatMap((t) => t.turns)), earlierTurns: earlier.length };
+  } catch {
+    return null;
   }
 }
 
@@ -953,24 +1119,38 @@ async function handleHook(input, deps) {
   if (!id || !env.INBOX_IN_EXEC && await isNonInteractiveRun(input.transcript_path)) return null;
   const cliPath = env.CODEX_CLI_PATH || null;
   const withCli = (s) => cliPath && s.cliPath !== cliPath ? { ...s, cliPath } : s;
+  const rolloutPath = input.agent_id ? null : input.transcript_path;
+  const withRollout = (s) => rolloutPath !== null && s.transcriptPath !== rolloutPath ? { ...s, transcriptPath: rolloutPath } : s;
+  const withHost = (s) => withRollout(withCli(s));
+  let isMarkedBehind = false;
+  const withBehind = async (s) => {
+    const isFirstHook = heardState(s.heard) === "none";
+    if (!isFirstHook || rolloutPath === null || input.source === "compact" || !isUnseen(s)) return s;
+    const rollout = await readRollout(rolloutPath, input.cwd ?? s.root, input.turn_id);
+    if ((rollout?.earlierTurns ?? 0) === 0) return s;
+    isMarkedBehind = true;
+    return { ...s, presence: { ...s.presence, ledgerState: "behind" } };
+  };
   switch (input.hook_event_name) {
     case "SessionStart": {
       const root = input.cwd ?? "";
       const s = await updateState(
         dir,
         id,
-        (s2) => noteHook(withCli({ ...input.source === "clear" ? cleared(s2) : s2, root }), "start", now())
+        async (s2) => noteHook(withHost(await withBehind({ ...input.source === "clear" ? cleared(s2) : s2, root })), "start", now())
       );
+      if (isMarkedBehind) deps.startUpdate(id);
       const context = startContext(CODEX, s, input.source);
       return context ? { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context } } : null;
     }
     case "UserPromptSubmit": {
       let notes = [];
-      await updateState(dir, id, (s) => {
-        const r = notePrompt2(withCli(s), input.prompt ?? "", now());
+      await updateState(dir, id, async (s) => {
+        const r = notePrompt2(withHost(await withBehind(s)), input.prompt ?? "", now());
         notes = r.notes;
         return input.agent_id ? r.state : noteHook(r.state, "prompt", now(), input.turn_id);
       });
+      if (isMarkedBehind) deps.startUpdate(id);
       return notes.length === 0 ? null : { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: notes.join("\n\n") } };
     }
     case "PreToolUse": {
@@ -978,24 +1158,24 @@ async function handleHook(input, deps) {
       const toolInput = input.tool_input ?? {};
       const command = typeof toolInput.command === "string" ? toolInput.command : "";
       if (tool === "apply_patch") {
-        const files = patchFiles(command).map((f) => resolve2(input.cwd || "/", f));
-        await updateState(dir, id, (s) => files.reduce((x, f) => noteActivity(x, `edited ${f}`), s));
+        const files = patchFiles(command).map((f) => resolve3(input.cwd || "/", f));
+        await updateState(dir, id, (s) => files.reduce((x, f) => noteActivity(x, `edited ${f}`), withRollout(s)));
         return null;
       }
       const line = activityOf(tool, toolInput);
-      if (line) await updateState(dir, id, (s) => noteActivity(s, line));
+      if (line) await updateState(dir, id, (s) => noteActivity(withRollout(s), line));
       return null;
     }
     case "Stop": {
       const reply = input.last_assistant_message ?? "";
       const { dialogs, commands } = await turnIn(input.transcript_path, input.turn_id);
       const lines = dialogs.map((questions) => dialogActivity(questions, { kind: "open" }));
-      const written = await updateState(dir, id, (s) => {
-        const withLines = lines.reduce((x, line) => noteActivity(x, line), withCli(s));
+      const written = await updateState(dir, id, async (s) => {
+        const withLines = lines.reduce((x, line) => noteActivity(x, line), withHost(await withBehind(s)));
         const withOutput = commands.reduce((x, c) => noteCommandOutput(x, c.command, c.output), withLines);
         return noteHook(endTurn2(withOutput, reply, now()), "stop", now());
       });
-      if (written.pending.length > 0) deps.startUpdate(id);
+      if (needsUpdate(written)) deps.startUpdate(id);
       return null;
     }
   }

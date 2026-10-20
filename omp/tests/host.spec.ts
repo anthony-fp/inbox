@@ -42,6 +42,7 @@ let execCalls: { command: string; args: string[] }[]
 let copied: string[]
 let agentKind: string | undefined
 let hasUI: boolean
+let branch: unknown[]
 
 const pi = () =>
   ({
@@ -65,7 +66,7 @@ const pi = () =>
 
 const makeCtx = (id = 's1') =>
   ({
-    sessionManager: { getSessionId: () => id },
+    sessionManager: { getSessionId: () => id, getBranch: () => branch },
     cwd: '/work',
     hasUI,
     isIdle: () => isIdle,
@@ -147,6 +148,7 @@ beforeEach(() => {
   copied = []
   agentKind = undefined
   hasUI = true
+  branch = []
 })
 
 afterEach(() => {
@@ -720,4 +722,81 @@ test('Resume sends Continue to the agent', () => {
   isIdle = true
   expect(inbox.resume(makeCtx())).toBeNull()
   expect(sent).toEqual([{ text: 'Continue', options: undefined }])
+})
+
+const message = (message: Record<string, unknown>) => ({ type: 'message', message })
+
+const earlierBranch = () => [
+  message({ role: 'user', content: 'Before the clear' }),
+  { type: 'reset_boundary' },
+  message({ role: 'developer', content: 'Injected by omp' }),
+  message({ role: 'user', content: [{ type: 'text', text: 'Add a greeting CLI. Node or Python?' }] }),
+  message({ role: 'custom', customType: 'inbox', display: false, content: 'inbox: nothing waits on the user' }),
+  message({
+    role: 'assistant',
+    content: [
+      { type: 'text', text: 'I will check the repo.' },
+      { type: 'toolCall', id: 'c1', name: 'bash', arguments: { command: 'ls' } },
+      { type: 'toolCall', id: 'c2', name: 'record', arguments: { kind: 'task', ask: 'Try it' } },
+      { type: 'toolCall', id: 'c3', name: 'ask', arguments: { questions: [{ question: 'Which runtime?' }] } },
+    ],
+  }),
+  message({ role: 'toolResult', toolCallId: 'c3', content: [{ type: 'text', text: 'Node' }], isError: false }),
+  message({ role: 'assistant', content: [{ type: 'text', text: 'The plan is written.' }] }),
+]
+
+test('a resumed session with earlier turns is marked behind and catches up over its branch', async () => {
+  branch = earlierBranch()
+  createInbox(pi(), deps())
+  await call('session_start', { type: 'session_start' })
+  await settle()
+
+  expect(completions).toHaveLength(1)
+  const conversation = completions[0]!.prompt.match(/<conversation>\n([\s\S]*?)\n<\/conversation>/)?.[1]
+  expect(conversation).toBe(
+    [
+      'Person: Add a greeting CLI. Node or Python?',
+      'Agent: I will check the repo.',
+      'Agent ran: ls',
+      'Agent asked the user in a dialog: "Which runtime?"; answer: Node',
+      'Agent: The plan is written.',
+    ].join('\n'),
+  )
+  expect(state().presence.ledgerState).toBe('current')
+  expect(state().ledger.items.map((i: { ask: string }) => i.ask)).toEqual(['Use Node or Python?'])
+
+  await call('session_switch', { type: 'session_switch', reason: 'resume' })
+  await settle()
+  expect(completions).toHaveLength(1)
+})
+
+test('a new session with no earlier turns, and a session that has no UI, start without a catch-up', async () => {
+  createInbox(pi(), deps())
+  await call('session_start', { type: 'session_start' })
+  await settle()
+  expect(completions).toEqual([])
+
+  branch = earlierBranch()
+  hasUI = false
+  await call('session_start', { type: 'session_start' }, makeCtx('s2'))
+  await settle()
+  expect(completions).toEqual([])
+})
+
+test('a failed catch-up is tried again at the next agent end, before the exchange', async () => {
+  branch = earlierBranch()
+  createInbox(pi(), deps())
+  reply = new Error('offline')
+  await call('session_start', { type: 'session_start' })
+  await settle()
+  expect(state().presence.ledgerState).toBe('failed')
+
+  reply = MODEL_ANSWER
+  await prompt('Node')
+  await endAgent('Using Node.')
+  await settle()
+  expect(completions).toHaveLength(2)
+  expect(completions[1]!.prompt).toContain('<conversation>')
+  expect(state().presence.ledgerState).toBe('current')
+  expect(state().pending).toEqual([])
 })

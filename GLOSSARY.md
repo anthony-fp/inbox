@@ -94,6 +94,22 @@ terminal and desktop looks, `codex/src/tab.tsx` for the Codex tab,
 A behavior that differs between looks because one look cannot do something,
 or because the product decided so. Any other difference is drift.
 
+**Catch-up**:
+Rebuilding the ledger from the whole conversation, instead of from one reply's
+exchange. `runUpdates` does it when `needsCatchUp` says the ledger may have
+missed a turn, and the host can read the conversation.
+
+**Behind**:
+The ledger state (`ledgerState: 'behind'`) for a session the inbox has recorded
+nothing of, though it already has turns. The next update catches up. Only
+`failed` shows a warning.
+
+**Dropped reply**:
+An exchange whose update failed twice, so its reply never reached the ledger.
+`presence.hasDroppedReply` keeps the "may be missing" warning until a catch-up
+covers it. A host that cannot read its conversation has no catch-up, so the
+warning stays until a clear.
+
 **Parity record**:
 `hooks/clients.ts`. It lists, for each host, whether each feature is `full`,
 `different` or `unsupported`, with a reason for the last two. Each such entry

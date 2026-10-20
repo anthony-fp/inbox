@@ -1,4 +1,5 @@
-import { buildPrompt } from './model-text'
+import { parseReply } from './ledger'
+import { buildPrompt, transcriptCatchUpPrompt } from './model-text'
 import { fetchTracked, prRowId, splitLinked } from './pr-tab'
 import type { GhRun, PrPress } from './pr-tab'
 import {
@@ -13,7 +14,7 @@ import {
   withUnconfirmed,
 } from './presses'
 import type { Effect, EffectHost, RowPress } from './presses'
-import { applied, completedAttempt, pressOn, withFetchedPrs } from './session'
+import { applied, appliedCatchUp, completedAttempt, needsCatchUp, pressOn, withFetchedPrs } from './session'
 import type { Pressed, SendOutcome, Session } from './session'
 import type { ReplyHolds } from './view'
 import type { RowNote } from '../types'
@@ -78,7 +79,38 @@ export type SessionHost<S extends Session> = {
   isTurnRunning?(s: S): boolean
 }
 
-export type UpdateHost<S extends Session> = Pick<SessionHost<S>, 'now' | 'read' | 'update' | 'exclusive' | 'ask'>
+/** What a host's catch-up found: the model's answer to apply, or why there is none. */
+export type CatchUpReply =
+  /** `source` is the text the answer may quote code blocks from, or null when the model read the conversation itself. */
+  | { kind: 'reply'; text: string; source: string | null }
+  /** The model gave no answer. */
+  | { kind: 'failed' }
+  /** There is no conversation to read, so the pending exchanges run instead. */
+  | { kind: 'unreadable' }
+
+export type UpdateHost<S extends Session> = Pick<SessionHost<S>, 'now' | 'read' | 'update' | 'exclusive' | 'ask'> & {
+  /**
+   * Has the inbox model read the whole conversation, and returns its answer for `runUpdates` to apply. Absent when
+   * the host cannot read the conversation.
+   */
+  catchUp?(s: S): Promise<CatchUpReply>
+}
+
+/**
+ * Asks the model to catch the ledger up over `conversation`, for a host that reads the conversation as text. A null
+ * or empty `conversation` is unreadable. `screen` is what the person sees of the inbox.
+ */
+export async function askOverConversation(
+  ask: Ask,
+  s: Session,
+  screen: string,
+  conversation: string | null,
+): Promise<CatchUpReply> {
+  if (!conversation) return { kind: 'unreadable' }
+  const text = await ask(transcriptCatchUpPrompt(s.ledger, screen, conversation)).catch(() => null)
+
+  return text === null ? { kind: 'failed' } : { kind: 'reply', text, source: conversation }
+}
 
 export async function reconcileUpdateStatus<S extends Session>(
   host: Pick<UpdateHost<S>, 'read' | 'update' | 'exclusive'>,
@@ -103,21 +135,37 @@ export async function reconcileUpdateStatus<S extends Session>(
 }
 
 /**
- * Runs the pending exchanges, oldest first, while this process holds the
- * update lock. An update started meanwhile finds the lock held and exits, so
- * the pending list is read again after the lock is released.
+ * Runs the update for the session while this process holds the update lock: a catch-up over the whole conversation
+ * when `needsCatchUp` says the ledger may have missed a turn and the host can read the conversation, otherwise the
+ * pending exchanges, oldest first. An update started meanwhile finds the lock held and exits, so the work is read
+ * again after the lock is released.
+ *
+ * A catch-up that fails ends the run, and the next update tries it again. A conversation that cannot be read is not
+ * tried again in this run.
  */
 export async function runUpdates<S extends Session>(host: UpdateHost<S>): Promise<void> {
-  while ((await host.read()).pending.length > 0) {
+  let canCatchUp = host.catchUp !== undefined
+  const wantsCatchUp = (s: S) => canCatchUp && needsCatchUp(s)
+  const hasWork = (s: S) => s.pending.length > 0 || wantsCatchUp(s)
+  while (hasWork(await host.read())) {
     const held = await host.exclusive(async () => {
       try {
         for (;;) {
-          const s = await host.update(x => ({
-            ...x,
-            presence: { ...x.presence, isUpdating: x.pending.length > 0 },
-          }))
-          const next = s.pending[0]
-          if (!next) break
+          const s = await host.update(x => ({ ...x, presence: { ...x.presence, isUpdating: hasWork(x) } }))
+          if (!hasWork(s)) break
+          if (wantsCatchUp(s)) {
+            const reply = await host.catchUp!(s).catch((): CatchUpReply => ({ kind: 'failed' }))
+            if (reply.kind === 'unreadable') {
+              canCatchUp = false
+              continue
+            }
+            const parsed = reply.kind === 'reply' ? parseReply(reply.text, reply.source) : null
+            const at = await host.now()
+            await host.update(x => appliedCatchUp(x, s, parsed, at))
+            if (!parsed) return 'stop' as const
+            continue
+          }
+          const next = s.pending[0]!
           const promptAt = await host.now()
           const reply = await host.ask(buildPrompt(s.ledger, next.ex)).catch(() => null)
           const after = await host.update(async x =>
@@ -125,13 +173,13 @@ export async function runUpdates<S extends Session>(host: UpdateHost<S>): Promis
               ? applied(x, reply, await host.now(), promptAt)
               : x,
           )
-          if (after.pending[0]?.failed && !next.failed) return 'retry' as const
+          if (after.pending[0]?.failed && !next.failed) return 'stop' as const
         }
       } finally {
         await host.update(x => ({ ...x, presence: { ...x.presence, isUpdating: false } }))
       }
     })
-    if (!held.acquired || held.value === 'retry') return
+    if (!held.acquired || held.value === 'stop') return
   }
 }
 

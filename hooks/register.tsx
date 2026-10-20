@@ -65,7 +65,7 @@ import {
 } from './session'
 import type { SentBy, Session } from './session'
 import { fetchPrs as fetchSessionPrs, runUpdates, startPress, wakeForDone as wakeSessionForDone } from './session-host'
-import type { SessionHost } from './session-host'
+import type { CatchUpReply, SessionHost } from './session-host'
 import { demoView, isDemoCopy } from './demo'
 import type { Exchange, Press, Update } from './ledger'
 import {
@@ -106,10 +106,8 @@ import {
 import {
   EMPTY,
   KEPT_SESSIONS,
-  applyUpdate,
   applyExchangeUpdate,
   closeItem,
-  parseReply,
   closedState,
   readKind,
   tasksRunBy,
@@ -895,81 +893,47 @@ async function redrawAfterReload($: EngineInterface) {
   if (times.length > 0 && latest + SETTLED_MS > now) redrawWhileLeaving($, latest + SETTLED_MS)
 }
 
-type ModelResult = Awaited<ReturnType<EngineInterface['model']['fork']>>
-
-type LedgerState = Session['presence']['ledgerState']
-
-async function applyLedgerReply(
-  $: EngineInterface,
-  owner: Owner,
-  r: ModelResult,
-  source: string | null,
-): Promise<LedgerState> {
-  if (!r.isAnswered) {
-    // A fork has nothing to read until this process sends its first request,
-    // as after a resume.
-    return r.reason === 'nothing-to-fork' ? 'behind' : 'failed'
-  }
-  const parsed = parseReply(r.text, source)
-  if (!parsed || !isCurrent(owner)) return 'failed'
-  const now = await $.clock.now()
-  await commitLedger($, l => applyUpdate(l, parsed, now, l.turn), owner)
-
-  return isCurrent(owner) ? 'current' : 'failed'
-}
-
-/** Reads the whole conversation into the ledger: by forking it, or from the transcript when there is nothing to fork. */
-async function catchUpLedger($: EngineInterface, owner: Owner): Promise<LedgerState> {
+/**
+ * The model's answer to a catch-up over the whole conversation: from a fork of it, or from the transcript when there
+ * is nothing to fork.
+ */
+async function catchUpReply($: EngineInterface, owner: Owner): Promise<CatchUpReply> {
+  if (!isCurrent(owner)) return { kind: 'failed' }
   const [{ ledger }, shown] = await Promise.all([read($, SESSION), screen($)])
   const forked = await $.model.fork({ prompt: catchUpPrompt(CLAUDE_CODE, ledger, shown) })
-  if (forked.isAnswered || forked.reason !== 'nothing-to-fork') return applyLedgerReply($, owner, forked, null)
-  // A resumed conversation has no request of this process's to fork until its
-  // first reply, so the model reads the transcript instead, uncached.
+  if (!isCurrent(owner)) return { kind: 'failed' }
+  if (forked.isAnswered) return { kind: 'reply', text: forked.text, source: null }
+  // A fork has nothing to read until this process sends its first request,
+  // as after a resume. The model then reads the transcript instead, uncached.
+  if (forked.reason !== 'nothing-to-fork') return { kind: 'failed' }
   const transcript = transcriptText(await $.session.messages())
-  if (!transcript) return 'behind'
+  if (!transcript) return { kind: 'unreadable' }
   const r = await askLedgerModel($, transcriptCatchUpPrompt(ledger, shown, transcript), 90_000)
+  if (!isCurrent(owner)) return { kind: 'failed' }
 
-  return applyLedgerReply($, owner, r, transcript)
+  return r.isAnswered ? { kind: 'reply', text: r.text, source: transcript } : { kind: 'failed' }
 }
 
 /**
- * Catches up over the whole conversation, which covers every exchange still pending. The turns it covers are
- * the ones started when it began.
+ * Marks the ledger `behind` so the next update catches up over the whole conversation, then runs it. A load calls
+ * this when the ledger may have missed turns.
  */
-async function catchUp($: EngineInterface, owner: Owner) {
-  const host = hostOf($, owner)
-  await host.exclusive(async () => {
-    const { turnsStarted } = (await host.read()).presence
-    await host.update(s => ({ ...s, presence: { ...s.presence, isUpdating: true } }))
-    const state = await catchUpLedger($, owner).catch((): LedgerState => 'failed')
-    await host.update(s => ({
-      ...s,
-      pending: s.pending.filter(p => p.turnsStarted > turnsStarted),
-      presence: {
-        ...s.presence,
-        ledgerState: state,
-        isUpdating: false,
-        turnsApplied: Math.max(s.presence.turnsApplied, turnsStarted),
-      },
-    }))
-  })
+async function catchUpNow($: EngineInterface) {
+  await commit($, currentOwner(), s =>
+    s.presence.ledgerState === 'current' ? { ...s, presence: { ...s.presence, ledgerState: 'behind' } } : s,
+  )
+  updateLedger($)
 }
 
 /**
  * Runs the per-reply update for the conversation, one at a time: the pending exchanges, or a catch-up when the
  * ledger may have missed a turn, as after a failed update or a reload that cut one off.
  */
-function updateLedger($: EngineInterface, { catchesUp = false } = {}) {
+function updateLedger($: EngineInterface) {
   const owner = currentOwner()
   queue = queue.then(async () => {
     if (!isCurrent(owner)) return
-    const { presence, pending } = await read($, SESSION)
-    const needsCatchUp =
-      catchesUp ||
-      presence.ledgerState !== 'current' ||
-      (pending.length === 0 && presence.turnsStarted > presence.turnsApplied)
-    if (needsCatchUp) await catchUp($, owner)
-    else await runUpdates(hostOf($, owner))
+    await runUpdates({ ...hostOf($, owner), catchUp: () => catchUpReply($, owner) })
     if (isCurrent(owner)) void publishStatus($)
   })
   // A rejected link would skip every later update, so the chain swallows it.
@@ -2211,7 +2175,7 @@ async function applyConversation(
     presence.turnsStarted > presence.turnsApplied ||
     (!isUnread && isEmpty && (await $.session.turns().catch(() => 0)) > 0)
   if (!isLoading()) return
-  if (needsCatchUp) updateLedger($, { catchesUp: true })
+  if (needsCatchUp) await catchUpNow($)
   void publishStatus($)
   if (ledger.prs.length > 0) void fetchPrs($, false)
 }
@@ -2307,7 +2271,7 @@ async function readAgain($: EngineInterface) {
       (hasRun && saved.session) ||
       (!ledger.card && ledger.items.length === 0 && (await $.session.turns().catch(() => 0)) > 0)
     )
-      updateLedger($, { catchesUp: true })
+      await catchUpNow($)
     void publishStatus($)
     if (ledger.prs.length > 0) void fetchPrs($, false)
     void followNewRows($).catch(() => undefined)
@@ -2364,13 +2328,17 @@ export const register: Register = on => {
     if (isOn && (e.reason === 'clear' || e.reason === 'resume')) {
       conversation.generation += 1
       await Promise.all([
-        replaceDrawn($, s => ({
-          ...cleared(s),
-          lastActions: withoutRowActions(s.lastActions),
-          sent: [],
-          heldRows: [],
-          presence: { ...s.presence, isUpdating: false, ledgerState: 'current' },
-        })),
+        replaceDrawn($, s => {
+          const empty = cleared(s)
+
+          return {
+            ...empty,
+            lastActions: withoutRowActions(s.lastActions),
+            sent: [],
+            heldRows: [],
+            presence: { ...empty.presence, isUpdating: false },
+          }
+        }),
         forgetRowState($),
         update($, AWAY, a => ({ ...a, isAway: false })),
       ])

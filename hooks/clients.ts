@@ -48,19 +48,9 @@ export const CLIENTS: Record<ClientId, Client> = {
   },
   codex: {
     support: {
-      'catch-up': {
-        kind: 'unsupported',
-        reason: 'Not built in Codex yet; client-parity step 6 builds it from the rollout transcript.',
-      },
-      'failed-update-recovery': {
-        kind: 'different',
-        reason:
-          'Codex retries a failed exchange once at the next Stop, then drops it, and a later successful update clears the warning that a reply may be missing. Not built in Codex yet; client-parity step 6 builds recovery with catch-up.',
-      },
-      'ledger-behind-state': {
-        kind: 'unsupported',
-        reason: 'Not built in Codex yet; client-parity step 6 sets `behind` when a session starts with earlier turns.',
-      },
+      'catch-up': { kind: 'full' },
+      'failed-update-recovery': { kind: 'full' },
+      'ledger-behind-state': { kind: 'full' },
       'dialog-outcome': {
         kind: 'different',
         reason:
@@ -108,20 +98,9 @@ export const CLIENTS: Record<ClientId, Client> = {
   },
   omp: {
     support: {
-      'catch-up': {
-        kind: 'unsupported',
-        reason:
-          'Not built in omp yet; client-parity step 6 builds it from omp session entries, after an investigation of what they hold.',
-      },
-      'failed-update-recovery': {
-        kind: 'different',
-        reason:
-          'omp retries a failed exchange once at the next agent end, then drops it, and a later successful update clears the warning that a reply may be missing. Not built in omp yet; client-parity step 6 builds recovery with catch-up.',
-      },
-      'ledger-behind-state': {
-        kind: 'unsupported',
-        reason: 'Not built in omp yet; client-parity step 6 sets `behind` when a session starts with earlier turns.',
-      },
+      'catch-up': { kind: 'full' },
+      'failed-update-recovery': { kind: 'full' },
+      'ledger-behind-state': { kind: 'full' },
       'dialog-outcome': { kind: 'full' },
       'tool-output-urls': { kind: 'full' },
       'pr-link-from-output': { kind: 'full' },
@@ -139,7 +118,7 @@ export const CLIENTS: Record<ClientId, Client> = {
       'fork-ledger': {
         kind: 'unsupported',
         reason:
-          "Not built in omp yet; client-parity step 8 builds it. omp's `session_switch` event reports a fork and the session file it came from, and the host's handler reads neither.",
+          "A forked omp session gets a ledger rebuilt from its branch by catch-up. It does not get the parent's saved card and items: omp's `session_switch` event reports the session file the fork came from, and the host does not read it. Client-parity step 8 builds that.",
       },
       'band-and-stop-rows': {
         kind: 'different',

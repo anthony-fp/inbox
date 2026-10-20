@@ -2,12 +2,18 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { systemText } from '../../hooks/model-text'
-import { reconcileUpdateStatus as reconcileStatus, runUpdates as runSessionUpdates } from '../../hooks/session-host'
+import { screenText, systemText } from '../../hooks/model-text'
+import {
+  askOverConversation,
+  reconcileUpdateStatus as reconcileStatus,
+  runUpdates as runSessionUpdates,
+} from '../../hooks/session-host'
 import type { Ask } from '../../hooks/session-host'
+import { isTabOpen } from './core'
 import { codexStore } from './host'
 import type { SessionState } from './state'
 import { CODEX } from './texts'
+import { readRollout } from './transcript'
 import type { Run } from '../../hooks/gh'
 
 /** The inbox model, at low reasoning effort. gpt-6-luna is faster but closed a finding the reply only mentioned. */
@@ -93,4 +99,14 @@ export const reconcileUpdateStatus = (dir: string, sessionId: string): Promise<S
   reconcileStatus(codexStore(dir, sessionId, Date.now))
 
 export const runUpdates = (dir: string, sessionId: string, ask: Ask, now: () => number): Promise<void> =>
-  runSessionUpdates({ ...codexStore(dir, sessionId, now), ask })
+  runSessionUpdates({
+    ...codexStore(dir, sessionId, now),
+    ask,
+    catchUp: async s =>
+      askOverConversation(
+        ask,
+        s,
+        screenText(CODEX, isTabOpen(s, now()), null),
+        (await readRollout(s.transcriptPath, s.root))?.conversation ?? null,
+      ),
+  })

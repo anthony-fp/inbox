@@ -1,6 +1,7 @@
-import { mkdtempSync } from 'node:fs'
+import { copyFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import type { HookDeps, HookInput } from '../src/hook'
 import type { Run } from '../../hooks/gh'
@@ -33,4 +34,13 @@ export function hookDeps(dir: string, now = () => 1000): HookDeps & { updates: s
 
 export function input(event: string, fields: Partial<HookInput> = {}): HookInput {
   return { hook_event_name: event, session_id: 's1', transcript_path: join(tmpdir(), 'rollout.jsonl'), ...fields }
+}
+
+export const ROLLOUT_FIXTURE = join(dirname(fileURLToPath(import.meta.url)), '..', 'tests', 'fixtures', 'rollout.jsonl')
+
+export function rolloutCopy(): string {
+  const path = join(tempDir(), 'rollout.jsonl')
+  copyFileSync(ROLLOUT_FIXTURE, path)
+
+  return path
 }

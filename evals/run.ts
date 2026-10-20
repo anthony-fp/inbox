@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 
 import { applyUpdate, EMPTY, parseReply } from '../hooks/ledger'
-import { buildPrompt, CLAUDE_CODE, systemText } from '../hooks/model-text'
+import { buildPrompt, CLAUDE_CODE, systemText, transcriptCatchUpPrompt } from '../hooks/model-text'
 import type { Exchange } from '../hooks/ledger'
 import type { Ledger } from '../types'
 import { run } from '../codex/src/run'
@@ -19,6 +19,7 @@ type Check =
   | { open: string }
   | { closed: string; outcome?: string }
   | { added: number }
+  | { done: string }
   | { new: string; kind?: 'question' | 'task'; rec?: string | null; help?: string }
   | { notNew: string }
   | { noHelp: string }
@@ -30,6 +31,8 @@ type Case = {
   about: string
   ledger: Partial<Ledger>
   exchange: Partial<Exchange> & { reply: string }
+  /** A conversation to catch the ledger up on, in place of the exchange's per-reply update. */
+  catchUp?: string
   checks: Check[]
   min?: Partial<Record<Agent, number>>
 }
@@ -71,6 +74,7 @@ function failures(before: Ledger, after: Ledger, checks: Check[]): string[] {
   const isOpen = (id: string) => after.items.some(i => i.id === id) || after.findings.some(f => f.id === id)
   const closedOutcome = (id: string) =>
     after.closed.find(c => c.id === id)?.outcome ?? after.closedFindings.find(f => f.id === id)?.outcome ?? null
+  const finished = (after.card?.done ?? []).filter(line => !(before.card?.done ?? []).includes(line))
   const out: string[] = []
   for (const c of checks) {
     if ('open' in c && !isOpen(c.open)) out.push(`${c.open} closed`)
@@ -79,6 +83,8 @@ function failures(before: Ledger, after: Ledger, checks: Check[]): string[] {
       if (outcome === null) out.push(`${c.closed} still open`)
       else if (c.outcome && !has(c.outcome, outcome)) out.push(`${c.closed} closed as "${outcome}"`)
     } else if ('added' in c && added.length !== c.added) out.push(`${added.length} items added`)
+    else if ('done' in c && !finished.some(line => has(c.done, line)))
+      out.push(`no done line like /${c.done}/: ${finished.map(line => `"${line}"`).join(', ')}`)
     else if ('new' in c) {
       const match = added.find(
         i =>
@@ -123,9 +129,10 @@ async function once(agent: Agent, c: Case, n: number): Promise<Result> {
     screen: agent === 'codex' ? 'The Inbox tab is closed.' : 'The /inbox pane is closed.',
     ...c.exchange,
   }
-  const prompt = buildPrompt(ledger, ex)
+  const prompt =
+    c.catchUp === undefined ? buildPrompt(ledger, ex) : transcriptCatchUpPrompt(ledger, ex.screen, c.catchUp)
   const answer = agent === 'codex' ? await askCodex(prompt) : await claude(prompt)
-  const update = answer === null ? null : parseReply(answer, `${ex.reply}\n${ex.activity.join('\n')}`)
+  const update = answer === null ? null : parseReply(answer, c.catchUp ?? `${ex.reply}\n${ex.activity.join('\n')}`)
   const failed =
     update === null
       ? ['no answer the mod can read']

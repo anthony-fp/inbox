@@ -10,7 +10,8 @@ import { notePrompt, noteToolCall, viewOf } from '../src/core'
 import { handleHook } from '../src/hook'
 import { readState, statePath, updateState } from '../src/state'
 import { CODEX } from '../src/texts'
-import { hookDeps, input, tempDir } from './helpers'
+import { runUpdates } from '../src/update'
+import { hookDeps, input, rolloutCopy, tempDir } from './helpers'
 
 test('a session starts with the guidance, records the prompt, and ends the turn into the update', async () => {
   const dir = tempDir()
@@ -386,4 +387,101 @@ test('a Stop reads the ending turn’s shell commands: local URLs become activit
   const after = await readState(dir, 's1')
   assert.deepEqual(after.pending[1]?.ex.activity, ['URL in output: http://127.0.0.1:8080/x'])
   assert.deepEqual(after.ledger.prs, ['acme/app#12', 'acme/app#20'])
+})
+
+const execDeps = (dir: string) => {
+  const deps = hookDeps(dir)
+
+  return { ...deps, env: { ...deps.env, INBOX_IN_EXEC: '1' } }
+}
+
+const CATCH_UP_REPLY =
+  'GOAL: Toy calculator\nNOW: Waiting on a patch\nDONE: Listed the repo files\nNEW: decide | - | Allow edits? | Yes / No | Yes'
+
+test('a session resumed with earlier turns is marked behind at its first hook and catches up over the rollout', async () => {
+  const dir = tempDir()
+  const deps = execDeps(dir)
+  const transcript = rolloutCopy()
+  const prompts: string[] = []
+
+  await handleHook(input('SessionStart', { cwd: '/repo', source: 'resume', transcript_path: transcript }), deps)
+  const started = await readState(dir, 's1')
+  assert.equal(started.presence.ledgerState, 'behind')
+  assert.equal(started.transcriptPath, transcript)
+  assert.deepEqual(deps.updates, ['s1'])
+
+  await runUpdates(
+    dir,
+    's1',
+    async prompt => (prompts.push(prompt), CATCH_UP_REPLY),
+    () => 7,
+  )
+  const caught = await readState(dir, 's1')
+  assert.equal(prompts.length, 1)
+  assert.match(prompts[0] ?? '', /<conversation>\n[\s\S]*Person: List the files here and say what each does/)
+  assert.equal(caught.presence.ledgerState, 'current')
+  assert.equal(caught.ledger.card?.goal, 'Toy calculator')
+  assert.deepEqual(
+    caught.ledger.items.map(i => i.ask),
+    ['Allow edits?'],
+  )
+})
+
+test('a failed catch-up leaves the ledger behind, and the next Stop catches up again before the exchange', async () => {
+  const dir = tempDir()
+  const deps = execDeps(dir)
+  const transcript = rolloutCopy()
+  const prompts: string[] = []
+  let answer: string | null = null
+  const ask = async (prompt: string) => (prompts.push(prompt), answer)
+
+  await handleHook(input('UserPromptSubmit', { prompt: 'What now?', turn_id: 't9', transcript_path: transcript }), deps)
+  await handleHook(
+    input('Stop', { turn_id: 't9', transcript_path: transcript, last_assistant_message: 'Try adding tests.' }),
+    deps,
+  )
+  await runUpdates(dir, 's1', ask, () => 7)
+  assert.equal((await readState(dir, 's1')).presence.ledgerState, 'failed')
+  assert.equal(prompts.length, 1)
+
+  answer = CATCH_UP_REPLY
+  await handleHook(input('Stop', { turn_id: 't9', transcript_path: transcript, last_assistant_message: '' }), deps)
+  assert.equal(deps.updates.length, 3)
+  await runUpdates(dir, 's1', ask, () => 8)
+  const caught = await readState(dir, 's1')
+  assert.equal(prompts.length, 2)
+  assert.match(prompts[1] ?? '', /<conversation>/)
+  assert.equal(caught.presence.ledgerState, 'current')
+  assert.deepEqual(caught.pending, [])
+})
+
+test('a new session, a compaction start, a subagent and a session with recorded turns are not marked behind', async () => {
+  const dir = tempDir()
+  const deps = execDeps(dir)
+  const fresh = join(tempDir(), 'fresh.jsonl')
+  writeFileSync(fresh, JSON.stringify({ type: 'event_msg', payload: { type: 'task_started', turn_id: 't1' } }))
+  const earlier = rolloutCopy()
+
+  await handleHook(input('SessionStart', { cwd: '/repo', source: 'startup', transcript_path: fresh }), deps)
+  await handleHook(input('UserPromptSubmit', { prompt: 'Hi', turn_id: 't1', transcript_path: fresh }), deps)
+  assert.equal((await readState(dir, 's1')).presence.ledgerState, 'current')
+
+  await handleHook(input('SessionStart', { session_id: 's2', source: 'compact', transcript_path: earlier }), deps)
+  assert.equal((await readState(dir, 's2')).presence.ledgerState, 'current')
+
+  await handleHook(
+    input('UserPromptSubmit', { session_id: 's3', agent_id: 'a1', prompt: 'Review', transcript_path: earlier }),
+    deps,
+  )
+  const subagent = await readState(dir, 's3')
+  assert.equal(subagent.presence.ledgerState, 'current')
+  assert.equal(subagent.transcriptPath, null)
+
+  await updateState(dir, 's4', s => ({ ...s, presence: { ...s.presence, turnsStarted: 2, turnsApplied: 2 } }))
+  await handleHook(
+    input('UserPromptSubmit', { session_id: 's4', prompt: 'Go', turn_id: 't9', transcript_path: earlier }),
+    deps,
+  )
+  assert.equal((await readState(dir, 's4')).presence.ledgerState, 'current')
+  assert.deepEqual(deps.updates, [])
 })
