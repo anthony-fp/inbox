@@ -240,4 +240,9 @@ Parts 2 and 3 were built as one, since the mod's `SessionHost` needs the single 
 
 The script does not run on the mod's storage, because a test in `claude plugin test` gets no `$.state`. The 145 tests in `tests/hooks.test.ts` run the mod's storage through its events instead.
 
-Both looks were checked live on the final code. In the terminal, with its own `CLAUDE_CONFIG_DIR`: the demo pane, an answer press, a stop row from a failed turn, and `/clear`. In the Claude app, in the inbox-ui VM: a task Claude recorded, Done on it, the Done message sent after the settle window and its closed row reading Done, and the empty pane after `/clear`. omp was not checked live after step 4. Its tests pass.
+Every look was checked live after step 4.
+
+- **Terminal,** with its own `CLAUDE_CONFIG_DIR`: the demo pane, an answer press, a stop row from a failed turn, and `/clear`. In the inbox-ui VM, a session a released build saved resumed with its four questions. An answer press arrived and folded into Closed, and the saved record converted to the session shape.
+- **Claude app,** in the inbox-ui VM: a task Claude recorded, Done on it, the Done message sent after the settle window, its closed row reading Done, and the empty pane after `/clear`. A session a released build saved opened with its question and task, and an answer press arrived and folded into Closed.
+- **Codex tab,** in the inbox-ui VM: a question a released build saved showed in the tab. Its answer press settled with ✓, arrived, and folded into Closed.
+- **omp,** with its own `HOME`: the band, a question, a resumed session, the closed list, Copy, Done, Explain, and Dismiss with Undo. Reply and the PRs tab were not checked live.
