@@ -122,7 +122,7 @@ Built-in mods show under **Built-in** in `/plugin` → Installed. They can't be 
 - "The settings and flags that stop installed mods, such as `disableAllHooks`, `--bare`, and `--safe-mode`, don't stop built-in mods." [O#mods-built-into-claude-code]
 - Public source for `diff`, `agents-md`, `sec-default` and `telemetry` is in `mods/` of anthropics/claude-code. Not for `you-should-know`. [O#read-the-source-of-built-in-mods]
 - `$.telemetry` records are "sent only when Claude Code or a built-in mod makes the call". [R]
-- Inference for the inbox: `cc-plugin-you-should-know` also spends model calls and draws above the prompt. It overlaps the inbox's findings and band. How the two bands are ordered is unknown.
+- Inference for the inbox: `cc-plugin-you-should-know` also spends model calls and draws above the prompt. It overlaps the inbox's findings and band. Built-in mods run after the ones a user installs [E#the-order-mods-run-in], so its band drawing reaches the inbox through `next(e)` and draws under the inbox's lines.
 
 ## Where mods run and draw
 
@@ -592,7 +592,7 @@ From [R#limits] unless marked. "Claude Code skips a hook that exceeds a time lim
 - **Pane**: "a sidebar beside the transcript in a wide fullscreen terminal, or a framed region above the prompt otherwise. With several panes open, each gets a tab that shows its title." [IF#pick-where-to-draw]
 - **Band** (site `AbovePrompt`): "a strip directly above the prompt input. It's always there, and every mod shares it." [IF#pick-where-to-draw]
 - Sharing the band: "A tree replaces what the mods after yours draw there. To keep theirs, put the result of `await next(e)` among the children of a `Box`." [IF#pick-where-to-draw]
-  - The inbox's band hook (`hooks/register.tsx:on('ui.render', AbovePrompt)`) yields while a survey holds the band (`if (!isOn || e.props.hasSurvey) return next(e)`). Its trees never include `await next(e)`, so when it draws, it hides band content from mods that run after it.
+  - The inbox's band hook (`hooks/register.tsx:on('ui.render', AbovePrompt)`) yields while a survey holds the band (`if (!isOn || e.props.hasSurvey) return next(e)`). When it draws, its tree puts the result of `await next(e)` under its own lines, so the mods that run after it still show. Live on 2.1.304, with a probe mod loaded after it that draws one line without `next(e)`: the probe's line shows under the counts, and under the stop line.
 
 ### Sites by surface
 
@@ -1687,7 +1687,7 @@ Each row names the conflict, which source to trust, and why.
 | 6 | Which engine does the desktop app use now, and how far does it trail the CLI? | `/status` in Code mode. Log `$.session.version()` to the debug log. |
 | 7 | Does remote turn-off stop built-in mods or the desktop engine separately? How does "saved off" clear there? | Run `claude plugin test` with the desktop app's engine binary. |
 | 8 | Does the shipped guard match its main-branch source? Does GUIDANCE reach the system prompt, does the carry block reach Claude, does `classic.SessionStart` fire after `/clear`, does a `Read` deny rule beat the inbox's allow, do the tools fail to register with `allowedMcpServers` set? | On a test machine, add a managed-settings file, run `claude --debug`, and probe each one. Ask Claude to quote the `inbox:guidance` section. |
-| 9 | How does the inbox's band share `AbovePrompt` with `cc-plugin-you-should-know` and other mods' bands? Is `maxRows` split? | Enable both and inspect. |
+| 9 | How does `cc-plugin-you-should-know`'s note look under the inbox's band lines, and how many rows does it take? Both draw in one tree, under one `maxRows`. | Enable both in a signed-in session and run a long task until a note appears. |
 | 10 | Does a server-managed `enabledPlugins` entry install the inbox in an Anthropic-hosted cloud session? | Test org. Even if it installs, nothing draws, so the gate should keep the mod off. |
 | 11 | Under `allowManagedModsOnly`, do the inbox's tools and `/inbox` go away? | Managed-settings test file plus `claude --debug`. |
 | 12 | Is `e.isInteractive` ever true in Code mode, for example after `/desktop` hands off a live terminal session? | Run `/desktop` from a terminal session with the mod loaded and log the start event. |

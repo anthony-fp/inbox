@@ -824,6 +824,32 @@ test('the band is [Open inbox] and the counts, the same while working and after 
   expect(await pane.find({ key: 'explain-i2-key' })).toBeUndefined()
 })
 
+test('the band keeps what the mods after the inbox draw there, with its counts and with its stop line', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => $.ui.resolve(e).Text({ children: ['Heads up'] }))
+  world($, on, [])
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'add a greeting cli', wait: false, origin: { kind: 'composer' } })
+  await $.turn.complete({ answer: 'Plan ready.', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.settle()
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const band = await $.ui.mount({ plugin: 'inbox', surface, ...BAND })
+    expect(await band.find({ text: /^Needs you 2$/ })).toBeDefined()
+    expect(await band.find({ text: 'Heads up' })).toBeDefined()
+    await band.unmount()
+  }
+
+  await $.classic.StopFailure({ error: 'server_error' } as never)
+  await clock.settle()
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const band = await $.ui.mount({ plugin: 'inbox', surface, ...BAND })
+    expect(await band.find({ key: 'resume' })).toBeDefined()
+    expect(await band.find({ text: 'Heads up' })).toBeDefined()
+    await band.unmount()
+  }
+})
+
 test('resumed into a conversation it cannot fork yet, it catches up from the transcript before any reply', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   const prompts: string[] = []
