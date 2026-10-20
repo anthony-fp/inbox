@@ -313,11 +313,29 @@ function writesOnlyUnder(dir: string): string {
 }
 
 /**
+ * The Claude sign-in of your own omp profile, which a run's empty `HOME` gets through its environment. Each run asks
+ * again, since `omp token` refreshes a token that has expired.
+ */
+async function ompClaudeToken(): Promise<{ token: string; error: string | null }> {
+  const r = await exec(['omp', 'token', 'anthropic'], { cwd: tmpdir(), env: process.env })
+  const token = r.stdout.trim()
+
+  return r.code === 0 && token !== ''
+    ? { token, error: null }
+    : {
+        token: '',
+        error: `The omp agent needs a Claude sign-in in omp (run omp, then /login): ${r.stderr.slice(0, 300)}`,
+      }
+}
+
+/**
  * Runs omp in print mode with its `bash` tool and the probe extension, in a fresh HOME that holds nothing of the
- * person's omp config. Like Codex, it has a shell that can write only in the case's folder. The API key reaches omp
- * through the environment of this one command.
+ * person's omp config. Like Codex, it has a shell that can write only in the case's folder. The sign-in token reaches
+ * omp through the environment of this one command.
  */
 async function ompIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome> {
+  const signIn = await ompClaudeToken()
+  if (signIn.error) return { reply: '', calls: s.calls(), error: signIn.error }
   const home = join(s.dir, 'omp-home')
   mkdirSync(home)
   const toolsFile = join(s.dir, 'tools.json')
@@ -349,7 +367,7 @@ async function ompIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome> {
       env: {
         PATH: process.env.PATH,
         HOME: home,
-        ANTHROPIC_OAUTH_TOKEN: ompToken,
+        ANTHROPIC_OAUTH_TOKEN: signIn.token,
         INBOX_EVAL_STATE: s.state,
         INBOX_EVAL_LOG: s.log,
         INBOX_EVAL_TOOLS: toolsFile,
@@ -463,16 +481,9 @@ async function assertNoInboxServer() {
   rmSync(probe.dir, { recursive: true, force: true })
 }
 
-/** The Claude sign-in of your own omp profile, which each run's empty `HOME` gets through its environment. */
-let ompToken = ''
-
 /** One trivial omp run, which fails when the session offers any tool besides the probe's, or any MCP server's. */
 async function assertOnlyOmpProbeSession() {
   if (!agents.includes('omp')) return
-  const token = await exec(['omp', 'token', 'anthropic'], { cwd: tmpdir(), env: process.env })
-  ompToken = token.stdout.trim()
-  if (token.code !== 0 || ompToken === '')
-    throw new Error(`The omp agent needs a Claude sign-in in omp (run omp, then /login):\n${token.stderr}`)
   const o = await runOmp({ name: 'preflight', about: '', prompt: 'Reply with the word ok.', checks: [] })
   if (o.error) throw new Error(`omp preflight failed: ${o.error}`)
 }
