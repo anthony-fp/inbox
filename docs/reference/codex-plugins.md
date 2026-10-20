@@ -1402,13 +1402,14 @@ threads a root thread and its forks belong to. They differ after a fork.
   has `payload.id` equal to the thread id. Older files are compressed (`.zst`), and `archived_sessions` holds others.
   The inbox reads neither (`codex/src/transcript.ts:rolloutFor`). The MCP server's environment names no Codex home, so
   it uses `$CODEX_HOME`, else `~/.codex`.
-- **The tab catches a chat up when it opens.** The tab's `tools/call inbox_view` carries `_meta.thread_id`, which the
-  plan says equals the hooks' `session_id`. For a chat the inbox has never heard from, the server finds the rollout by
-  that id, copies a fork's parent ledger, marks the ledger `behind` when the rollout has earlier turns, and starts the
-  update in a detached process (`codex/src/server.ts:makeServer`). Covered by specs with a fixture rollout tree. Not
-  checked in the Codex app: the `thread_id` the tab sends from a fork (the root's session id would find the root's
-  rollout, which a seen chat skips), and whether the server process can read `~/.codex/sessions` under Codex's sandbox.
-  A chat whose tab never opens waits for the hook of its next message.
+- **The tab catches a chat up when it opens.** [live] The tab's `tools/call inbox_view` carries `_meta.thread_id`,
+  which equals the hooks' `session_id`. For a chat the inbox has never heard from, the server finds the rollout by that
+  id, copies a fork's parent ledger, marks the ledger `behind` when the rollout has earlier turns, and starts the update
+  in a detached process (`codex/src/server.ts:makeServer`). In the Codex app on the test Mac, a resumed chat's rows
+  appeared within a minute of opening its tab, with no message sent, and the server read `~/.codex/sessions`. A fork's
+  tab sent the fork's own thread id, the one in its rollout's file name, and its state file took the parent's ledger.
+  The first message after that ran the hooks and left the ledger as it was. A chat whose tab never opens waits for the
+  hook of its next message.
 - **Hooks.** `session_id` on hook input. "Subagent hooks use the parent
   session id." (L/hooks#common-input-fields) The SessionEnd example uses
   `"thr_123"`. [inference] The hook `session_id` is a thread id.
