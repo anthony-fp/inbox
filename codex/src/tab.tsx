@@ -67,7 +67,8 @@ import { commentParts, failingChecks, readableComment, readiness, threadWhere, w
 import type { Draft, Finding, PrCheck, PrThread, PrView } from '../../types'
 import { followTo } from '../../hooks/arrivals'
 import { parseInline } from '../../hooks/inline'
-import { isShownEmpty, newRows, openRows, TAB_IDS, TAB_OF } from './arrivals'
+import { ARRIVAL_TAB_IDS, isShownEmpty, newRows, openRows, TAB_IDS, TAB_OF } from './arrivals'
+import type { ArrivalTab } from './arrivals'
 import type { FoldGroup, Group, SeenRows, Tab } from './arrivals'
 import type { TabView as View } from './core'
 import type { PressReply } from './server'
@@ -356,7 +357,7 @@ function applyView(next: View, seq: number) {
   for (const { pr, isSettled } of next.prs.drawn)
     if (isSettled) drawIn(Math.max(0, SETTLED_MS - (next.at - (next.lastActions[prMarkId(pr.ref)]?.at ?? next.at))))
   const isOpening = TAB_IDS.every(t => rowsSeen[t] === undefined)
-  const rows = newRows(rowsSeen, next)
+  const rows = newRows(rowsSeen, next, next.isFetchingPrs)
   rowsSeen = rows.seen
   const added = [...rows.added.needsYou, ...rows.added.findings]
   for (const id of added) entering.add(id)
@@ -368,10 +369,9 @@ function applyView(next: View, seq: number) {
   draw()
 }
 
-function follow(v: View, added: Record<Tab, string[]>) {
-  if (tab === 'prs') return
+function follow(v: View, added: Record<ArrivalTab, string[]>) {
   const drawn = shownSettled()
-  const to = followTo(TAB_IDS, tab, isShownEmpty(v, tab, drawn, unfolded), added)
+  const to = followTo(ARRIVAL_TAB_IDS, tab, isShownEmpty(v, tab, drawn, unfolded, v.isFetchingPrs), added)
   if (!to) return
   tab = to
   selection[to] = null

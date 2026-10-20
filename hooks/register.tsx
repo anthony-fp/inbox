@@ -216,7 +216,16 @@ import {
 import type { ActionEmphasis, ActionIcon, DrawnEntry, InboxView, ModLook, PlannedKey, RowView, RowWait } from './view'
 import { agentTools, recordClose, recordItem } from './tools'
 import type { UndoProps } from './undo-client'
-import { closedGroups, followTo, isTabEmpty, listedRowIds, openRowIds, recordRows } from './arrivals'
+import {
+  closedGroups,
+  followTo,
+  isPrsTabEmpty,
+  isTabEmpty,
+  listedRowIds,
+  openRowIds,
+  prRowIds,
+  recordRows,
+} from './arrivals'
 import { parseInline } from './inline'
 import type { Span } from './inline'
 import type { RowRecord } from './arrivals'
@@ -1492,7 +1501,7 @@ async function followNewRows($: EngineInterface, isOpening = false) {
   if (isOpening) recordedRows = null
   const added = newRows(isDemo, {
     ...listedRowIds(view),
-    prs: prState.isFetching ? null : [...prs.map(x => `pr ${x.pr.ref}`), ...ids.prs],
+    prs: prState.isFetching ? null : prRowIds(prs),
   })
   if (!isShown) return
   const keeps = (['needsYou', 'findings'] as const).flatMap(t => {
@@ -1510,7 +1519,7 @@ async function followNewRows($: EngineInterface, isOpening = false) {
   const settled = new Set(settledRowIds(allRows(view)))
   const isEmpty =
     tab === 'prs'
-      ? prs.length === 0 && !prState.isFetching
+      ? isPrsTabEmpty(prs.length, prState.isFetching)
       : isTabEmpty({
           rows: tab === 'needsYou' ? [...view.needsYou.questions, ...view.needsYou.tasks] : view.findings.rows,
           settled,

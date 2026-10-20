@@ -62,11 +62,7 @@ export const CLIENTS: Record<ClientId, Client> = {
         reason:
           "Codex runs no hook for a long command's output, so the inbox reads the turn's shell commands from the rollout at Stop. A PR that `gh pr create` opened is linked when the turn ends, not when the command finishes.",
       },
-      'pr-arrivals': {
-        kind: 'unsupported',
-        reason:
-          'Not built in Codex yet; client-parity step 8 builds it. `TAB_IDS` in `codex/src/arrivals.ts` has no PRs tab, so a new PR does not move the tab.',
-      },
+      'pr-arrivals': { kind: 'full' },
       'prs-empty-hint': {
         kind: 'different',
         reason: 'The Codex app calls a chat a conversation, so its hint says conversation where the mod says session.',

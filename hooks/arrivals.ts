@@ -1,6 +1,8 @@
+import { failingChecks, waitingThreads } from './prs'
+import { prCheckId, prMarkId, prThreadId } from './pr-tab'
 import { FINDING_GROUPS, NEEDS_YOU_GROUPS } from './view'
 import type { InboxView, RowView } from './view'
-import type { Finding, FoldKind } from '../types'
+import type { Finding, FoldKind, PrView } from '../types'
 
 export type RowRecord<T extends string> = Partial<Record<T, ReadonlySet<string>>>
 
@@ -85,4 +87,22 @@ export function followTo<T extends string>(
   rows: Record<T, string[]>,
 ): T | null {
   return isShownEmpty ? (tabs.find(t => t !== shown && rows[t].length > 0) ?? null) : null
+}
+
+/**
+ * The PRs tab's row ids: each drawn PR's mark, and for a PR not settled, its waiting threads and failing checks. A new
+ * PR counts as a new row through its mark.
+ */
+export function prRowIds(drawn: readonly { pr: PrView; isSettled: boolean }[]): string[] {
+  return drawn.flatMap(({ pr, isSettled }) => [
+    prMarkId(pr.ref),
+    ...(isSettled
+      ? []
+      : [...waitingThreads(pr).map(t => prThreadId(pr, t)), ...failingChecks(pr).map(c => prCheckId(pr, c))]),
+  ])
+}
+
+/** True while no PR is drawn and the fetch is done, so the PRs tab shows only its empty text. */
+export function isPrsTabEmpty(drawnCount: number, isFetching: boolean): boolean {
+  return drawnCount === 0 && !isFetching
 }

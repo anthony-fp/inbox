@@ -29,7 +29,7 @@ import {
 import type { RowView, RowWait } from '../../hooks/view'
 import type { Item, LastAction, LocalResult } from '../../types'
 import { followTo } from '../../hooks/arrivals'
-import { isShownEmpty, newRows, openRows, TAB_IDS } from '../src/arrivals'
+import { ARRIVAL_TAB_IDS, isShownEmpty, newRows, openRows } from '../src/arrivals'
 import { endTurn, noteHook, notePrompt, noteToolCall, viewOf } from '../src/core'
 import { demoState } from '../src/demo'
 import { EXIT_MS, ROW_STATE_MS, stepRow } from '../src/rows'
@@ -835,8 +835,8 @@ test('a tool call in a turn the prompt hook recorded, after a Stop sent Codex ba
 
 test('the tab moves from an empty Needs you to Findings when it opens on a finding or a poll brings one, and counts as new only rows added since its first view', () => {
   const s = noteHook(emptyState('s1'), 'start', 1)
-  const first = newRows({}, viewOf(s, 10))
-  assert.deepEqual(first.added, { needsYou: [], findings: [] })
+  const first = newRows({}, viewOf(s, 10), false)
+  assert.deepEqual(first.added, { needsYou: [], findings: [], prs: [] })
   const withFinding = {
     ...s,
     ledger: recordItem(
@@ -846,28 +846,75 @@ test('the tab moves from an empty Needs you to Findings when it opens on a findi
       20,
     ).ledger,
   }
-  const next = newRows(first.seen, viewOf(withFinding, 20))
-  assert.deepEqual(next.added, { needsYou: [], findings: ['f1'] })
+  const next = newRows(first.seen, viewOf(withFinding, 20), false)
+  assert.deepEqual(next.added, { needsYou: [], findings: ['f1'], prs: [] })
   const followed = (state: SessionState) =>
-    followTo(TAB_IDS, 'needsYou', isShownEmpty(viewOf(state, 20), 'needsYou', new Set(), new Set()), next.added)
+    followTo(
+      ARRIVAL_TAB_IDS,
+      'needsYou',
+      isShownEmpty(viewOf(state, 20), 'needsYou', new Set(), new Set(), false),
+      next.added,
+    )
   assert.equal(followed(withFinding), 'findings')
   const opened = viewOf(withFinding, 20)
   assert.equal(
-    followTo(TAB_IDS, 'needsYou', isShownEmpty(opened, 'needsYou', new Set(), new Set()), openRows(opened)),
+    followTo(
+      ARRIVAL_TAB_IDS,
+      'needsYou',
+      isShownEmpty(opened, 'needsYou', new Set(), new Set(), false),
+      openRows(opened),
+    ),
     'findings',
   )
   assert.equal(viewOf({ ...withFinding, heard: NOTHING_HEARD }, 20).heard, 'none')
   assert.equal(followed({ ...withFinding, heard: NOTHING_HEARD }), null)
   assert.equal(followed({ ...withFinding, ledger: withItems().ledger }), null)
-  assert.deepEqual(newRows(next.seen, viewOf(withFinding, 30)).added, { needsYou: [], findings: [] })
+  assert.deepEqual(newRows(next.seen, viewOf(withFinding, 30), false).added, { needsYou: [], findings: [], prs: [] })
   const closed = recordClose(CODEX, withFinding.ledger, { id: 'f1', reason: 'fixed' }, 30)
   const afterClose = { ...withFinding, ledger: closed.ledger }
   const settled = viewOf(afterClose, 31)
-  assert.equal(isShownEmpty(settled, 'findings', new Set(['f1']), new Set()), false)
-  assert.equal(isShownEmpty(settled, 'findings', new Set(), new Set()), true)
+  assert.equal(isShownEmpty(settled, 'findings', new Set(['f1']), new Set(), false), false)
+  assert.equal(isShownEmpty(settled, 'findings', new Set(), new Set(), false), true)
   const history = viewOf(afterClose, 30_000)
-  assert.equal(isShownEmpty(history, 'findings', new Set(), new Set(['issue'])), false)
-  assert.equal(isShownEmpty(history, 'findings', new Set(), new Set()), true)
+  assert.equal(isShownEmpty(history, 'findings', new Set(), new Set(['issue']), false), false)
+  assert.equal(isShownEmpty(history, 'findings', new Set(), new Set(), false), true)
+})
+
+test('a new PR counts as a new row, moves an empty tab to PRs, and counts nothing while PRs load', () => {
+  const s = noteHook(emptyState('s1'), 'start', 1)
+  const pr = (ref: string) => ({
+    ref,
+    number: 1,
+    title: 'Fix it',
+    url: `https://github.com/${ref}`,
+    isDraft: false,
+    state: 'OPEN',
+    base: 'main',
+    mergeable: 'MERGEABLE',
+    reviewDecision: '',
+    checks: [],
+    threads: [],
+    error: null,
+  })
+  const withPrs = (refs: string[]) => {
+    const v = viewOf(s, 10)
+
+    return { ...v, prs: { ...v.prs, drawn: refs.map(ref => ({ pr: pr(ref), isSettled: false })) } }
+  }
+  const first = newRows({}, withPrs([]), false)
+  const loading = newRows(first.seen, withPrs(['a/b#1']), true)
+  assert.deepEqual(loading.added.prs, [])
+  const arrived = newRows(first.seen, withPrs(['a/b#1']), false)
+  assert.equal(arrived.added.prs.length, 1)
+  const followed = (shown: 'needsYou' | 'prs', v: ReturnType<typeof withPrs>, added: typeof arrived.added) =>
+    followTo(ARRIVAL_TAB_IDS, shown, isShownEmpty(v, shown, new Set(), new Set(), false), added)
+  assert.equal(followed('needsYou', withPrs(['a/b#1']), arrived.added), 'prs')
+  assert.equal(followed('needsYou', withPrs(['a/b#1']), openRows(withPrs(['a/b#1']))), null)
+  assert.equal(followed('prs', withPrs(['a/b#1']), arrived.added), null)
+  const emptied = withPrs([])
+  assert.equal(isShownEmpty(emptied, 'prs', new Set(), new Set(), true), false)
+  assert.equal(followed('prs', emptied, { needsYou: [], findings: ['f1'], prs: [] }), 'findings')
+  assert.equal(followed('prs', emptied, { needsYou: [], findings: [], prs: [] }), null)
 })
 
 test('after a close the next waiting row opens, else the nearest one before it, and a row that arrives above leaves the open row open', () => {

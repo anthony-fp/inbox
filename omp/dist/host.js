@@ -3453,6 +3453,15 @@ function isTabEmpty({
 function followTo(tabs, shown, isShownEmpty, rows) {
   return isShownEmpty ? tabs.find((t) => t !== shown && rows[t].length > 0) ?? null : null;
 }
+function prRowIds(drawn) {
+  return drawn.flatMap(({ pr, isSettled }) => [
+    prMarkId(pr.ref),
+    ...isSettled ? [] : [...waitingThreads(pr).map((t) => prThreadId(pr, t)), ...failingChecks(pr).map((c) => prCheckId(pr, c))]
+  ]);
+}
+function isPrsTabEmpty(drawnCount, isFetching) {
+  return drawnCount === 0 && !isFetching;
+}
 
 // src/panel.ts
 var INITIAL_UI = {
@@ -3862,23 +3871,17 @@ function handleKey(screen, ui, key, now, text) {
   const button = key === "enter" ? selected.buttons[focusOf(selected, base)] : selected.buttons.find((b) => b.key === key);
   return button ? activate(screen, base, selected, button, now) : { ui: base };
 }
-function prRowIds(view) {
-  return view.prs.drawn.flatMap(({ pr, isSettled }) => [
-    prMarkId(pr.ref),
-    ...isSettled ? [] : [...waitingThreads(pr).map((t) => prThreadId(pr, t)), ...failingChecks(pr).map((c) => prCheckId(pr, c))]
-  ]);
-}
 function tabRows(screen) {
   const { view } = screen;
   return {
-    listed: { ...listedRowIds(view), prs: screen.isFetchingPrs ? null : prRowIds(view) },
+    listed: { ...listedRowIds(view), prs: screen.isFetchingPrs ? null : prRowIds(view.prs.drawn) },
     open: { ...openRowIds(view), prs: [] }
   };
 }
 function isShownEmpty(screen, ui) {
   const { view } = screen;
   if (ui.tab === "prs")
-    return view.prs.drawn.length === 0 && !screen.isFetchingPrs;
+    return isPrsTabEmpty(view.prs.drawn.length, screen.isFetchingPrs);
   const rows = ui.tab === "needsYou" ? [...view.needsYou.questions, ...view.needsYou.tasks] : view.findings.rows;
   return isTabEmpty({
     rows,

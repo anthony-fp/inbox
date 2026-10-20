@@ -1,5 +1,14 @@
 import type { Closed, Draft, FoldKind, Stop, Tab } from '../../types'
-import { closedGroups, followTo, isTabEmpty, listedRowIds, openRowIds, recordRows } from '../../hooks/arrivals'
+import {
+  closedGroups,
+  followTo,
+  isPrsTabEmpty,
+  isTabEmpty,
+  listedRowIds,
+  openRowIds,
+  prRowIds,
+  recordRows,
+} from '../../hooks/arrivals'
 import type { RowRecord } from '../../hooks/arrivals'
 import { closedState } from '../../hooks/ledger'
 import {
@@ -614,29 +623,19 @@ export function handleKey(screen: PanelScreen, ui: PanelUi, key: string, now: nu
 
 export type SeenRows = RowRecord<Tab>
 
-/** The ids of the rows `prEntries` draws: each PR's mark, and for a PR not settled, its waiting threads and failing checks. */
-function prRowIds(view: SessionView): string[] {
-  return view.prs.drawn.flatMap(({ pr, isSettled }) => [
-    prMarkId(pr.ref),
-    ...(isSettled
-      ? []
-      : [...waitingThreads(pr).map(t => prThreadId(pr, t)), ...failingChecks(pr).map(c => prCheckId(pr, c))]),
-  ])
-}
-
 /** Each tab's row ids: every row it lists, and the open rows a freshly opened panel moves for. PRs are null while they load. */
 function tabRows(screen: PanelScreen): { listed: Record<Tab, string[] | null>; open: Record<Tab, string[]> } {
   const { view } = screen
 
   return {
-    listed: { ...listedRowIds(view), prs: screen.isFetchingPrs ? null : prRowIds(view) },
+    listed: { ...listedRowIds(view), prs: screen.isFetchingPrs ? null : prRowIds(view.prs.drawn) },
     open: { ...openRowIds(view), prs: [] },
   }
 }
 
 function isShownEmpty(screen: PanelScreen, ui: PanelUi): boolean {
   const { view } = screen
-  if (ui.tab === 'prs') return view.prs.drawn.length === 0 && !screen.isFetchingPrs
+  if (ui.tab === 'prs') return isPrsTabEmpty(view.prs.drawn.length, screen.isFetchingPrs)
   const rows = ui.tab === 'needsYou' ? [...view.needsYou.questions, ...view.needsYou.tasks] : view.findings.rows
   return isTabEmpty({
     rows,

@@ -1,5 +1,14 @@
-import { closedGroups, isTabEmpty, listedRowIds, openRowIds, recordRows } from '../../hooks/arrivals'
+import {
+  closedGroups,
+  isPrsTabEmpty,
+  isTabEmpty,
+  listedRowIds,
+  openRowIds,
+  prRowIds,
+  recordRows,
+} from '../../hooks/arrivals'
 import type { RowRecord } from '../../hooks/arrivals'
+import type { SessionView } from '../../hooks/session'
 import type { InboxView } from '../../hooks/view'
 import type { HeardState } from './core'
 
@@ -12,20 +21,33 @@ export const TAB_OF: Record<Group, Tab> = { question: 'needsYou', task: 'needsYo
 
 export const TAB_IDS: Tab[] = ['needsYou', 'findings']
 
-export type SeenRows = RowRecord<Tab>
+export type ArrivalTab = Tab | 'prs'
 
-export const openRows = openRowIds
+export const ARRIVAL_TAB_IDS: ArrivalTab[] = [...TAB_IDS, 'prs']
 
-export function newRows(seen: SeenRows, v: InboxView): { seen: SeenRows; added: Record<Tab, string[]> } {
-  return recordRows(seen, listedRowIds(v))
+export type SeenRows = RowRecord<ArrivalTab>
+
+export function openRows(v: InboxView): Record<ArrivalTab, string[]> {
+  return { ...openRowIds(v), prs: [] }
+}
+
+export function newRows(
+  seen: SeenRows,
+  v: SessionView,
+  isFetchingPrs: boolean,
+): { seen: SeenRows; added: Record<ArrivalTab, string[]> } {
+  return recordRows(seen, { ...listedRowIds(v), prs: isFetchingPrs ? null : prRowIds(v.prs.drawn) })
 }
 
 export function isShownEmpty(
-  v: InboxView & { heard: HeardState },
-  t: Tab,
+  v: SessionView & { heard: HeardState },
+  t: ArrivalTab,
   drawn: ReadonlySet<string>,
   unfolded: ReadonlySet<FoldGroup>,
+  isFetchingPrs: boolean,
 ): boolean {
+  if (t === 'prs') return isPrsTabEmpty(v.prs.drawn.length, isFetchingPrs)
+
   return isTabEmpty({
     rows: t === 'findings' ? v.findings.rows : [...v.needsYou.questions, ...v.needsYou.tasks],
     settled: drawn,
