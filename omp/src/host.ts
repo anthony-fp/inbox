@@ -62,7 +62,6 @@ import type { Stop } from '../../types'
 const INBOX_MODEL_TIMEOUT_MS = 120_000
 /** Added to the settle window so the timer fires after the window has fully passed. */
 const WAKE_MARGIN_MS = 250
-const SONNET = /sonnet/i
 const MESSAGE_TYPE = 'inbox'
 const BAND_KEY = 'inbox-band'
 
@@ -180,12 +179,25 @@ export function sessionIdInFile(file: string): string | null {
   return /(?:^|[\\/])[^_\\/]+_([^\\/]+)\.jsonl$/.exec(file)?.[1] ?? null
 }
 
+/** Orders models newest first by the `major.minor.patch` revision omp classifies from each id. */
+function byNewestRevision(a: Model, b: Model): number {
+  const parts = (m: Model) => (m.identity.revision ?? '0.0.0').split('.').map(Number)
+  const [x, y] = [parts(a), parts(b)]
+  const differing = x.findIndex((n, i) => n !== y[i])
+
+  return differing === -1 ? 0 : (y[differing] ?? 0) - (x[differing] ?? 0)
+}
+
 /**
- * The inbox model: a Sonnet model the person's providers offer, since the inbox model evals pass on Sonnet. The
- * `anthropic` provider is preferred. Otherwise omp's `@smol` role.
+ * The inbox model: the newest Sonnet model the person's providers offer, since the inbox model evals pass on Sonnet.
+ * omp's model lists also hold retired Sonnets, which no longer answer. The `anthropic` provider is preferred.
+ * Otherwise omp's `@smol` role.
  */
 export function inboxModel(ctx: ExtensionContext): Model | null {
-  const sonnets = ctx.models.list().filter(m => SONNET.test(m.id))
+  const sonnets = ctx.models
+    .list()
+    .filter(m => m.identity.family === 'sonnet')
+    .toSorted(byNewestRevision)
   const sonnet = sonnets.find(m => m.provider === 'anthropic') ?? sonnets[0]
 
   return sonnet ?? ctx.models.resolve('@smol') ?? null

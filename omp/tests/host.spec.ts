@@ -18,9 +18,20 @@ const MODEL_ANSWER = [
   'NEW: decide | 1 | Use Node or Python? | Node / Python | Node',
 ].join('\n')
 
-type Model = { id: string; name: string; provider: string }
-const sonnet: Model = { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5', provider: 'anthropic' }
-const smol: Model = { id: 'gpt-mini', name: 'GPT Mini', provider: 'openai' }
+type Model = { id: string; name: string; provider: string; identity: { family?: string; revision?: string } }
+const sonnet: Model = {
+  id: 'claude-sonnet-4-5',
+  name: 'Claude Sonnet 4.5',
+  provider: 'anthropic',
+  identity: { family: 'sonnet', revision: '4.5.0' },
+}
+const retiredSonnet: Model = {
+  id: 'claude-3-5-sonnet-20240620',
+  name: 'Claude Sonnet 3.5',
+  provider: 'anthropic',
+  identity: { family: 'sonnet', revision: '3.5.0' },
+}
+const smol: Model = { id: 'gpt-mini', name: 'GPT Mini', provider: 'openai', identity: {} }
 
 let dir: string
 let clock: number
@@ -296,7 +307,8 @@ test('a failing inbox model marks the update failed, and the next turn retries t
   expect(state().pending).toEqual([])
 })
 
-test('the inbox model is a Sonnet model when the providers offer one, with the inbox system prompt', async () => {
+test('the inbox model is the newest Sonnet model the providers offer, with the inbox system prompt', async () => {
+  models = [smol, retiredSonnet, sonnet]
   createInbox(pi(), deps())
   await prompt('hello')
   await endAgent('Done.')

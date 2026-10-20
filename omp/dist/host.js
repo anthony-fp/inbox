@@ -4729,7 +4729,6 @@ var OMP = {
 // src/host.ts
 var INBOX_MODEL_TIMEOUT_MS = 120000;
 var WAKE_MARGIN_MS = 250;
-var SONNET = /sonnet/i;
 var MESSAGE_TYPE = "inbox";
 var BAND_KEY = "inbox-band";
 async function defaultComplete(model, context, options) {
@@ -4775,8 +4774,14 @@ var sessionIdOf = (ctx) => ctx.sessionManager.getSessionId();
 function sessionIdInFile(file) {
   return /(?:^|[\\/])[^_\\/]+_([^\\/]+)\.jsonl$/.exec(file)?.[1] ?? null;
 }
+function byNewestRevision(a, b) {
+  const parts = (m) => (m.identity.revision ?? "0.0.0").split(".").map(Number);
+  const [x, y] = [parts(a), parts(b)];
+  const differing = x.findIndex((n, i) => n !== y[i]);
+  return differing === -1 ? 0 : (y[differing] ?? 0) - (x[differing] ?? 0);
+}
 function inboxModel(ctx) {
-  const sonnets = ctx.models.list().filter((m) => SONNET.test(m.id));
+  const sonnets = ctx.models.list().filter((m) => m.identity.family === "sonnet").toSorted(byNewestRevision);
   const sonnet = sonnets.find((m) => m.provider === "anthropic") ?? sonnets[0];
   return sonnet ?? ctx.models.resolve("@smol") ?? null;
 }
