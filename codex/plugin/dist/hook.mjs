@@ -405,17 +405,19 @@ function linkedPrs(prs, refs) {
 
 // ../hooks/session.ts
 var NO_PRS = { views: {}, branchRef: null, isFetching: false };
+var NO_TURN = { person: null, trigger: null, activity: [], press: null };
 function emptySession() {
   return {
     ledger: EMPTY,
-    turn: { person: null, activity: [], press: null },
+    turn: NO_TURN,
     told: TOLD_NOTHING,
     presence: { turnsStarted: 0, turnsApplied: 0, ledgerState: "current", isUpdating: false },
     pending: [],
     sent: [],
     lastActions: {},
     heldRows: [],
-    prViews: NO_PRS
+    prViews: NO_PRS,
+    stop: null
   };
 }
 function startContext(host, s, source) {
@@ -427,17 +429,21 @@ function cleared(s) {
   return {
     ...s,
     ledger: EMPTY,
-    turn: { person: null, activity: [], press: null },
+    turn: NO_TURN,
     told: { inbox: null, closed: [] },
     pending: [],
-    lastActions: {}
+    lastActions: {},
+    stop: null
   };
 }
 function notePrompt(host, s, text, isOpen) {
+  const matched = matchSent(s, text);
+  return recordPrompt(host, startTurn(matched.state), text, isOpen, matched.sentBy);
+}
+function matchSent(s, text) {
   const matchingAt = s.sent.findIndex((x) => x.text === text);
   const matching = matchingAt >= 0 ? s.sent[matchingAt] : void 0;
   const sentAt = matching && (matching.phase === void 0 || matching.phase === "accepted") ? matchingAt : -1;
-  const sentBy = sentAt >= 0 ? s.sent[sentAt]?.press ?? null : null;
   const sent = sentAt >= 0 ? s.sent[sentAt] : void 0;
   const eligible = sent?.deliveryId === null ? Object.fromEntries(
     Object.entries(s.lastActions).filter(
@@ -452,8 +458,17 @@ function notePrompt(host, s, text, isOpen) {
     (actions, later) => later.text === text && later.row !== null ? withUnconfirmed(actions, text, later.pressedAt ?? void 0, later.deliveryId) : actions,
     arrived
   );
+  return {
+    state: { ...s, lastActions, sent: sent ? s.sent.filter((_x, i) => i !== sentAt) : s.sent },
+    sentBy: sent ? { press: sent.press } : null
+  };
+}
+function startTurn(s) {
+  return { ...s, presence: { ...s.presence, turnsStarted: s.presence.turnsStarted + 1 }, stop: null };
+}
+function recordPrompt(host, s, text, isOpen, sentBy) {
   const ledger = { ...s.ledger, turn: s.ledger.turn + 1 };
-  const r = promptNotes(host, ledger, { text, isPress: sentAt >= 0, isOpen }, s.told);
+  const r = promptNotes(host, ledger, { text, isPress: sentBy !== null, isOpen }, s.told);
   const person = s.turn.person === null ? text : `${s.turn.person}
 
 ${text}`;
@@ -462,10 +477,7 @@ ${text}`;
       ...s,
       ledger,
       told: r.told,
-      lastActions,
-      sent: sentAt >= 0 ? s.sent.filter((_x, i) => i !== sentAt) : s.sent,
-      turn: { ...s.turn, person, press: sentBy ?? s.turn.press },
-      presence: { ...s.presence, turnsStarted: s.presence.turnsStarted + 1 }
+      turn: { ...s.turn, person, trigger: null, press: sentBy?.press ?? s.turn.press }
     },
     notes: r.notes
   };
@@ -475,17 +487,17 @@ function noteActivity(s, line) {
   if (activity === s.turn.activity) return s;
   return { ...s, turn: { ...s.turn, activity } };
 }
-function endTurn(host, s, reply, isOpen) {
+function endTurn(host, s, reply, isOpen, queuesEmptyReply = false) {
   const refs = prRefs(reply);
   const base = {
     ...s,
     ledger: refs.length > 0 ? { ...s.ledger, prs: linkedPrs(s.ledger.prs, refs) } : s.ledger,
-    turn: { person: null, activity: [], press: null }
+    turn: NO_TURN
   };
-  if (reply.trim() === "") return base;
+  if (reply.trim() === "" && !queuesEmptyReply) return base;
   const ex = {
     person: s.turn.person,
-    trigger: s.turn.person === null ? "unknown" : null,
+    trigger: s.turn.person === null ? s.turn.trigger ?? "unknown" : null,
     activity: s.turn.activity,
     reply,
     turn: s.ledger.turn,

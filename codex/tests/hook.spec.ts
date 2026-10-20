@@ -251,7 +251,7 @@ test('a session saved by an older build loads converted, as the mod converts its
   for (const key of ['top', 'checks', 'snapshots', 'recordedRuns']) assert.equal(key in s, false, key)
   assert.equal(viewOf(s, 2).heard, 'heard')
   assert.equal(viewOf(noteToolCall(s, 't9', 3), 3).heard, 'heard')
-  assert.deepEqual(s.turn, { person: 'Run the tests', activity: [], press: null })
+  assert.deepEqual(s.turn, { person: 'Run the tests', trigger: null, activity: [], press: null })
   assert.equal('checks' in (s.pending[0]?.ex ?? {}), false)
   assert.equal(s.pending[0]?.ex.reply, 'Hello')
   assert.deepEqual(

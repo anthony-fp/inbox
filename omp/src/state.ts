@@ -5,17 +5,14 @@ import { KEPT_SESSIONS, pruneClosed, upgradeLedger } from '../../hooks/ledger'
 import { upgradeLastActions } from '../../hooks/presses'
 import { emptySession, NO_PRS } from '../../hooks/session'
 import type { Session } from '../../hooks/session'
-import type { Stop } from '../../types'
 
 export type OmpState = Session & {
   version: 1
   sessionId: string
-  /** Why the last turn stopped, until the next turn starts. */
-  stop: Stop | null
 }
 
 export function emptyState(sessionId: string): OmpState {
-  return { version: 1, sessionId, ...emptySession(), stop: null }
+  return { version: 1, sessionId, ...emptySession() }
 }
 
 function fileName(sessionId: string): string {

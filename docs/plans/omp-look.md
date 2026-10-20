@@ -1,6 +1,6 @@
 # A shared session core, then omp as the third host
 
-Status: building. Steps 1, 2 and 3 are built on the `session-core` branch, not yet merged. Step 4 is next.
+Status: building. Steps 1, 2 and 3 are built on the `session-core` branch, not yet merged. Step 4 has a gap list and a build order, waiting for review.
 
 omp ([omp.sh](https://omp.sh/)) is a terminal coding agent forked from pi. It loads TypeScript extensions in its own Bun process. A throwaway extension showed that the shared modules in `hooks/` load in omp unchanged, and that omp can draw the band above the prompt and an `/inbox` panel and take its keys. That extension drew the shared demo data only. It never ran a real session.
 
@@ -159,3 +159,78 @@ omp installs the plugin from a local checkout with `omp plugin marketplace add <
 The mod keeps its session in `PluginState` in `types/index.d.ts`, and `hooks/register.tsx` runs both its host work and its two looks. This step maps `PluginState` onto `Session`, moves the mod's host work to a mod `SessionHost`, and leaves `register.tsx` drawing. Saved state outlives the code, so `upgradeState` converts each saved field that changes shape.
 
 This step changes the most code, and runs last so that the `SessionHost` shape has been tested on two hosts first. After it, each host runs the same session code, and a new host supplies a `SessionHost`, a look and their tests.
+
+### Gap list
+
+The mod's host code does more than `Session` and `SessionHost` model. Each difference below is marked with what step 4 does with it:
+
+- **Move into the shared modules.** Codex and omp gain it, or run as before.
+- **Keep in the mod.** It depends on something only Claude Code has. The mod's `SessionHost` or its event handlers keep it.
+- **Drop.** The shared code already does the same job.
+
+#### Move into the shared modules
+
+- **A refused Done message.** The mod records the refusal on the closed row, as `doneNotification.error`. The row then reads "Not sent: …" and offers Undo. The shared `wakeForDone` leaves a refused message's row reading as unconfirmed, because `completedAttempt` only drops the sent record. Codex and omp would show "Not sent" as the mod does. This fixes a drift between the looks.
+- **A message another plugin rewrote.** `$.prompt.submit` can return different text than the mod sent. The mod moves the row's delivery to the new text with `withRewrite` in `awaitRewritten`. `SendOutcome` would carry the text that was entered, and `completedAttempt` would apply the rewrite. Codex and omp never rewrite, so nothing changes for them.
+- **Counting turn starts.** The mod counts a turn when the turn starts, in `turn.start`. That event also covers turns the person did not start. The shared `notePrompt` counts on each prompt. A shared `startTurn` does the counting and clears the last stop. `notePrompt` calls it, so Codex and omp count as before. The mod calls it from `turn.start`.
+- **What started a turn.** The mod records `trigger`, such as a task notification, when no person's words started the turn. `Session.turn` would gain `trigger`. `endTurn` already writes `'unknown'` when no person's words started the turn, and that stays the fallback.
+- **A turn with no reply.** The mod queues an exchange when the person dismissed a question dialog, even with an empty reply. `endTurn` drops an empty reply. It would take a flag to queue the exchange anyway.
+- **Row notes in the view.** The mod's view shows each row's notes, such as a stale press. `sessionView` passes no notes. It would take them as an argument.
+- **Finding the branch's PR.** The mod looks up the current branch's PR only while the PRs tab is shown. The shared `fetchPrs` always looks it up. It would take a `findsBranchPr` argument, which Codex and omp set to true.
+- **A ledger that may have missed a turn.** The mod marks its ledger `behind` when it cannot read a turn, and catches up on the next update. `Session.presence.ledgerState` would gain `behind`. The view treats it as current, as the mod does now.
+- **Stops.** The mod and omp each keep a `stop` beside the session and clear it when a turn starts. `Session` holds `stop`, and `startTurn` clears it. omp also clears it in `turn_start`, because a message queued during a run starts a turn with no prompt event. Codex sets none.
+- **Untracked sends.** The mod keeps `untrackedSent` for messages an older build sent without a record that can be matched. A shared `sent` record with `phase: 'uncertain'` blocks a false match in the same way. `upgradeState` would convert each `untrackedSent` entry into one, and the field would go.
+
+#### Keep in the mod
+
+- **Catching up.** When the ledger is `behind`, or a reload cut off an update, the mod catches up. It forks the conversation with `$.model.fork`, or reads the transcript when there is nothing to fork. This stays a mod step that runs before the shared `runUpdates`. Codex and omp have no fork.
+- **Delivery receipts.** The mod learns that a message arrived when Claude Code stores its prompt row, in `session.append`. It adds the inbox text at that point too. The shared `notePrompt` matches arrivals by the prompt's text. It is built from three parts: `matchSent` matches the arrival, `startTurn` counts the turn, and `recordPrompt` records the words and returns the notes. Codex and omp call `notePrompt`. The mod calls `recordPrompt` for the person's words and its own sends, and its `session.append` handler marks arrivals on the shared `sent` records.
+- **Conversation switches.** `/clear`, `/resume` and `/branch` switch conversations inside one process. The mod tracks which conversation a write belongs to, and drops a write that arrives after a switch. A branched conversation starts from its parent's saved state. The mod's `SessionHost.read` and `update` hold the conversation they were made for, and do nothing once it changes.
+- **An unreadable store.** When the store cannot read a conversation's saved state, the mod skips saves until a read succeeds, so it does not overwrite that state. This stays in the mod's `update`.
+- **Claude Code's signals.** These stay in the mod's event handlers:
+  - permission and question dialogs
+  - away time and the minute tick
+  - the Herdr status line
+  - the theme
+  - the demo
+  - closing a task when the shell command it names ran
+  - clearing a sign-in stop after `/login`
+  - linking a PR after `gh pr create`
+  - local URLs in command output
+  - replies a Stop hook sent back
+  - the turn box
+- **Coalesced PR fetches.** The mod runs one PR fetch at a time, shows that one is running, and polls every two minutes unless the person is away. A dismissed PR leaves the tab once its row settles. These stay in the mod, around the shared `fetchPrs`.
+- **The pane's follow-ups to a press.** Undo scrolling, keeping the pressed row open, reopening a row whose send failed, and restoring a draft stay in `register.tsx`. They read the shared `press`'s outcome.
+
+#### Drop
+
+- **`applyAnyPress`.** It is a copy of the shared `pressOn`.
+- **Press order.** The mod numbers each press in `lastActions` as `pressOrder`, so a press's late write cannot replace a later press's. The shared `press` applies each press inside one locked update, so its writes land in press order.
+- **The mod's record and close changes.** `runTool` applies `recordItem` and `recordClose` as the shared `recorded` does.
+- **The mod's PR merge.** The merge in `fetchPrsNow` keeps the same PRs as the shared `withFetchedPrs`.
+- **The mod's update queue.** An in-memory promise chain runs one exchange at a time, with no retry. The shared `runUpdates` saves the pending exchanges and tries a failed one once more.
+- **`SentPrompt`.** The shared `sent` record holds the same fields. The session id is unneeded, because each conversation saves its own session.
+
+### How the mod saves its session
+
+Today the mod saves only `{ savedAt, ledger }` for each conversation, under `s:<id>`. It keeps everything else in separate `PluginState` fields that only the running process uses. After step 4, `PluginState` holds one `session` field of type `Session`, and the mod saves the whole session for each conversation, as Codex and omp do. The fields only the pane uses stay as they are: the tab, the selection, the typing row, drafts, folds, notes and the demo.
+
+`upgradeState` converts two older shapes:
+
+- a saved `{ savedAt, ledger }`, which becomes a session with that ledger and empty other fields
+- the separate `PluginState` fields that a hot reload kept, which move into `session`
+
+### What people will notice in the mod
+
+- `/resume` brings back each row's last press and any update that had not run, not only the rows.
+- A failed update is tried once more, and the retry outlives a reload.
+- Nothing else should change. The tests in `tests/hooks.test.ts` that read separate `PluginState` fields will read `session` instead, and their expected results stay the same.
+
+### Build order
+
+Each part passes `./scripts/check.sh` and can be committed on its own.
+
+1. Make the shared changes listed under "Move into the shared modules". The Codex and omp tests keep passing. Their only visible change is the "Not sent" text on a refused Done. Built: `untrackedSent` converts in part 2, with the rest of the mod's saved state.
+2. Move the mod's state into one `session` field, saved whole, and convert the older shapes.
+3. Give the mod a `SessionHost`, and route its tools, prompts, turn ends, updates, presses, Done messages and PR fetches through the shared functions. Delete what the "Drop" list names.
+4. Run `tests/session-script.ts` against the mod's `SessionHost`. Check the terminal and the desktop pane live, in a session with its own `CLAUDE_CONFIG_DIR`.

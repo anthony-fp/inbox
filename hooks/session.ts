@@ -13,19 +13,21 @@ import {
   threadSentIn,
 } from './pr-tab'
 import type { Applied, PrPress } from './pr-tab'
-import { applyPress, withAcceptedSend, withArrival, withUnconfirmed } from './presses'
+import { applyPress, withAcceptedSend, withArrival, withRewrite, withUnconfirmed } from './presses'
 import type { RowPress } from './presses'
 import { prNeedsYou, prRefs } from './prs'
 import { recordClose, recordItem } from './tools'
 import { inboxView, NO_HOLDS, perTurnStatus } from './view'
 import type { InboxView, ReplyHolds } from './view'
-import type { LastAction, Ledger, PrView, PrViews, Turns } from '../types'
+import type { LastAction, Ledger, PrView, PrViews, RowNote, Stop, Turns } from '../types'
 
 export type Session = {
   ledger: Ledger
   /** What the turn running now gathered for the per-reply update. */
   turn: {
     person: string | null
+    /** What started the turn when the person's words did not, such as a task notification. */
+    trigger: string | null
     activity: string[]
     press: Press | null
   }
@@ -35,7 +37,8 @@ export type Session = {
     /** Prompts that started a turn, and how many of those turns the inbox model has summarized. */
     turnsStarted: number
     turnsApplied: number
-    ledgerState: 'current' | 'failed'
+    /** `behind`: the ledger may have missed a turn, and a host that can catch up does. Only `failed` shows. */
+    ledgerState: 'current' | 'behind' | 'failed'
     isUpdating: boolean
   }
   /**
@@ -64,14 +67,18 @@ export type Session = {
   heldRows: string[]
   /** The PRs tab's data: each PR's latest view and the current branch's PR. `isFetching` is always false here; the host knows what runs. */
   prViews: PrViews
+  /** Why the last turn stopped, until the next turn starts. */
+  stop: Stop | null
 }
 
 export const NO_PRS: PrViews = { views: {}, branchRef: null, isFetching: false }
 
+const NO_TURN: Session['turn'] = { person: null, trigger: null, activity: [], press: null }
+
 export function emptySession(): Session {
   return {
     ledger: EMPTY,
-    turn: { person: null, activity: [], press: null },
+    turn: NO_TURN,
     told: TOLD_NOTHING,
     presence: { turnsStarted: 0, turnsApplied: 0, ledgerState: 'current', isUpdating: false },
     pending: [],
@@ -79,6 +86,7 @@ export function emptySession(): Session {
     lastActions: {},
     heldRows: [],
     prViews: NO_PRS,
+    stop: null,
   }
 }
 
@@ -99,18 +107,20 @@ export function cleared<S extends Session>(s: S): S {
   return {
     ...s,
     ledger: EMPTY,
-    turn: { person: null, activity: [], press: null },
+    turn: NO_TURN,
     told: { inbox: null, closed: [] },
     pending: [],
     lastActions: {},
+    stop: null,
   }
 }
 
+/** A message a press sent, matched to a prompt that arrived. `press` is null for a message no row press sent. */
+export type SentBy = { press: Press | null }
+
 /**
- * Records a prompt and returns what the agent reads beside it: the questions a
- * numbered answer refers to, and the inbox when it changed. A message a
- * press sent is matched by its text, since a prompt's arrival carries only that.
- * An uncertain earlier attempt blocks a same-text match with a later send.
+ * Records a prompt that arrived and returns what the agent reads beside it.
+ * A host that tells its own sends apart from the person's words calls the parts below instead.
  */
 export function notePrompt<S extends Session>(
   host: Host,
@@ -118,10 +128,20 @@ export function notePrompt<S extends Session>(
   text: string,
   isOpen: boolean,
 ): { state: S; notes: string[] } {
+  const matched = matchSent(s, text)
+
+  return recordPrompt(host, startTurn(matched.state), text, isOpen, matched.sentBy)
+}
+
+/**
+ * Matches an arrived prompt to the message a press sent, by its text, since a
+ * prompt's arrival carries only that. An uncertain earlier attempt blocks a
+ * same-text match with a later send.
+ */
+export function matchSent<S extends Session>(s: S, text: string): { state: S; sentBy: SentBy | null } {
   const matchingAt = s.sent.findIndex(x => x.text === text)
   const matching = matchingAt >= 0 ? s.sent[matchingAt] : undefined
   const sentAt = matching && (matching.phase === undefined || matching.phase === 'accepted') ? matchingAt : -1
-  const sentBy: Press | null = sentAt >= 0 ? (s.sent[sentAt]?.press ?? null) : null
   const sent = sentAt >= 0 ? s.sent[sentAt] : undefined
   const eligible =
     sent?.deliveryId === null
@@ -151,8 +171,31 @@ export function notePrompt<S extends Session>(
           : actions,
       arrived,
     )
+
+  return {
+    state: { ...s, lastActions, sent: sent ? s.sent.filter((_x, i) => i !== sentAt) : s.sent },
+    sentBy: sent ? { press: sent.press } : null,
+  }
+}
+
+/** Counts a turn that started, and clears the stop the last turn ended with. */
+export function startTurn<S extends Session>(s: S): S {
+  return { ...s, presence: { ...s.presence, turnsStarted: s.presence.turnsStarted + 1 }, stop: null }
+}
+
+/**
+ * Records a prompt's words for the turn and returns what the agent reads beside it: the questions a numbered answer
+ * refers to, and the inbox when it changed.
+ */
+export function recordPrompt<S extends Session>(
+  host: Host,
+  s: S,
+  text: string,
+  isOpen: boolean,
+  sentBy: SentBy | null,
+): { state: S; notes: string[] } {
   const ledger = { ...s.ledger, turn: s.ledger.turn + 1 }
-  const r = promptNotes(host, ledger, { text, isPress: sentAt >= 0, isOpen }, s.told)
+  const r = promptNotes(host, ledger, { text, isPress: sentBy !== null, isOpen }, s.told)
   const person = s.turn.person === null ? text : `${s.turn.person}\n\n${text}`
 
   return {
@@ -160,10 +203,7 @@ export function notePrompt<S extends Session>(
       ...s,
       ledger,
       told: r.told,
-      lastActions,
-      sent: sentAt >= 0 ? s.sent.filter((_x, i) => i !== sentAt) : s.sent,
-      turn: { ...s.turn, person, press: sentBy ?? s.turn.press },
-      presence: { ...s.presence, turnsStarted: s.presence.turnsStarted + 1 },
+      turn: { ...s.turn, person, trigger: null, press: sentBy?.press ?? s.turn.press },
     },
     notes: r.notes,
   }
@@ -176,17 +216,27 @@ export function noteActivity<S extends Session>(s: S, line: string | null): S {
   return { ...s, turn: { ...s.turn, activity } }
 }
 
-export function endTurn<S extends Session>(host: Host, s: S, reply: string, isOpen: boolean): S {
+/**
+ * Queues the turn's exchange for the inbox model. A turn with no reply queues nothing unless
+ * `queuesEmptyReply` is set, as for a turn whose question dialog the person dismissed.
+ */
+export function endTurn<S extends Session>(
+  host: Host,
+  s: S,
+  reply: string,
+  isOpen: boolean,
+  queuesEmptyReply = false,
+): S {
   const refs = prRefs(reply)
   const base = {
     ...s,
     ledger: refs.length > 0 ? { ...s.ledger, prs: linkedPrs(s.ledger.prs, refs) } : s.ledger,
-    turn: { person: null, activity: [], press: null },
+    turn: NO_TURN,
   }
-  if (reply.trim() === '') return base
+  if (reply.trim() === '' && !queuesEmptyReply) return base
   const ex: Exchange = {
     person: s.turn.person,
-    trigger: s.turn.person === null ? 'unknown' : null,
+    trigger: s.turn.person === null ? (s.turn.trigger ?? 'unknown') : null,
     activity: s.turn.activity,
     reply,
     turn: s.ledger.turn,
@@ -253,7 +303,8 @@ export function pressOn(
 }
 
 export type SendOutcome =
-  | { state: 'accepted'; queuedId: string | null }
+  /** `entered` is the text the agent got, when another plugin changed the message on its way. */
+  | { state: 'accepted'; queuedId: string | null; entered?: string }
   | { state: 'rejected'; reason: string }
   | { state: 'unconfirmed'; reason: string }
 
@@ -262,15 +313,22 @@ export function completedAttempt<S extends Session>(state: S, deliveryId: string
   const index = state.sent.findIndex(s => s.deliveryId === deliveryId)
   const attempt = state.sent[index]
   if (!attempt) return state
+  const text = outcome.state === 'accepted' ? (outcome.entered ?? attempt.text) : attempt.text
+  const delivered = Object.entries(state.lastActions).filter(
+    ([_id, action]) => action.delivery && 'id' in action.delivery && action.delivery.id === deliveryId,
+  )
+  let lastActions =
+    text === attempt.text
+      ? state.lastActions
+      : delivered.reduce(
+          (actions, [id, action]) => withRewrite(actions, [id], action.at, attempt.text, text, deliveryId),
+          state.lastActions,
+        )
   const earlierUnknown = state.sent
     .slice(0, index)
-    .some(s => s.text === attempt.text && (s.phase === 'attempting' || s.phase === 'uncertain'))
-  let lastActions = state.lastActions
+    .some(s => s.text === text && (s.phase === 'attempting' || s.phase === 'uncertain'))
   if (outcome.state === 'accepted' && !earlierUnknown) {
-    for (const [id, action] of Object.entries(lastActions)) {
-      if (action.delivery && 'id' in action.delivery && action.delivery.id === deliveryId)
-        lastActions = withAcceptedSend(lastActions, [id], action.at, attempt.text, deliveryId)
-    }
+    for (const [id, action] of delivered) lastActions = withAcceptedSend(lastActions, [id], action.at, text, deliveryId)
   }
   return {
     ...state,
@@ -279,6 +337,7 @@ export function completedAttempt<S extends Session>(state: S, deliveryId: string
       s.deliveryId === deliveryId
         ? {
             ...s,
+            text,
             phase: outcome.state === 'accepted' ? ('accepted' as const) : ('uncertain' as const),
             queuedId: outcome.state === 'accepted' ? outcome.queuedId : null,
           }
@@ -351,6 +410,7 @@ export function sessionView(
   now: number,
   settleWindowMs: number,
   holds: ReplyHolds = NO_HOLDS,
+  notes: Record<string, RowNote> = {},
 ): SessionView {
   const l = s.ledger
   const lastActions = withoutStalePending(s.lastActions, now)
@@ -365,7 +425,7 @@ export function sessionView(
     ...inboxView({
       ledger: l,
       lastActions,
-      notes: {},
+      notes,
       turns: s.presence,
       extraSteps: Object.fromEntries(l.items.map(item => [item.id, itemPrSteps(item, s.prViews, l.prs)])),
       settleWindowMs,

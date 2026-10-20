@@ -223,7 +223,7 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     const last = prsFetchedAt.get(id)
     if (!isPrFetchDue(s, last, now())) return
     fetchingPrs.add(id)
-    void fetchPrs(hostFor(id))
+    void fetchPrs(hostFor(id), true)
       .catch(() => undefined)
       .finally(() => {
         prsFetchedAt.set(id, now())

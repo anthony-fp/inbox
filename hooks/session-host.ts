@@ -5,6 +5,7 @@ import {
   doneWake,
   markSentToAgent,
   recordPress,
+  refuseDoneNotification,
   runLocalEffects,
   runSends,
   withDeliveryId,
@@ -113,7 +114,10 @@ type WakeHost<S extends Session> = Pick<
   'now' | 'read' | 'update' | 'deliver' | 'prepare' | 'settleWindowMs' | 'newId'
 >
 
-/** Tells the agent about rows closed with Done once their settle window has passed. */
+/**
+ * Tells the agent about rows closed with Done once their settle window has passed. A refused message
+ * marks those rows with why, so they read "Not sent" and offer Undo.
+ */
 export async function wakeForDone<S extends Session>(host: WakeHost<S>): Promise<void> {
   const check = (s: S) =>
     doneWake(s.ledger, { now: host.now(), windowMs: host.settleWindowMs, isTurnRunning: s.turn.person !== null })
@@ -135,7 +139,7 @@ export async function wakeForDone<S extends Session>(host: WakeHost<S>): Promise
     }
     const next: S = {
       ...s,
-      ledger: markSentToAgent(s.ledger, wake.ids),
+      ledger: markSentToAgent(s.ledger, wake.ids, deliveryId),
       lastActions,
       sent: [
         ...s.sent,
@@ -152,7 +156,12 @@ export async function wakeForDone<S extends Session>(host: WakeHost<S>): Promise
       ],
     }
     await checkpoint(next)
-    return completedAttempt(next, deliveryId, await host.deliver(next, wake.text))
+    const outcome = await host.deliver(next, wake.text)
+    const after = completedAttempt(next, deliveryId, outcome)
+
+    return outcome.state === 'rejected'
+      ? { ...after, ledger: refuseDoneNotification(after.ledger, deliveryId, outcome.reason) }
+      : after
   })
 }
 
@@ -302,11 +311,12 @@ export function isPrFetchDue(s: Session, lastFetchedAt: number | undefined, now:
 }
 
 /**
- * Fetches the PRs the session tracks and merges them in. Returns without
- * fetching when gh cannot start.
+ * Fetches the PRs the session tracks and merges them in. `findsBranchPr` also looks up the current branch's PR.
+ * Returns without fetching when gh cannot start.
  */
 export async function fetchPrs<S extends Session>(
   host: Pick<SessionHost<S>, 'now' | 'read' | 'update' | 'gh'>,
+  findsBranchPr: boolean,
 ): Promise<void> {
   const s = await host.read()
   const bin = await host.gh.find()
@@ -320,7 +330,7 @@ export async function fetchPrs<S extends Session>(
       }),
       s.prViews,
       s.ledger.prs,
-      true,
+      findsBranchPr,
     )
   let fetch = await fetchWith(bin)
   if (sawUnstartable) {

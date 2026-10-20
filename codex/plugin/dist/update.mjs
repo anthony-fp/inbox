@@ -645,17 +645,19 @@ var ROW_TABS = TABS.filter((t) => t.id !== "prs");
 
 // ../hooks/session.ts
 var NO_PRS = { views: {}, branchRef: null, isFetching: false };
+var NO_TURN = { person: null, trigger: null, activity: [], press: null };
 function emptySession() {
   return {
     ledger: EMPTY,
-    turn: { person: null, activity: [], press: null },
+    turn: NO_TURN,
     told: TOLD_NOTHING,
     presence: { turnsStarted: 0, turnsApplied: 0, ledgerState: "current", isUpdating: false },
     pending: [],
     sent: [],
     lastActions: {},
     heldRows: [],
-    prViews: NO_PRS
+    prViews: NO_PRS,
+    stop: null
   };
 }
 function applied(s, reply, now, promptAt) {

@@ -387,7 +387,7 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
           const last = prsFetchedAt.get(id)
           if (!isPrFetchDue(s, last, deps.now())) return
           try {
-            await fetchPrs(host)
+            await fetchPrs(host, true)
           } finally {
             prsFetchedAt.set(id, deps.now())
           }

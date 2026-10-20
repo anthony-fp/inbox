@@ -1318,6 +1318,17 @@ function markSentToAgent(ledger, ids, notificationId) {
     closed: ledger.closed.map((c) => ids.includes(c.id) ? { ...c, isSentToAgent: true, ...notificationId ? { doneNotification: { id: notificationId } } : {} } : c)
   };
 }
+function refuseDoneNotification(ledger, notificationId, reason) {
+  return {
+    ...ledger,
+    closed: ledger.closed.map((c) => {
+      if (c.how !== "done" || c.doneNotification?.id !== notificationId)
+        return c;
+      const { isSentToAgent: _sent, ...closed } = c;
+      return { ...closed, doneNotification: { id: notificationId, error: reason } };
+    })
+  };
+}
 var STALE_TEXT = "This changed before your press. Nothing was sent.";
 function noteText(note) {
   return note === "sample" ? "Sample entry: nothing was sent." : STALE_TEXT;
@@ -1408,6 +1419,12 @@ function withQueuedDelivery(lastActions, rows, at, matches, delivery, deliveryId
 }
 function withFailure(lastActions, rows, at, reason, deliveryId) {
   return withQueuedDelivery(lastActions, rows, at, () => true, { state: "failed", reason, ...deliveryId ? { id: deliveryId } : {} }, deliveryId);
+}
+function withRewrite(lastActions, rows, at, message, entered, deliveryId) {
+  return Object.fromEntries(Object.entries(lastActions).map(([id, action]) => [
+    id,
+    rows.includes(id) && action.at === at && (action.delivery?.state === "queued" || action.delivery?.state === "unconfirmed") && (deliveryId ? action.delivery.id === deliveryId : action.delivery.id === undefined) && action.delivery.message === message ? { ...action, delivery: { ...action.delivery, message: entered } } : action
+  ]));
 }
 function reopenOnFailure(ledger, id, at) {
   if (ledger.items.some((i) => i.id === id))
@@ -2668,25 +2685,30 @@ function recordClose(host, ledger, input, now) {
 
 // ../hooks/session.ts
 var NO_PRS = { views: {}, branchRef: null, isFetching: false };
+var NO_TURN = { person: null, trigger: null, activity: [], press: null };
 function emptySession() {
   return {
     ledger: EMPTY,
-    turn: { person: null, activity: [], press: null },
+    turn: NO_TURN,
     told: TOLD_NOTHING,
     presence: { turnsStarted: 0, turnsApplied: 0, ledgerState: "current", isUpdating: false },
     pending: [],
     sent: [],
     lastActions: {},
     heldRows: [],
-    prViews: NO_PRS
+    prViews: NO_PRS,
+    stop: null
   };
 }
 var PRESS_TIMEOUT_MS = 60000;
 function notePrompt(host, s, text, isOpen) {
+  const matched = matchSent(s, text);
+  return recordPrompt(host, startTurn(matched.state), text, isOpen, matched.sentBy);
+}
+function matchSent(s, text) {
   const matchingAt = s.sent.findIndex((x) => x.text === text);
   const matching = matchingAt >= 0 ? s.sent[matchingAt] : undefined;
   const sentAt = matching && (matching.phase === undefined || matching.phase === "accepted") ? matchingAt : -1;
-  const sentBy = sentAt >= 0 ? s.sent[sentAt]?.press ?? null : null;
   const sent = sentAt >= 0 ? s.sent[sentAt] : undefined;
   const eligible = sent?.deliveryId === null ? Object.fromEntries(Object.entries(s.lastActions).filter(([_id, last]) => (last.delivery?.state === "queued" || last.delivery?.state === "unconfirmed") && last.delivery.id === undefined)) : s.lastActions;
   const arrived = sent && sent.row !== null ? {
@@ -2694,8 +2716,17 @@ function notePrompt(host, s, text, isOpen) {
     ...sent.deliveryId === null ? withUnconfirmed(eligible, text) : withArrival(eligible, text, sent.pressedAt ?? undefined, sent.deliveryId)
   } : s.lastActions;
   const lastActions = s.sent.slice(matchingAt + 1).reduce((actions, later) => later.text === text && later.row !== null ? withUnconfirmed(actions, text, later.pressedAt ?? undefined, later.deliveryId) : actions, arrived);
+  return {
+    state: { ...s, lastActions, sent: sent ? s.sent.filter((_x, i) => i !== sentAt) : s.sent },
+    sentBy: sent ? { press: sent.press } : null
+  };
+}
+function startTurn(s) {
+  return { ...s, presence: { ...s.presence, turnsStarted: s.presence.turnsStarted + 1 }, stop: null };
+}
+function recordPrompt(host, s, text, isOpen, sentBy) {
   const ledger = { ...s.ledger, turn: s.ledger.turn + 1 };
-  const r = promptNotes(host, ledger, { text, isPress: sentAt >= 0, isOpen }, s.told);
+  const r = promptNotes(host, ledger, { text, isPress: sentBy !== null, isOpen }, s.told);
   const person = s.turn.person === null ? text : `${s.turn.person}
 
 ${text}`;
@@ -2704,10 +2735,7 @@ ${text}`;
       ...s,
       ledger,
       told: r.told,
-      lastActions,
-      sent: sentAt >= 0 ? s.sent.filter((_x, i) => i !== sentAt) : s.sent,
-      turn: { ...s.turn, person, press: sentBy ?? s.turn.press },
-      presence: { ...s.presence, turnsStarted: s.presence.turnsStarted + 1 }
+      turn: { ...s.turn, person, trigger: null, press: sentBy?.press ?? s.turn.press }
     },
     notes: r.notes
   };
@@ -2718,18 +2746,18 @@ function noteActivity(s, line) {
     return s;
   return { ...s, turn: { ...s.turn, activity } };
 }
-function endTurn(host, s, reply, isOpen) {
+function endTurn(host, s, reply, isOpen, queuesEmptyReply = false) {
   const refs = prRefs(reply);
   const base = {
     ...s,
     ledger: refs.length > 0 ? { ...s.ledger, prs: linkedPrs(s.ledger.prs, refs) } : s.ledger,
-    turn: { person: null, activity: [], press: null }
+    turn: NO_TURN
   };
-  if (reply.trim() === "")
+  if (reply.trim() === "" && !queuesEmptyReply)
     return base;
   const ex = {
     person: s.turn.person,
-    trigger: s.turn.person === null ? "unknown" : null,
+    trigger: s.turn.person === null ? s.turn.trigger ?? "unknown" : null,
     activity: s.turn.activity,
     reply,
     turn: s.ledger.turn,
@@ -2789,19 +2817,20 @@ function completedAttempt(state, deliveryId, outcome) {
   const attempt = state.sent[index];
   if (!attempt)
     return state;
-  const earlierUnknown = state.sent.slice(0, index).some((s) => s.text === attempt.text && (s.phase === "attempting" || s.phase === "uncertain"));
-  let lastActions = state.lastActions;
+  const text = outcome.state === "accepted" ? outcome.entered ?? attempt.text : attempt.text;
+  const delivered = Object.entries(state.lastActions).filter(([_id, action]) => action.delivery && ("id" in action.delivery) && action.delivery.id === deliveryId);
+  let lastActions = text === attempt.text ? state.lastActions : delivered.reduce((actions, [id, action]) => withRewrite(actions, [id], action.at, attempt.text, text, deliveryId), state.lastActions);
+  const earlierUnknown = state.sent.slice(0, index).some((s) => s.text === text && (s.phase === "attempting" || s.phase === "uncertain"));
   if (outcome.state === "accepted" && !earlierUnknown) {
-    for (const [id, action] of Object.entries(lastActions)) {
-      if (action.delivery && "id" in action.delivery && action.delivery.id === deliveryId)
-        lastActions = withAcceptedSend(lastActions, [id], action.at, attempt.text, deliveryId);
-    }
+    for (const [id, action] of delivered)
+      lastActions = withAcceptedSend(lastActions, [id], action.at, text, deliveryId);
   }
   return {
     ...state,
     lastActions,
     sent: state.sent.map((s) => s.deliveryId === deliveryId ? {
       ...s,
+      text,
       phase: outcome.state === "accepted" ? "accepted" : "uncertain",
       queuedId: outcome.state === "accepted" ? outcome.queuedId : null
     } : s)
@@ -2825,7 +2854,7 @@ function withoutStalePending(lastActions, now) {
     return [id, rest];
   }));
 }
-function sessionView(s, now, settleWindowMs, holds = NO_HOLDS) {
+function sessionView(s, now, settleWindowMs, holds = NO_HOLDS, notes = {}) {
   const l = s.ledger;
   const lastActions = withoutStalePending(s.lastActions, now);
   const awaitsRetry = s.pending.length > 0 && (s.pending[0]?.failed === true || s.presence.ledgerState === "failed");
@@ -2838,7 +2867,7 @@ function sessionView(s, now, settleWindowMs, holds = NO_HOLDS) {
     ...inboxView({
       ledger: l,
       lastActions,
-      notes: {},
+      notes,
       turns: s.presence,
       extraSteps: Object.fromEntries(l.items.map((item) => [item.id, itemPrSteps(item, s.prViews, l.prs)])),
       settleWindowMs,
@@ -2923,7 +2952,7 @@ async function wakeForDone(host) {
     }
     const next = {
       ...s,
-      ledger: markSentToAgent(s.ledger, wake.ids),
+      ledger: markSentToAgent(s.ledger, wake.ids, deliveryId),
       lastActions,
       sent: [
         ...s.sent,
@@ -2940,7 +2969,9 @@ async function wakeForDone(host) {
       ]
     };
     await checkpoint(next);
-    return completedAttempt(next, deliveryId, await host.deliver(next, wake.text));
+    const outcome = await host.deliver(next, wake.text);
+    const after = completedAttempt(next, deliveryId, outcome);
+    return outcome.state === "rejected" ? { ...after, ledger: refuseDoneNotification(after.ledger, deliveryId, outcome.reason) } : after;
   });
 }
 async function press(host, p, isStale, holds) {
@@ -3045,7 +3076,7 @@ function isPrFetchDue(s, lastFetchedAt, now) {
   const hasNewPr = splitLinked(s.ledger.prs).tracked.some((ref) => !(ref in s.prViews.views));
   return now - lastFetchedAt >= PRS_REFRESH_MS || hasNewPr && now - lastFetchedAt >= NEW_PR_FETCH_MS;
 }
-async function fetchPrs(host) {
+async function fetchPrs(host, findsBranchPr) {
   const s = await host.read();
   const bin = await host.gh.find();
   host.gh.noteMissing(bin === null);
@@ -3054,7 +3085,7 @@ async function fetchPrs(host) {
   let sawUnstartable = false;
   const fetchWith = (path) => fetchTracked(host.gh.run(s, path, () => {
     sawUnstartable = true;
-  }), s.prViews, s.ledger.prs, true);
+  }), s.prViews, s.ledger.prs, findsBranchPr);
   let fetch = await fetchWith(bin);
   if (sawUnstartable) {
     host.gh.forget();
@@ -4262,7 +4293,7 @@ function demoView(now) {
 import { mkdir, readdir, readFile, rename, stat as stat2, unlink, writeFile } from "fs/promises";
 import { join } from "path";
 function emptyState(sessionId) {
-  return { version: 1, sessionId, ...emptySession(), stop: null };
+  return { version: 1, sessionId, ...emptySession() };
 }
 function fileName(sessionId) {
   if (!/^[\w-]{1,100}$/.test(sessionId))
@@ -4670,7 +4701,7 @@ function createInbox(pi, deps = defaultDeps) {
         if (!isPrFetchDue(s, last, deps.now()))
           return;
         try {
-          await fetchPrs(host);
+          await fetchPrs(host, true);
         } finally {
           prsFetchedAt.set(id, deps.now());
         }
