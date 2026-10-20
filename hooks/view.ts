@@ -740,7 +740,7 @@ export function inboxView({
 
       return {
         is: 'settled',
-        label: capitalized(closed.outcome),
+        label: outcomeLabel(closed),
         at,
         canUndo: isUndoable(closed),
         isLapsed: isLapsed(closed),
@@ -868,6 +868,11 @@ export function inboxView({
     },
     status,
   }
+}
+
+/** A closed record's outcome as a look shows it. A finding a question replaced says where it went. */
+export function outcomeLabel(c: { outcome: string; askedAs?: string }): string {
+  return c.askedAs ? 'Now a question in Needs you' : capitalized(c.outcome)
 }
 
 function heldLabel(c: Pick<Closed, 'how' | 'outcome'>): string {

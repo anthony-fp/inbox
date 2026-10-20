@@ -2035,7 +2035,7 @@ function inboxView({
         return { is: "held", label: heldLabel(closed2), at };
       return {
         is: "settled",
-        label: capitalized(closed2.outcome),
+        label: outcomeLabel(closed2),
         at,
         canUndo: isUndoable(closed2),
         isLapsed: isLapsed(closed2),
@@ -2136,6 +2136,9 @@ function inboxView({
     },
     status
   };
+}
+function outcomeLabel(c) {
+  return c.askedAs ? "Now a question in Needs you" : capitalized(c.outcome);
 }
 function heldLabel(c) {
   if (c.how === "answered")
@@ -3359,7 +3362,7 @@ function closedLines(d) {
     title: d.title,
     isDim: true,
     age: d.at,
-    feedback: { text: settledLabel(capitalized(d.outcome), d.delivery), tone: null },
+    feedback: { text: settledLabel(outcomeLabel(d), d.delivery), tone: null },
     buttons: canUndo ? [undo] : [],
     isStatic: !canUndo,
     isWaiting: false

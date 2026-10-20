@@ -50,6 +50,7 @@ import {
   rowFeedbackText,
   rowKeyPlan,
   rowMark,
+  outcomeLabel,
   settledLabel,
   stopFix,
   stopText,
@@ -269,6 +270,7 @@ type ClosedLine = {
   at: number
   how: Closed['how']
   outcome: string
+  askedAs?: string
   delivery: ClosedDelivery
 }
 
@@ -297,7 +299,7 @@ function closedLines(d: ClosedLine): Line {
     title: d.title,
     isDim: true,
     age: d.at,
-    feedback: { text: settledLabel(capitalized(d.outcome), d.delivery), tone: null },
+    feedback: { text: settledLabel(outcomeLabel(d), d.delivery), tone: null },
     buttons: canUndo ? [undo] : [],
     isStatic: !canUndo,
     isWaiting: false,

@@ -198,6 +198,7 @@ import {
   PRESS_GUARD_MS,
   QUEUED_AFTER_MS,
   rowKeyPlan,
+  outcomeLabel,
   settledLabel,
   actionLabel,
   replyHint,
@@ -2035,11 +2036,8 @@ function rowKeyActions($: EngineInterface, r: RowView, isAllShown: boolean): { k
 }
 
 type ClosedLine = Pick<Closed, 'id' | 'ask' | 'at' | 'how' | 'outcome'> & {
+  askedAs?: string
   delivery: Parameters<typeof settledLabel>[1]
-}
-
-function outcomeText(d: Pick<Closed, 'outcome'>): string {
-  return capitalized(d.outcome)
 }
 
 function desktopTabSizes(
@@ -4108,7 +4106,7 @@ export const register: Register = on => {
                 {d.ask}
               </Text>,
               <Text wrap="wrap" color={pal.age}>
-                {settledLabel(outcomeText(d), d.delivery)}
+                {settledLabel(outcomeLabel(d), d.delivery)}
               </Text>,
               refusedUndo(d),
             ],
@@ -4122,7 +4120,7 @@ export const register: Register = on => {
                   {d.ask}
                 </Text>
                 <Text wrap="wrap" color={pal.age}>
-                  {settledLabel(outcomeText(d), d.delivery)}
+                  {settledLabel(outcomeLabel(d), d.delivery)}
                 </Text>
                 {refusedUndo(d)}
               </Box>
@@ -4445,6 +4443,7 @@ export const register: Register = on => {
           at: f.closedAt,
           how: f.how,
           outcome: f.outcome,
+          askedAs: f.askedAs,
           delivery: f.delivery,
         }))
         return section([

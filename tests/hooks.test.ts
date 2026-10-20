@@ -3312,6 +3312,9 @@ test('a forked conversation keeps the parent’s findings and closed records, an
   await clock.settle()
   const pane = await $.ui.mount(PANE)
   expect(await pane.find({ text: /Add a backoff to the retry loop\?/ })).toBeDefined()
+  await pane.press({ key: 'tab-findings' })
+  expect((await pane.find({ key: 'settled-f1' }))?.text).toContain('Now a question in Needs you')
+  await pane.press({ key: 'tab-needsYou' })
   const contextOf = async () =>
     ((await $.prompt.submit({ text: 'where are we?', wait: false, origin: { kind: 'composer' } })).context ?? []).join(
       '\n',
