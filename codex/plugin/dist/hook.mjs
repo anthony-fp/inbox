@@ -1,11 +1,23 @@
 // Built by codex/build.mjs from codex/src and hooks/. Do not edit.
 
 // src/hook-main.ts
-import { dirname as dirname2, join as join3 } from "node:path";
+import { dirname as dirname2, join as join4 } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// src/hook.ts
+// src/detached-update.ts
 import { spawn } from "node:child_process";
+function detachedUpdate(dir, env, script) {
+  return (sessionId) => {
+    const child = spawn(process.execPath, [script, sessionId], {
+      detached: true,
+      stdio: "ignore",
+      env: { ...env, INBOX_DATA: dir }
+    });
+    child.unref();
+  };
+}
+
+// src/hook.ts
 import { resolve as resolve3 } from "node:path";
 
 // ../hooks/text.ts
@@ -861,8 +873,8 @@ async function updateState(dir, sessionId, change) {
 }
 
 // src/transcript.ts
-import { open } from "node:fs/promises";
-import { resolve as resolve2 } from "node:path";
+import { open, readdir as readdir2 } from "node:fs/promises";
+import { join as join2, resolve as resolve2 } from "node:path";
 
 // ../hooks/conversation.ts
 var NL2 = "\n";
@@ -1137,6 +1149,22 @@ async function readRollout(path, cwd, currentTurnId) {
   }
 }
 
+// src/history.ts
+async function withForkedLedger(s, { dir, rolloutPath }) {
+  const parentId = await forkedFromId(rolloutPath);
+  const parent = parentId === null ? null : await readState(dir, parentId).catch(() => null);
+  return parent !== null && hasLedger(parent) ? forkedFrom(s, parent) : s;
+}
+async function withEarlierHistory(s, history) {
+  if (heardState(s.heard) !== "none") return { state: s, isBehind: false };
+  const forked = await withForkedLedger(s, history);
+  const { rolloutPath, cwd, currentTurnId, canMarkBehind = true } = history;
+  if (!canMarkBehind || !isUnseen(forked)) return { state: forked, isBehind: false };
+  const rollout = await readRollout(rolloutPath, cwd, currentTurnId);
+  if ((rollout?.earlierTurns ?? 0) === 0) return { state: forked, isBehind: false };
+  return { state: { ...forked, presence: { ...forked.presence, ledgerState: "behind" } }, isBehind: true };
+}
+
 // src/hook.ts
 async function handleHook(input, deps) {
   const id = input.session_id;
@@ -1147,22 +1175,19 @@ async function handleHook(input, deps) {
   const rolloutPath = input.agent_id ? null : input.transcript_path;
   const withRollout = (s) => rolloutPath !== null && s.transcriptPath !== rolloutPath ? { ...s, transcriptPath: rolloutPath } : s;
   const withHost = (s) => withRollout(withCli(s));
-  const withForkedLedger = async (s) => {
-    if (heardState(s.heard) !== "none" || rolloutPath === null) return s;
-    const parentId = await forkedFromId(rolloutPath);
-    const parent = parentId === null ? null : await readState(dir, parentId).catch(() => null);
-    return parent !== null && hasLedger(parent) ? forkedFrom(s, parent) : s;
-  };
   let isMarkedBehind = false;
-  const withBehind = async (s) => {
-    const isFirstHook = heardState(s.heard) === "none";
-    if (!isFirstHook || rolloutPath === null || input.source === "compact" || !isUnseen(s)) return s;
-    const rollout = await readRollout(rolloutPath, input.cwd ?? s.root, input.turn_id);
-    if ((rollout?.earlierTurns ?? 0) === 0) return s;
-    isMarkedBehind = true;
-    return { ...s, presence: { ...s.presence, ledgerState: "behind" } };
+  const withHistory = async (s) => {
+    if (rolloutPath === null) return s;
+    const r = await withEarlierHistory(s, {
+      dir,
+      rolloutPath,
+      cwd: input.cwd ?? s.root,
+      currentTurnId: input.turn_id,
+      canMarkBehind: input.source !== "compact"
+    });
+    isMarkedBehind = r.isBehind;
+    return r.state;
   };
-  const withHistory = async (s) => withBehind(await withForkedLedger(s));
   switch (input.hook_event_name) {
     case "SessionStart": {
       const root = input.cwd ?? "";
@@ -1213,26 +1238,16 @@ async function handleHook(input, deps) {
   }
   return null;
 }
-function detachedUpdate(dir, env, script) {
-  return (sessionId) => {
-    const child = spawn(process.execPath, [script, sessionId], {
-      detached: true,
-      stdio: "ignore",
-      env: { ...env, INBOX_DATA: dir }
-    });
-    child.unref();
-  };
-}
 
 // src/data-dir.ts
 import { homedir as homedir2 } from "node:os";
-import { join as join2 } from "node:path";
+import { join as join3 } from "node:path";
 function dataDir(env, pluginRoot) {
   const fromEnv = env.INBOX_DATA || env.PLUGIN_DATA;
   if (fromEnv) return fromEnv;
   const m = pluginRoot.match(/^(.*)\/plugins\/cache\/([^/]+)\/([^/]+)\/[^/]+$/);
   if (m) return `${m[1]}/plugins/data/${m[3]}-${m[2]}`;
-  return join2(homedir2(), ".codex", "inbox-dev");
+  return join3(homedir2(), ".codex", "inbox-dev");
 }
 
 // src/hook-main.ts
@@ -1245,7 +1260,7 @@ async function main() {
     dir,
     env: process.env,
     now: Date.now,
-    startUpdate: detachedUpdate(dir, process.env, join3(dist, "update.mjs"))
+    startUpdate: detachedUpdate(dir, process.env, join4(dist, "update.mjs"))
   });
   if (out) process.stdout.write(JSON.stringify(out));
 }

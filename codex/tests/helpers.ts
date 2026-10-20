@@ -1,4 +1,4 @@
-import { copyFileSync, mkdtempSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -41,6 +41,23 @@ export const ROLLOUT_FIXTURE = join(dirname(fileURLToPath(import.meta.url)), '..
 export function rolloutCopy(): string {
   const path = join(tempDir(), 'rollout.jsonl')
   copyFileSync(ROLLOUT_FIXTURE, path)
+
+  return path
+}
+
+export function rolloutAt(
+  home: string,
+  threadId: string,
+  meta: Record<string, unknown> = {},
+  { day = '2026/10/20', ext = 'jsonl' }: { day?: string; ext?: string } = {},
+): string {
+  const [first = '', ...rest] = readFileSync(ROLLOUT_FIXTURE, 'utf8').split('\n')
+  const row = JSON.parse(first)
+  const payload = { ...row.payload, id: threadId, originator: 'Codex Desktop', source: 'vscode', ...meta }
+  const folder = join(home, 'sessions', day)
+  mkdirSync(folder, { recursive: true })
+  const path = join(folder, `rollout-${day.replaceAll('/', '-')}T05-01-10-${threadId}.${ext}`)
+  writeFileSync(path, ext === 'jsonl' ? [JSON.stringify({ ...row, payload }), ...rest].join('\n') : 'compressed')
 
   return path
 }

@@ -2,7 +2,7 @@
 
 // src/update-main.ts
 import { homedir as homedir3 } from "node:os";
-import { dirname as dirname2, join as join4 } from "node:path";
+import { dirname as dirname2, join as join5 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/data-dir.ts
@@ -1108,7 +1108,7 @@ import {
   symlink as symlink2,
   writeFile as writeFile2
 } from "node:fs/promises";
-import { join as join3 } from "node:path";
+import { join as join4 } from "node:path";
 
 // ../hooks/session-host.ts
 async function askOverConversation(ask, s, screen, conversation) {
@@ -1192,8 +1192,8 @@ function codexStore(dir, sessionId, now) {
 }
 
 // src/transcript.ts
-import { open } from "node:fs/promises";
-import { resolve as resolve2 } from "node:path";
+import { open, readdir as readdir2 } from "node:fs/promises";
+import { join as join3, resolve as resolve2 } from "node:path";
 
 // ../hooks/conversation.ts
 var NL4 = "\n";
@@ -1398,14 +1398,14 @@ var OFF = [
   "personality"
 ];
 async function modelHome(dir, personHome) {
-  const auth = join3(personHome, "auth.json");
+  const auth = join4(personHome, "auth.json");
   const hasSignInFile = await access(auth).then(
     () => true,
     () => false
   );
   if (!hasSignInFile) return null;
-  const home = join3(dir, "model-home");
-  const link = join3(home, "auth.json");
+  const home = join4(dir, "model-home");
+  const link = join4(home, "auth.json");
   try {
     await mkdir2(home, { recursive: true });
     const isLinked = await readlink2(link).catch(() => null) === auth;
@@ -1427,9 +1427,9 @@ async function keepNewerSignIn(link, auth) {
 }
 function codexAsk(exec, cli, dir, personHome) {
   return async (prompt) => {
-    const work = join3(dir, "exec");
-    const system = join3(dir, "inbox-system.md");
-    const out = join3(work, `reply-${randomUUID2()}.txt`);
+    const work = join4(dir, "exec");
+    const system = join4(dir, "inbox-system.md");
+    const out = join4(work, `reply-${randomUUID2()}.txt`);
     await mkdir2(work, { recursive: true });
     const home = await modelHome(dir, personHome);
     const instructions = systemText(CODEX);
@@ -1494,7 +1494,7 @@ async function main() {
   const sessionId = process.argv[2] ?? "";
   const dir = dataDir(process.env, dirname2(dirname2(fileURLToPath(import.meta.url))));
   const { cliPath } = await readState(dir, sessionId);
-  const personHome = process.env.CODEX_HOME || join4(homedir3(), ".codex");
+  const personHome = process.env.CODEX_HOME || join5(homedir3(), ".codex");
   await runUpdates2(dir, sessionId, codexAsk(run, cliPath ?? "codex", dir, personHome), Date.now);
 }
 main().catch(() => process.exit(0));

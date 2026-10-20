@@ -1,22 +1,13 @@
-import { spawn } from 'node:child_process'
 import { resolve } from 'node:path'
 
 import { dialogActivity } from '../../hooks/model-text'
-import {
-  cleared,
-  forkedFrom,
-  hasLedger,
-  isUnseen,
-  needsUpdate,
-  noteActivity,
-  noteCommandOutput,
-  startContext,
-} from '../../hooks/session'
-import { activityOf, endTurn, heardState, noteHook, notePrompt, patchFiles } from './core'
-import { readState, updateState } from './state'
+import { cleared, needsUpdate, noteActivity, noteCommandOutput, startContext } from '../../hooks/session'
+import { activityOf, endTurn, noteHook, notePrompt, patchFiles } from './core'
+import { withEarlierHistory } from './history'
+import { updateState } from './state'
 import type { SessionState } from './state'
 import { CODEX } from './texts'
-import { forkedFromId, isNonInteractiveRun, readRollout, turnIn } from './transcript'
+import { isNonInteractiveRun, turnIn } from './transcript'
 
 export type HookInput = {
   hook_event_name: string
@@ -52,31 +43,21 @@ export async function handleHook(input: HookInput, deps: HookDeps): Promise<Reco
   const withRollout = (s: SessionState): SessionState =>
     rolloutPath !== null && s.transcriptPath !== rolloutPath ? { ...s, transcriptPath: rolloutPath } : s
   const withHost = (s: SessionState): SessionState => withRollout(withCli(s))
-  /** The first hook of a forked chat gives it the parent's ledger when the parent has one. */
-  const withForkedLedger = async (s: SessionState): Promise<SessionState> => {
-    if (heardState(s.heard) !== 'none' || rolloutPath === null) return s
-    const parentId = await forkedFromId(rolloutPath)
-    const parent = parentId === null ? null : await readState(dir, parentId).catch(() => null)
-
-    return parent !== null && hasLedger(parent) ? forkedFrom(s, parent) : s
-  }
   let isMarkedBehind = false
-  /**
-   * The first hook of a session the inbox has recorded nothing of marks the ledger `behind` when the rollout holds
-   * earlier turns, as when the plugin was turned on in the middle of a conversation. A compaction start runs in the
-   * middle of a turn, so it marks nothing.
-   */
-  const withBehind = async (s: SessionState): Promise<SessionState> => {
-    const isFirstHook = heardState(s.heard) === 'none'
-    if (!isFirstHook || rolloutPath === null || input.source === 'compact' || !isUnseen(s)) return s
-    const rollout = await readRollout(rolloutPath, input.cwd ?? s.root, input.turn_id)
-    if ((rollout?.earlierTurns ?? 0) === 0) return s
-    isMarkedBehind = true
+  /** A compaction start runs in the middle of a turn, so it marks nothing behind. */
+  const withHistory = async (s: SessionState): Promise<SessionState> => {
+    if (rolloutPath === null) return s
+    const r = await withEarlierHistory(s, {
+      dir,
+      rolloutPath,
+      cwd: input.cwd ?? s.root,
+      currentTurnId: input.turn_id,
+      canMarkBehind: input.source !== 'compact',
+    })
+    isMarkedBehind = r.isBehind
 
-    return { ...s, presence: { ...s.presence, ledgerState: 'behind' } }
+    return r.state
   }
-
-  const withHistory = async (s: SessionState): Promise<SessionState> => withBehind(await withForkedLedger(s))
 
   switch (input.hook_event_name) {
     case 'SessionStart': {
@@ -136,16 +117,4 @@ export async function handleHook(input: HookInput, deps: HookDeps): Promise<Reco
   }
 
   return null
-}
-
-/** Starts the update in a detached process, so a model call longer than the hook's limit still finishes. */
-export function detachedUpdate(dir: string, env: NodeJS.ProcessEnv, script: string): (sessionId: string) => void {
-  return sessionId => {
-    const child = spawn(process.execPath, [script, sessionId], {
-      detached: true,
-      stdio: 'ignore',
-      env: { ...env, INBOX_DATA: dir },
-    })
-    child.unref()
-  }
 }

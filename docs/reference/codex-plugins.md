@@ -1397,6 +1397,18 @@ threads a root thread and its forks belong to. They differ after a fork.
   parent's thread id, then the parent's rows including the parent's `session_meta`. A rollout that is not a fork has
   no `forked_from_id`; a subagent's has `parent_thread_id` instead. Every hook's `transcript_path` is that rollout,
   so the inbox reads the parent from the first row (`codex/src/transcript.ts:forkedFromId`).
+- **A rollout is found by thread id.** [live] On the test Mac, rollouts are
+  `${CODEX_HOME:-~/.codex}/sessions/YYYY/MM/DD/rollout-<timestamp>-<thread id>.jsonl`, and the first row, `session_meta`,
+  has `payload.id` equal to the thread id. Older files are compressed (`.zst`), and `archived_sessions` holds others.
+  The inbox reads neither (`codex/src/transcript.ts:rolloutFor`). The MCP server's environment names no Codex home, so
+  it uses `$CODEX_HOME`, else `~/.codex`.
+- **The tab catches a chat up when it opens.** The tab's `tools/call inbox_view` carries `_meta.thread_id`, which the
+  plan says equals the hooks' `session_id`. For a chat the inbox has never heard from, the server finds the rollout by
+  that id, copies a fork's parent ledger, marks the ledger `behind` when the rollout has earlier turns, and starts the
+  update in a detached process (`codex/src/server.ts:makeServer`). Covered by specs with a fixture rollout tree. Not
+  checked in the Codex app: the `thread_id` the tab sends from a fork (the root's session id would find the root's
+  rollout, which a seen chat skips), and whether the server process can read `~/.codex/sessions` under Codex's sandbox.
+  A chat whose tab never opens waits for the hook of its next message.
 - **Hooks.** `session_id` on hook input. "Subagent hooks use the parent
   session id." (L/hooks#common-input-fields) The SessionEnd example uses
   `"thr_123"`. [inference] The hook `session_id` is a thread id.

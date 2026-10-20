@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import type { createHandler } from './server-handler'
 import { dataDir, devBuild } from './data-dir'
+import { detachedUpdate } from './detached-update'
 
 type Handler = ReturnType<typeof createHandler>
 
@@ -70,6 +71,7 @@ function load(url: string, path: string): Promise<Handler> {
       dir,
       () => loadError,
       () => isPluginFolderGone,
+      detachedUpdate(dir, process.env, join(here, 'update.mjs')),
     ),
   )
   handle.then(

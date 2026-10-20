@@ -51,12 +51,13 @@ export const CLIENTS: Record<ClientId, Client> = {
       'catch-up': {
         kind: 'different',
         reason:
-          'Codex runs no hook when a chat is opened, so a resumed chat catches up at the hook its next message runs, not when it is opened.',
+          'Codex runs no hook when a chat is opened. A resumed chat catches up when its Inbox tab opens, and at the hook its next message runs if the tab stays closed.',
       },
       'failed-update-recovery': { kind: 'full' },
       'ledger-behind-state': {
         kind: 'different',
-        reason: 'A resumed chat is marked behind at its next hook, since Codex runs no hook when a chat is opened.',
+        reason:
+          'Codex runs no hook when a chat is opened. A resumed chat is marked behind when its Inbox tab opens, and at the hook its next message runs if the tab stays closed.',
       },
       'dialog-outcome': {
         kind: 'different',
@@ -82,7 +83,7 @@ export const CLIENTS: Record<ClientId, Client> = {
       'fork-ledger': {
         kind: 'different',
         reason:
-          "Codex runs no hook when a chat is opened, so a fork takes its parent's ledger at the hook its first message runs.",
+          "Codex runs no hook when a chat is opened. A fork takes its parent's ledger when its Inbox tab opens, and at the hook its first message runs if the tab stays closed.",
       },
       'band-and-stop-rows': {
         kind: 'unsupported',

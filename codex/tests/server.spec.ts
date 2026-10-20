@@ -14,7 +14,8 @@ import { makeServer, tabUri } from '../src/server'
 import { PRESS_TIMEOUT_MS } from '../../hooks/session'
 import { SETTLE_WINDOW_MS } from '../src/settle'
 import { readState, statePath, updateState } from '../src/state'
-import { fakeRunner, tempDir } from './helpers'
+import { handleHook } from '../src/hook'
+import { fakeRunner, hookDeps, input, rolloutAt, tempDir } from './helpers'
 
 async function setup(queueCode: number, now = () => 100, fallbackCli = async () => 'codex') {
   const dir = tempDir()
@@ -1221,3 +1222,92 @@ for (const failure of ['none', 'checkpoint', 'completion', 'queue', 'lookup'] as
     )
   })
 }
+
+function openSetup() {
+  const dir = tempDir()
+  const home = tempDir()
+  const updates: string[] = []
+  const handle = makeServer({
+    dir,
+    now: () => 100,
+    exec: fakeRunner(() => ({ code: 0, stdout: '', stderr: '' })).exec,
+    tabHtml: '<html></html>',
+    fallbackCli: async () => '/apps/codex',
+    openCatchUp: { codexHome: home, startUpdate: id => updates.push(id) },
+  })
+  const call = (name: string, id: string, meta: Record<string, unknown> = { thread_id: id }) =>
+    handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: {}, _meta: meta } })
+
+  return { dir, home, updates, call }
+}
+
+test('the tab’s first view of a chat with earlier turns marks it behind and starts one catch-up, even across polls', async () => {
+  const { dir, home, updates, call } = openSetup()
+  const rollout = rolloutAt(home, 'c1', { cwd: '/repo' })
+  await call('inbox_view', 'c1')
+  await call('inbox_view', 'c1')
+
+  const s = await readState(dir, 'c1')
+  assert.equal(s.presence.ledgerState, 'behind')
+  assert.equal(s.transcriptPath, rollout)
+  assert.equal(s.root, '/repo')
+  assert.equal(s.cliPath, '/apps/codex')
+  assert.deepEqual(updates, ['c1'])
+
+  await handleHook(input('SessionStart', { session_id: 'c1', cwd: '/repo', transcript_path: rollout }), {
+    ...hookDeps(dir),
+    startUpdate: id => updates.push(`hook ${id}`),
+  })
+  assert.deepEqual(updates, ['c1'])
+})
+
+test('the tab’s first view of a forked chat gives it the parent’s ledger and starts no catch-up', async () => {
+  const { dir, home, updates, call } = openSetup()
+  await updateState(dir, 'parent', s => ({
+    ...s,
+    presence: { ...s.presence, turnsStarted: 3, turnsApplied: 3 },
+    ledger: { ...s.ledger, turn: 3, card: { goal: 'Parent goal', done: [], now: '', running: [] }, nextId: 4 },
+  }))
+  rolloutAt(home, 'fork', { forked_from_id: 'parent' })
+  await call('inbox_view', 'fork')
+
+  const s = await readState(dir, 'fork')
+  assert.equal(s.ledger.card?.goal, 'Parent goal')
+  assert.equal(s.presence.ledgerState, 'current')
+  assert.deepEqual(updates, [])
+})
+
+test('the tab changes nothing for a chat with no rollout, and does not look again once it appears', async () => {
+  const { dir, home, updates, call } = openSetup()
+  await call('inbox_view', 'c2')
+  rolloutAt(home, 'c2')
+  await call('inbox_view', 'c2')
+
+  const s = await readState(dir, 'c2')
+  assert.equal(s.presence.ledgerState, 'current')
+  assert.equal(s.transcriptPath, null)
+  assert.deepEqual(updates, [])
+})
+
+test('a chat whose hooks already ran is left as it is when its tab opens', async () => {
+  const { dir, home, updates, call } = openSetup()
+  rolloutAt(home, 'c3')
+  await updateState(dir, 'c3', s => noteHook(s, 'start', 50))
+  await call('inbox_view', 'c3')
+
+  const s = await readState(dir, 'c3')
+  assert.equal(s.presence.ledgerState, 'current')
+  assert.equal(s.transcriptPath, null)
+  assert.deepEqual(updates, [])
+})
+
+test('a call the model makes does not catch up the chat', async () => {
+  const { dir, home, updates, call } = openSetup()
+  rolloutAt(home, 'c4')
+  const agent = { 'x-codex-turn-metadata': { session_id: 'c4', turn_id: 't1' } }
+  await call('inbox', 'c4', agent)
+  await call('record', 'c4', agent)
+
+  assert.equal((await readState(dir, 'c4')).presence.ledgerState, 'current')
+  assert.deepEqual(updates, [])
+})

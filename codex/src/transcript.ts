@@ -1,7 +1,7 @@
 // Reads Codex's session transcript, a JSONL file whose path every hook gets.
 
-import { open } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { open, readdir } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
 
 import { flattenConversation } from '../../hooks/conversation'
 import type { Turn } from '../../hooks/conversation'
@@ -9,7 +9,16 @@ import { addActivity, dialogActivity, dialogQuestions } from '../../hooks/model-
 import type { DialogQuestion } from '../../hooks/model-text'
 import { activityOf, patchFiles } from './core'
 
-type SessionMeta = { type?: string; payload?: { originator?: string; source?: string; forked_from_id?: unknown } }
+type SessionMeta = {
+  type?: string
+  payload?: {
+    originator?: string
+    source?: string
+    forked_from_id?: unknown
+    parent_thread_id?: unknown
+    cwd?: unknown
+  }
+}
 
 /** The rollout's first row, `session_meta`. Null when the file or the row cannot be read. */
 async function readSessionMeta(path: string): Promise<SessionMeta | null> {
@@ -53,6 +62,41 @@ export async function forkedFromId(path: string): Promise<string | null> {
   const id = (await readSessionMeta(path))?.payload?.forked_from_id
 
   return typeof id === 'string' && id !== '' ? id : null
+}
+
+/** The names under `dir` that match `pattern`, newest first. Empty when the folder cannot be read. */
+async function namesIn(dir: string, pattern: RegExp): Promise<string[]> {
+  const names = await readdir(dir).catch(() => [])
+
+  return names
+    .filter(n => pattern.test(n))
+    .sort()
+    .reverse()
+}
+
+/**
+ * A chat's rollout, found by its thread id in Codex's `sessions/YYYY/MM/DD/rollout-<time>-<thread id>.jsonl`. Null
+ * when no readable file holds it, or when the newest one belongs to a subagent or a run no person chats in. A rollout
+ * Codex has compressed (`.zst`) is not read. `cwd` is the folder the chat runs in, from its first row.
+ */
+export async function rolloutFor(codexHome: string, threadId: string): Promise<{ path: string; cwd: string } | null> {
+  if (threadId === '') return null
+  const sessions = join(codexHome, 'sessions')
+  const suffix = `-${threadId}.jsonl`
+  for (const year of await namesIn(sessions, /^\d{4}$/))
+    for (const month of await namesIn(join(sessions, year), /^\d{2}$/))
+      for (const day of await namesIn(join(sessions, year, month), /^\d{2}$/)) {
+        const folder = join(sessions, year, month, day)
+        const [name] = (await namesIn(folder, /^rollout-.+\.jsonl$/)).filter(n => n.endsWith(suffix))
+        if (name === undefined) continue
+        const path = join(folder, name)
+        const meta = await readSessionMeta(path)
+        const isOwnChat = meta !== null && !meta.payload?.parent_thread_id && !(await isNonInteractiveRun(path))
+
+        return isOwnChat ? { path, cwd: typeof meta.payload?.cwd === 'string' ? meta.payload.cwd : '' } : null
+      }
+
+  return null
 }
 
 const DIALOG_TOOL = 'request_user_input_async'

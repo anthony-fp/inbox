@@ -28,6 +28,19 @@ async function devBuild(dir2) {
   }
 }
 
+// src/detached-update.ts
+import { spawn } from "node:child_process";
+function detachedUpdate(dir2, env, script) {
+  return (sessionId) => {
+    const child = spawn(process.execPath, [script, sessionId], {
+      detached: true,
+      stdio: "ignore",
+      env: { ...env, INBOX_DATA: dir2 }
+    });
+    child.unref();
+  };
+}
+
 // src/server-main.ts
 var here = dirname(fileURLToPath(import.meta.url));
 var pluginRoot = dirname(here);
@@ -70,7 +83,8 @@ function load(url, path) {
     (m) => m.createHandler(
       dir,
       () => loadError,
-      () => isPluginFolderGone
+      () => isPluginFolderGone,
+      detachedUpdate(dir, process.env, join2(here, "update.mjs"))
     )
   );
   handle.then(

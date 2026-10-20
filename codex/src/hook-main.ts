@@ -1,7 +1,8 @@
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { detachedUpdate, handleHook } from './hook'
+import { detachedUpdate } from './detached-update'
+import { handleHook } from './hook'
 import type { HookInput } from './hook'
 import { dataDir } from './data-dir'
 

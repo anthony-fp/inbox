@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
+import { isAbsolute } from 'node:path'
 
 import { ghFinder, ghIn } from '../../hooks/gh'
 import type { Run } from '../../hooks/gh'
@@ -9,11 +10,12 @@ import type { PrPress } from '../../hooks/pr-tab'
 import { demoAfterPress, demoTurns, noteText, openTarget } from '../../hooks/presses'
 import type { PathProbe, RowPress } from '../../hooks/presses'
 import { agentTools } from '../../hooks/tools'
-import { noteToolCall, viewOf } from './core'
+import { heardState, noteToolCall, viewOf } from './core'
 import type { TabView } from './core'
 import { demoState } from './demo'
+import { withEarlierHistory } from './history'
 import { codexStore } from './host'
-import { pressOn, recorded } from '../../hooks/session'
+import { isUnseen, pressOn, recorded } from '../../hooks/session'
 import type { SendOutcome } from '../../hooks/session'
 import { fetchPrs, prFetchTracker, press, wakeForDone as wakeSessionForDone } from '../../hooks/session-host'
 import type { SessionHost } from '../../hooks/session-host'
@@ -24,6 +26,7 @@ import { pruneSessions, readState, updateState } from './state'
 import { reconcileUpdateStatus } from './update'
 import type { SessionState } from './state'
 import { CODEX, INBOX_DESCRIPTION, inboxToolText, VIEW_DESCRIPTION } from './texts'
+import { rolloutFor } from './transcript'
 import type { LastAction, PrViews, RowNote } from '../../types'
 
 /** Codex keeps a tab's page by its address, even across server restarts, so a new build needs a new address for a new chat to load it. */
@@ -117,6 +120,14 @@ export type ServerDeps = {
   build?: string
   loadError?: () => string | null
   isPluginFolderGone?: () => boolean
+  /**
+   * Where a chat the inbox has not seen is caught up from when its tab opens. Without it, the chat catches up at its
+   * first hook.
+   */
+  openCatchUp?: {
+    codexHome: string
+    startUpdate: (sessionId: string) => void
+  }
 }
 
 type Message = { jsonrpc: '2.0'; id?: number | string; method?: string; params?: Record<string, unknown> }
@@ -168,7 +179,38 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
   const gh = ghFinder(deps.exec)
   const prFetches = prFetchTracker(now)
   const prunedFor = new Set<string>()
+  const checkedOnOpen = new Set<string>()
   let isGhMissing = false
+
+  /**
+   * Codex runs no hook when a chat opens, so the tab's first view of a chat the inbox has not seen does what the
+   * chat's first hook would: it copies a fork's ledger and, when the rollout holds earlier turns, starts a catch-up.
+   * It runs once per chat in this process, and changes nothing when the rollout cannot be found.
+   */
+  async function catchUpOnOpen(id: string) {
+    const { openCatchUp } = deps
+    if (!openCatchUp || checkedOnOpen.has(id)) return
+    checkedOnOpen.add(id)
+    const before = await readState(dir, id)
+    if (before.transcriptPath !== null || heardState(before.heard) !== 'none' || !isUnseen(before)) return
+    const rollout = await rolloutFor(openCatchUp.codexHome, id)
+    if (rollout === null) return
+    const cli = await deps.fallbackCli().catch(() => null)
+    let isBehind = false
+    await updateState(dir, id, async s => {
+      const r = await withEarlierHistory(s, { dir, rolloutPath: rollout.path, cwd: rollout.cwd })
+      isBehind = r.isBehind
+      if (r.state === s) return s
+
+      return {
+        ...r.state,
+        root: s.root || rollout.cwd,
+        transcriptPath: rollout.path,
+        cliPath: s.cliPath ?? (cli !== null && isAbsolute(cli) ? cli : null),
+      }
+    })
+    if (isBehind) openCatchUp.startUpdate(id)
+  }
 
   async function queueMessage(s: SessionState, message: string, resolvedCli?: string): Promise<SendOutcome> {
     let cli: string
@@ -332,6 +374,7 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
         if (args.demo === true)
           return { ...text('Inbox demo'), structuredContent: await served(demoOf(id), id, true, holds) }
         await wakeForDone(id).catch(() => undefined)
+        await catchUpOnOpen(id).catch(() => undefined)
         const s = await updateState(dir, id, s => ({
           ...s,
           heldRows: Object.keys(holds.replies),
