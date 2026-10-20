@@ -24,7 +24,7 @@ const style: Style = {
 const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '')
 
 const screenOf = (overrides: Partial<PanelScreen> = {}, holds = NO_HOLDS): PanelScreen => ({
-  view: sessionView(demoState(NOW), NOW, SETTLED_MS, holds),
+  view: sessionView(demoState(NOW), NOW, SETTLED_MS, true, holds),
   modelName: 'Claude Sonnet 4.5',
   isGhMissing: false,
   isFetchingPrs: false,
@@ -205,7 +205,7 @@ test('Discard on a held row drops the draft and records the discard', () => {
   const state = demoState(NOW)
   state.ledger = closeItem(state.ledger, 'd11', { how: 'claude', outcome: 'closed by omp: answered in chat' }, NOW)
   const holds = { replies: { d11: NOW }, discarded: {} }
-  const held = { ...screenOf(), view: sessionView(state, NOW, SETTLED_MS, holds) }
+  const held = { ...screenOf(), view: sessionView(state, NOW, SETTLED_MS, true, holds) }
   const heldRow = waiting(held, 'd11')
   expect(heldRow.state.is).toBe('held')
   expect(plannedLabels(heldRow)).toEqual(['Reply', 'Discard'])
@@ -331,7 +331,7 @@ test('a failed send shows why and offers Try again first', () => {
     at: NOW,
     delivery: { state: 'failed', reason: 'omp is busy' },
   }
-  const screen = { ...screenOf(), view: sessionView(state, NOW, SETTLED_MS) }
+  const screen = { ...screenOf(), view: sessionView(state, NOW, SETTLED_MS, true) }
   const row = waiting(screen, 'i11')
   expect(text(screen, onRow(row))).toContain('Not sent: omp is busy')
   expect(buttonLine(screen, onRow(row))).toContain('Try again')
@@ -374,13 +374,13 @@ test('the PRs tab says when gh is missing and when there are no PRs', () => {
   const screen = screenOf({ isGhMissing: true })
   const ui = { ...INITIAL_UI, tab: 'prs' as const }
   expect(text(screen, ui)).toContain(GH_MISSING_TEXT)
-  const empty = { ...screenOf(), view: sessionView(emptyState('s'), NOW, SETTLED_MS) }
+  const empty = { ...screenOf(), view: sessionView(emptyState('s'), NOW, SETTLED_MS, true) }
   expect(text(empty, ui)).toContain('No PRs')
   expect(text({ ...empty, isFetchingPrs: true }, ui)).toContain('Checking for PRs…')
 })
 
 test('an empty Needs you tab explains itself', () => {
-  const empty = { ...screenOf(), view: sessionView(emptyState('s'), NOW, SETTLED_MS) }
+  const empty = { ...screenOf(), view: sessionView(emptyState('s'), NOW, SETTLED_MS, true) }
   expect(text(empty, INITIAL_UI)).toContain('Nothing needs you.')
 })
 
@@ -433,7 +433,7 @@ test('a closed row whose Done message was refused offers Undo, which presses und
   const task = s.ledger.closed.find(d => d.kind === 'task' && d.how === 'done')!
   const refused = { ...task, doneNotification: { id: 'n1', error: 'queue refused' } }
   const ledger = { ...s.ledger, closed: s.ledger.closed.map(d => (d.id === task.id ? refused : d)) }
-  const screen = screenOf({ view: sessionView({ ...s, ledger }, NOW, SETTLED_MS, NO_HOLDS) })
+  const screen = screenOf({ view: sessionView({ ...s, ledger }, NOW, SETTLED_MS, true, NO_HOLDS) })
   const ui: PanelUi = { ...INITIAL_UI, unfolded: ['task'], selectedId: `closed ${task.id}` }
   expect(text(screen, ui)).toContain('Not sent: queue refused')
   expect(handleKey(screen, ui, 'enter', NOW).press).toEqual({ id: task.id, action: 'undo' })
@@ -467,7 +467,7 @@ const findingsOnly = () => {
   const s = demoState(NOW)
 
   return screenOf({
-    view: sessionView({ ...s, ledger: { ...s.ledger, items: [], closed: [] } }, NOW, SETTLED_MS, NO_HOLDS),
+    view: sessionView({ ...s, ledger: { ...s.ledger, items: [], closed: [] } }, NOW, SETTLED_MS, true, NO_HOLDS),
   })
 }
 
@@ -476,7 +476,7 @@ test('a panel that opens on an empty Needs you moves to the first tab with open 
 })
 
 test('rows that arrive while Needs you shows only its empty text move the panel to their tab', () => {
-  const empty = screenOf({ view: sessionView(emptyState('s1'), NOW, SETTLED_MS, NO_HOLDS) })
+  const empty = screenOf({ view: sessionView(emptyState('s1'), NOW, SETTLED_MS, true, NO_HOLDS) })
   const opened = followRows(empty, INITIAL_UI, {}, true, NOW)
   expect(opened.ui.tab).toBe('needsYou')
   expect(followRows(findingsOnly(), opened.ui, opened.seen, false, NOW).ui.tab).toBe('findings')
@@ -489,7 +489,9 @@ test('a new row above the default selection leaves the selection on its row', ()
   const selectedBefore = handleKey(before, INITIAL_UI, 'noop', NOW).ui.selectedId
   const question = s.ledger.items.find(i => i.id === firstQuestion(before).id)!
   const items = [{ ...question, id: 'new-question', ask: 'A new question?' }, ...s.ledger.items]
-  const after = screenOf({ view: sessionView({ ...s, ledger: { ...s.ledger, items } }, NOW, SETTLED_MS, NO_HOLDS) })
+  const after = screenOf({
+    view: sessionView({ ...s, ledger: { ...s.ledger, items } }, NOW, SETTLED_MS, true, NO_HOLDS),
+  })
   expect(handleKey(after, INITIAL_UI, 'noop', NOW).ui.selectedId).toBe('new-question')
   expect(followRows(after, INITIAL_UI, seen, false, NOW).ui.selectedId).toBe(selectedBefore)
 })

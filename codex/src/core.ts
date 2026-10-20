@@ -112,5 +112,7 @@ export type TabView = View & {
 }
 
 export function viewOf(s: SessionState, now: number, holds: ReplyHolds = NO_HOLDS): View {
-  return { ...sessionView(s, now, SETTLE_WINDOW_MS, holds), heard: heardState(s.heard), at: now }
+  const canCatchUp = s.transcriptPath !== null
+
+  return { ...sessionView(s, now, SETTLE_WINDOW_MS, canCatchUp, holds), heard: heardState(s.heard), at: now }
 }

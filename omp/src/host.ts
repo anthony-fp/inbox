@@ -686,7 +686,7 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
       const s = await readState(dir, id)
 
       return {
-        view: sessionView(s, deps.now(), deps.settleWindowMs, holds),
+        view: sessionView(s, deps.now(), deps.settleWindowMs, true, holds),
         modelName: modelNameOf(ctx),
         isGhMissing,
         isFetchingPrs: prFetches.isFetching(id),

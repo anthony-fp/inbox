@@ -225,7 +225,7 @@ The PRs tab shows the PR status. The other tabs show the item status. The mod pi
 
 The UI names the result, not the model call or tool. The failure text is `Last update failed. Items from that reply may be missing.` A stopped worker shows that error. An active update shows `Updating…` and hides the prior error.
 
-The mod catches up after the next message. Codex keeps its first failed exchange until the next Stop starts a retry, so that waiting state includes `It retries after your next message.` A second failure drops the exchange. Once no exchange awaits retry, the failure text has no retry promise. Both hosts advance applied turns after a failed update, so a handed-off row can return to the count.
+Every host with `canCatchUp` reads the whole conversation on its next update, so a failed ledger always retries and the failure text ends with `It retries after your next message.` A host that cannot read its conversation, a Codex thread without a `transcriptPath`, promises the retry only while an exchange is pending. A second failure drops the exchange and keeps the warning until a catch-up covers it. If a conversation that has a path cannot be read or parsed, nothing is pending and the ledger is failed, the promise is false: the run reports it unreadable and has nothing to retry. All hosts advance applied turns after a failed update, so a handed-off row can return to the count.
 
 An expired item closes as `Expired`. The rule behind it, 12 prompts or more than 20 open, belongs to the per-turn update.
 

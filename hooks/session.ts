@@ -541,20 +541,24 @@ function withoutStalePending(lastActions: Record<string, LastAction>, now: numbe
   )
 }
 
+/**
+ * `canCatchUp` says whether the host can read the whole conversation. Its next update then retries a failed ledger,
+ * even with no exchange waiting. A host that cannot retries only when an exchange is pending.
+ */
 export function sessionView(
   s: Session,
   now: number,
   settleWindowMs: number,
+  canCatchUp: boolean,
   holds: ReplyHolds = NO_HOLDS,
   notes: Record<string, RowNote> = {},
 ): SessionView {
   const l = s.ledger
   const lastActions = withoutStalePending(s.lastActions, now)
-  const awaitsRetry = s.pending.length > 0 && (s.pending[0]?.failed === true || s.presence.ledgerState === 'failed')
   const update = {
     isUpdating: s.presence.isUpdating,
     isFailed: s.presence.ledgerState === 'failed',
-    retries: awaitsRetry,
+    retries: canCatchUp || s.pending.length > 0,
   }
 
   return {

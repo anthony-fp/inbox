@@ -3046,14 +3046,13 @@ function withoutStalePending(lastActions, now) {
     return [id, rest];
   }));
 }
-function sessionView(s, now, settleWindowMs, holds = NO_HOLDS, notes = {}) {
+function sessionView(s, now, settleWindowMs, canCatchUp, holds = NO_HOLDS, notes = {}) {
   const l = s.ledger;
   const lastActions = withoutStalePending(s.lastActions, now);
-  const awaitsRetry = s.pending.length > 0 && (s.pending[0]?.failed === true || s.presence.ledgerState === "failed");
   const update = {
     isUpdating: s.presence.isUpdating,
     isFailed: s.presence.ledgerState === "failed",
-    retries: awaitsRetry
+    retries: canCatchUp || s.pending.length > 0
   };
   return {
     ...inboxView({
@@ -4663,7 +4662,7 @@ function demoSource(deps) {
   const changed = () => listeners.forEach((l) => l());
   return {
     screen: async (holds) => ({
-      view: sessionView(state, deps.now(), deps.settleWindowMs, holds),
+      view: sessionView(state, deps.now(), deps.settleWindowMs, true, holds),
       modelName: null,
       isGhMissing: false,
       isFetchingPrs: false,
@@ -5164,7 +5163,7 @@ function createInbox(pi, deps = defaultDeps) {
       const id = sessionIdOf(ctx);
       const s = await readState(dir, id);
       return {
-        view: sessionView(s, deps.now(), deps.settleWindowMs, holds),
+        view: sessionView(s, deps.now(), deps.settleWindowMs, true, holds),
         modelName: modelNameOf(ctx),
         isGhMissing,
         isFetchingPrs: prFetches.isFetching(id),

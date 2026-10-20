@@ -59,6 +59,7 @@ import {
   pressOn,
   recordPrompt,
   recorded,
+  sessionView,
   startTurn,
   upgradeSession,
   withNewPrRefs,
@@ -74,7 +75,6 @@ import {
   checkRunText,
   drawnPrs,
   fetchTracked,
-  itemPrSteps,
   isDismissing,
   isTracked,
   olderPrsText,
@@ -188,11 +188,9 @@ import {
   fieldExit,
   hasAge,
   heldReplies,
-  inboxView,
   isFailure,
   isWaitingRow,
   isGuarded,
-  perTurnStatus,
   PRESS_GUARD_MS,
   QUEUED_AFTER_MS,
   rowKeyPlan,
@@ -249,6 +247,8 @@ const IS_KEY_LIST_SHOWN = atom({ plugin: 'inbox', key: 'isKeyListShown' } as con
 const LEAVE_BAR_CELLS = 12
 const LEAVE_BAR_STEPS = LEAVE_BAR_CELLS * 2
 const RESIZE_SCROLL_MS = 100
+/** The mod can always read the whole conversation: from a fork of it, or from the transcript. */
+const CAN_CATCH_UP = true
 const DEMO = atom({ plugin: 'inbox', key: 'demo' } as const, null as DemoCopy | null)
 const DEMO_RECORDING = atom({ plugin: 'inbox', key: 'isDemoRecording' } as const, false)
 const TOOLS_REFUSED_TEXT =
@@ -649,12 +649,9 @@ function publishStatus($: EngineInterface, isEnding = false): Promise<void> {
     .then(async () => {
       const pane = await $.env.get('HERDR_PANE_ID')
       if (!pane) return
-      const [{ ledger, stop, lastActions, presence }, dialogs, now] = await Promise.all([
-        read($, SESSION),
-        read($, DIALOGS),
-        $.clock.now(),
-      ])
-      const { needsYou, findings } = viewOf({ ledger, lastActions, notes: {}, turns: presence, now }, presence)
+      const [session, dialogs, now] = await Promise.all([read($, SESSION), read($, DIALOGS), $.clock.now()])
+      const { ledger, stop } = session
+      const { needsYou, findings } = sessionView(session, now, SETTLED_MS, CAN_CATCH_UP)
       const items = [...needsYou.questions, ...needsYou.tasks]
         .filter(r => r.state.is === 'open')
         .flatMap(r => (r.item ? [r.item] : []))
@@ -817,41 +814,14 @@ async function commit(
   return after
 }
 
-function viewOf(
-  {
-    ledger,
-    lastActions,
-    notes,
-    turns,
-    prViews,
-    now,
-    replies = {},
-    discarded = {},
-  }: Pick<DemoCopy, 'ledger' | 'lastActions' | 'turns'> & {
-    notes: Record<string, RowNote>
-    prViews?: PrViews
-    now: number
-    replies?: Record<string, number>
-    discarded?: Record<string, number>
-  },
-  presence: Pick<Session['presence'], 'isUpdating' | 'ledgerState'>,
-): InboxView {
-  return inboxView({
-    ledger,
-    lastActions,
-    notes,
-    turns,
-    now,
-    replies,
-    discarded,
-    extraSteps: prViews ? Object.fromEntries(ledger.items.map(i => [i.id, itemPrSteps(i, prViews, ledger.prs)])) : {},
-    settleWindowMs: SETTLED_MS,
-    status: perTurnStatus({
-      isUpdating: presence.isUpdating,
-      isFailed: presence.ledgerState === 'failed',
-      retries: true,
-    }),
-  })
+/** The session a look draws: `session`, with the ledger, PR views, presses and turn counts of the sample while it shows. */
+function drawnSession(
+  session: Session,
+  drawn: Pick<DemoCopy, 'ledger' | 'stop' | 'prViews' | 'lastActions' | 'turns'>,
+): Session {
+  const { ledger, stop, prViews, lastActions, turns } = drawn
+
+  return { ...session, ledger, stop, prViews, lastActions, presence: { ...session.presence, ...turns } }
 }
 
 function redrawWhileLeaving($: EngineInterface, expiresAt: number) {
@@ -2037,12 +2007,16 @@ async function drawnState(
   const { ledger, stop, prViews, lastActions, presence } = session
   const turns = { turnsStarted: presence.turnsStarted, turnsApplied: presence.turnsApplied }
   const drawn = demo ?? { ledger, stop, prViews, lastActions, notes, turns }
+  const holds = { replies: heldReplies(typing, drafts), discarded }
 
   const isUnread = demo === null && unreadable === conversation.id
 
+  const view = sessionView(drawnSession(session, drawn), now, SETTLED_MS, CAN_CATCH_UP, holds, drawn.notes)
+
   return {
     ...drawn,
-    view: viewOf({ ...drawn, now, replies: heldReplies(typing, drafts), discarded }, presence),
+    lastActions: view.lastActions,
+    view,
     isDemo: demo !== null,
     showsDemoNotices: demo !== null && !isDemoRecording,
     isUnread,

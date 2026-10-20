@@ -27,7 +27,7 @@ test('a refused Done message leaves its row reading Not sent, with Undo', async 
   await press(host, { action: 'done', id }, false, NO_HOLDS)
   clock += host.settleWindowMs
   await wakeForDone(host)
-  const view = sessionView(await host.read(), clock, host.settleWindowMs)
+  const view = sessionView(await host.read(), clock, host.settleWindowMs, true)
 
   expect(view.needsYou.closed.tasks.map(c => c.delivery)).toEqual([{ error: 'queue refused', canUndo: true }])
 })
@@ -141,7 +141,10 @@ test('a dropped reply keeps the warning through later good updates, until a catc
   await runUpdates(host)
   const kept = await host.read()
   expect(kept.ledger.items.map(i => i.ask)).toEqual(['Use Node or Python?'])
-  expect(sessionView(kept, 0, host.settleWindowMs).status.error).toContain('Last update failed')
+  const retryPromise = 'retries after your next message'
+  expect(sessionView(kept, 0, host.settleWindowMs, false).status.error).toContain('Last update failed')
+  expect(sessionView(kept, 0, host.settleWindowMs, false).status.error).not.toContain(retryPromise)
+  expect(sessionView(kept, 0, host.settleWindowMs, true).status.error).toContain(retryPromise)
 
   await runUpdates({ ...host, ...reading({ kind: 'reply', text: LEDGER_REPLY, source: null }, calls) })
   expect((await host.read()).presence).toMatchObject({ ledgerState: 'current', hasDroppedReply: false })

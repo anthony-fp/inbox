@@ -62,7 +62,7 @@ export async function runSessionScript<S extends Session>(makeHost: MakeHost<S>,
   const { host, delivered, performed } = makeHost(async () => MODEL_ANSWER)
   const snapshot = async () => {
     const s = await host.read()
-    const view = sessionView(s, await host.now(), SETTLE_WINDOW_MS)
+    const view = sessionView(s, await host.now(), SETTLE_WINDOW_MS, true)
 
     return {
       rows: allRows(view).map(r => `${r.title}: ${r.state.is}`),
