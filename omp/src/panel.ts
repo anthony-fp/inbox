@@ -240,9 +240,13 @@ function lineOfRow(row: RowView): Line {
   const state = row.state
   const undo = row.actions.find(a => a.press.action === 'undo')
 
+  // As in the terminal, a settled row is marked done once nothing it sent is still on its way.
+  const settledLead: Lead | null =
+    state.is === 'settled' ? (state.delivery !== null ? { text: ' ', tone: null } : { text: '✓', tone: 'sep' }) : null
+
   return {
     ...blankLine(row.id),
-    lead: leadOf(row),
+    lead: settledLead ?? leadOf(row),
     title: row.title,
     isDim: state.is === 'settled',
     age: row.at,

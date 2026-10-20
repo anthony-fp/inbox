@@ -3323,9 +3323,10 @@ function lineOfRow(row) {
   const f = row.feedback;
   const state = row.state;
   const undo = row.actions.find((a) => a.press.action === "undo");
+  const settledLead = state.is === "settled" ? state.delivery !== null ? { text: " ", tone: null } : { text: "\u2713", tone: "sep" } : null;
   return {
     ...blankLine(row.id),
-    lead: leadOf(row),
+    lead: settledLead ?? leadOf(row),
     title: row.title,
     isDim: state.is === "settled",
     age: row.at,
