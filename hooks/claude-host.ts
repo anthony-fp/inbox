@@ -12,6 +12,7 @@ import { localPath, openCommands, withArrival, withRewrite, withUnconfirmed } fr
 import type { Effect } from './presses'
 import { emptySession, upgradeSession } from './session'
 import type { SavedSession, SendOutcome, SentBy, Session } from './session'
+import { exclusiveKeys } from './session-host'
 import type { SessionHost } from './session-host'
 
 /** The drawn conversation's session. `revision` counts its writes, so a write computed from an older one is retried. */
@@ -439,7 +440,7 @@ const COPY_FAILURES: Record<Extract<UiCopyResult, { isCopied: false }>['reason']
   refused: 'another plugin refused it',
 }
 
-export async function openUrl($: EngineInterface, url: string): Promise<string | null> {
+async function openUrl($: EngineInterface, url: string): Promise<string | null> {
   const r = await $.process.run(['open', url])
 
   return r.exitCode === 0 ? null : r.stderr.trim() || `open exited ${r.exitCode}`
@@ -556,15 +557,7 @@ export function sessionHost(
       return saved?.session ? upgradeSession(saved.session) : emptySession()
     },
     update: opts.update,
-    exclusive: async fn => {
-      if (updating.has(owner.id)) return { acquired: false }
-      updating.add(owner.id)
-      try {
-        return { acquired: true, value: await fn() }
-      } finally {
-        updating.delete(owner.id)
-      }
-    },
+    exclusive: fn => updating.run(owner.id, fn),
     ask: async prompt => {
       const r = await askLedgerModel($, prompt, 45_000)
       return r.isAnswered ? r.text : null
@@ -596,4 +589,4 @@ export function sessionHost(
 }
 
 /** The conversations whose per-reply update runs now. */
-const updating = new Set<string>()
+const updating = exclusiveKeys()

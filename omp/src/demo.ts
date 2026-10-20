@@ -1,22 +1,12 @@
-import { demoView } from '../../hooks/demo'
-import { pruneClosed } from '../../hooks/ledger'
-import { demoRecord, demoTurns, withLasts } from '../../hooks/presses'
+import { demoSession } from '../../hooks/demo'
+import { demoAfterPress, demoTurns } from '../../hooks/presses'
 import { pressOn, sessionView } from '../../hooks/session'
 import type { PanelSource } from './controller'
 import { emptyState } from './state'
 import type { OmpState } from './state'
 
 export function demoState(now: number): OmpState {
-  const d = demoView(now)
-  const s = emptyState('demo')
-
-  return {
-    ...s,
-    ledger: d.ledger,
-    lastActions: d.lastActions,
-    prViews: d.prViews,
-    presence: { ...s.presence, ...d.turns },
-  }
+  return { ...emptyState('demo'), ...demoSession(now) }
 }
 
 /** A panel source over the shared demo data. A press changes the sample and sends nothing. */
@@ -42,14 +32,18 @@ export function demoSource(deps: {
       const at = deps.now()
       const r = pressOn(state, p, at)
       if ('stale' in r) return { error: null, note: 'stale' }
-      const { lasts, isSample } = demoRecord(r.lasts, r.effects)
+      const { isSample, ...after } = demoAfterPress(
+        { lastActions: state.lastActions, turns: state.presence },
+        r,
+        new Set(Object.keys(holds.replies)),
+      )
       state = {
         ...state,
-        ledger: pruneClosed(r.ledger, new Set(Object.keys(holds.replies))),
-        lastActions: withLasts(state.lastActions, lasts, r.drop),
-        presence: { ...state.presence, ...demoTurns(state.presence, r.effects) },
+        ledger: after.ledger,
+        lastActions: after.lastActions,
+        presence: { ...state.presence, ...after.turns },
       }
-      if (r.effects.length > 0)
+      if (r.effects.some(e => e.kind === 'send'))
         deps.after(() => {
           state = { ...state, presence: { ...state.presence, ...demoTurns(state.presence, [], true) } }
           changed()

@@ -16,7 +16,7 @@ Shared modules are in `hooks/`. Every host consumes them, directly or through a 
 | `hooks/ledger.ts` | Shared module. Saved ledger, upgrades, reply parsing and ledger writes. |
 | `hooks/model-text.ts` | Shared module. Guidance, prompts, inbox notes, question numbers and the `Host` and `Told` types. Each host's `Host` names its agent, surface and the `record` and `close` tools. |
 | `hooks/session.ts` | Shared module. The session state shape, and its pure functions: `notePrompt`, `endTurn`, `recorded`, `pressOn` and `sessionView`. |
-| `hooks/session-host.ts` | Shared module. The `SessionHost` flows that run on a host's store: `runUpdates`, `reconcileUpdateStatus`, `wakeForDone`, `press`, `fetchPrs` and `isPrFetchDue`. |
+| `hooks/session-host.ts` | Shared module. The `SessionHost` flows that run on a host's store: `runUpdates`, `reconcileUpdateStatus`, `wakeForDone`, `press`, `fetchPrs`, `isPrFetchDue`, `prFetchTracker` and `exclusiveKeys`. |
 | `hooks/gh.ts` | Shared module. `ghFinder` finds a gh that starts, and `ghIn` runs it, over a host's command runner. |
 | `hooks/text.ts` | Shared module. Clipping, code-block formatting and relative ages. |
 | `hooks/claude.ts` | Mod only. Claude transcript, command, dialog, stop and sidebar helpers. |
@@ -81,6 +81,7 @@ Change a rule in its owner. Do not change it in a reader.
 | Held rows: which closed rows stay in place while the person replies, what their reply sends, and which closed records a prune keeps | `hooks/view.ts:heldReplies`, `hooks/view.ts:inboxView`, `hooks/view.ts:fieldExit`, `hooks/presses.ts:applyPress`, `hooks/ledger.ts:pruneClosed` | All four looks. The mod passes its open field, drafts and discarded replies. `hooks/claude-host.ts:changeSession` prunes each write, and also keeps the closed record of a row a press settled less than `SETTLED_MS` ago, since the pane still draws it. The omp panel holds its field and drafts in its ui state and passes them with each screen and press. The Codex tab sends its replies and discarded replies with each view and press. The Codex server saves those replies' rows as `heldRows`, and `codex/src/state.ts:updateState` keeps their closed records when it prunes each write. Each view or press replaces `heldRows`, since Codex shows one tab per thread, as `tabSeenAt` also assumes. |
 | Feedback text | `hooks/view.ts:feedbackText`, `hooks/view.ts:feedbackOf` | Terminal and desktop through the pane, Codex through the tab, omp through the panel |
 | Done labels | `hooks/view.ts:DONE_LABELS` | All four looks |
+| Closed-row outcome labels | `hooks/view.ts:outcomeLabel`, set on each closed entry by `hooks/view.ts:inboxView` | All four looks |
 | Row content and reply intent | `hooks/view.ts:RowView`, `hooks/view.ts:rowMark`, `hooks/view.ts:replyHint`, `hooks/view.ts:rowFeedbackText` | All four looks |
 | Action order, emphasis and icon kind | `hooks/view.ts:ActionView`, `hooks/view.ts:actionsOf`, `hooks/view.ts:rowKeyPlan` | All four looks |
 | Shared labels and fold counts | `hooks/view.ts:ROW_COPY`, `hooks/view.ts:actionLabel`, `hooks/view.ts:foldLabel`, `hooks/view.ts:earlierLabel`, `hooks/view.ts:groupEmptyText`, `hooks/view.ts:DEMO_NOTICE` | All four looks |
@@ -89,11 +90,11 @@ Change a rule in its owner. Do not change it in a reader.
 | Settle window | `hooks/view.ts:SETTLED_MS`, `hooks/view.ts:settleWindowMs` | The mod and omp pass `SETTLED_MS`. Codex passes `codex/src/settle.ts:SETTLE_WINDOW_MS`. |
 | Closed fold size | `hooks/view.ts:CLOSED_SHOWN`, `hooks/view.ts:closedShown` | All four looks. |
 | Options fold size | `hooks/view.ts:OPTIONS_FOLD_AT` | The terminal, desktop and Codex looks through `actionsOf`. omp shows every option. |
-| New rows, empty tabs and where a look moves | `hooks/arrivals.ts:recordRows`, `hooks/arrivals.ts:isTabEmpty`, `hooks/arrivals.ts:followTo` | The pane, the Codex tab and the omp panel, in `omp/src/panel.ts:followRows`. |
-| Stop texts | `hooks/view.ts:stopText`, `hooks/view.ts:stopFix`, `hooks/view.ts:RESUME_TEXT` | The mod and omp. Codex shows no stops. |
+| New rows, empty tabs and where a look moves | `hooks/arrivals.ts:recordRows`, `hooks/arrivals.ts:listedRowIds`, `hooks/arrivals.ts:openRowIds`, `hooks/arrivals.ts:closedGroups`, `hooks/arrivals.ts:isTabEmpty`, `hooks/arrivals.ts:followTo` | The pane, the Codex tab and the omp panel, in `omp/src/panel.ts:followRows`. |
+| Stop texts, and which stops offer Resume | `hooks/view.ts:stopText`, `hooks/view.ts:stopFix`, `hooks/view.ts:RESUME_TEXT`, `hooks/view.ts:isResumable` | The mod and omp. Codex shows no stops. |
 | Press guard | `hooks/view.ts:PRESS_GUARD_MS` | The terminal, desktop and Codex looks. omp takes keys only and has no guard. |
 | Row padding | `hooks/layout.ts:ROW_PAD_PT` | Desktop and Codex |
-| Demo data | `hooks/demo.ts:demoView` | The mod's `/inbox demo`, `codex/src/demo.ts:demoState` and `omp/src/demo.ts:demoState` |
+| Demo data | `hooks/demo.ts:demoView`, `hooks/demo.ts:demoSession` | The mod's `/inbox demo`, `codex/src/demo.ts:demoState` and `omp/src/demo.ts:demoState` |
 | Model-read texts | `hooks/model-text.ts:guidanceText`, `hooks/model-text.ts:systemText`, `hooks/model-text.ts:inboxText`, `hooks/model-text.ts:promptNotes`, `hooks/tools.ts:recordDescription` | The mod, Codex and omp, each through its `Host` |
 | Saved state shapes and upgrades | `types/index.d.ts:Session`, `hooks/session.ts:upgradeSession`, `hooks/ledger.ts:upgradeLedger`, `hooks/presses.ts:upgradeLastActions` | Every host. The mod gathers the separate fields an earlier build kept into one session in `hooks/claude-host.ts:upgradeDrawn`, and upgrades its UI state in `hooks/register.tsx:upgradeState`. Codex and omp call `upgradeSession` from `codex/src/state.ts:upgraded` and `omp/src/state.ts:upgraded`. |
 | PR readiness and prompts | `hooks/prs.ts:readiness`, `hooks/prs.ts:prompts` | The mod, the Codex tab and the omp panel |
@@ -113,7 +114,7 @@ Some content and host bookkeeping still have two copies. These are remaining wor
 | --- | --- | --- |
 | PR block and row composition | `hooks/register.tsx` and `codex/src/tab.tsx` | Both use shared PR rules and button plans, but compose their own content. |
 | Host notices and some closed-row composition | `hooks/register.tsx` and `codex/src/tab.tsx` | Share identical decisions while keeping native fitting and decoration local. |
-| Local effects and demo presses | `hooks/claude-host.ts:openPath`, `hooks/register.tsx:runDemoPress`, `hooks/session-host.ts:press`, `codex/src/server.ts:makeServer` | Shared effect descriptions still have host execution and demo wiring. |
+| Local effects and demo presses | `hooks/presses.ts:openTarget`, `hooks/presses.ts:demoAfterPress`, `hooks/claude-host.ts:openPath`, `hooks/register.tsx:runDemoPress`, `hooks/session-host.ts:press`, `codex/src/server.ts:makeServer` | Codex and omp open files and links through `openTarget`, and every host computes a demo press with `demoAfterPress`. The mod still opens paths its own way, and each host keeps its own demo timer. |
 
 A `deliveryId` identifies one local press. Each host keeps a sent-prompt record
 before an arrival can change its rows. Arrival events provide message text but

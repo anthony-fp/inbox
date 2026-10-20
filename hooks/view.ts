@@ -218,7 +218,7 @@ export type InboxView = {
   status: ItemStatus
 }
 
-export type ClosedView<T> = T & { delivery: ClosedDelivery }
+export type ClosedView<T> = T & { delivery: ClosedDelivery; outcomeLabel: string }
 
 export function allRows(v: InboxView): RowView[] {
   return [...v.needsYou.questions, ...v.needsYou.tasks, ...v.findings.rows]
@@ -256,6 +256,11 @@ export function groupEmptyText(title: string): string {
 
 /** The message Resume sends after an API error stopped a turn. */
 export const RESUME_TEXT = 'Continue'
+
+/** True when Resume can continue past the stop. */
+export function isResumable(stop: Stop): boolean {
+  return stop.kind === 'api-error'
+}
 
 export function stopText(stop: Stop): string {
   switch (stop.kind) {
@@ -832,6 +837,7 @@ export function inboxView({
     .reverse()
     .map(d => ({
       ...d,
+      outcomeLabel: outcomeLabel(d),
       delivery:
         d.doneNotification?.error !== undefined
           ? { error: d.doneNotification.error, canUndo: isUndoable(d) }
@@ -843,13 +849,18 @@ export function inboxView({
     }))
   const fixesSent: ClosedView<ClosedFinding>[] = ledger.findings
     .filter(f => isFixSent(lastActions[f.id]))
-    .map(f => ({
-      ...f,
-      how: 'answered',
-      outcome: fixLabel(f),
-      closedAt: lastActions[f.id]!.at,
-      delivery: pendingDeliveryAt(lastActions[f.id], now),
-    }))
+    .map(f => {
+      const outcome = fixLabel(f)
+
+      return {
+        ...f,
+        how: 'answered',
+        outcome,
+        outcomeLabel: outcomeLabel({ ...f, outcome }),
+        closedAt: lastActions[f.id]!.at,
+        delivery: pendingDeliveryAt(lastActions[f.id], now),
+      }
+    })
 
   return {
     needsYou: {
@@ -862,7 +873,9 @@ export function inboxView({
       count: findingRows.filter(isWaitingRow).length,
       rows: findingRows,
       closed: [
-        ...ledger.closedFindings.filter(f => !held.has(f.id)).map(f => ({ ...f, delivery: null as null })),
+        ...ledger.closedFindings
+          .filter(f => !held.has(f.id))
+          .map(f => ({ ...f, outcomeLabel: outcomeLabel(f), delivery: null as null })),
         ...fixesSent,
       ].sort((a, b) => b.closedAt - a.closedAt),
     },

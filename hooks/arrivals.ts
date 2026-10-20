@@ -1,4 +1,6 @@
-import type { RowView } from './view'
+import { FINDING_GROUPS, NEEDS_YOU_GROUPS } from './view'
+import type { InboxView, RowView } from './view'
+import type { Finding, FoldKind } from '../types'
 
 export type RowRecord<T extends string> = Partial<Record<T, ReadonlySet<string>>>
 
@@ -21,6 +23,37 @@ export function recordRows<T extends string>(
   }
 
   return { seen: next, added }
+}
+
+export type ListedTab = 'needsYou' | 'findings'
+
+/** Each tab's row ids in a view, settled rows included, so a row Undo brings back is not new. */
+export function listedRowIds(v: InboxView): Record<ListedTab, string[]> {
+  return {
+    needsYou: [...v.needsYou.questions, ...v.needsYou.tasks].map(r => r.id),
+    findings: v.findings.rows.map(r => r.id),
+  }
+}
+
+/** Each tab's row ids that are not settled: the rows a look moves to as it opens. */
+export function openRowIds(v: InboxView): Record<ListedTab, string[]> {
+  const open = (rows: RowView[]) => rows.filter(r => r.state.is !== 'settled').map(r => r.id)
+
+  return { needsYou: open([...v.needsYou.questions, ...v.needsYou.tasks]), findings: open(v.findings.rows) }
+}
+
+/** The tab's Closed folds, for `isTabEmpty`. */
+export function closedGroups(
+  v: InboxView,
+  tab: ListedTab,
+  isUnfolded: (kind: FoldKind) => boolean,
+): { isUnfolded: boolean; rows: readonly { id: string }[] }[] {
+  return tab === 'findings'
+    ? (Object.keys(FINDING_GROUPS) as Finding['kind'][]).map(kind => ({
+        isUnfolded: isUnfolded(kind),
+        rows: v.findings.closed.filter(f => f.kind === kind),
+      }))
+    : NEEDS_YOU_GROUPS.map(g => ({ isUnfolded: isUnfolded(g.kind), rows: v.needsYou.closed[g.list] }))
 }
 
 export function isTabEmpty({

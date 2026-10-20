@@ -427,13 +427,6 @@ test('a press for a row that is gone reports it stale and sends nothing', async 
   expect(sent).toEqual([])
 })
 
-test('a press the panel drew for another session is stale', async () => {
-  const { inbox, id } = await withQuestion()
-  const outcome = await inbox.press(makeCtx(), { action: 'answer', id, option: 'Node' }, NO_HOLDS, true)
-  expect(outcome.note).toBe('stale')
-  expect(sent).toEqual([])
-})
-
 test('Done schedules the wake and the wake tells the agent after the settle window', async () => {
   const inbox = createInbox(pi(), deps())
   await prompt('hello')

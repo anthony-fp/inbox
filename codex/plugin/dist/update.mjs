@@ -660,6 +660,15 @@ function emptySession() {
     stop: null
   };
 }
+var SESSION_ID = /^[\w-]{1,100}$/;
+function sessionFile(sessionId) {
+  if (!SESSION_ID.test(sessionId)) throw new Error(`Not a session id: ${sessionId}`);
+  return `${sessionId}.json`;
+}
+function missingAsNull(err) {
+  if (err.code === "ENOENT") return null;
+  throw err;
+}
 function upgradeSession(saved) {
   const base = emptySession();
   const views = saved.prViews?.views ?? {};
@@ -748,12 +757,8 @@ function emptyState(sessionId) {
     heard: NOTHING_HEARD
   };
 }
-function fileName(sessionId) {
-  if (!/^[\w-]{1,100}$/.test(sessionId)) throw new Error(`Not a session id: ${sessionId}`);
-  return sessionId;
-}
 function statePath(dir, sessionId) {
-  return join2(dir, "sessions", `${fileName(sessionId)}.json`);
+  return join2(dir, "sessions", sessionFile(sessionId));
 }
 function upgraded(saved, sessionId) {
   if (saved.version !== void 0 && saved.version !== 1)
@@ -780,12 +785,12 @@ function upgraded(saved, sessionId) {
     }
   };
 }
+async function readSaved(dir, sessionId) {
+  const saved = await readFile(statePath(dir, sessionId), "utf8").catch(missingAsNull);
+  return saved === null ? { state: emptyState(sessionId), isSaved: false } : { state: upgraded(JSON.parse(saved), sessionId), isSaved: true };
+}
 async function readState(dir, sessionId) {
-  const saved = await readFile(statePath(dir, sessionId), "utf8").catch((err) => {
-    if (err.code === "ENOENT") return null;
-    throw err;
-  });
-  return saved === null ? emptyState(sessionId) : upgraded(JSON.parse(saved), sessionId);
+  return (await readSaved(dir, sessionId)).state;
 }
 var LOCK_WAIT_MS = 1e4;
 var LOCK_CHILD = "held";
@@ -930,8 +935,9 @@ async function tryWithLock(path, fn) {
 async function updateState(dir, sessionId, change) {
   const path = statePath(dir, sessionId);
   return withLock(`${path}.lock`, async () => {
-    const current = await readState(dir, sessionId);
+    const { state: current, isSaved } = await readSaved(dir, sessionId);
     const changed = await change(current);
+    if (isSaved && changed === current) return current;
     const next = { ...changed, ledger: pruneClosed(changed.ledger, new Set(changed.heldRows)) };
     const tmp = `${path}.${process.pid}.tmp`;
     await writeFile(tmp, JSON.stringify(next));

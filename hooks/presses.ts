@@ -1,7 +1,9 @@
 import type { Closed, Delivery, Finding, Help, Item, LastAction, Ledger, LocalResult, RowNote, Turns } from '../types'
-import { closeFinding, closeItem, reopenFinding, reopenItem } from './ledger'
+import type { Run } from './gh'
+import { closeFinding, closeItem, pruneClosed, reopenFinding, reopenItem } from './ledger'
 import type { Press } from './ledger'
 import { namedPrs, parseRef } from './prs'
+import type { Pressed } from './session'
 
 export function clipLabel(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
@@ -51,6 +53,40 @@ export function openCommands(
   if (!isFile || isExecutable || LAUNCHES.test(path)) return { argv: ['open', '-R', path], fallback: null }
 
   return { argv: ['open', path], fallback: ['open', '-t', path] }
+}
+
+/** What a host can ask of the file system: a path's stat, or null when it is gone, and whether it can be run. */
+export type PathProbe = {
+  stat(path: string): Promise<{ isFile(): boolean } | null>
+  isExecutable(path: string): Promise<boolean>
+}
+
+const OPEN_TIMEOUT_MS = 10_000
+
+/** Opens a link, or a path as `openCommands` decides. Returns why it could not, or null. */
+export async function openTarget(
+  run: Run,
+  probe: PathProbe,
+  target: string,
+  root: string,
+  home: string,
+): Promise<string | null> {
+  const open = (argv: string[]) => run(argv, { cwd: '/', timeoutMs: OPEN_TIMEOUT_MS })
+  const failure = (r: { code: number; stderr: string }) => r.stderr.trim() || `open exited ${r.code}`
+  if (/^https:\/\//.test(target)) {
+    const r = await open(['open', target])
+    return r.code === 0 ? null : failure(r)
+  }
+  const path = localPath(target, root || '/', home)
+  const info = await probe.stat(path)
+  if (!info) return 'it no longer exists'
+  const isFile = info.isFile()
+  const isExecutable = isFile && (await probe.isExecutable(path))
+  const { argv, fallback } = openCommands(path, isFile, isExecutable)
+  const r = await open(argv)
+  const retry = r.code !== 0 && fallback ? await open(fallback) : r
+
+  return retry.code === 0 ? null : failure(retry)
 }
 
 export type HelpStep = { label: string; step: Help[] }
@@ -550,6 +586,26 @@ export function demoTurns(turns: Turns, effects: Effect[], isReplied = false): T
   if (isReplied) return { ...turns, turnsApplied: turns.turnsStarted }
 
   return effects.some(e => e.kind === 'send') ? { ...turns, turnsStarted: turns.turnsStarted + 1 } : turns
+}
+
+/**
+ * The demo's state after a press: the press's ledger without records no reply holds, its last actions without
+ * delivery marks, and a turn started when it sends. `isSample` is true when the press had an effect the demo
+ * only pretends to run.
+ */
+export function demoAfterPress(
+  before: { lastActions: Record<string, LastAction>; turns: Turns },
+  r: Pressed,
+  held: ReadonlySet<string>,
+): { ledger: Ledger; lastActions: Record<string, LastAction>; turns: Turns; isSample: boolean } {
+  const { lasts, isSample } = demoRecord(r.lasts, r.effects)
+
+  return {
+    ledger: pruneClosed(r.ledger, held),
+    lastActions: withLasts(before.lastActions, lasts, r.drop),
+    turns: demoTurns(before.turns, r.effects),
+    isSample,
+  }
 }
 
 export type EffectHost = {

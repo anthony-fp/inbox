@@ -110,7 +110,6 @@ import {
   closeItem,
   parseReply,
   closedState,
-  pruneClosed,
   readKind,
   tasksRunBy,
   upgradeLedger,
@@ -150,7 +149,7 @@ import {
   baseName,
   capitalized,
   clipLabel,
-  demoRecord,
+  demoAfterPress,
   demoTurns,
   doneWake,
   localPath,
@@ -162,7 +161,6 @@ import {
   upgradeLastActions,
   withArrival,
   withDeliveryId,
-  withLasts,
   withRewrite,
   withUnconfirmed,
 } from './presses'
@@ -171,6 +169,7 @@ import {
   closedShown,
   DOT,
   NEEDS_YOU_GROUPS,
+  isResumable,
   RESUME_TEXT,
   stopFix,
   stopText,
@@ -198,7 +197,6 @@ import {
   PRESS_GUARD_MS,
   QUEUED_AFTER_MS,
   rowKeyPlan,
-  outcomeLabel,
   settledLabel,
   actionLabel,
   replyHint,
@@ -219,7 +217,7 @@ import {
 import type { ActionEmphasis, ActionIcon, DrawnEntry, InboxView, ModLook, PlannedKey, RowView, RowWait } from './view'
 import { CLOSE_DESCRIPTION, CLOSE_SCHEMA, RECORD_SCHEMA, recordDescription, recordClose, recordItem } from './tools'
 import type { UndoProps } from './undo-client'
-import { followTo, recordRows, isTabEmpty } from './arrivals'
+import { closedGroups, followTo, isTabEmpty, listedRowIds, openRowIds, recordRows } from './arrivals'
 import { parseInline } from './inline'
 import type { Span } from './inline'
 import type { RowRecord } from './arrivals'
@@ -636,7 +634,7 @@ function notePerson($: EngineInterface, line: string) {
 }
 
 function noteActivity($: EngineInterface, line: string) {
-  return commit($, currentOwner(), s => noteTurnActivity(s, line))
+  return commit($, currentOwner(), s => noteTurnActivity(s, line)).catch(() => undefined)
 }
 
 function messageText(message: SessionAppendMessage): string {
@@ -961,7 +959,8 @@ async function catchUp($: EngineInterface, owner: Owner) {
  * Runs the per-reply update for the conversation, one at a time: the pending exchanges, or a catch-up when the
  * ledger may have missed a turn, as after a failed update or a reload that cut one off.
  */
-function updateLedger($: EngineInterface, owner: Owner = currentOwner(), { catchesUp = false } = {}) {
+function updateLedger($: EngineInterface, { catchesUp = false } = {}) {
+  const owner = currentOwner()
   queue = queue.then(async () => {
     if (!isCurrent(owner)) return
     const { presence, pending } = await read($, SESSION)
@@ -1554,11 +1553,9 @@ async function followNewRows($: EngineInterface, isOpening = false) {
   const prs = drawnPrs(prState, ledger.prs, lastActions, now)
   const prViews = prs.filter(x => !x.isSettled).map(x => x.pr)
   const ids = tabRowIds(view, prViews)
-  const settledNeedsYou = settledRowIds([...view.needsYou.questions, ...view.needsYou.tasks])
   if (isOpening) recordedRows = null
   const added = newRows(isDemo, {
-    needsYou: [...ids.needsYou, ...settledNeedsYou],
-    findings: [...ids.findings, ...settledRowIds(view.findings.rows)],
+    ...listedRowIds(view),
     prs: prState.isFetching ? null : [...prs.map(x => `pr ${x.pr.ref}`), ...ids.prs],
   })
   if (!isShown) return
@@ -1581,23 +1578,14 @@ async function followNewRows($: EngineInterface, isOpening = false) {
       : isTabEmpty({
           rows: tab === 'needsYou' ? [...view.needsYou.questions, ...view.needsYou.tasks] : view.findings.rows,
           settled,
-          closed:
-            tab === 'needsYou'
-              ? (['question', 'task'] as const).map(kind => ({
-                  isUnfolded: unfolded.includes(kind),
-                  rows: ledger.closed.filter(d => d.kind === kind),
-                }))
-              : (['issue', 'opportunity'] as const).map(kind => ({
-                  isUnfolded: unfolded.includes(kind),
-                  rows: view.findings.closed.filter(f => f.kind === kind),
-                })),
+          closed: closedGroups(view, tab, kind => unfolded.includes(kind)),
           hasBlocker: tab === 'needsYou' && (!!stop || isUnread),
         })
   const to = followTo(
     TABS.map(t => t.id),
     tab,
     isEmpty,
-    isOpening ? { needsYou: ids.needsYou, findings: ids.findings, prs: [] } : added,
+    isOpening ? { ...openRowIds(view), prs: [] } : added,
   )
   if (to) await jumpTo($, to)
 }
@@ -1703,7 +1691,6 @@ function pressRowId(p: RowPress | PrPress): string {
 
 /** Tells Claude about rows closed with Done once their settle window has passed, unless a turn runs. */
 async function wakeForDone($: EngineInterface) {
-  if (isTurnRunning) return
   await wakeSessionForDone(hostOf($, currentOwner()))
 }
 
@@ -1895,14 +1882,12 @@ async function runDemoPress(
       hasNewClose(d.ledger, r.ledger) ||
       ('ref' in p ? p.action === 'pr-dismiss' : p.action === 'address') ||
       (!('ref' in p) && p.action === 'type' && !isOpenIn(d.ledger, p.id))
-    const { lasts, isSample } = demoRecord(r.lasts, r.effects)
+    const { isSample, ...after } = demoAfterPress({ lastActions: d.lastActions, turns: d.turns }, r, held)
 
     return {
       ...d,
-      ledger: pruneClosed(r.ledger, held),
-      lastActions: withLasts(d.lastActions, lasts, r.drop),
+      ...after,
       notes: isSample && !isRecording ? { ...notes, [rowId]: { note: 'sample' as const, at: now } } : notes,
-      turns: demoTurns(d.turns, r.effects),
     }
   })
   const pressed = applied
@@ -2036,7 +2021,7 @@ function rowKeyActions($: EngineInterface, r: RowView, isAllShown: boolean): { k
 }
 
 type ClosedLine = Pick<Closed, 'id' | 'ask' | 'at' | 'how' | 'outcome'> & {
-  askedAs?: string
+  outcomeLabel: string
   delivery: Parameters<typeof settledLabel>[1]
 }
 
@@ -2228,7 +2213,7 @@ async function applyConversation(
     presence.turnsStarted > presence.turnsApplied ||
     (!isUnread && isEmpty && (await $.session.turns().catch(() => 0)) > 0)
   if (!isLoading()) return
-  if (needsCatchUp) updateLedger($, currentOwner(), { catchesUp: true })
+  if (needsCatchUp) updateLedger($, { catchesUp: true })
   void publishStatus($)
   if (ledger.prs.length > 0) void fetchPrs($, false)
 }
@@ -2324,7 +2309,7 @@ async function readAgain($: EngineInterface) {
       (hasRun && saved.session) ||
       (!ledger.card && ledger.items.length === 0 && (await $.session.turns().catch(() => 0)) > 0)
     )
-      updateLedger($, currentOwner(), { catchesUp: true })
+      updateLedger($, { catchesUp: true })
     void publishStatus($)
     if (ledger.prs.length > 0) void fetchPrs($, false)
     void followNewRows($).catch(() => undefined)
@@ -2461,13 +2446,12 @@ export const register: Register = on => {
     const run = () => clearingDialog($, key, () => next(e))
     if (e.agentId) return run()
     const line = toolActivity(String(e.tool), input)
-    if (line) await noteActivity($, line).catch(() => undefined)
+    if (line) await noteActivity($, line)
     if (String(e.tool) === TURN_BOX_TOOL) turnBox = turnBoxText(input) ?? turnBox
     if (e.tool === 'Bash') {
       const ran = await run()
       if ((await read($, SESSION)).turn.activity.length < 40)
-        for (const url of new Set(ran.text?.match(LOCAL_URL) ?? []))
-          await noteActivity($, `URL in output: ${url}`).catch(() => undefined)
+        for (const url of new Set(ran.text?.match(LOCAL_URL) ?? [])) await noteActivity($, `URL in output: ${url}`)
       if (/\bgh\s+pr\s+create\b/.test(e.command)) void linkPrs($, prRefs(ran.text ?? ''))
 
       return ran
@@ -2478,7 +2462,7 @@ export const register: Register = on => {
       await openDialog($, { kind: 'question', text: question, key })
       const ran = await run()
       const outcome = dialogOutcome(ran)
-      await noteActivity($, dialogActivity(dialogQuestions(input.questions), outcome)).catch(() => undefined)
+      await noteActivity($, dialogActivity(dialogQuestions(input.questions), outcome))
       if (outcome.kind === 'dismissed') isDialogDismissed = true
 
       return ran
@@ -2720,10 +2704,10 @@ export const register: Register = on => {
 
     // An API error resumes from
     // [Resume], which keeps its key while it sends, so the desktop app keeps the band's focus.
-    const isResumable = stop.kind === 'api-error'
-    const notSent = isResumable && resuming?.is === 'refused' ? `Not sent: ${resuming.why}` : ''
+    const canResume = isResumable(stop)
+    const notSent = canResume && resuming?.is === 'refused' ? `Not sent: ${resuming.why}` : ''
     const isNotSentOwnRow = notSent !== '' && e.surface === 'desktop' && e.props.maxRows > 2
-    const fix = isResumable ? '' : stopFix(stop)
+    const fix = canResume ? '' : stopFix(stop)
     const inlineNotSent = isNotSentOwnRow ? '' : notSent
     const stopLine = (
       <Box flexDirection="row" alignItems="flex-start" gap={1}>
@@ -2734,7 +2718,7 @@ export const register: Register = on => {
             {inlineNotSent ? <Text color="error"> {inlineNotSent}</Text> : null}
           </Text>
         </Box>
-        {isResumable ? (
+        {canResume ? (
           <Button
             key="resume"
             label={resuming?.is === 'sending' ? 'Resuming…' : 'Resume'}
@@ -4106,7 +4090,7 @@ export const register: Register = on => {
                 {d.ask}
               </Text>,
               <Text wrap="wrap" color={pal.age}>
-                {settledLabel(outcomeLabel(d), d.delivery)}
+                {settledLabel(d.outcomeLabel, d.delivery)}
               </Text>,
               refusedUndo(d),
             ],
@@ -4120,7 +4104,7 @@ export const register: Register = on => {
                   {d.ask}
                 </Text>
                 <Text wrap="wrap" color={pal.age}>
-                  {settledLabel(outcomeLabel(d), d.delivery)}
+                  {settledLabel(d.outcomeLabel, d.delivery)}
                 </Text>
                 {refusedUndo(d)}
               </Box>
@@ -4402,7 +4386,7 @@ export const register: Register = on => {
                     {ago(now - stop.at)}
                   </Text>
                 </Text>
-                {stop.kind === 'api-error' ? (
+                {isResumable(stop) ? (
                   <Box flexDirection="column">
                     <Text wrap="wrap">{capitalized(stopText(stop))}.</Text>
                     {resuming?.is === 'refused' ? (
@@ -4443,7 +4427,7 @@ export const register: Register = on => {
           at: f.closedAt,
           how: f.how,
           outcome: f.outcome,
-          askedAs: f.askedAs,
+          outcomeLabel: f.outcomeLabel,
           delivery: f.delivery,
         }))
         return section([

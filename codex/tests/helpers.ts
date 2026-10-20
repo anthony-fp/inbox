@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { HookDeps, HookInput } from '../src/hook'
-import type { Run } from '../src/run'
+import type { Run } from '../../hooks/gh'
 
 export function tempDir(): string {
   return mkdtempSync(join(tmpdir(), 'inbox-codex-'))

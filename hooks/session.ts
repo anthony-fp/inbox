@@ -1,4 +1,4 @@
-import { applyExchangeUpdate, EMPTY, parseReply, upgradeLedger } from './ledger'
+import { applyExchangeUpdate, EMPTY, KEPT_SESSIONS, parseReply, upgradeLedger } from './ledger'
 import type { Exchange, Press } from './ledger'
 import { addActivity, carryText, guidanceText, promptNotes, screenText, START_TITLE, TOLD_NOTHING } from './model-text'
 import type { Host, Told } from './model-text'
@@ -23,7 +23,7 @@ import type { LastAction, Ledger, PrView, PrViews, RowNote, Session, Stop, Turns
 
 export type { Session } from '../types'
 
-export const NO_PRS: PrViews = { views: {}, branchRef: null, isFetching: false }
+const NO_PRS: PrViews = { views: {}, branchRef: null, isFetching: false }
 
 const NO_TURN: Session['turn'] = { person: null, trigger: null, activity: [], press: null }
 
@@ -40,6 +40,34 @@ export function emptySession(): Session {
     prViews: NO_PRS,
     stop: null,
   }
+}
+
+const SESSION_ID = /^[\w-]{1,100}$/
+const SESSION_FILE = /^[\w-]{1,100}\.json$/
+
+/** The name of a session's saved file. Throws for an id that is not safe in a file name. */
+export function sessionFile(sessionId: string): string {
+  if (!SESSION_ID.test(sessionId)) throw new Error(`Not a session id: ${sessionId}`)
+
+  return `${sessionId}.json`
+}
+
+export const isSessionFile = (name: string): boolean => SESSION_FILE.test(name)
+
+/** For a read's `catch`: a file that is not there reads as null, and any other failure throws. */
+export function missingAsNull(err: unknown): null {
+  if ((err as { code?: unknown }).code === 'ENOENT') return null
+  throw err
+}
+
+/**
+ * The saved sessions that may be deleted: the oldest beyond the newest `KEPT_SESSIONS`, ranked by when the file
+ * was last saved, never the `keep` session. `files` are the session files, with their save times.
+ */
+export function staleSessionFiles<F extends { name: string; mtimeMs: number }>(files: F[], keep: string): F[] {
+  const ranked = [...files].sort((a, b) => a.mtimeMs - b.mtimeMs || a.name.localeCompare(b.name))
+
+  return ranked.filter(f => f.name !== `${keep}.json`).slice(0, Math.max(0, ranked.length - KEPT_SESSIONS))
 }
 
 export const PRESS_TIMEOUT_MS = 60_000
@@ -394,7 +422,7 @@ export function withFetchedPrs<S extends Session>(
   return { ...s, prViews: { views: { ...dismissing, ...views }, branchRef, isFetching: false } }
 }
 
-export type PrTab = {
+type PrTab = {
   drawn: { pr: PrView; isSettled: boolean }[]
   branchRef: string | null
   /** How many open PRs wait on the person. */

@@ -1193,6 +1193,25 @@ function openCommands(path, isFile, isExecutable) {
     return { argv: ["open", "-R", path], fallback: null };
   return { argv: ["open", path], fallback: ["open", "-t", path] };
 }
+var OPEN_TIMEOUT_MS = 1e4;
+async function openTarget(run, probe, target, root, home) {
+  const open = (argv2) => run(argv2, { cwd: "/", timeoutMs: OPEN_TIMEOUT_MS });
+  const failure = (r2) => r2.stderr.trim() || `open exited ${r2.code}`;
+  if (/^https:\/\//.test(target)) {
+    const r2 = await open(["open", target]);
+    return r2.code === 0 ? null : failure(r2);
+  }
+  const path = localPath(target, root || "/", home);
+  const info = await probe.stat(path);
+  if (!info)
+    return "it no longer exists";
+  const isFile = info.isFile();
+  const isExecutable = isFile && await probe.isExecutable(path);
+  const { argv, fallback } = openCommands(path, isFile, isExecutable);
+  const r = await open(argv);
+  const retry = r.code !== 0 && fallback ? await open(fallback) : r;
+  return retry.code === 0 ? null : failure(retry);
+}
 function steps(helps) {
   const copy = helps.find((h) => h.kind === "copy");
   const open = helps.find((h) => h.kind === "open");
@@ -1443,6 +1462,15 @@ function demoTurns(turns, effects, isReplied = false) {
   if (isReplied)
     return { ...turns, turnsApplied: turns.turnsStarted };
   return effects.some((e) => e.kind === "send") ? { ...turns, turnsStarted: turns.turnsStarted + 1 } : turns;
+}
+function demoAfterPress(before, r, held) {
+  const { lasts, isSample } = demoRecord(r.lasts, r.effects);
+  return {
+    ledger: pruneClosed(r.ledger, held),
+    lastActions: withLasts(before.lastActions, lasts, r.drop),
+    turns: demoTurns(before.turns, r.effects),
+    isSample
+  };
 }
 async function runLocalEffects(host, effects, rowId, pending) {
   const errors = [];
@@ -1735,6 +1763,9 @@ function groupEmptyText(title) {
   return `No open ${title.toLowerCase()}`;
 }
 var RESUME_TEXT = "Continue";
+function isResumable(stop) {
+  return stop.kind === "api-error";
+}
 function stopText(stop) {
   switch (stop.kind) {
     case "sign-in":
@@ -2111,15 +2142,20 @@ function inboxView({
   const held = new Set([...questionRows, ...taskRows, ...findingRows].filter((r) => r.state.is === "held").map((r) => r.id));
   const closed = [...ledger.closed].filter((d) => !held.has(d.id)).reverse().map((d) => ({
     ...d,
+    outcomeLabel: outcomeLabel(d),
     delivery: d.doneNotification?.error !== undefined ? { error: d.doneNotification.error, canUndo: isUndoable(d) } : (d.how === "answered" || d.how === "done") && lastActions[d.id]?.kind === "mark" && lastActions[d.id]?.at === d.at ? pendingDeliveryAt(lastActions[d.id], now) : null
   }));
-  const fixesSent = ledger.findings.filter((f) => isFixSent(lastActions[f.id])).map((f) => ({
-    ...f,
-    how: "answered",
-    outcome: fixLabel(f),
-    closedAt: lastActions[f.id].at,
-    delivery: pendingDeliveryAt(lastActions[f.id], now)
-  }));
+  const fixesSent = ledger.findings.filter((f) => isFixSent(lastActions[f.id])).map((f) => {
+    const outcome = fixLabel(f);
+    return {
+      ...f,
+      how: "answered",
+      outcome,
+      outcomeLabel: outcomeLabel({ ...f, outcome }),
+      closedAt: lastActions[f.id].at,
+      delivery: pendingDeliveryAt(lastActions[f.id], now)
+    };
+  });
   return {
     needsYou: {
       count: counted.length,
@@ -2131,7 +2167,7 @@ function inboxView({
       count: findingRows.filter(isWaitingRow).length,
       rows: findingRows,
       closed: [
-        ...ledger.closedFindings.filter((f) => !held.has(f.id)).map((f) => ({ ...f, delivery: null })),
+        ...ledger.closedFindings.filter((f) => !held.has(f.id)).map((f) => ({ ...f, outcomeLabel: outcomeLabel(f), delivery: null })),
         ...fixesSent
       ].sort((a, b) => b.closedAt - a.closedAt)
     },
@@ -2704,6 +2740,23 @@ function emptySession() {
     stop: null
   };
 }
+var SESSION_ID = /^[\w-]{1,100}$/;
+var SESSION_FILE = /^[\w-]{1,100}\.json$/;
+function sessionFile(sessionId) {
+  if (!SESSION_ID.test(sessionId))
+    throw new Error(`Not a session id: ${sessionId}`);
+  return `${sessionId}.json`;
+}
+var isSessionFile = (name) => SESSION_FILE.test(name);
+function missingAsNull(err) {
+  if (err.code === "ENOENT")
+    return null;
+  throw err;
+}
+function staleSessionFiles(files, keep) {
+  const ranked = [...files].sort((a, b) => a.mtimeMs - b.mtimeMs || a.name.localeCompare(b.name));
+  return ranked.filter((f) => f.name !== `${keep}.json`).slice(0, Math.max(0, ranked.length - KEPT_SESSIONS));
+}
 var PRESS_TIMEOUT_MS = 60000;
 function upgradeSession(saved) {
   const base = emptySession();
@@ -2936,6 +2989,22 @@ function prTabOf(s, lastActions, now) {
 }
 
 // ../hooks/session-host.ts
+function exclusiveKeys() {
+  const held = new Set;
+  return {
+    run: async (key, fn) => {
+      if (held.has(key))
+        return { acquired: false };
+      held.add(key);
+      try {
+        return { acquired: true, value: await fn() };
+      } finally {
+        held.delete(key);
+      }
+    },
+    isHeld: (key) => held.has(key)
+  };
+}
 async function reconcileUpdateStatus(host) {
   const state = await host.read();
   if (!state.presence.isUpdating)
@@ -3143,6 +3212,24 @@ function isPrFetchDue(s, lastFetchedAt, now) {
   const hasNewPr = splitLinked(s.ledger.prs).tracked.some((ref) => !(ref in s.prViews.views));
   return now - lastFetchedAt >= PRS_REFRESH_MS || hasNewPr && now - lastFetchedAt >= NEW_PR_FETCH_MS;
 }
+function prFetchTracker(now) {
+  const running = new Set;
+  const endedAt = new Map;
+  return {
+    isFetching: (id) => running.has(id),
+    fetchWhenDue: (id, s, fetch) => {
+      if (running.has(id) || !isPrFetchDue(s, endedAt.get(id), now()))
+        return null;
+      running.add(id);
+      return fetch().catch(() => {
+        return;
+      }).finally(() => {
+        endedAt.set(id, now());
+        running.delete(id);
+      });
+    }
+  };
+}
 async function fetchPrs(host, findsBranchPr) {
   const s = await host.read();
   const bin = await host.gh.find();
@@ -3194,23 +3281,11 @@ var LIGHT_TONES = {
 // src/commands.ts
 import { constants } from "fs";
 import { access, stat } from "fs/promises";
-var OPEN_TIMEOUT_MS = 1e4;
-async function openTarget(run, target, root, home) {
-  const open = (argv2) => run(argv2, { cwd: "/", timeoutMs: OPEN_TIMEOUT_MS });
-  const failure = (r2) => r2.stderr.trim() || `open exited ${r2.code}`;
-  if (/^https:\/\//.test(target)) {
-    const r2 = await open(["open", target]);
-    return r2.code === 0 ? null : failure(r2);
-  }
-  const path = localPath(target, root || "/", home);
-  const info = await stat(path).catch(() => null);
-  if (!info)
-    return "it no longer exists";
-  const isExecutable = info.isFile() && await access(path, constants.X_OK).then(() => true, () => false);
-  const { argv, fallback } = openCommands(path, info.isFile(), isExecutable);
-  const r = await open(argv);
-  const retry = r.code !== 0 && fallback ? await open(fallback) : r;
-  return retry.code === 0 ? null : failure(retry);
+function openTarget2(run, target, root, home) {
+  return openTarget(run, {
+    stat: (path) => stat(path).catch(() => null),
+    isExecutable: (path) => access(path, constants.X_OK).then(() => true, () => false)
+  }, target, root, home);
 }
 
 // ../hooks/arrivals.ts
@@ -3225,6 +3300,22 @@ function recordRows(seen, listed) {
       next[tab] = new Set(ids);
   }
   return { seen: next, added };
+}
+function listedRowIds(v) {
+  return {
+    needsYou: [...v.needsYou.questions, ...v.needsYou.tasks].map((r) => r.id),
+    findings: v.findings.rows.map((r) => r.id)
+  };
+}
+function openRowIds(v) {
+  const open = (rows) => rows.filter((r) => r.state.is !== "settled").map((r) => r.id);
+  return { needsYou: open([...v.needsYou.questions, ...v.needsYou.tasks]), findings: open(v.findings.rows) };
+}
+function closedGroups(v, tab, isUnfolded) {
+  return tab === "findings" ? Object.keys(FINDING_GROUPS).map((kind) => ({
+    isUnfolded: isUnfolded(kind),
+    rows: v.findings.closed.filter((f) => f.kind === kind)
+  })) : NEEDS_YOU_GROUPS.map((g) => ({ isUnfolded: isUnfolded(g.kind), rows: v.needsYou.closed[g.list] }));
 }
 function isTabEmpty({
   rows,
@@ -3363,7 +3454,7 @@ function closedLines(d) {
     title: d.title,
     isDim: true,
     age: d.at,
-    feedback: { text: settledLabel(outcomeLabel(d), d.delivery), tone: null },
+    feedback: { text: settledLabel(d.outcomeLabel, d.delivery), tone: null },
     buttons: canUndo ? [undo] : [],
     isStatic: !canUndo,
     isWaiting: false
@@ -3403,7 +3494,7 @@ function stopEntries(screen, ui) {
   const { stop } = screen;
   if (!stop)
     return [];
-  const isResumable = stop.kind === "api-error";
+  const canResume = isResumable(stop);
   const resuming = ui.resuming?.stopAt === stop.at ? ui.resuming : null;
   const resume = {
     label: resuming?.is === "sending" ? "Resuming\u2026" : "Resume",
@@ -3421,11 +3512,11 @@ function stopEntries(screen, ui) {
         title: "Stopped",
         status: { text: `${capitalized(stopText(stop))}.`, tone: "error", rest: "" },
         age: stop.at,
-        detail: isResumable ? null : stopFix(stop),
+        detail: canResume ? null : stopFix(stop),
         feedback: resuming?.is === "refused" ? { text: `Not sent: ${resuming.why}`, tone: "error" } : null,
-        buttons: isResumable ? [resume] : [],
-        isStatic: !isResumable,
-        isWaiting: isResumable,
+        buttons: canResume ? [resume] : [],
+        isStatic: !canResume,
+        isWaiting: canResume,
         isDetailShown: true
       }
     }
@@ -3644,17 +3735,17 @@ function handleKey(screen, ui, key, now, text) {
   const button = key === "enter" ? selected.buttons[focusOf(selected, base)] : selected.buttons.find((b) => b.key === key);
   return button ? activate(screen, base, selected, button, now) : { ui: base };
 }
-function tabRows(screen, now) {
+function prRowIds(view) {
+  return view.prs.drawn.flatMap(({ pr, isSettled }) => [
+    prMarkId(pr.ref),
+    ...isSettled ? [] : [...waitingThreads(pr).map((t) => prThreadId(pr, t)), ...failingChecks(pr).map((c) => prCheckId(pr, c))]
+  ]);
+}
+function tabRows(screen) {
   const { view } = screen;
-  const needsYou = [...view.needsYou.questions, ...view.needsYou.tasks];
-  const openIds = (rows) => rows.filter((r) => r.state.is !== "settled").map((r) => r.id);
   return {
-    listed: {
-      needsYou: needsYou.map((r) => r.id),
-      findings: view.findings.rows.map((r) => r.id),
-      prs: screen.isFetchingPrs ? null : linesOf(prEntries(screen, now)).map((l) => l.id)
-    },
-    open: { needsYou: openIds(needsYou), findings: openIds(view.findings.rows), prs: [] }
+    listed: { ...listedRowIds(view), prs: screen.isFetchingPrs ? null : prRowIds(view) },
+    open: { ...openRowIds(view), prs: [] }
   };
 }
 function isShownEmpty(screen, ui) {
@@ -3662,19 +3753,15 @@ function isShownEmpty(screen, ui) {
   if (ui.tab === "prs")
     return view.prs.drawn.length === 0 && !screen.isFetchingPrs;
   const rows = ui.tab === "needsYou" ? [...view.needsYou.questions, ...view.needsYou.tasks] : view.findings.rows;
-  const closed = ui.tab === "needsYou" ? NEEDS_YOU_GROUPS.map((g) => ({ isUnfolded: ui.unfolded.includes(g.kind), rows: view.needsYou.closed[g.list] })) : Object.keys(FINDING_GROUPS).map((kind) => ({
-    isUnfolded: ui.unfolded.includes(kind),
-    rows: view.findings.closed.filter((f) => f.kind === kind)
-  }));
   return isTabEmpty({
     rows,
     settled: new Set(rows.filter((r) => r.state.is === "settled").map((r) => r.id)),
-    closed,
+    closed: closedGroups(view, ui.tab, (kind) => ui.unfolded.includes(kind)),
     hasBlocker: ui.tab === "needsYou" && screen.stop !== null
   });
 }
 function followRows(screen, ui, seen, isOpening, now) {
-  const { listed, open } = tabRows(screen, now);
+  const { listed, open } = tabRows(screen);
   const recorded2 = recordRows(seen, listed);
   const tabs = TABS.map((t) => t.id);
   const to = followTo(tabs, ui.tab, isShownEmpty(screen, ui), isOpening ? open : recorded2.added);
@@ -3980,6 +4067,17 @@ function createPanel(deps) {
 // ../hooks/demo.ts
 var MIN = 60000;
 var REPO = "https://github.com/acme/visor";
+function demoSession(now) {
+  const d = demoView(now);
+  const s = emptySession();
+  return {
+    ...s,
+    ledger: d.ledger,
+    lastActions: d.lastActions,
+    prViews: d.prViews,
+    presence: { ...s.presence, ...d.turns }
+  };
+}
 function demoView(now) {
   return {
     ledger: {
@@ -4363,29 +4461,24 @@ import { join } from "path";
 function emptyState(sessionId) {
   return { version: 1, sessionId, ...emptySession() };
 }
-function fileName(sessionId) {
-  if (!/^[\w-]{1,100}$/.test(sessionId))
-    throw new Error(`Not a session id: ${sessionId}`);
-  return sessionId;
-}
 function statePath(dir, sessionId) {
-  return join(dir, "sessions", `${fileName(sessionId)}.json`);
+  return join(dir, "sessions", sessionFile(sessionId));
 }
 function upgraded(saved, sessionId) {
   if (saved.version !== undefined && saved.version !== 1)
     throw new Error(`Unsupported inbox state version: ${saved.version}`);
   return { version: 1, sessionId, ...upgradeSession(saved) };
 }
+async function readSaved(dir, sessionId) {
+  const saved = await readFile(statePath(dir, sessionId), "utf8").catch(missingAsNull);
+  return saved === null ? { state: emptyState(sessionId), isSaved: false } : { state: upgraded(JSON.parse(saved), sessionId), isSaved: true };
+}
 async function readState(dir, sessionId) {
-  const saved = await readFile(statePath(dir, sessionId), "utf8").catch((err) => {
-    if (err.code === "ENOENT")
-      return null;
-    throw err;
-  });
-  return saved === null ? emptyState(sessionId) : upgraded(JSON.parse(saved), sessionId);
+  return (await readSaved(dir, sessionId)).state;
 }
 var updateTails = new Map;
-var exclusiveRuns = new Set;
+var exclusiveRuns = exclusiveKeys();
+var madeFolders = new Set;
 var tmpCount = 0;
 function inTurn(key, fn) {
   const run = (updateTails.get(key) ?? Promise.resolve()).then(fn);
@@ -4400,33 +4493,31 @@ function inTurn(key, fn) {
 async function updateState(dir, sessionId, change) {
   const path = statePath(dir, sessionId);
   return inTurn(path, async () => {
-    const current = await readState(dir, sessionId);
+    const { state: current, isSaved } = await readSaved(dir, sessionId);
     const changed = await change(current);
+    if (isSaved && changed === current)
+      return current;
     const next = { ...changed, ledger: pruneClosed(changed.ledger, new Set(changed.heldRows)) };
-    await mkdir(join(dir, "sessions"), { recursive: true });
+    const folder = join(dir, "sessions");
+    if (!madeFolders.has(folder)) {
+      await mkdir(folder, { recursive: true });
+      madeFolders.add(folder);
+    }
     const tmp = `${path}.${process.pid}-${++tmpCount}.tmp`;
     await writeFile(tmp, JSON.stringify(next));
     await rename(tmp, path);
     return next;
   });
 }
-async function exclusiveRun(dir, sessionId, fn) {
-  const key = statePath(dir, sessionId);
-  if (exclusiveRuns.has(key))
-    return { acquired: false };
-  exclusiveRuns.add(key);
-  try {
-    return { acquired: true, value: await fn() };
-  } finally {
-    exclusiveRuns.delete(key);
-  }
+function exclusiveRun(dir, sessionId, fn) {
+  return exclusiveRuns.run(statePath(dir, sessionId), fn);
 }
 async function pruneSessions(dir, keep) {
   const folder = join(dir, "sessions");
-  const names = (await readdir(folder).catch(() => [])).filter((name) => /^[\w-]{1,100}\.json$/.test(name));
+  const names = (await readdir(folder).catch(() => [])).filter(isSessionFile);
   if (names.length <= KEPT_SESSIONS)
     return;
-  const saved = await Promise.all(names.map(async (name) => {
+  const readable = await Promise.all(names.map(async (name) => {
     const path = join(folder, name);
     try {
       const { mtimeMs } = await stat2(path);
@@ -4436,10 +4527,8 @@ async function pruneSessions(dir, keep) {
       return null;
     }
   }));
-  const readable = saved.filter((s) => s !== null).sort((a, b) => a.mtimeMs - b.mtimeMs || a.name.localeCompare(b.name));
-  const stale = readable.filter((s) => s.name !== `${keep}.json`).slice(0, Math.max(0, readable.length - KEPT_SESSIONS));
-  for (const { path, mtimeMs } of stale) {
-    if (updateTails.has(path) || exclusiveRuns.has(path))
+  for (const { path, mtimeMs } of staleSessionFiles(readable.filter((f) => f !== null), keep)) {
+    if (updateTails.has(path) || exclusiveRuns.isHeld(path))
       continue;
     try {
       if ((await stat2(path)).mtimeMs === mtimeMs)
@@ -4452,15 +4541,7 @@ async function pruneSessions(dir, keep) {
 
 // src/demo.ts
 function demoState(now) {
-  const d = demoView(now);
-  const s = emptyState("demo");
-  return {
-    ...s,
-    ledger: d.ledger,
-    lastActions: d.lastActions,
-    prViews: d.prViews,
-    presence: { ...s.presence, ...d.turns }
-  };
+  return { ...emptyState("demo"), ...demoSession(now) };
 }
 function demoSource(deps) {
   let state = demoState(deps.now());
@@ -4480,14 +4561,14 @@ function demoSource(deps) {
       const r = pressOn(state, p, at);
       if ("stale" in r)
         return { error: null, note: "stale" };
-      const { lasts, isSample } = demoRecord(r.lasts, r.effects);
+      const { isSample, ...after } = demoAfterPress({ lastActions: state.lastActions, turns: state.presence }, r, new Set(Object.keys(holds.replies)));
       state = {
         ...state,
-        ledger: pruneClosed(r.ledger, new Set(Object.keys(holds.replies))),
-        lastActions: withLasts(state.lastActions, lasts, r.drop),
-        presence: { ...state.presence, ...demoTurns(state.presence, r.effects) }
+        ledger: after.ledger,
+        lastActions: after.lastActions,
+        presence: { ...state.presence, ...after.turns }
       };
-      if (r.effects.length > 0)
+      if (r.effects.some((e) => e.kind === "send"))
         deps.after(() => {
           state = { ...state, presence: { ...state.presence, ...demoTurns(state.presence, [], true) } };
           changed();
@@ -4642,15 +4723,20 @@ function createInbox(pi, deps = defaultDeps) {
   const dir = deps.stateDir(pi);
   const openPanels = new Set;
   const prepared = new Set;
-  const fetchingPrs = new Set;
-  const prsFetchedAt = new Map;
+  const prFetches = prFetchTracker(deps.now);
   const listeners = new Map;
   let noted = null;
   let isGhMissing = false;
   const notifyChanged = (id) => listeners.get(id)?.forEach((listener) => listener());
   const change = async (id, fn) => {
-    const saved = await updateState(dir, id, fn);
-    notifyChanged(id);
+    let isChanged = false;
+    const saved = await updateState(dir, id, async (current) => {
+      const changed = await fn(current);
+      isChanged = changed !== current;
+      return changed;
+    });
+    if (isChanged)
+      notifyChanged(id);
     return saved;
   };
   const run = async (args, { cwd, timeoutMs }) => {
@@ -4705,7 +4791,7 @@ function createInbox(pi, deps = defaultDeps) {
         const why = sendToAgent(ctx, text);
         return why === null ? { state: "accepted", queuedId: null } : { state: "rejected", reason: why };
       },
-      perform: async (_s, effect) => effect.kind === "copy" ? deps.copy(effect.text) : openTarget(run, effect.target, ctx.cwd, deps.home),
+      perform: async (_s, effect) => effect.kind === "copy" ? deps.copy(effect.text) : openTarget2(run, effect.target, ctx.cwd, deps.home),
       gh: {
         find: gh.find,
         forget: gh.forget,
@@ -4728,26 +4814,16 @@ function createInbox(pi, deps = defaultDeps) {
   }
   function fetchPrsWhenDue(ctx) {
     const id = sessionIdOf(ctx);
-    if (fetchingPrs.has(id))
+    if (prFetches.isFetching(id))
       return;
-    fetchingPrs.add(id);
-    notifyChanged(id);
     deps.background((async () => {
-      try {
-        const host = hostFor(ctx);
-        const s = await host.read();
-        const last = prsFetchedAt.get(id);
-        if (!isPrFetchDue(s, last, deps.now()))
-          return;
-        try {
-          await fetchPrs(host, true);
-        } finally {
-          prsFetchedAt.set(id, deps.now());
-        }
-      } finally {
-        fetchingPrs.delete(id);
-        notifyChanged(id);
-      }
+      const host = hostFor(ctx);
+      const fetching = prFetches.fetchWhenDue(id, await host.read(), () => fetchPrs(host, true));
+      if (!fetching)
+        return;
+      notifyChanged(id);
+      await fetching;
+      notifyChanged(id);
     })());
   }
   function wakeLater(ctx) {
@@ -4906,7 +4982,7 @@ function createInbox(pi, deps = defaultDeps) {
         view: sessionView(s, deps.now(), deps.settleWindowMs, holds),
         modelName: modelNameOf(ctx),
         isGhMissing,
-        isFetchingPrs: fetchingPrs.has(id),
+        isFetchingPrs: prFetches.isFetching(id),
         stop: s.stop
       };
     },
@@ -4928,8 +5004,8 @@ function createInbox(pi, deps = defaultDeps) {
       listeners.set(id, set);
       return () => void set.delete(listener);
     },
-    press: async (ctx, p, holds, isStale = false) => {
-      const outcome = await press(hostFor(ctx), p, isStale, holds);
+    press: async (ctx, p, holds) => {
+      const outcome = await press(hostFor(ctx), p, false, holds);
       if (outcome.wakesForDone)
         wakeLater(ctx);
       return outcome;

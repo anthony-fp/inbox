@@ -1,4 +1,5 @@
-import type { DemoCopy } from '../types'
+import type { DemoCopy, Session } from '../types'
+import { emptySession } from './session'
 
 const MIN = 60_000
 const REPO = 'https://github.com/acme/visor'
@@ -9,6 +10,20 @@ export function isDemoCopy(saved: unknown): saved is DemoCopy {
   const d = saved as Record<string, unknown>
 
   return ['ledger', 'prViews', 'lastActions', 'notes', 'turns'].every(k => d[k] !== null && typeof d[k] === 'object')
+}
+
+/** The sample as a session a host can draw and press on. */
+export function demoSession(now: number): Session {
+  const d = demoView(now)
+  const s = emptySession()
+
+  return {
+    ...s,
+    ledger: d.ledger,
+    lastActions: d.lastActions,
+    prViews: d.prViews,
+    presence: { ...s.presence, ...d.turns },
+  }
 }
 
 export function demoView(now: number): DemoCopy {

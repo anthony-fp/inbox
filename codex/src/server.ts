@@ -3,19 +3,19 @@ import { constants } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
 
 import { ghFinder, ghIn } from '../../hooks/gh'
+import type { Run } from '../../hooks/gh'
 import { isDismissing, isTracked } from '../../hooks/pr-tab'
 import type { PrPress } from '../../hooks/pr-tab'
-import { demoRecord, demoTurns, localPath, noteText, openCommands, withLasts } from '../../hooks/presses'
-import type { RowPress } from '../../hooks/presses'
+import { demoAfterPress, demoTurns, noteText, openTarget } from '../../hooks/presses'
+import type { PathProbe, RowPress } from '../../hooks/presses'
 import { CLOSE_DESCRIPTION, CLOSE_SCHEMA, RECORD_SCHEMA, recordDescription } from '../../hooks/tools'
 import { noteToolCall, viewOf } from './core'
 import type { TabView } from './core'
 import { demoState } from './demo'
 import { codexStore } from './host'
-import { pruneClosed } from '../../hooks/ledger'
 import { pressOn, recorded } from '../../hooks/session'
 import type { SendOutcome } from '../../hooks/session'
-import { fetchPrs, isPrFetchDue, press, wakeForDone as wakeSessionForDone } from '../../hooks/session-host'
+import { fetchPrs, prFetchTracker, press, wakeForDone as wakeSessionForDone } from '../../hooks/session-host'
 import type { SessionHost } from '../../hooks/session-host'
 import { NO_HOLDS, SETTLED_MS } from '../../hooks/view'
 import type { ReplyHolds } from '../../hooks/view'
@@ -24,7 +24,6 @@ import { pruneSessions, readState, updateState } from './state'
 import { reconcileUpdateStatus } from './update'
 import type { SessionState } from './state'
 import { CODEX, INBOX_DESCRIPTION, inboxToolText, VIEW_DESCRIPTION } from './texts'
-import type { Run } from './run'
 import type { LastAction, PrViews, RowNote } from '../../types'
 
 /** Codex keeps a tab's page by its address, even across server restarts, so a new build needs a new address for a new chat to load it. */
@@ -168,9 +167,8 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
   const uri = tabUri(deps.tabHtml)
   const tools = toolsFor(uri)
   const gh = ghFinder(deps.exec)
-  const fetchingPrs = new Set<string>()
+  const prFetches = prFetchTracker(now)
   const prunedFor = new Set<string>()
-  const prsFetchedAt = new Map<string, number>()
   let isGhMissing = false
 
   async function queueMessage(s: SessionState, message: string, resolvedCli?: string): Promise<SendOutcome> {
@@ -219,16 +217,7 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
   const currentPage = async () => (await deps.devPage?.()) ?? deps.tabHtml
 
   function fetchPrsWhenDue(id: string, s: SessionState) {
-    if (fetchingPrs.has(id)) return
-    const last = prsFetchedAt.get(id)
-    if (!isPrFetchDue(s, last, now())) return
-    fetchingPrs.add(id)
-    void fetchPrs(hostFor(id), true)
-      .catch(() => undefined)
-      .finally(() => {
-        prsFetchedAt.set(id, now())
-        fetchingPrs.delete(id)
-      })
+    void prFetches.fetchWhenDue(id, s, () => fetchPrs(hostFor(id), true))
   }
 
   const served = async (
@@ -243,7 +232,7 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     return {
       ...viewOf(current, now(), holds),
       thread: id,
-      isFetchingPrs: !isDemo && fetchingPrs.has(id),
+      isFetchingPrs: !isDemo && prFetches.isFetching(id),
       isGhMissing: !isDemo && isGhMissing,
       devPage: tabUri(await currentPage()),
       ...(deps.build ? { serverBuild: deps.build } : {}),
@@ -264,29 +253,15 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     }
   }
 
-  /** Opens a link, or a path as `openCommands` decides. Returns why it could not, or null. */
-  async function open(s: SessionState, target: string): Promise<string | null> {
-    const run = (argv: string[]) => deps.exec(argv, { cwd: '/', timeoutMs: 10_000 })
-    const failure = (r: { code: number; stderr: string }) => r.stderr.trim() || `open exited ${r.code}`
-    if (/^https:\/\//.test(target)) {
-      const r = await run(['open', target])
-      return r.code === 0 ? null : failure(r)
-    }
-    const path = localPath(target, s.root || '/', s.home)
-    const info = await stat(path).catch(() => null)
-    if (!info) return 'it no longer exists'
-    const isExecutable =
-      info.isFile() &&
-      (await access(path, constants.X_OK).then(
+  const files: PathProbe = {
+    stat: path => stat(path).catch(() => null),
+    isExecutable: path =>
+      access(path, constants.X_OK).then(
         () => true,
         () => false,
-      ))
-    const { argv, fallback } = openCommands(path, info.isFile(), isExecutable)
-    const r = await run(argv)
-    const retry = r.code !== 0 && fallback ? await run(fallback) : r
-
-    return retry.code === 0 ? null : failure(retry)
+      ),
   }
+  const open = (s: SessionState, target: string) => openTarget(deps.exec, files, target, s.root, s.home)
 
   const demos = new Map<string, SessionState>()
   const demoOf = (id: string) => {
@@ -304,12 +279,16 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     const s = demoOf(id)
     const r = thread === id ? pressOn(s, p, now()) : ({ stale: true } as const)
     if ('stale' in r) return { view: await served(s, id, true, holds), copy: null, error: null, note: 'stale' }
-    const { lasts, isSample } = demoRecord(r.lasts, r.effects)
+    const { isSample, ...after } = demoAfterPress(
+      { lastActions: s.lastActions, turns: s.presence },
+      r,
+      new Set(Object.keys(holds.replies)),
+    )
     const next: SessionState = {
       ...s,
-      ledger: pruneClosed(r.ledger, new Set(Object.keys(holds.replies))),
-      lastActions: withLasts(s.lastActions, lasts, r.drop),
-      presence: { ...s.presence, ...demoTurns(s.presence, r.effects) },
+      ledger: after.ledger,
+      lastActions: after.lastActions,
+      presence: { ...s.presence, ...after.turns },
     }
     demos.set(id, next)
     if (r.effects.some(e => e.kind === 'send'))

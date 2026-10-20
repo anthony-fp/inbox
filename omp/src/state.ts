@@ -2,8 +2,16 @@ import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from 'node:
 import { join } from 'node:path'
 
 import { KEPT_SESSIONS, pruneClosed } from '../../hooks/ledger'
-import { emptySession, upgradeSession } from '../../hooks/session'
+import {
+  emptySession,
+  isSessionFile,
+  missingAsNull,
+  sessionFile,
+  staleSessionFiles,
+  upgradeSession,
+} from '../../hooks/session'
 import type { SavedSession, Session } from '../../hooks/session'
+import { exclusiveKeys } from '../../hooks/session-host'
 
 export type OmpState = Session & {
   version: 1
@@ -14,14 +22,8 @@ export function emptyState(sessionId: string): OmpState {
   return { version: 1, sessionId, ...emptySession() }
 }
 
-function fileName(sessionId: string): string {
-  if (!/^[\w-]{1,100}$/.test(sessionId)) throw new Error(`Not a session id: ${sessionId}`)
-
-  return sessionId
-}
-
 export function statePath(dir: string, sessionId: string): string {
-  return join(dir, 'sessions', `${fileName(sessionId)}.json`)
+  return join(dir, 'sessions', sessionFile(sessionId))
 }
 
 type Saved = SavedSession & Partial<Pick<OmpState, 'version' | 'sessionId'>>
@@ -33,18 +35,22 @@ function upgraded(saved: Saved, sessionId: string): OmpState {
   return { version: 1, sessionId, ...upgradeSession(saved) }
 }
 
+async function readSaved(dir: string, sessionId: string): Promise<{ state: OmpState; isSaved: boolean }> {
+  const saved = await readFile(statePath(dir, sessionId), 'utf8').catch(missingAsNull)
+
+  return saved === null
+    ? { state: emptyState(sessionId), isSaved: false }
+    : { state: upgraded(JSON.parse(saved), sessionId), isSaved: true }
+}
+
 /** A session's saved state. A missing file is a new session; a file that cannot be read or converted throws. */
 export async function readState(dir: string, sessionId: string): Promise<OmpState> {
-  const saved = await readFile(statePath(dir, sessionId), 'utf8').catch((err: NodeJS.ErrnoException) => {
-    if (err.code === 'ENOENT') return null
-    throw err
-  })
-
-  return saved === null ? emptyState(sessionId) : upgraded(JSON.parse(saved), sessionId)
+  return (await readSaved(dir, sessionId)).state
 }
 
 const updateTails = new Map<string, Promise<void>>()
-const exclusiveRuns = new Set<string>()
+const exclusiveRuns = exclusiveKeys()
+const madeFolders = new Set<string>()
 let tmpCount = 0
 
 /** Runs `fn` after every earlier call with the same key has settled. A failure does not block later calls. */
@@ -74,10 +80,15 @@ export async function updateState(
   const path = statePath(dir, sessionId)
 
   return inTurn(path, async () => {
-    const current = await readState(dir, sessionId)
+    const { state: current, isSaved } = await readSaved(dir, sessionId)
     const changed = await change(current)
+    if (isSaved && changed === current) return current
     const next = { ...changed, ledger: pruneClosed(changed.ledger, new Set(changed.heldRows)) }
-    await mkdir(join(dir, 'sessions'), { recursive: true })
+    const folder = join(dir, 'sessions')
+    if (!madeFolders.has(folder)) {
+      await mkdir(folder, { recursive: true })
+      madeFolders.add(folder)
+    }
     const tmp = `${path}.${process.pid}-${++tmpCount}.tmp`
     await writeFile(tmp, JSON.stringify(next))
     await rename(tmp, path)
@@ -87,19 +98,8 @@ export async function updateState(
 }
 
 /** Runs `fn` unless another run already holds the session's per-reply update in this process. */
-export async function exclusiveRun<T>(
-  dir: string,
-  sessionId: string,
-  fn: () => Promise<T>,
-): Promise<{ acquired: true; value: T } | { acquired: false }> {
-  const key = statePath(dir, sessionId)
-  if (exclusiveRuns.has(key)) return { acquired: false }
-  exclusiveRuns.add(key)
-  try {
-    return { acquired: true, value: await fn() }
-  } finally {
-    exclusiveRuns.delete(key)
-  }
+export function exclusiveRun<T>(dir: string, sessionId: string, fn: () => Promise<T>) {
+  return exclusiveRuns.run(statePath(dir, sessionId), fn)
 }
 
 /**
@@ -109,9 +109,9 @@ export async function exclusiveRun<T>(
  */
 export async function pruneSessions(dir: string, keep: string): Promise<void> {
   const folder = join(dir, 'sessions')
-  const names = (await readdir(folder).catch(() => [])).filter(name => /^[\w-]{1,100}\.json$/.test(name))
+  const names = (await readdir(folder).catch(() => [])).filter(isSessionFile)
   if (names.length <= KEPT_SESSIONS) return
-  const saved = await Promise.all(
+  const readable = await Promise.all(
     names.map(async name => {
       const path = join(folder, name)
       try {
@@ -123,10 +123,11 @@ export async function pruneSessions(dir: string, keep: string): Promise<void> {
       }
     }),
   )
-  const readable = saved.filter(s => s !== null).sort((a, b) => a.mtimeMs - b.mtimeMs || a.name.localeCompare(b.name))
-  const stale = readable.filter(s => s.name !== `${keep}.json`).slice(0, Math.max(0, readable.length - KEPT_SESSIONS))
-  for (const { path, mtimeMs } of stale) {
-    if (updateTails.has(path) || exclusiveRuns.has(path)) continue
+  for (const { path, mtimeMs } of staleSessionFiles(
+    readable.filter(f => f !== null),
+    keep,
+  )) {
+    if (updateTails.has(path) || exclusiveRuns.isHeld(path)) continue
     try {
       if ((await stat(path)).mtimeMs === mtimeMs) await unlink(path)
     } catch {

@@ -13,7 +13,14 @@ import type { Run } from '../../hooks/gh'
 import type { RowPress } from '../../hooks/presses'
 import { endTurn, noteActivity, notePrompt, recorded, sessionView } from '../../hooks/session'
 import type { SessionView } from '../../hooks/session'
-import { fetchPrs, isPrFetchDue, press, reconcileUpdateStatus, runUpdates, wakeForDone } from '../../hooks/session-host'
+import {
+  fetchPrs,
+  prFetchTracker,
+  press,
+  reconcileUpdateStatus,
+  runUpdates,
+  wakeForDone,
+} from '../../hooks/session-host'
 import type { PressOutcome, SessionHost } from '../../hooks/session-host'
 import { CLOSE_DESCRIPTION, CLOSE_SCHEMA, RECORD_SCHEMA, recordDescription } from '../../hooks/tools'
 import { DARK_TONES, LIGHT_TONES } from '../../hooks/tones'
@@ -80,8 +87,8 @@ export type Inbox = {
   fetchPrsWhenDue(ctx: ExtensionContext): void
   /** Calls `listener` after the session's saved state changes. Returns how to stop. */
   onChange(ctx: ExtensionContext, listener: () => void): () => void
-  /** Applies a press for the session. `isStale` is true when the panel drew the press for another session. */
-  press(ctx: ExtensionContext, p: RowPress | PrPress, holds: ReplyHolds, isStale?: boolean): Promise<PressOutcome>
+  /** Applies a press for the session. */
+  press(ctx: ExtensionContext, p: RowPress | PrPress, holds: ReplyHolds): Promise<PressOutcome>
   /** Sends the message that resumes a stopped turn. Returns why it could not, or null. */
   resume(ctx: ExtensionContext): string | null
 }
@@ -272,8 +279,7 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
   const dir = deps.stateDir(pi)
   const openPanels = new Set<string>()
   const prepared = new Set<string>()
-  const fetchingPrs = new Set<string>()
-  const prsFetchedAt = new Map<string, number>()
+  const prFetches = prFetchTracker(deps.now)
   const listeners = new Map<string, Set<() => void>>()
   let noted: { id: string; prompt: string; notes: string[] } | null = null
   let isGhMissing = false
@@ -282,8 +288,14 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
   const notifyChanged = (id: string) => listeners.get(id)?.forEach(listener => listener())
 
   const change = async (id: string, fn: Parameters<typeof updateState>[2]) => {
-    const saved = await updateState(dir, id, fn)
-    notifyChanged(id)
+    let isChanged = false
+    const saved = await updateState(dir, id, async current => {
+      const changed = await fn(current)
+      isChanged = changed !== current
+
+      return changed
+    })
+    if (isChanged) notifyChanged(id)
 
     return saved
   }
@@ -376,25 +388,15 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
 
   function fetchPrsWhenDue(ctx: ExtensionContext): void {
     const id = sessionIdOf(ctx)
-    if (fetchingPrs.has(id)) return
-    fetchingPrs.add(id)
-    notifyChanged(id)
+    if (prFetches.isFetching(id)) return
     deps.background(
       (async () => {
-        try {
-          const host = hostFor(ctx)
-          const s = await host.read()
-          const last = prsFetchedAt.get(id)
-          if (!isPrFetchDue(s, last, deps.now())) return
-          try {
-            await fetchPrs(host, true)
-          } finally {
-            prsFetchedAt.set(id, deps.now())
-          }
-        } finally {
-          fetchingPrs.delete(id)
-          notifyChanged(id)
-        }
+        const host = hostFor(ctx)
+        const fetching = prFetches.fetchWhenDue(id, await host.read(), () => fetchPrs(host, true))
+        if (!fetching) return
+        notifyChanged(id)
+        await fetching
+        notifyChanged(id)
       })(),
     )
   }
@@ -565,7 +567,7 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
         view: sessionView(s, deps.now(), deps.settleWindowMs, holds),
         modelName: modelNameOf(ctx),
         isGhMissing,
-        isFetchingPrs: fetchingPrs.has(id),
+        isFetchingPrs: prFetches.isFetching(id),
         stop: s.stop,
       }
     },
@@ -586,8 +588,8 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
 
       return () => void set.delete(listener)
     },
-    press: async (ctx, p, holds, isStale = false) => {
-      const outcome = await press(hostFor(ctx), p, isStale, holds)
+    press: async (ctx, p, holds) => {
+      const outcome = await press(hostFor(ctx), p, false, holds)
       if (outcome.wakesForDone) wakeLater(ctx)
 
       return outcome

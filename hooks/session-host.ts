@@ -18,6 +18,30 @@ import type { Pressed, SendOutcome, Session } from './session'
 import type { ReplyHolds } from './view'
 import type { RowNote } from '../types'
 
+export type Exclusive<T> = { acquired: true; value: T } | { acquired: false }
+
+/** Keys that at most one run holds at a time in this process. */
+export function exclusiveKeys(): {
+  /** Runs `fn` unless a run already holds `key`. The hold ends when `fn` settles. */
+  run<T>(key: string, fn: () => Promise<T>): Promise<Exclusive<T>>
+  isHeld(key: string): boolean
+} {
+  const held = new Set<string>()
+
+  return {
+    run: async (key, fn) => {
+      if (held.has(key)) return { acquired: false }
+      held.add(key)
+      try {
+        return { acquired: true, value: await fn() }
+      } finally {
+        held.delete(key)
+      }
+    },
+    isHeld: key => held.has(key),
+  }
+}
+
 export type Ask = (prompt: string) => Promise<string | null>
 
 /** Everything a host supplies to run one session. A function here takes the members it uses. */
@@ -27,7 +51,7 @@ export type SessionHost<S extends Session> = {
   /** Changes the session under its lock. An external effect, such as a delivery, runs outside a change. */
   update(change: (s: S) => S | Promise<S>): Promise<S>
   /** Runs `fn` unless another run holds the session's per-reply update. */
-  exclusive<T>(fn: () => Promise<T>): Promise<{ acquired: true; value: T } | { acquired: false }>
+  exclusive<T>(fn: () => Promise<T>): Promise<Exclusive<T>>
   /** Calls the inbox model. Null when it fails. */
   ask: Ask
   /** Sends a message to the agent as if the person typed it. Runs outside a change, so it may change the session itself. */
@@ -339,6 +363,34 @@ export function isPrFetchDue(s: Session, lastFetchedAt: number | undefined, now:
   const hasNewPr = splitLinked(s.ledger.prs).tracked.some(ref => !(ref in s.prViews.views))
 
   return now - lastFetchedAt >= PRS_REFRESH_MS || (hasNewPr && now - lastFetchedAt >= NEW_PR_FETCH_MS)
+}
+
+/** Which sessions have a PR fetch running, and when each last ended. */
+export function prFetchTracker(now: () => number): {
+  isFetching(id: string): boolean
+  /**
+   * Runs `fetch` when no fetch is running for `id` and `isPrFetchDue` says the PRs are due. Returns the run, which
+   * never rejects, or null when nothing started.
+   */
+  fetchWhenDue(id: string, s: Session, fetch: () => Promise<void>): Promise<void> | null
+} {
+  const running = new Set<string>()
+  const endedAt = new Map<string, number>()
+
+  return {
+    isFetching: id => running.has(id),
+    fetchWhenDue: (id, s, fetch) => {
+      if (running.has(id) || !isPrFetchDue(s, endedAt.get(id), now())) return null
+      running.add(id)
+
+      return fetch()
+        .catch(() => undefined)
+        .finally(() => {
+          endedAt.set(id, now())
+          running.delete(id)
+        })
+    },
+  }
 }
 
 /**

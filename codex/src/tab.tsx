@@ -38,7 +38,6 @@ import {
   replyHint,
   rowMark,
   rowFeedbackText,
-  outcomeLabel,
   settledLabel,
   ROW_COPY,
   SETTLED_MS,
@@ -1250,7 +1249,7 @@ function itemsClosed(v: View, kind: 'question' | 'task', entries: Entry[]): Clos
   return closedShown(v.needsYou.closed[kind === 'question' ? 'questions' : 'tasks'], settledIn(entries)).map(d => ({
     id: d.id,
     ask: d.ask,
-    outcome: d.outcome,
+    outcomeLabel: d.outcomeLabel,
     state: closedState(d),
     at: d.at,
     delivery: d.delivery,
@@ -1305,8 +1304,7 @@ function groupEmpty(title: string, rest: Entry[]): GroupEmpty | null {
 type ClosedLine = {
   id: string
   ask: string
-  outcome: string
-  askedAs?: string
+  outcomeLabel: string
   state: ClosedState
   at: number
   delivery: Parameters<typeof settledLabel>[1]
@@ -1372,7 +1370,7 @@ function GroupEnd({
                 <span class="mark">{d.delivery === null ? CLOSED_MARKS[d.state] : ''}</span>
                 <div class="content tight">
                   <div class="muted">{d.ask}</div>
-                  <div class="outcome">{settledLabel(outcomeLabel(d), d.delivery)}</div>
+                  <div class="outcome">{settledLabel(d.outcomeLabel, d.delivery)}</div>
                   {d.delivery && typeof d.delivery === 'object' && d.delivery.canUndo ? (
                     <button
                       type="button"
@@ -1447,8 +1445,7 @@ function Findings({ v, lists, now }: { v: View; lists: Lists; now: number }) {
     closedShown(closedOf(kind), settled).map(f => ({
       id: f.id,
       ask: f.title,
-      outcome: f.outcome,
-      askedAs: f.askedAs,
+      outcomeLabel: f.outcomeLabel,
       state: closedState(f),
       at: f.closedAt,
       delivery: f.delivery,

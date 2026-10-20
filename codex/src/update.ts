@@ -8,7 +8,7 @@ import type { Ask } from '../../hooks/session-host'
 import { codexStore } from './host'
 import type { SessionState } from './state'
 import { CODEX } from './texts'
-import type { Run } from './run'
+import type { Run } from '../../hooks/gh'
 
 /** The inbox model, at low reasoning effort. gpt-6-luna is faster but closed a finding the reply only mentioned. */
 export const MODEL = 'gpt-6.1-sol'

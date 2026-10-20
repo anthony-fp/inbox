@@ -1,18 +1,14 @@
-import { demoView } from '../../hooks/demo'
+import { demoSession } from '../../hooks/demo'
 import { emptyState } from './state'
 import type { SessionState } from './state'
 
 export function demoState(now: number): SessionState {
-  const d = demoView(now)
   const s = emptyState('demo')
 
   return {
     ...s,
+    ...demoSession(now),
     root: '/demo',
-    ledger: d.ledger,
-    lastActions: d.lastActions,
-    prViews: d.prViews,
-    presence: { ...s.presence, ...d.turns },
     heard: { ...s.heard, startAt: now },
   }
 }

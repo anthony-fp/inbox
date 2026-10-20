@@ -1,5 +1,5 @@
 import type { Closed, Draft, FoldKind, Stop, Tab } from '../../types'
-import { followTo, isTabEmpty, recordRows } from '../../hooks/arrivals'
+import { closedGroups, followTo, isTabEmpty, listedRowIds, openRowIds, recordRows } from '../../hooks/arrivals'
 import type { RowRecord } from '../../hooks/arrivals'
 import { closedState } from '../../hooks/ledger'
 import {
@@ -43,6 +43,7 @@ import {
   groupEmptyText,
   heldReplies,
   isFailure,
+  isResumable,
   isWaitingRow,
   keptOpen,
   replyHint,
@@ -50,7 +51,6 @@ import {
   rowFeedbackText,
   rowKeyPlan,
   rowMark,
-  outcomeLabel,
   settledLabel,
   stopFix,
   stopText,
@@ -270,7 +270,7 @@ type ClosedLine = {
   at: number
   how: Closed['how']
   outcome: string
-  askedAs?: string
+  outcomeLabel: string
   delivery: ClosedDelivery
 }
 
@@ -299,7 +299,7 @@ function closedLines(d: ClosedLine): Line {
     title: d.title,
     isDim: true,
     age: d.at,
-    feedback: { text: settledLabel(outcomeLabel(d), d.delivery), tone: null },
+    feedback: { text: settledLabel(d.outcomeLabel, d.delivery), tone: null },
     buttons: canUndo ? [undo] : [],
     isStatic: !canUndo,
     isWaiting: false,
@@ -337,7 +337,7 @@ function groupEntries(g: Group, unfolded: readonly FoldKind[]): Entry[] {
 function stopEntries(screen: PanelScreen, ui: PanelUi): Entry[] {
   const { stop } = screen
   if (!stop) return []
-  const isResumable = stop.kind === 'api-error'
+  const canResume = isResumable(stop)
   const resuming = ui.resuming?.stopAt === stop.at ? ui.resuming : null
   const resume: Button = {
     label: resuming?.is === 'sending' ? 'Resuming…' : 'Resume',
@@ -356,11 +356,11 @@ function stopEntries(screen: PanelScreen, ui: PanelUi): Entry[] {
         title: 'Stopped',
         status: { text: `${capitalized(stopText(stop))}.`, tone: 'error', rest: '' },
         age: stop.at,
-        detail: isResumable ? null : stopFix(stop),
+        detail: canResume ? null : stopFix(stop),
         feedback: resuming?.is === 'refused' ? { text: `Not sent: ${resuming.why}`, tone: 'error' } : null,
-        buttons: isResumable ? [resume] : [],
-        isStatic: !isResumable,
-        isWaiting: isResumable,
+        buttons: canResume ? [resume] : [],
+        isStatic: !canResume,
+        isWaiting: canResume,
         isDetailShown: true,
       },
     },
@@ -611,22 +611,23 @@ export function handleKey(screen: PanelScreen, ui: PanelUi, key: string, now: nu
 
 export type SeenRows = RowRecord<Tab>
 
+/** The ids of the rows `prEntries` draws: each PR's mark, and for a PR not settled, its waiting threads and failing checks. */
+function prRowIds(view: SessionView): string[] {
+  return view.prs.drawn.flatMap(({ pr, isSettled }) => [
+    prMarkId(pr.ref),
+    ...(isSettled
+      ? []
+      : [...waitingThreads(pr).map(t => prThreadId(pr, t)), ...failingChecks(pr).map(c => prCheckId(pr, c))]),
+  ])
+}
+
 /** Each tab's row ids: every row it lists, and the open rows a freshly opened panel moves for. PRs are null while they load. */
-function tabRows(
-  screen: PanelScreen,
-  now: number,
-): { listed: Record<Tab, string[] | null>; open: Record<Tab, string[]> } {
+function tabRows(screen: PanelScreen): { listed: Record<Tab, string[] | null>; open: Record<Tab, string[]> } {
   const { view } = screen
-  const needsYou = [...view.needsYou.questions, ...view.needsYou.tasks]
-  const openIds = (rows: RowView[]) => rows.filter(r => r.state.is !== 'settled').map(r => r.id)
 
   return {
-    listed: {
-      needsYou: needsYou.map(r => r.id),
-      findings: view.findings.rows.map(r => r.id),
-      prs: screen.isFetchingPrs ? null : linesOf(prEntries(screen, now)).map(l => l.id),
-    },
-    open: { needsYou: openIds(needsYou), findings: openIds(view.findings.rows), prs: [] },
+    listed: { ...listedRowIds(view), prs: screen.isFetchingPrs ? null : prRowIds(view) },
+    open: { ...openRowIds(view), prs: [] },
   }
 }
 
@@ -634,18 +635,10 @@ function isShownEmpty(screen: PanelScreen, ui: PanelUi): boolean {
   const { view } = screen
   if (ui.tab === 'prs') return view.prs.drawn.length === 0 && !screen.isFetchingPrs
   const rows = ui.tab === 'needsYou' ? [...view.needsYou.questions, ...view.needsYou.tasks] : view.findings.rows
-  const closed =
-    ui.tab === 'needsYou'
-      ? NEEDS_YOU_GROUPS.map(g => ({ isUnfolded: ui.unfolded.includes(g.kind), rows: view.needsYou.closed[g.list] }))
-      : (Object.keys(FINDING_GROUPS) as (keyof typeof FINDING_GROUPS)[]).map(kind => ({
-          isUnfolded: ui.unfolded.includes(kind),
-          rows: view.findings.closed.filter(f => f.kind === kind),
-        }))
-
   return isTabEmpty({
     rows,
     settled: new Set(rows.filter(r => r.state.is === 'settled').map(r => r.id)),
-    closed,
+    closed: closedGroups(view, ui.tab, kind => ui.unfolded.includes(kind)),
     hasBlocker: ui.tab === 'needsYou' && screen.stop !== null,
   })
 }
@@ -662,7 +655,7 @@ export function followRows(
   isOpening: boolean,
   now: number,
 ): { ui: PanelUi; seen: SeenRows } {
-  const { listed, open } = tabRows(screen, now)
+  const { listed, open } = tabRows(screen)
   const recorded = recordRows(seen, listed)
   const tabs = TABS.map(t => t.id)
   const to = followTo(tabs, ui.tab, isShownEmpty(screen, ui), isOpening ? open : recorded.added)
