@@ -656,7 +656,6 @@ test('last actions an earlier build saved convert once by the table, and a task 
   world($, on, [])
   ledgerReply =
     'NOW: Waiting on the load script\nNEW: do | - | Run the load script | - | -\nHELP: new 1 | run | ./load.sh | load script'
-  const LAST_ACTIONS = { plugin: 'inbox', key: 'lastActions' } as const
   const at = 1_000_000
   const thread = (id: string) => `acme/greet#12 thread ${id}`
   const old: Record<string, Record<string, unknown>> = {
@@ -712,9 +711,9 @@ test('last actions an earlier build saved convert once by the table, and a task 
   }
   let saving: unknown = null
   let saved: unknown = null
-  on('state.set', LAST_ACTIONS, ($, e, next) => {
-    const write = saving ? { ...e, value: saving as never } : e
-    saved = write.value
+  on('state.set', { plugin: 'inbox', key: 'session' } as const, ($, e, next) => {
+    const write = saving ? { ...e, value: { ...e.value, lastActions: saving as never } } : e
+    saved = write.value.lastActions
     return next(write)
   })
   let savingUnfolded: unknown = null
@@ -1517,10 +1516,10 @@ test('an older Claude send with no saved receipt cannot acknowledge a new identi
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])
   let clearSent = false
-  on('state.set', { plugin: 'inbox', key: 'sent' } as const, ($, e, next) => {
+  on('state.set', { plugin: 'inbox', key: 'session' } as const, ($, e, next) => {
     if (!clearSent) return next(e)
     clearSent = false
-    return next({ ...e, value: [] })
+    return next({ ...e, value: { ...e.value, sent: [] } })
   })
 
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
@@ -1720,9 +1719,12 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   let hasReply = false
   let isResolved = false
   let onFetched: (() => void) | undefined
-  on('state.set', { plugin: 'inbox', key: 'prViews' } as const, async ($, e, next) => {
+  let isFetching = false
+  on('state.set', { plugin: 'inbox', key: 'session' } as const, async ($, e, next) => {
     const r = await next(e)
-    if (!e.value.isFetching) onFetched?.()
+    const wasFetching = isFetching
+    isFetching = e.value.prViews.isFetching
+    if (wasFetching && !isFetching) onFetched?.()
     return r
   })
   ghAnswers.push(
@@ -2017,9 +2019,12 @@ test('a PR’s Dismiss settles its block with Undo, which brings it back, a read
     })
   const noThreads = JSON.stringify({ data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } } })
   let onFetched: (() => void) | undefined
-  on('state.set', { plugin: 'inbox', key: 'prViews' } as const, async ($, e, next) => {
+  let isFetching = false
+  on('state.set', { plugin: 'inbox', key: 'session' } as const, async ($, e, next) => {
     const r = await next(e)
-    if (!e.value.isFetching) onFetched?.()
+    const wasFetching = isFetching
+    isFetching = e.value.prViews.isFetching
+    if (wasFetching && !isFetching) onFetched?.()
     return r
   })
   let isSlow = false
@@ -2370,7 +2375,9 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   expect(await pane.find({ text: /Sample entries\./ })).toBeUndefined()
   expect(await pane.find({ text: SAMPLE })).toBeUndefined()
   expect(await band.find({ text: /Needs you 2/ })).toBeDefined()
-  expect(stored.get('s:session-1')).toBe(saved)
+  const savedAfter = stored.get('s:session-1')!
+  expect(savedAfter).toContain('Real branch work')
+  expect(savedAfter).not.toContain(demo.ledger.items[0]!.ask)
 })
 
 test('/inbox demo recording shows the sample entries without the notices that mark them as samples', async ($, on) => {
@@ -2445,8 +2452,8 @@ test('a ledger update held during clear cannot write its old question into the n
   const inWrite = new Promise<void>(resolve => (entered = resolve))
   const held = new Promise<void>(resolve => (release = resolve))
   let didHold = false
-  on('state.set', { plugin: 'inbox', key: 'ledger' } as const, async ($, e, next) => {
-    if (!didHold && e.value.card?.goal === 'Old work') {
+  on('state.set', { plugin: 'inbox', key: 'session' } as const, async ($, e, next) => {
+    if (!didHold && e.value.ledger.card?.goal === 'Old work') {
       didHold = true
       entered()
       await held
@@ -2577,9 +2584,9 @@ test('a ledger write committed before clear still saves to its original session'
   let release!: () => void
   const afterWrite = new Promise<void>(resolve => (entered = resolve))
   const held = new Promise<void>(resolve => (release = resolve))
-  on('state.set', { plugin: 'inbox', key: 'ledger' } as const, async ($, e, next) => {
+  on('state.set', { plugin: 'inbox', key: 'session' } as const, async ($, e, next) => {
     const result = await next(e)
-    if (e.value.findings.some((f: { title: string }) => f.title === 'Late finding')) {
+    if (e.value.ledger.findings.some((f: { title: string }) => f.title === 'Late finding')) {
       entered()
       await held
     }
@@ -2614,9 +2621,9 @@ test('the latest committed ledger wins when an older write completes afterward',
   let release!: () => void
   const afterWrite = new Promise<void>(resolve => (entered = resolve))
   const held = new Promise<void>(resolve => (release = resolve))
-  on('state.set', { plugin: 'inbox', key: 'ledger' } as const, async ($, e, next) => {
+  on('state.set', { plugin: 'inbox', key: 'session' } as const, async ($, e, next) => {
     const result = await next(e)
-    const titles = e.value.findings.map((f: { title: string }) => f.title)
+    const titles = e.value.ledger.findings.map((f: { title: string }) => f.title)
     if (titles.includes('First finding') && !titles.includes('Second finding')) {
       entered()
       await held
@@ -3034,10 +3041,10 @@ test('a tool call after a hot reload, before the load converts the ledger, still
   mock.clock(on, { now: 1 })
   world($, on, [])
   let strip = false
-  on('state.set', { plugin: 'inbox', key: 'ledger' } as const, ($, e, next) => {
+  on('state.set', { plugin: 'inbox', key: 'session' } as const, ($, e, next) => {
     if (!strip) return next(e)
-    const { closedFindings, ...old } = e.value as Record<string, unknown>
-    return next({ ...e, value: old as never })
+    const { closedFindings, ...old } = e.value.ledger as unknown as Record<string, unknown>
+    return next({ ...e, value: { ...e.value, ledger: old as never } })
   })
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   await $.tool.call({

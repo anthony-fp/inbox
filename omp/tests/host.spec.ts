@@ -373,7 +373,14 @@ async function withQuestion() {
 test('an answer press sends one follow-up while a turn runs, and the arriving prompt matches it', async () => {
   const { inbox, id } = await withQuestion()
   const outcome = await inbox.press(makeCtx(), { action: 'answer', id, option: 'Node' }, NO_HOLDS)
-  expect(outcome).toEqual({ copy: null, error: null, note: null, isUnconfirmed: false, wakesForDone: false })
+  expect(outcome).toEqual({
+    copy: null,
+    error: null,
+    note: null,
+    isUnconfirmed: false,
+    isRowFailed: false,
+    wakesForDone: false,
+  })
   expect(sent).toEqual([{ text: 'Re "Use Node or Python?": Node', options: { deliverAs: 'followUp' } }])
   expect(state().sent.map((x: { phase: string }) => x.phase)).toEqual(['accepted'])
 

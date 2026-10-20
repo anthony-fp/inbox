@@ -2701,6 +2701,45 @@ function emptySession() {
   };
 }
 var PRESS_TIMEOUT_MS = 60000;
+function upgradeSession(saved) {
+  const base = emptySession();
+  const views = saved.prViews?.views ?? {};
+  return {
+    ledger: saved.ledger ? { ...base.ledger, ...upgradeLedger({ ...saved.ledger, items: saved.ledger.items ?? [] }) } : base.ledger,
+    turn: { ...base.turn, ...saved.turn },
+    told: { ...base.told, ...saved.told },
+    presence: { ...base.presence, ...saved.presence },
+    pending: saved.pending ?? [],
+    sent: (saved.sent ?? []).map((x) => ({
+      ...x,
+      row: x.row ?? null,
+      queuedId: x.queuedId ?? null,
+      pressedAt: x.pressedAt ?? null,
+      deliveryId: x.deliveryId ?? null,
+      phase: x.phase ?? "accepted"
+    })),
+    lastActions: upgradeLastActions(saved.lastActions ?? {}),
+    heldRows: saved.heldRows ?? [],
+    prViews: {
+      ...NO_PRS,
+      ...saved.prViews,
+      views: Object.fromEntries(Object.entries(views).map(([ref, pr]) => [
+        ref,
+        {
+          ...pr,
+          threads: pr.threads.map((t) => ({
+            ...t,
+            isLinesChanged: t.isLinesChanged ?? false,
+            at: t.at ?? null,
+            reply: t.reply && { ...t.reply, at: t.reply.at ?? null }
+          }))
+        }
+      ])),
+      isFetching: false
+    },
+    stop: saved.stop ?? null
+  };
+}
 function notePrompt(host, s, text, isOpen) {
   const matched = matchSent(s, text);
   return recordPrompt(host, startTurn(matched.state), text, isOpen, matched.sentBy);
@@ -2746,7 +2785,7 @@ function noteActivity(s, line) {
     return s;
   return { ...s, turn: { ...s.turn, activity } };
 }
-function endTurn(host, s, reply, isOpen, queuesEmptyReply = false) {
+function endTurn(host, s, reply, isOpen, { tab = null, queuesEmptyReply = false } = {}) {
   const refs = prRefs(reply);
   const base = {
     ...s,
@@ -2762,7 +2801,7 @@ function endTurn(host, s, reply, isOpen, queuesEmptyReply = false) {
     reply,
     turn: s.ledger.turn,
     press: s.turn.press,
-    screen: screenText(host, isOpen, null)
+    screen: screenText(host, isOpen, tab)
   };
   return { ...base, pending: [...base.pending, { ex, turnsStarted: s.presence.turnsStarted }] };
 }
@@ -2918,9 +2957,9 @@ async function runUpdates(host) {
           const next = s.pending[0];
           if (!next)
             break;
-          const promptAt = host.now();
+          const promptAt = await host.now();
           const reply = await host.ask(buildPrompt(s.ledger, next.ex)).catch(() => null);
-          const after = await host.update((x) => x.pending[0]?.turnsStarted === next.turnsStarted && x.pending[0].ex.turn === next.ex.turn ? applied(x, reply, host.now(), promptAt) : x);
+          const after = await host.update(async (x) => x.pending[0]?.turnsStarted === next.turnsStarted && x.pending[0].ex.turn === next.ex.turn ? applied(x, reply, await host.now(), promptAt) : x);
           if (after.pending[0]?.failed && !next.failed)
             return "retry";
         }
@@ -2933,12 +2972,16 @@ async function runUpdates(host) {
   }
 }
 async function wakeForDone(host) {
-  const check = (s) => doneWake(s.ledger, { now: host.now(), windowMs: host.settleWindowMs, isTurnRunning: s.turn.person !== null });
-  if (!check(await host.read()))
+  const check = async (s) => doneWake(s.ledger, {
+    now: await host.now(),
+    windowMs: host.settleWindowMs,
+    isTurnRunning: host.isTurnRunning ? host.isTurnRunning(s) : s.turn.person !== null
+  });
+  if (!await check(await host.read()))
     return;
   let attempt = null;
   await host.update(async (s) => {
-    const wake = check(s);
+    const wake = await check(s);
     if (!wake)
       return s;
     await host.prepare?.(s);
@@ -2961,7 +3004,7 @@ async function wakeForDone(host) {
         {
           text: wake.text,
           press: { id: wake.ids[0], action: "done" },
-          at: host.now(),
+          at: await host.now(),
           row: wake.ids[0],
           queuedId: null,
           pressedAt: null,
@@ -2975,16 +3018,17 @@ async function wakeForDone(host) {
   const sending = attempt;
   if (!sending)
     return;
-  const outcome = await host.deliver(await host.read(), sending.text);
+  const outcome = await host.deliver(await host.read(), sending.text, sending.deliveryId);
   await host.update((s) => {
     const after = completedAttempt(s, sending.deliveryId, outcome);
     return outcome.state === "rejected" ? { ...after, ledger: refuseDoneNotification(after.ledger, sending.deliveryId, outcome.reason) } : after;
   });
 }
-async function press(host, p, isStale, holds) {
+async function startPress(host, p, isStale, holds) {
   const rowId = "ref" in p ? prRowId(p) : p.id;
   const localPressId = host.newId();
   let isUnconfirmed = false;
+  let isRowFailed = false;
   let copy = null;
   let error = null;
   let note = isStale ? "stale" : null;
@@ -2999,7 +3043,7 @@ async function press(host, p, isStale, holds) {
     },
     send: async (e, deliveryId) => {
       try {
-        const outcome = await host.deliver(await host.read(), e.text);
+        const outcome = await host.deliver(await host.read(), e.text, deliveryId);
         await host.update((s) => completedAttempt(s, deliveryId, outcome));
         return outcome.state === "accepted" ? { state: "accepted" } : outcome;
       } catch (err) {
@@ -3011,40 +3055,40 @@ async function press(host, p, isStale, holds) {
       await host.update((s) => ({ ...s, ledger: f(s.ledger) }));
     }
   };
-  await host.update((saved) => {
+  await host.update(async (saved) => {
     const s = { ...saved, heldRows: Object.keys(holds.replies) };
     if (note)
       return s;
-    const at = host.now();
-    const r2 = pressOn(s, p, at, localPressId);
+    const at2 = await host.now();
+    const r2 = pressOn(s, p, at2, localPressId);
     if ("stale" in r2) {
       note = "stale";
       return s;
     }
     const firstSend = r2.effects.find((e) => e.kind === "send");
     const deliveryId = firstSend ? host.newId() : undefined;
-    const pressLasts = firstSend && deliveryId ? withDeliveryId(r2.lasts, Object.keys(r2.lasts), at, firstSend.text, deliveryId) : r2.lasts;
+    const pressLasts = firstSend && deliveryId ? withDeliveryId(r2.lasts, Object.keys(r2.lasts), at2, firstSend.text, deliveryId) : r2.lasts;
     const next = {
       ...s,
       ledger: r2.ledger,
       lastActions: withLasts(s.lastActions, pressLasts, r2.drop),
       told: r2.reopenedId ? { ...s.told, closed: s.told.closed.filter((id) => id !== r2.reopenedId) } : s.told
     };
-    Object.assign(pressed2, { r: r2, at, deliveryId });
+    Object.assign(pressed2, { r: r2, at: at2, deliveryId });
     if (!firstSend || !deliveryId)
       return next;
     return {
       ...next,
-      lastActions: withUnconfirmed(next.lastActions, firstSend.text, at, deliveryId),
+      lastActions: withUnconfirmed(next.lastActions, firstSend.text, at2, deliveryId),
       sent: [
         ...next.sent,
         {
           text: firstSend.text,
           press: firstSend.by,
-          at: host.now(),
+          at: await host.now(),
           row: rowId,
           queuedId: null,
-          pressedAt: at,
+          pressedAt: at2,
           deliveryId,
           phase: "attempting"
         }
@@ -3055,19 +3099,33 @@ async function press(host, p, isStale, holds) {
     error = `Not sent: ${err instanceof Error ? err.message : String(err)}`;
   });
   const r = pressed2.r;
-  if (!r || pressed2.at === undefined)
-    return { copy, error, note, isUnconfirmed, wakesForDone: false };
-  try {
-    const failed = await runSends(effectHost, r.effects, rowId, Object.keys(r.lasts), pressed2.at);
-    if (failed?.state === "rejected")
-      error = `Not sent: ${failed.reason}`;
-    if (failed?.state === "unconfirmed")
-      isUnconfirmed = true;
-  } catch {
-    isUnconfirmed = true;
-  }
-  await runLocalEffects(effectHost, r.effects, rowId, r.lasts[rowId]?.result);
-  return { copy, error, note, isUnconfirmed, wakesForDone: !("ref" in p) && p.action === "done" };
+  const at = pressed2.at;
+  if (!r || at === undefined)
+    return {
+      effects: null,
+      finish: async () => ({ copy, error, note, isUnconfirmed, isRowFailed, wakesForDone: false })
+    };
+  return {
+    effects: r.effects,
+    finish: async () => {
+      try {
+        const failed = await runSends(effectHost, r.effects, rowId, Object.keys(r.lasts), at);
+        if (failed?.state === "rejected") {
+          error = `Not sent: ${failed.reason}`;
+          isRowFailed = failed.isRowFailed;
+        }
+        if (failed?.state === "unconfirmed")
+          isUnconfirmed = true;
+      } catch {
+        isUnconfirmed = true;
+      }
+      await runLocalEffects(effectHost, r.effects, rowId, r.lasts[rowId]?.result);
+      return { copy, error, note, isUnconfirmed, isRowFailed, wakesForDone: !("ref" in p) && p.action === "done" };
+    }
+  };
+}
+async function press(host, p, isStale, holds) {
+  return (await startPress(host, p, isStale, holds)).finish();
 }
 var PRS_REFRESH_MS = 120000;
 var NEW_PR_FETCH_MS = 15000;
@@ -3098,7 +3156,7 @@ async function fetchPrs(host, findsBranchPr) {
       fetch = await fetchWith(refound);
   }
   const { views: fetched, branchRef } = fetch;
-  await host.update((cur) => withFetchedPrs(cur, fetched, branchRef, host.now()));
+  await host.update(async (cur) => withFetchedPrs(cur, fetched, branchRef, await host.now()));
 }
 
 // ../hooks/tones.ts
@@ -4307,30 +4365,7 @@ function statePath(dir, sessionId) {
 function upgraded(saved, sessionId) {
   if (saved.version !== undefined && saved.version !== 1)
     throw new Error(`Unsupported inbox state version: ${saved.version}`);
-  const base = emptyState(sessionId);
-  return {
-    ...base,
-    ...saved,
-    version: 1,
-    sessionId,
-    ledger: saved.ledger ? { ...base.ledger, ...upgradeLedger({ ...saved.ledger, items: saved.ledger.items ?? [] }) } : base.ledger,
-    turn: { ...base.turn, ...saved.turn },
-    told: { ...base.told, ...saved.told },
-    presence: { ...base.presence, ...saved.presence },
-    pending: saved.pending ?? [],
-    sent: (saved.sent ?? []).map((x) => ({
-      ...x,
-      row: x.row ?? null,
-      queuedId: x.queuedId ?? null,
-      pressedAt: x.pressedAt ?? null,
-      deliveryId: x.deliveryId ?? null,
-      phase: x.phase ?? "accepted"
-    })),
-    lastActions: upgradeLastActions(saved.lastActions ?? {}),
-    heldRows: saved.heldRows ?? [],
-    prViews: { ...NO_PRS, ...saved.prViews, isFetching: false },
-    stop: saved.stop ?? null
-  };
+  return { version: 1, sessionId, ...upgradeSession(saved) };
 }
 async function readState(dir, sessionId) {
   const saved = await readFile(statePath(dir, sessionId), "utf8").catch((err) => {

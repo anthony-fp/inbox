@@ -22,7 +22,7 @@ export type Ask = (prompt: string) => Promise<string | null>
 
 /** Everything a host supplies to run one session. A function here takes the members it uses. */
 export type SessionHost<S extends Session> = {
-  now(): number
+  now(): number | Promise<number>
   read(): Promise<S>
   /** Changes the session under its lock. An external effect, such as a delivery, runs outside a change. */
   update(change: (s: S) => S | Promise<S>): Promise<S>
@@ -31,7 +31,7 @@ export type SessionHost<S extends Session> = {
   /** Calls the inbox model. Null when it fails. */
   ask: Ask
   /** Sends a message to the agent as if the person typed it. Runs outside a change, so it may change the session itself. */
-  deliver(s: S, text: string): Promise<SendOutcome>
+  deliver(s: S, text: string, deliveryId: string): Promise<SendOutcome>
   /** Throws when `deliver` could not start. Run before a sent record is saved, so a message that cannot go leaves no record. */
   prepare?(s: S): Promise<void>
   /** Opens a link or path, or copies text. Returns why it could not, or null. */
@@ -50,6 +50,8 @@ export type SessionHost<S extends Session> = {
   settleWindowMs: number
   /** A new id for a delivery. */
   newId(): string
+  /** Whether a turn runs now, which holds a Done message back. Without it, a turn runs while the turn has a person's words. */
+  isTurnRunning?(s: S): boolean
 }
 
 export type UpdateHost<S extends Session> = Pick<SessionHost<S>, 'now' | 'read' | 'update' | 'exclusive' | 'ask'>
@@ -92,11 +94,11 @@ export async function runUpdates<S extends Session>(host: UpdateHost<S>): Promis
           }))
           const next = s.pending[0]
           if (!next) break
-          const promptAt = host.now()
+          const promptAt = await host.now()
           const reply = await host.ask(buildPrompt(s.ledger, next.ex)).catch(() => null)
-          const after = await host.update(x =>
+          const after = await host.update(async x =>
             x.pending[0]?.turnsStarted === next.turnsStarted && x.pending[0].ex.turn === next.ex.turn
-              ? applied(x, reply, host.now(), promptAt)
+              ? applied(x, reply, await host.now(), promptAt)
               : x,
           )
           if (after.pending[0]?.failed && !next.failed) return 'retry' as const
@@ -111,7 +113,7 @@ export async function runUpdates<S extends Session>(host: UpdateHost<S>): Promis
 
 type WakeHost<S extends Session> = Pick<
   SessionHost<S>,
-  'now' | 'read' | 'update' | 'deliver' | 'prepare' | 'settleWindowMs' | 'newId'
+  'now' | 'read' | 'update' | 'deliver' | 'prepare' | 'settleWindowMs' | 'newId' | 'isTurnRunning'
 >
 
 /**
@@ -119,12 +121,16 @@ type WakeHost<S extends Session> = Pick<
  * marks those rows with why, so they read "Not sent" and offer Undo.
  */
 export async function wakeForDone<S extends Session>(host: WakeHost<S>): Promise<void> {
-  const check = (s: S) =>
-    doneWake(s.ledger, { now: host.now(), windowMs: host.settleWindowMs, isTurnRunning: s.turn.person !== null })
-  if (!check(await host.read())) return
+  const check = async (s: S) =>
+    doneWake(s.ledger, {
+      now: await host.now(),
+      windowMs: host.settleWindowMs,
+      isTurnRunning: host.isTurnRunning ? host.isTurnRunning(s) : s.turn.person !== null,
+    })
+  if (!(await check(await host.read()))) return
   let attempt: { deliveryId: string; text: string } | null = null
   await host.update(async s => {
-    const wake = check(s)
+    const wake = await check(s)
     if (!wake) return s
     await host.prepare?.(s)
     const deliveryId = host.newId()
@@ -148,7 +154,7 @@ export async function wakeForDone<S extends Session>(host: WakeHost<S>): Promise
         {
           text: wake.text,
           press: { id: wake.ids[0]!, action: 'done' },
-          at: host.now(),
+          at: await host.now(),
           row: wake.ids[0]!,
           queuedId: null,
           pressedAt: null,
@@ -162,7 +168,7 @@ export async function wakeForDone<S extends Session>(host: WakeHost<S>): Promise
   })
   const sending = attempt as { deliveryId: string; text: string } | null
   if (!sending) return
-  const outcome = await host.deliver(await host.read(), sending.text)
+  const outcome = await host.deliver(await host.read(), sending.text, sending.deliveryId)
   await host.update(s => {
     const after = completedAttempt(s, sending.deliveryId, outcome)
 
@@ -178,26 +184,36 @@ export type PressOutcome = {
   note: RowNote['note'] | null
   /** The delivery may or may not have reached the agent. */
   isUnconfirmed: boolean
+  /** The message was refused, and the pressed row still reads that failure, since no later press replaced it. */
+  isRowFailed: boolean
   /** The press closed a row with Done. Call `wakeForDone` once the settle window has passed. */
   wakesForDone: boolean
 }
 
 type PressHost<S extends Session> = Pick<SessionHost<S>, 'now' | 'read' | 'update' | 'deliver' | 'perform' | 'newId'>
 
+/** A press that is saved, with what it still runs. */
+export type StartedPress = {
+  /** The effects the press runs. Null when it was stale or could not be saved, so it runs nothing. */
+  effects: Effect[] | null
+  /** Delivers the press's message, outside the session's lock, then runs its opens and copies. */
+  finish(): Promise<PressOutcome>
+}
+
 /**
- * Applies a press. When it sends a message, the sent record is saved with the press, and delivery runs after that
- * update, outside the session's lock, since a host's delivery can run the host's own handlers before it returns.
- * Opens and copies run after the press is saved.
+ * Applies and saves a press. When it sends a message, the sent record is saved with it. A look can update its own
+ * drawing before `finish` delivers, since a host's delivery can run the host's own handlers before it returns.
  */
-export async function press<S extends Session>(
+export async function startPress<S extends Session>(
   host: PressHost<S>,
   p: RowPress | PrPress,
   isStale: boolean,
   holds: ReplyHolds,
-): Promise<PressOutcome> {
+): Promise<StartedPress> {
   const rowId = 'ref' in p ? prRowId(p) : p.id
   const localPressId = host.newId()
   let isUnconfirmed = false
+  let isRowFailed = false
   let copy: PressOutcome['copy'] = null
   let error: string | null = null
   let note: PressOutcome['note'] = isStale ? 'stale' : null
@@ -211,7 +227,7 @@ export async function press<S extends Session>(
     },
     send: async (e, deliveryId) => {
       try {
-        const outcome = await host.deliver(await host.read(), e.text)
+        const outcome = await host.deliver(await host.read(), e.text, deliveryId)
         await host.update(s => completedAttempt(s, deliveryId, outcome))
         return outcome.state === 'accepted' ? { state: 'accepted' as const } : outcome
       } catch (err) {
@@ -224,11 +240,11 @@ export async function press<S extends Session>(
     },
   }
   await host
-    .update(saved => {
+    .update(async saved => {
       const s: S = { ...saved, heldRows: Object.keys(holds.replies) }
       if (note) return s
       // Read under the lock, so the press is timed after every write that landed before it.
-      const at = host.now()
+      const at = await host.now()
       const r = pressOn(s, p, at, localPressId)
       if ('stale' in r) {
         note = 'stale'
@@ -257,7 +273,7 @@ export async function press<S extends Session>(
           {
             text: firstSend.text,
             press: firstSend.by,
-            at: host.now(),
+            at: await host.now(),
             row: rowId,
             queuedId: null,
             pressedAt: at,
@@ -272,17 +288,41 @@ export async function press<S extends Session>(
       error = `Not sent: ${err instanceof Error ? err.message : String(err)}`
     })
   const r = pressed.r
-  if (!r || pressed.at === undefined) return { copy, error, note, isUnconfirmed, wakesForDone: false }
-  try {
-    const failed = await runSends(effectHost, r.effects, rowId, Object.keys(r.lasts), pressed.at)
-    if (failed?.state === 'rejected') error = `Not sent: ${failed.reason}`
-    if (failed?.state === 'unconfirmed') isUnconfirmed = true
-  } catch {
-    isUnconfirmed = true
-  }
-  await runLocalEffects(effectHost, r.effects, rowId, r.lasts[rowId]?.result)
+  const at = pressed.at
+  if (!r || at === undefined)
+    return {
+      effects: null,
+      finish: async () => ({ copy, error, note, isUnconfirmed, isRowFailed, wakesForDone: false }),
+    }
 
-  return { copy, error, note, isUnconfirmed, wakesForDone: !('ref' in p) && p.action === 'done' }
+  return {
+    effects: r.effects,
+    finish: async () => {
+      try {
+        const failed = await runSends(effectHost, r.effects, rowId, Object.keys(r.lasts), at)
+        if (failed?.state === 'rejected') {
+          error = `Not sent: ${failed.reason}`
+          isRowFailed = failed.isRowFailed
+        }
+        if (failed?.state === 'unconfirmed') isUnconfirmed = true
+      } catch {
+        isUnconfirmed = true
+      }
+      await runLocalEffects(effectHost, r.effects, rowId, r.lasts[rowId]?.result)
+
+      return { copy, error, note, isUnconfirmed, isRowFailed, wakesForDone: !('ref' in p) && p.action === 'done' }
+    },
+  }
+}
+
+/** Applies a press and runs it: `startPress`, then its `finish`. */
+export async function press<S extends Session>(
+  host: PressHost<S>,
+  p: RowPress | PrPress,
+  isStale: boolean,
+  holds: ReplyHolds,
+): Promise<PressOutcome> {
+  return (await startPress(host, p, isStale, holds)).finish()
 }
 
 const PRS_REFRESH_MS = 120_000
@@ -327,5 +367,5 @@ export async function fetchPrs<S extends Session>(
     if (refound !== bin) fetch = await fetchWith(refound)
   }
   const { views: fetched, branchRef } = fetch
-  await host.update(cur => withFetchedPrs(cur, fetched, branchRef, host.now()))
+  await host.update(async cur => withFetchedPrs(cur, fetched, branchRef, await host.now()))
 }

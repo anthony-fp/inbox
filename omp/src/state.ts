@@ -1,10 +1,9 @@
 import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { KEPT_SESSIONS, pruneClosed, upgradeLedger } from '../../hooks/ledger'
-import { upgradeLastActions } from '../../hooks/presses'
-import { emptySession, NO_PRS } from '../../hooks/session'
-import type { Session } from '../../hooks/session'
+import { KEPT_SESSIONS, pruneClosed } from '../../hooks/ledger'
+import { emptySession, upgradeSession } from '../../hooks/session'
+import type { SavedSession, Session } from '../../hooks/session'
 
 export type OmpState = Session & {
   version: 1
@@ -25,43 +24,13 @@ export function statePath(dir: string, sessionId: string): string {
   return join(dir, 'sessions', `${fileName(sessionId)}.json`)
 }
 
-type Saved = Partial<Omit<OmpState, 'sent' | 'pending'>> & {
-  sent?: (Omit<OmpState['sent'][number], 'row' | 'queuedId' | 'pressedAt' | 'deliveryId'> &
-    Partial<OmpState['sent'][number]>)[]
-  pending?: OmpState['pending']
-}
+type Saved = SavedSession & Partial<Pick<OmpState, 'version' | 'sessionId'>>
 
 /** State saved by an earlier build, with any field it lacks filled in. */
 function upgraded(saved: Saved, sessionId: string): OmpState {
   if (saved.version !== undefined && saved.version !== 1)
     throw new Error(`Unsupported inbox state version: ${saved.version}`)
-  const base = emptyState(sessionId)
-
-  return {
-    ...base,
-    ...saved,
-    version: 1,
-    sessionId,
-    ledger: saved.ledger
-      ? { ...base.ledger, ...upgradeLedger({ ...saved.ledger, items: saved.ledger.items ?? [] }) }
-      : base.ledger,
-    turn: { ...base.turn, ...saved.turn },
-    told: { ...base.told, ...saved.told },
-    presence: { ...base.presence, ...saved.presence },
-    pending: saved.pending ?? [],
-    sent: (saved.sent ?? []).map(x => ({
-      ...x,
-      row: x.row ?? null,
-      queuedId: x.queuedId ?? null,
-      pressedAt: x.pressedAt ?? null,
-      deliveryId: x.deliveryId ?? null,
-      phase: x.phase ?? 'accepted',
-    })),
-    lastActions: upgradeLastActions(saved.lastActions ?? {}),
-    heldRows: saved.heldRows ?? [],
-    prViews: { ...NO_PRS, ...saved.prViews, isFetching: false },
-    stop: saved.stop ?? null,
-  }
+  return { version: 1, sessionId, ...upgradeSession(saved) }
 }
 
 /** A session's saved state. A missing file is a new session; a file that cannot be read or converted throws. */

@@ -62,7 +62,7 @@ export async function runSessionScript<S extends Session>(makeHost: MakeHost<S>,
   const { host, delivered, performed } = makeHost(async () => MODEL_ANSWER)
   const snapshot = async () => {
     const s = await host.read()
-    const view = sessionView(s, host.now(), SETTLE_WINDOW_MS)
+    const view = sessionView(s, await host.now(), SETTLE_WINDOW_MS)
 
     return {
       rows: allRows(view).map(r => `${r.title}: ${r.state.is}`),
@@ -84,8 +84,8 @@ export async function runSessionScript<S extends Session>(makeHost: MakeHost<S>,
   equal(await snapshot(), { ...base, rows: [], turns: { turnsStarted: 1, turnsApplied: 0 } }, 'after the prompt')
 
   let toolAnswer = ''
-  await host.update(s => {
-    const r = recorded(CLAUDE_CODE, s, 'record', { kind: 'task', ask: 'Try the CLI by hand' }, host.now())
+  await host.update(async s => {
+    const r = recorded(CLAUDE_CODE, s, 'record', { kind: 'task', ask: 'Try the CLI by hand' }, await host.now())
     toolAnswer = r.result
     return r.state
   })
@@ -118,7 +118,7 @@ export async function runSessionScript<S extends Session>(makeHost: MakeHost<S>,
   const answered = await press(host, { action: 'answer', id: questionId, option: 'Node' }, false, NO_HOLDS)
   equal(
     answered,
-    { copy: null, error: null, note: null, isUnconfirmed: false, wakesForDone: false },
+    { copy: null, error: null, note: null, isUnconfirmed: false, isRowFailed: false, wakesForDone: false },
     'the answer press',
   )
   equal(

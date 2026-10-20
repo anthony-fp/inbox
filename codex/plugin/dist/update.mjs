@@ -496,55 +496,6 @@ function isLapsed(d) {
   return closedState(d) !== "handled";
 }
 
-// ../hooks/presses.ts
-var HANDOFF_IDS = /^(address|type|step-\d+|thread-address|pr-conflicts|pr-address-all)$/;
-var PR_RENAMES = [
-  [/^address-all-/, "pr-address-all"],
-  [/^resolve-/, "pr-conflicts"]
-];
-var THREAD_RENAMES = [
-  [/^address-/, "thread-address"],
-  [/^draft-/, "thread-draft"],
-  [/^discuss-/, "thread-discuss"]
-];
-var ROW_RENAMES = [
-  [/^explain(-|$)/, "explain"],
-  [/^(help-.+-|step-)\d+$/, (old) => `step-${old.split("-").pop()}`],
-  [/^typed$/, "type"],
-  [/^address(-|$)/, "address"],
-  [/^discuss(-|$)/, "discuss"]
-];
-function upgradedLastAction(key, old) {
-  const renames = key.startsWith("pr:") ? PR_RENAMES : key.includes(" thread ") ? THREAD_RENAMES : ROW_RENAMES;
-  const found = renames.find(([pattern]) => pattern.test(old.action));
-  const action = found ? typeof found[1] === "function" ? found[1](old.action) : found[1] : null;
-  if (action === null) return null;
-  const { isHandoff, ...kept } = old;
-  const isHandedOff2 = isHandoff ?? HANDOFF_IDS.test(action);
-  return {
-    ...kept,
-    kind: isHandedOff2 ? "handoff" : "talk",
-    action,
-    // Earlier builds saved "Explain sent" or "Sent to Claude to fix"; a last action is now the label pressed.
-    text: /^Sent to (Claude|Codex) to /.test(old.text) ? "Address" : old.text.replace(/ sent$/, "")
-  };
-}
-function upgradeLastActions(saved) {
-  return Object.fromEntries(
-    Object.entries(saved).flatMap(([key, entry]) => {
-      const {
-        tab: _tab,
-        title: _title,
-        index: _index,
-        ...last
-      } = entry;
-      if ("kind" in last && last.kind) return [[key, last]];
-      const upgraded2 = upgradedLastAction(key, last);
-      return upgraded2 ? [[key, upgraded2]] : [];
-    })
-  );
-}
-
 // ../hooks/model-text.ts
 var NL3 = "\n";
 var MODEL_KIND = { question: "decide", task: "do" };
@@ -634,6 +585,55 @@ function outcomeText(d) {
 }
 var TOLD_NOTHING = { inbox: null, closed: [] };
 
+// ../hooks/presses.ts
+var HANDOFF_IDS = /^(address|type|step-\d+|thread-address|pr-conflicts|pr-address-all)$/;
+var PR_RENAMES = [
+  [/^address-all-/, "pr-address-all"],
+  [/^resolve-/, "pr-conflicts"]
+];
+var THREAD_RENAMES = [
+  [/^address-/, "thread-address"],
+  [/^draft-/, "thread-draft"],
+  [/^discuss-/, "thread-discuss"]
+];
+var ROW_RENAMES = [
+  [/^explain(-|$)/, "explain"],
+  [/^(help-.+-|step-)\d+$/, (old) => `step-${old.split("-").pop()}`],
+  [/^typed$/, "type"],
+  [/^address(-|$)/, "address"],
+  [/^discuss(-|$)/, "discuss"]
+];
+function upgradedLastAction(key, old) {
+  const renames = key.startsWith("pr:") ? PR_RENAMES : key.includes(" thread ") ? THREAD_RENAMES : ROW_RENAMES;
+  const found = renames.find(([pattern]) => pattern.test(old.action));
+  const action = found ? typeof found[1] === "function" ? found[1](old.action) : found[1] : null;
+  if (action === null) return null;
+  const { isHandoff, ...kept } = old;
+  const isHandedOff2 = isHandoff ?? HANDOFF_IDS.test(action);
+  return {
+    ...kept,
+    kind: isHandedOff2 ? "handoff" : "talk",
+    action,
+    // Earlier builds saved "Explain sent" or "Sent to Claude to fix"; a last action is now the label pressed.
+    text: /^Sent to (Claude|Codex) to /.test(old.text) ? "Address" : old.text.replace(/ sent$/, "")
+  };
+}
+function upgradeLastActions(saved) {
+  return Object.fromEntries(
+    Object.entries(saved).flatMap(([key, entry]) => {
+      const {
+        tab: _tab,
+        title: _title,
+        index: _index,
+        ...last
+      } = entry;
+      if ("kind" in last && last.kind) return [[key, last]];
+      const upgraded2 = upgradedLastAction(key, last);
+      return upgraded2 ? [[key, upgraded2]] : [];
+    })
+  );
+}
+
 // ../hooks/view.ts
 var CHOICE_KEYS = [..."abcfghilm"];
 var TABS = [
@@ -658,6 +658,48 @@ function emptySession() {
     heldRows: [],
     prViews: NO_PRS,
     stop: null
+  };
+}
+function upgradeSession(saved) {
+  const base = emptySession();
+  const views = saved.prViews?.views ?? {};
+  return {
+    ledger: saved.ledger ? { ...base.ledger, ...upgradeLedger({ ...saved.ledger, items: saved.ledger.items ?? [] }) } : base.ledger,
+    turn: { ...base.turn, ...saved.turn },
+    told: { ...base.told, ...saved.told },
+    presence: { ...base.presence, ...saved.presence },
+    pending: saved.pending ?? [],
+    sent: (saved.sent ?? []).map((x) => ({
+      ...x,
+      row: x.row ?? null,
+      queuedId: x.queuedId ?? null,
+      pressedAt: x.pressedAt ?? null,
+      deliveryId: x.deliveryId ?? null,
+      phase: x.phase ?? "accepted"
+    })),
+    lastActions: upgradeLastActions(saved.lastActions ?? {}),
+    heldRows: saved.heldRows ?? [],
+    prViews: {
+      ...NO_PRS,
+      ...saved.prViews,
+      // Threads saved before their times and `isLinesChanged` existed.
+      views: Object.fromEntries(
+        Object.entries(views).map(([ref, pr]) => [
+          ref,
+          {
+            ...pr,
+            threads: pr.threads.map((t) => ({
+              ...t,
+              isLinesChanged: t.isLinesChanged ?? false,
+              at: t.at ?? null,
+              reply: t.reply && { ...t.reply, at: t.reply.at ?? null }
+            }))
+          }
+        ])
+      ),
+      isFetching: false
+    },
+    stop: saved.stop ?? null
   };
 }
 function applied(s, reply, now, promptAt) {
@@ -722,24 +764,11 @@ function upgraded(saved, sessionId) {
   return {
     ...base,
     ...kept,
-    // The ledger's shape is the mod's, so a saved one converts the way the mod's does. It converts
-    // before the defaults fill in, since an empty `closed` would hide an old `decided`.
-    ledger: saved.ledger ? { ...base.ledger, ...upgradeLedger({ ...saved.ledger, items: saved.ledger.items ?? [] }) } : base.ledger,
-    turn: { ...base.turn, ...turn },
-    told: { ...base.told, ...saved.told },
-    presence: { ...base.presence, ...saved.presence },
-    pending: (saved.pending ?? []).map(({ ex: { checks: _exChecks, ...ex }, ...p }) => ({ ...p, ex })),
-    // A message sent before the server kept its row changes no row when it arrives.
-    sent: (saved.sent ?? []).map((x) => ({
-      ...x,
-      row: x.row ?? null,
-      queuedId: x.queuedId ?? null,
-      pressedAt: x.pressedAt ?? null,
-      deliveryId: x.deliveryId ?? null,
-      phase: x.phase ?? "accepted"
-    })),
-    lastActions: upgradeLastActions(saved.lastActions ?? {}),
-    prViews: { ...NO_PRS, ...saved.prViews, isFetching: false },
+    ...upgradeSession({
+      ...kept,
+      turn,
+      pending: (saved.pending ?? []).map(({ ex: { checks: _exChecks, ...ex }, ...p }) => ({ ...p, ex }))
+    }),
     // A file saved before the hooks kept this record came from hooks that ran, so it reads as heard.
     // Its turns were not recorded, so `promptAt` is set too: a tool call then falls back to the time rule.
     heard: saved.heard ? { ...NOTHING_HEARD, ...saved.heard } : {
@@ -944,10 +973,10 @@ async function runUpdates(host) {
           }));
           const next = s.pending[0];
           if (!next) break;
-          const promptAt = host.now();
+          const promptAt = await host.now();
           const reply = await host.ask(buildPrompt(s.ledger, next.ex)).catch(() => null);
           const after = await host.update(
-            (x) => x.pending[0]?.turnsStarted === next.turnsStarted && x.pending[0].ex.turn === next.ex.turn ? applied(x, reply, host.now(), promptAt) : x
+            async (x) => x.pending[0]?.turnsStarted === next.turnsStarted && x.pending[0].ex.turn === next.ex.turn ? applied(x, reply, await host.now(), promptAt) : x
           );
           if (after.pending[0]?.failed && !next.failed) return "retry";
         }

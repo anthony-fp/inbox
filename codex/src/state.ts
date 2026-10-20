@@ -17,10 +17,9 @@ import {
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 
-import { KEPT_SESSIONS, pruneClosed, upgradeLedger } from '../../hooks/ledger'
+import { KEPT_SESSIONS, pruneClosed } from '../../hooks/ledger'
 import type { Exchange } from '../../hooks/ledger'
-import { upgradeLastActions } from '../../hooks/presses'
-import { emptySession, NO_PRS } from '../../hooks/session'
+import { emptySession, upgradeSession } from '../../hooks/session'
 import type { Session } from '../../hooks/session'
 
 export type SessionState = Session & {
@@ -107,26 +106,11 @@ function upgraded(saved: Saved, sessionId: string): SessionState {
   return {
     ...base,
     ...kept,
-    // The ledger's shape is the mod's, so a saved one converts the way the mod's does. It converts
-    // before the defaults fill in, since an empty `closed` would hide an old `decided`.
-    ledger: saved.ledger
-      ? { ...base.ledger, ...upgradeLedger({ ...saved.ledger, items: saved.ledger.items ?? [] }) }
-      : base.ledger,
-    turn: { ...base.turn, ...turn },
-    told: { ...base.told, ...saved.told },
-    presence: { ...base.presence, ...saved.presence },
-    pending: (saved.pending ?? []).map(({ ex: { checks: _exChecks, ...ex }, ...p }) => ({ ...p, ex })),
-    // A message sent before the server kept its row changes no row when it arrives.
-    sent: (saved.sent ?? []).map(x => ({
-      ...x,
-      row: x.row ?? null,
-      queuedId: x.queuedId ?? null,
-      pressedAt: x.pressedAt ?? null,
-      deliveryId: x.deliveryId ?? null,
-      phase: x.phase ?? 'accepted',
-    })),
-    lastActions: upgradeLastActions(saved.lastActions ?? {}),
-    prViews: { ...NO_PRS, ...saved.prViews, isFetching: false },
+    ...upgradeSession({
+      ...kept,
+      turn,
+      pending: (saved.pending ?? []).map(({ ex: { checks: _exChecks, ...ex }, ...p }) => ({ ...p, ex })),
+    }),
     // A file saved before the hooks kept this record came from hooks that ran, so it reads as heard.
     // Its turns were not recorded, so `promptAt` is set too: a tool call then falls back to the time rule.
     heard: saved.heard

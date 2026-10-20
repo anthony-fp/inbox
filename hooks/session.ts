@@ -1,4 +1,4 @@
-import { applyExchangeUpdate, EMPTY, parseReply } from './ledger'
+import { applyExchangeUpdate, EMPTY, parseReply, upgradeLedger } from './ledger'
 import type { Exchange, Press } from './ledger'
 import { addActivity, carryText, guidanceText, promptNotes, screenText, START_TITLE, TOLD_NOTHING } from './model-text'
 import type { Host, Told } from './model-text'
@@ -13,63 +13,15 @@ import {
   threadSentIn,
 } from './pr-tab'
 import type { Applied, PrPress } from './pr-tab'
-import { applyPress, withAcceptedSend, withArrival, withRewrite, withUnconfirmed } from './presses'
+import { applyPress, upgradeLastActions, withAcceptedSend, withArrival, withRewrite, withUnconfirmed } from './presses'
 import type { RowPress } from './presses'
 import { prNeedsYou, prRefs } from './prs'
 import { recordClose, recordItem } from './tools'
 import { inboxView, NO_HOLDS, perTurnStatus } from './view'
 import type { InboxView, ReplyHolds } from './view'
-import type { LastAction, Ledger, PrView, PrViews, RowNote, Stop, Turns } from '../types'
+import type { LastAction, Ledger, PrView, PrViews, RowNote, Session, Stop, Turns } from '../types'
 
-export type Session = {
-  ledger: Ledger
-  /** What the turn running now gathered for the per-reply update. */
-  turn: {
-    person: string | null
-    /** What started the turn when the person's words did not, such as a task notification. */
-    trigger: string | null
-    activity: string[]
-    press: Press | null
-  }
-  /** The inbox text the agent last read beside a prompt, and the closed items it was told about. */
-  told: Told
-  presence: {
-    /** Prompts that started a turn, and how many of those turns the inbox model has summarized. */
-    turnsStarted: number
-    turnsApplied: number
-    /** `behind`: the ledger may have missed a turn, and a host that can catch up does. Only `failed` shows. */
-    ledgerState: 'current' | 'behind' | 'failed'
-    isUpdating: boolean
-  }
-  /**
-   * Exchanges waiting for the inbox model, oldest first, with the turns started when each ended. `failed` marks
-   * one whose first update failed: the next update tries it once more, then drops it.
-   */
-  pending: { ex: Exchange; turnsStarted: number; failed?: true }[]
-  /**
-   * Messages a press sent, saved before delivery. A prompt that arrives can match an accepted
-   * record by its text; an uncertain one stays to block false matches with later presses.
-   */
-  sent: {
-    text: string
-    press: Press | null
-    at: number
-    row: string | null
-    queuedId: string | null
-    /** The row press's time in milliseconds; null for older records or messages without a row. */
-    pressedAt: number | null
-    /** The local press identity; null for older records or messages without a row. */
-    deliveryId: string | null
-    phase?: 'attempting' | 'accepted' | 'uncertain'
-  }[]
-  lastActions: Record<string, LastAction>
-  /** The rows the person's replies in progress held at the latest view or press. Every write keeps their closed records. */
-  heldRows: string[]
-  /** The PRs tab's data: each PR's latest view and the current branch's PR. `isFetching` is always false here; the host knows what runs. */
-  prViews: PrViews
-  /** Why the last turn stopped, until the next turn starts. */
-  stop: Stop | null
-}
+export type { Session } from '../types'
 
 export const NO_PRS: PrViews = { views: {}, branchRef: null, isFetching: false }
 
@@ -91,6 +43,65 @@ export function emptySession(): Session {
 }
 
 export const PRESS_TIMEOUT_MS = 60_000
+
+/** A session's shared fields as any earlier build saved them, each possibly missing. */
+export type SavedSession = Partial<Omit<Session, 'turn' | 'told' | 'presence' | 'sent' | 'prViews'>> & {
+  turn?: Partial<Session['turn']>
+  told?: Partial<Told>
+  presence?: Partial<Session['presence']>
+  sent?: (Pick<Session['sent'][number], 'text' | 'press' | 'at'> & Partial<Session['sent'][number]>)[]
+  prViews?: Partial<PrViews>
+}
+
+/**
+ * A saved session's shared fields in the current shape. A sent record saved before the
+ * row and delivery fields existed changes no row when its message arrives.
+ */
+export function upgradeSession(saved: SavedSession): Session {
+  const base = emptySession()
+  const views = saved.prViews?.views ?? {}
+
+  return {
+    ledger: saved.ledger
+      ? { ...base.ledger, ...upgradeLedger({ ...saved.ledger, items: saved.ledger.items ?? [] }) }
+      : base.ledger,
+    turn: { ...base.turn, ...saved.turn },
+    told: { ...base.told, ...saved.told },
+    presence: { ...base.presence, ...saved.presence },
+    pending: saved.pending ?? [],
+    sent: (saved.sent ?? []).map(x => ({
+      ...x,
+      row: x.row ?? null,
+      queuedId: x.queuedId ?? null,
+      pressedAt: x.pressedAt ?? null,
+      deliveryId: x.deliveryId ?? null,
+      phase: x.phase ?? 'accepted',
+    })),
+    lastActions: upgradeLastActions(saved.lastActions ?? {}),
+    heldRows: saved.heldRows ?? [],
+    prViews: {
+      ...NO_PRS,
+      ...saved.prViews,
+      // Threads saved before their times and `isLinesChanged` existed.
+      views: Object.fromEntries(
+        Object.entries(views).map(([ref, pr]) => [
+          ref,
+          {
+            ...pr,
+            threads: pr.threads.map(t => ({
+              ...t,
+              isLinesChanged: t.isLinesChanged ?? false,
+              at: t.at ?? null,
+              reply: t.reply && { ...t.reply, at: t.reply.at ?? null },
+            })),
+          },
+        ]),
+      ),
+      isFetching: false,
+    },
+    stop: saved.stop ?? null,
+  }
+}
 
 /**
  * A resumed conversation still holds the guidance from
@@ -218,14 +229,15 @@ export function noteActivity<S extends Session>(s: S, line: string | null): S {
 
 /**
  * Queues the turn's exchange for the inbox model. A turn with no reply queues nothing unless
- * `queuesEmptyReply` is set, as for a turn whose question dialog the person dismissed.
+ * `queuesEmptyReply` is set, as for a turn whose question dialog the person dismissed. `tab` names the tab the
+ * inbox shows, for the model's note on what the person sees.
  */
 export function endTurn<S extends Session>(
   host: Host,
   s: S,
   reply: string,
   isOpen: boolean,
-  queuesEmptyReply = false,
+  { tab = null, queuesEmptyReply = false }: { tab?: string | null; queuesEmptyReply?: boolean } = {},
 ): S {
   const refs = prRefs(reply)
   const base = {
@@ -241,7 +253,7 @@ export function endTurn<S extends Session>(
     reply,
     turn: s.ledger.turn,
     press: s.turn.press,
-    screen: screenText(host, isOpen, null),
+    screen: screenText(host, isOpen, tab),
   }
 
   return { ...base, pending: [...base.pending, { ex, turnsStarted: s.presence.turnsStarted }] }

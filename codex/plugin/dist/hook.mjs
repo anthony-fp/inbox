@@ -420,6 +420,48 @@ function emptySession() {
     stop: null
   };
 }
+function upgradeSession(saved) {
+  const base = emptySession();
+  const views = saved.prViews?.views ?? {};
+  return {
+    ledger: saved.ledger ? { ...base.ledger, ...upgradeLedger({ ...saved.ledger, items: saved.ledger.items ?? [] }) } : base.ledger,
+    turn: { ...base.turn, ...saved.turn },
+    told: { ...base.told, ...saved.told },
+    presence: { ...base.presence, ...saved.presence },
+    pending: saved.pending ?? [],
+    sent: (saved.sent ?? []).map((x) => ({
+      ...x,
+      row: x.row ?? null,
+      queuedId: x.queuedId ?? null,
+      pressedAt: x.pressedAt ?? null,
+      deliveryId: x.deliveryId ?? null,
+      phase: x.phase ?? "accepted"
+    })),
+    lastActions: upgradeLastActions(saved.lastActions ?? {}),
+    heldRows: saved.heldRows ?? [],
+    prViews: {
+      ...NO_PRS,
+      ...saved.prViews,
+      // Threads saved before their times and `isLinesChanged` existed.
+      views: Object.fromEntries(
+        Object.entries(views).map(([ref, pr]) => [
+          ref,
+          {
+            ...pr,
+            threads: pr.threads.map((t) => ({
+              ...t,
+              isLinesChanged: t.isLinesChanged ?? false,
+              at: t.at ?? null,
+              reply: t.reply && { ...t.reply, at: t.reply.at ?? null }
+            }))
+          }
+        ])
+      ),
+      isFetching: false
+    },
+    stop: saved.stop ?? null
+  };
+}
 function startContext(host, s, source) {
   const carried = carryText(s.ledger, START_TITLE);
   const parts = [source === "resume" ? null : guidanceText(host), carried].filter((x) => x !== null);
@@ -487,7 +529,7 @@ function noteActivity(s, line) {
   if (activity === s.turn.activity) return s;
   return { ...s, turn: { ...s.turn, activity } };
 }
-function endTurn(host, s, reply, isOpen, queuesEmptyReply = false) {
+function endTurn(host, s, reply, isOpen, { tab = null, queuesEmptyReply = false } = {}) {
   const refs = prRefs(reply);
   const base = {
     ...s,
@@ -502,7 +544,7 @@ function endTurn(host, s, reply, isOpen, queuesEmptyReply = false) {
     reply,
     turn: s.ledger.turn,
     press: s.turn.press,
-    screen: screenText(host, isOpen, null)
+    screen: screenText(host, isOpen, tab)
   };
   return { ...base, pending: [...base.pending, { ex, turnsStarted: s.presence.turnsStarted }] };
 }
@@ -607,24 +649,11 @@ function upgraded(saved, sessionId) {
   return {
     ...base,
     ...kept,
-    // The ledger's shape is the mod's, so a saved one converts the way the mod's does. It converts
-    // before the defaults fill in, since an empty `closed` would hide an old `decided`.
-    ledger: saved.ledger ? { ...base.ledger, ...upgradeLedger({ ...saved.ledger, items: saved.ledger.items ?? [] }) } : base.ledger,
-    turn: { ...base.turn, ...turn },
-    told: { ...base.told, ...saved.told },
-    presence: { ...base.presence, ...saved.presence },
-    pending: (saved.pending ?? []).map(({ ex: { checks: _exChecks, ...ex }, ...p }) => ({ ...p, ex })),
-    // A message sent before the server kept its row changes no row when it arrives.
-    sent: (saved.sent ?? []).map((x) => ({
-      ...x,
-      row: x.row ?? null,
-      queuedId: x.queuedId ?? null,
-      pressedAt: x.pressedAt ?? null,
-      deliveryId: x.deliveryId ?? null,
-      phase: x.phase ?? "accepted"
-    })),
-    lastActions: upgradeLastActions(saved.lastActions ?? {}),
-    prViews: { ...NO_PRS, ...saved.prViews, isFetching: false },
+    ...upgradeSession({
+      ...kept,
+      turn,
+      pending: (saved.pending ?? []).map(({ ex: { checks: _exChecks, ...ex }, ...p }) => ({ ...p, ex }))
+    }),
     // A file saved before the hooks kept this record came from hooks that ran, so it reads as heard.
     // Its turns were not recorded, so `promptAt` is set too: a tool call then falls back to the time rule.
     heard: saved.heard ? { ...NOTHING_HEARD, ...saved.heard } : {

@@ -1,4 +1,6 @@
-import type { Closed, Finding, Item, Ledger } from '../types'
+import type { Closed, Finding, Item, Ledger, Told } from '../types'
+
+export type { Told } from '../types'
 import type { Exchange } from './ledger'
 import { clip, clipMiddle, numberBlocks } from './text'
 
@@ -434,8 +436,6 @@ export function closedText(closed: Closed[]): string | null {
     ...closed.map(d => `- "${d.ask}" → ${outcomeText(d)}${advice(d)}`),
   ].join(NL)
 }
-
-export type Told = { inbox: string | null; closed: string[] }
 
 export const TOLD_NOTHING: Told = { inbox: null, closed: [] }
 
