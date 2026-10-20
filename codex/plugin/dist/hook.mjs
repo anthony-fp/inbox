@@ -580,6 +580,14 @@ function endTurn(host, s, reply, isOpen, { tab = null, queuesEmptyReply = false 
 function needsUpdate(s) {
   return s.pending.length > 0 || s.presence.ledgerState !== "current";
 }
+function hasLedger(s) {
+  const { ledger } = s;
+  return ledger.card !== null || ledger.items.length > 0 || ledger.findings.length > 0;
+}
+function forkedFrom(child, parent) {
+  if (child.ledger.turn !== 0 || child.ledger.card) return child;
+  return { ...child, ledger: parent.ledger };
+}
 function isUnseen(s) {
   const { ledger } = s;
   return s.presence.turnsStarted === 0 && s.presence.ledgerState === "current" && s.pending.length === 0 && ledger.card === null && ledger.items.length === 0 && ledger.findings.length === 0;
@@ -707,6 +715,9 @@ function upgraded(saved, sessionId) {
 async function readSaved(dir, sessionId) {
   const saved = await readFile(statePath(dir, sessionId), "utf8").catch(missingAsNull);
   return saved === null ? { state: emptyState(sessionId), isSaved: false } : { state: upgraded(JSON.parse(saved), sessionId), isSaved: true };
+}
+async function readState(dir, sessionId) {
+  return (await readSaved(dir, sessionId)).state;
 }
 var LOCK_WAIT_MS = 1e4;
 var LOCK_CHILD = "held";
@@ -877,8 +888,7 @@ function flattenConversation(turns) {
 }
 
 // src/transcript.ts
-async function isNonInteractiveRun(path) {
-  if (path === null) return true;
+async function readSessionMeta(path) {
   try {
     const file = await open(path, "r");
     try {
@@ -886,13 +896,22 @@ async function isNonInteractiveRun(path) {
       const { bytesRead } = await file.read(buf, 0, buf.length, 0);
       const first = buf.subarray(0, bytesRead).toString("utf8").split("\n")[0] ?? "";
       const meta = JSON.parse(first);
-      return meta.type === "session_meta" && (meta.payload?.originator === "codex_exec" || meta.payload?.source === "exec");
+      return meta.type === "session_meta" ? meta : null;
     } finally {
       await file.close();
     }
   } catch {
-    return false;
+    return null;
   }
+}
+async function isNonInteractiveRun(path) {
+  if (path === null) return true;
+  const meta = await readSessionMeta(path);
+  return meta?.payload?.originator === "codex_exec" || meta?.payload?.source === "exec";
+}
+async function forkedFromId(path) {
+  const id = (await readSessionMeta(path))?.payload?.forked_from_id;
+  return typeof id === "string" && id !== "" ? id : null;
 }
 var DIALOG_TOOL = "request_user_input_async";
 var TAIL_BYTES = 4 * 1024 * 1024;
@@ -1122,6 +1141,12 @@ async function handleHook(input, deps) {
   const rolloutPath = input.agent_id ? null : input.transcript_path;
   const withRollout = (s) => rolloutPath !== null && s.transcriptPath !== rolloutPath ? { ...s, transcriptPath: rolloutPath } : s;
   const withHost = (s) => withRollout(withCli(s));
+  const withForkedLedger = async (s) => {
+    if (heardState(s.heard) !== "none" || rolloutPath === null) return s;
+    const parentId = await forkedFromId(rolloutPath);
+    const parent = parentId === null ? null : await readState(dir, parentId).catch(() => null);
+    return parent !== null && hasLedger(parent) ? forkedFrom(s, parent) : s;
+  };
   let isMarkedBehind = false;
   const withBehind = async (s) => {
     const isFirstHook = heardState(s.heard) === "none";
@@ -1131,13 +1156,14 @@ async function handleHook(input, deps) {
     isMarkedBehind = true;
     return { ...s, presence: { ...s.presence, ledgerState: "behind" } };
   };
+  const withHistory = async (s) => withBehind(await withForkedLedger(s));
   switch (input.hook_event_name) {
     case "SessionStart": {
       const root = input.cwd ?? "";
       const s = await updateState(
         dir,
         id,
-        async (s2) => noteHook(withHost(await withBehind({ ...input.source === "clear" ? cleared(s2) : s2, root })), "start", now())
+        async (s2) => noteHook(withHost(await withHistory({ ...input.source === "clear" ? cleared(s2) : s2, root })), "start", now())
       );
       if (isMarkedBehind) deps.startUpdate(id);
       const context = startContext(CODEX, s, input.source);
@@ -1146,7 +1172,7 @@ async function handleHook(input, deps) {
     case "UserPromptSubmit": {
       let notes = [];
       await updateState(dir, id, async (s) => {
-        const r = notePrompt2(withHost(await withBehind(s)), input.prompt ?? "", now());
+        const r = notePrompt2(withHost(await withHistory(s)), input.prompt ?? "", now());
         notes = r.notes;
         return input.agent_id ? r.state : noteHook(r.state, "prompt", now(), input.turn_id);
       });
@@ -1171,7 +1197,7 @@ async function handleHook(input, deps) {
       const { dialogs, commands } = await turnIn(input.transcript_path, input.turn_id);
       const lines = dialogs.map((questions) => dialogActivity(questions, { kind: "open" }));
       const written = await updateState(dir, id, async (s) => {
-        const withLines = lines.reduce((x, line) => noteActivity(x, line), withHost(await withBehind(s)));
+        const withLines = lines.reduce((x, line) => noteActivity(x, line), withHost(await withHistory(s)));
         const withOutput = commands.reduce((x, c) => noteCommandOutput(x, c.command, c.output), withLines);
         return noteHook(endTurn2(withOutput, reply, now()), "stop", now());
       });

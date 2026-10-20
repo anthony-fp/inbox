@@ -2324,6 +2324,9 @@ function prMarkId(ref) {
   return `pr:${ref}`;
 }
 var GH_MISSING_TEXT = "The inbox could not find gh, so it cannot read your PRs.";
+function prsEmptyHint(place) {
+  return `Your PRs show here when this ${place} opens or links one, or when your branch has one.`;
+}
 var PR_GROUP_TITLES = { threads: "Review threads", checks: "Failing checks" };
 function threadRowText(pr, t, lastActions) {
   const isSent = threadSentIn(lastActions)(pr, t);
@@ -2963,6 +2966,15 @@ function needsCatchUp(s) {
 }
 function needsUpdate(s) {
   return s.pending.length > 0 || s.presence.ledgerState !== "current";
+}
+function hasLedger(s) {
+  const { ledger } = s;
+  return ledger.card !== null || ledger.items.length > 0 || ledger.findings.length > 0;
+}
+function forkedFrom(child, parent) {
+  if (child.ledger.turn !== 0 || child.ledger.card)
+    return child;
+  return { ...child, ledger: parent.ledger };
 }
 function isUnseen(s) {
   const { ledger } = s;
@@ -3736,8 +3748,10 @@ function prEntries(screen, now) {
   }
   if (prs.olderText)
     out.push({ kind: "note", text: prs.olderText });
-  if (prs.drawn.length === 0 && !screen.isGhMissing)
+  if (prs.drawn.length === 0 && !screen.isGhMissing) {
     out.push({ kind: "note", text: screen.isFetchingPrs ? "Checking for PRs\u2026" : "No PRs", isStrong: true });
+    out.push({ kind: "note", text: prsEmptyHint("session") });
+  }
   return out;
 }
 function pressFeedback(screen, id, now) {
@@ -4755,6 +4769,9 @@ function isUnattended(ctx) {
   return agent?.kind === "sub" || !ctx.hasUI;
 }
 var sessionIdOf = (ctx) => ctx.sessionManager.getSessionId();
+function sessionIdInFile(file) {
+  return /(?:^|[\\/])[^_\\/]+_([^\\/]+)\.jsonl$/.exec(file)?.[1] ?? null;
+}
 function inboxModel(ctx) {
   const sonnets = ctx.models.list().filter((m) => SONNET.test(m.id));
   const sonnet = sonnets.find((m) => m.provider === "anthropic") ?? sonnets[0];
@@ -4967,6 +4984,15 @@ function createInbox(pi, deps = defaultDeps) {
     if (isMarked)
       await runUpdates(updateHostFor(ctx));
   }
+  async function continueFork(ctx, parentFile) {
+    const parentId = parentFile === undefined ? null : sessionIdInFile(parentFile);
+    if (parentId === null || parentId === sessionIdOf(ctx))
+      return;
+    const parent = await readState(dir, parentId).catch(() => null);
+    if (parent === null || !hasLedger(parent))
+      return;
+    await change(sessionIdOf(ctx), (s) => forkedFrom(s, parent));
+  }
   function prepare(ctx) {
     const id = sessionIdOf(ctx);
     if (prepared.has(id))
@@ -5001,15 +5027,17 @@ function createInbox(pi, deps = defaultDeps) {
     });
     return notes;
   }
-  const start = (_event, ctx) => {
+  const start = (ctx, parentFile) => {
     if (isUnattended(ctx))
       return;
     prepare(ctx);
     showBand(ctx);
-    deps.background(catchUpUnseen(ctx));
+    deps.background(continueFork(ctx, parentFile).catch(() => {
+      return;
+    }).then(() => catchUpUnseen(ctx)));
   };
-  pi.on("session_start", start);
-  pi.on("session_switch", start);
+  pi.on("session_start", (_event, ctx) => start(ctx));
+  pi.on("session_switch", (event, ctx) => start(ctx, event.reason === "fork" ? event.previousSessionFile : undefined));
   pi.on("session_shutdown", (_event, ctx) => {
     const id = sessionIdOf(ctx);
     openPanels.delete(id);
@@ -5285,6 +5313,7 @@ function host_default(pi) {
 export {
   styleOf,
   stopOf,
+  sessionIdInFile,
   inboxModel,
   host_default as default,
   createInbox,

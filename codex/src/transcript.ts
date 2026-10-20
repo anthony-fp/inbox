@@ -9,6 +9,27 @@ import { addActivity, dialogActivity, dialogQuestions } from '../../hooks/model-
 import type { DialogQuestion } from '../../hooks/model-text'
 import { activityOf, patchFiles } from './core'
 
+type SessionMeta = { type?: string; payload?: { originator?: string; source?: string; forked_from_id?: unknown } }
+
+/** The rollout's first row, `session_meta`. Null when the file or the row cannot be read. */
+async function readSessionMeta(path: string): Promise<SessionMeta | null> {
+  try {
+    const file = await open(path, 'r')
+    try {
+      const buf = Buffer.alloc(64 * 1024)
+      const { bytesRead } = await file.read(buf, 0, buf.length, 0)
+      const first = buf.subarray(0, bytesRead).toString('utf8').split('\n')[0] ?? ''
+      const meta = JSON.parse(first) as SessionMeta
+
+      return meta.type === 'session_meta' ? meta : null
+    } finally {
+      await file.close()
+    }
+  } catch {
+    return null
+  }
+}
+
 /**
  * Whether the session is a run no person chats in, where the hooks do nothing.
  * An ephemeral thread, such as the Codex app's own background jobs that
@@ -19,23 +40,19 @@ import { activityOf, patchFiles } from './core'
  */
 export async function isNonInteractiveRun(path: string | null): Promise<boolean> {
   if (path === null) return true
-  try {
-    const file = await open(path, 'r')
-    try {
-      const buf = Buffer.alloc(64 * 1024)
-      const { bytesRead } = await file.read(buf, 0, buf.length, 0)
-      const first = buf.subarray(0, bytesRead).toString('utf8').split('\n')[0] ?? ''
-      const meta = JSON.parse(first) as { type?: string; payload?: { originator?: string; source?: string } }
+  const meta = await readSessionMeta(path)
 
-      return (
-        meta.type === 'session_meta' && (meta.payload?.originator === 'codex_exec' || meta.payload?.source === 'exec')
-      )
-    } finally {
-      await file.close()
-    }
-  } catch {
-    return false
-  }
+  return meta?.payload?.originator === 'codex_exec' || meta?.payload?.source === 'exec'
+}
+
+/**
+ * The session a forked chat was forked from, from `forked_from_id` in the rollout's first row. A fork's rollout also
+ * holds the parent's own `session_meta` later on, so only the first row counts.
+ */
+export async function forkedFromId(path: string): Promise<string | null> {
+  const id = (await readSessionMeta(path))?.payload?.forked_from_id
+
+  return typeof id === 'string' && id !== '' ? id : null
 }
 
 const DIALOG_TOOL = 'request_user_input_async'

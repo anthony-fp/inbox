@@ -56,6 +56,7 @@ import {
   prCheckId,
   prMarkId,
   prRowWaits,
+  prsEmptyHint,
   prThreadId,
   threadActions,
   threadRowText,
@@ -1623,7 +1624,7 @@ function PrRows({
   )
 }
 
-const PRS_HINT = 'Your PRs show here when this conversation opens or links one, or when your branch has one.'
+const PRS_HINT = prsEmptyHint('conversation')
 
 function Prs({ v, now }: { v: View; now: number }) {
   const { blocks, rows } = prPlan(v)

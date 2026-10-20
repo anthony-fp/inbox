@@ -22,6 +22,8 @@ import type { Run } from '../../hooks/gh'
 import type { RowPress } from '../../hooks/presses'
 import {
   endTurn,
+  forkedFrom,
+  hasLedger,
   isUnseen,
   needsUpdate,
   noteActivity,
@@ -172,6 +174,11 @@ function isUnattended(ctx: ExtensionContext): boolean {
 }
 
 const sessionIdOf = (ctx: ExtensionContext) => ctx.sessionManager.getSessionId()
+
+/** The session id in a session file's name, `<timestamp>_<sessionId>.jsonl`. Null for any other name. */
+export function sessionIdInFile(file: string): string | null {
+  return /(?:^|[\\/])[^_\\/]+_([^\\/]+)\.jsonl$/.exec(file)?.[1] ?? null
+}
 
 /**
  * The inbox model: a Sonnet model the person's providers offer, since the inbox model evals pass on Sonnet. The
@@ -482,6 +489,19 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
     if (isMarked) await runUpdates(updateHostFor(ctx))
   }
 
+  /**
+   * A forked session continues its parent's ledger, as the mod's fork does, when the parent saved one. The card, items
+   * and closed records carry over, so the fork's catch-up does not offer back what the person already closed.
+   * A parent with no saved ledger leaves the fork to catch up over its branch.
+   */
+  async function continueFork(ctx: ExtensionContext, parentFile: string | undefined): Promise<void> {
+    const parentId = parentFile === undefined ? null : sessionIdInFile(parentFile)
+    if (parentId === null || parentId === sessionIdOf(ctx)) return
+    const parent = await readState(dir, parentId).catch(() => null)
+    if (parent === null || !hasLedger(parent)) return
+    await change(sessionIdOf(ctx), s => forkedFrom(s, parent))
+  }
+
   /** Runs once for each session in this process: clears an update flag a crashed process left, and prunes old sessions. */
   function prepare(ctx: ExtensionContext): void {
     const id = sessionIdOf(ctx)
@@ -523,14 +543,18 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
     return notes
   }
 
-  const start = (_event: unknown, ctx: ExtensionContext) => {
+  const start = (ctx: ExtensionContext, parentFile?: string) => {
     if (isUnattended(ctx)) return
     prepare(ctx)
     showBand(ctx)
-    deps.background(catchUpUnseen(ctx))
+    deps.background(
+      continueFork(ctx, parentFile)
+        .catch(() => undefined)
+        .then(() => catchUpUnseen(ctx)),
+    )
   }
-  pi.on('session_start', start)
-  pi.on('session_switch', start)
+  pi.on('session_start', (_event, ctx) => start(ctx))
+  pi.on('session_switch', (event, ctx) => start(ctx, event.reason === 'fork' ? event.previousSessionFile : undefined))
   pi.on('session_shutdown', (_event, ctx) => {
     const id = sessionIdOf(ctx)
     openPanels.delete(id)

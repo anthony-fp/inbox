@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -781,6 +781,40 @@ test('a new session with no earlier turns, and a session that has no UI, start w
   await call('session_start', { type: 'session_start' }, makeCtx('s2'))
   await settle()
   expect(completions).toEqual([])
+})
+
+const forkOf = (parent: string) => ({
+  type: 'session_switch',
+  reason: 'fork',
+  previousSessionFile: `/sessions/2026-10-20T05-01-10-123Z_${parent}.jsonl`,
+})
+
+test('a forked session takes its parent’s ledger and does not catch up, and catches up when the parent has none', async () => {
+  createInbox(pi(), deps())
+  await record({ kind: 'task', ask: 'Try the CLI by hand' }, makeCtx('parent'))
+  await call('session_start', { type: 'session_start' }, makeCtx('parent'))
+  await settle()
+  const parentItems = state('parent').ledger.items
+
+  branch = earlierBranch()
+  await call('session_switch', forkOf('parent'), makeCtx('child'))
+  await settle()
+  expect(completions).toEqual([])
+  expect(state('child').ledger.items).toEqual(parentItems)
+  expect(state('child').presence.ledgerState).toBe('current')
+
+  await call('session_switch', forkOf('missing'), makeCtx('orphan'))
+  await settle()
+  expect(completions).toHaveLength(1)
+  expect(state('orphan').ledger.items.map((i: { ask: string }) => i.ask)).toEqual(['Use Node or Python?'])
+})
+
+test('a resume keeps its own ledger even when the event names another session file', async () => {
+  createInbox(pi(), deps())
+  await record({ kind: 'task', ask: 'Try the CLI by hand' }, makeCtx('parent'))
+  await call('session_switch', { ...forkOf('parent'), reason: 'resume' }, makeCtx('other'))
+  await settle()
+  expect(existsSync(join(dir, 'sessions', 'other.json'))).toBe(false)
 })
 
 test('a failed catch-up is tried again at the next agent end, before the exchange', async () => {

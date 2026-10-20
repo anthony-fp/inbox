@@ -76,11 +76,7 @@ export const CLIENTS: Record<ClientId, Client> = {
         reason:
           'The maintainer chose to keep each host rule. The mod opens a link with any scheme. Codex opens only https links and treats anything else as a path.',
       },
-      'fork-ledger': {
-        kind: 'unsupported',
-        reason:
-          "Not built in Codex yet; client-parity step 8 builds it or records the limit. A forked chat's parent id appears in MCP call metadata, which `codex/src/server.ts:turnOf` reads, and no hook names it.",
-      },
+      'fork-ledger': { kind: 'full' },
       'band-and-stop-rows': {
         kind: 'unsupported',
         reason: 'Codex has no line above its prompt, and shows no stops.',
@@ -105,21 +101,13 @@ export const CLIENTS: Record<ClientId, Client> = {
       'tool-output-urls': { kind: 'full' },
       'pr-link-from-output': { kind: 'full' },
       'pr-arrivals': { kind: 'full' },
-      'prs-empty-hint': {
-        kind: 'unsupported',
-        reason:
-          'Not built in omp yet; client-parity step 8 adds the hint. The PRs tab shows "No PRs" with no hint line.',
-      },
+      'prs-empty-hint': { kind: 'full' },
       'link-open-rule': {
         kind: 'different',
         reason:
           'The maintainer chose to keep each host rule. The mod opens a link with any scheme. omp opens only https links and treats anything else as a path.',
       },
-      'fork-ledger': {
-        kind: 'unsupported',
-        reason:
-          "A forked omp session gets a ledger rebuilt from its branch by catch-up. It does not get the parent's saved card and items: omp's `session_switch` event reports the session file the fork came from, and the host does not read it. Client-parity step 8 builds that.",
-      },
+      'fork-ledger': { kind: 'full' },
       'band-and-stop-rows': {
         kind: 'different',
         reason:

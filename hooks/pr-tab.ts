@@ -163,6 +163,11 @@ export function prMarkId(ref: string): string {
 
 export const GH_MISSING_TEXT = 'The inbox could not find gh, so it cannot read your PRs.'
 
+/** The hint under an empty PRs tab. `place` is the host's word for a conversation with the agent. */
+export function prsEmptyHint(place: string): string {
+  return `Your PRs show here when this ${place} opens or links one, or when your branch has one.`
+}
+
 export const PR_GROUP_TITLES = { threads: 'Review threads', checks: 'Failing checks' }
 
 /** What a review thread's row says, for each look to draw in its own controls. */

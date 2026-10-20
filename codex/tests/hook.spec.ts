@@ -427,6 +427,56 @@ test('a session resumed with earlier turns is marked behind at its first hook an
   )
 })
 
+function forkRollout(parentId: string): string {
+  const [first, ...rest] = readFileSync(rolloutCopy(), 'utf8').split('\n')
+  const meta = JSON.parse(first ?? '')
+  const path = join(tempDir(), 'fork.jsonl')
+  writeFileSync(
+    path,
+    [JSON.stringify({ ...meta, payload: { ...meta.payload, forked_from_id: parentId } }), ...rest].join('\n'),
+  )
+
+  return path
+}
+
+test('a forked chat takes its parent’s ledger at its first hook, and catches up when the parent has none', async () => {
+  const dir = tempDir()
+  const deps = execDeps(dir)
+  await updateState(dir, 'parent', s => ({
+    ...s,
+    presence: { ...s.presence, turnsStarted: 3, turnsApplied: 3 },
+    ledger: { ...s.ledger, turn: 3, card: { goal: 'Parent goal', done: [], now: '', running: [] }, nextId: 4 },
+  }))
+
+  await handleHook(
+    input('SessionStart', {
+      session_id: 'child',
+      cwd: '/repo',
+      source: 'startup',
+      transcript_path: forkRollout('parent'),
+    }),
+    deps,
+  )
+  const child = await readState(dir, 'child')
+  assert.equal(child.ledger.card?.goal, 'Parent goal')
+  assert.equal(child.ledger.turn, 3)
+  assert.equal(child.presence.turnsStarted, 0)
+  assert.equal(child.presence.ledgerState, 'current')
+  assert.deepEqual(deps.updates, [])
+
+  await handleHook(
+    input('SessionStart', {
+      session_id: 'orphan',
+      cwd: '/repo',
+      source: 'startup',
+      transcript_path: forkRollout('missing-parent'),
+    }),
+    deps,
+  )
+  assert.equal((await readState(dir, 'orphan')).presence.ledgerState, 'behind')
+  assert.deepEqual(deps.updates, ['orphan'])
+})
+
 test('a failed catch-up leaves the ledger behind, and the next Stop catches up again before the exchange', async () => {
   const dir = tempDir()
   const deps = execDeps(dir)

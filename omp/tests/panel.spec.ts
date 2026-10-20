@@ -1,6 +1,13 @@
 import { expect, test } from 'bun:test'
 
-import { GH_MISSING_TEXT, checkActions, prBlockActions, threadActions, threadSentIn } from '../../hooks/pr-tab'
+import {
+  GH_MISSING_TEXT,
+  checkActions,
+  prBlockActions,
+  prsEmptyHint,
+  threadActions,
+  threadSentIn,
+} from '../../hooks/pr-tab'
 import { failingChecks, waitingThreads } from '../../hooks/prs'
 import type { LastAction, Stop } from '../../types'
 import { closeItem } from '../../hooks/ledger'
@@ -376,6 +383,7 @@ test('the PRs tab says when gh is missing and when there are no PRs', () => {
   expect(text(screen, ui)).toContain(GH_MISSING_TEXT)
   const empty = { ...screenOf(), view: sessionView(emptyState('s'), NOW, SETTLED_MS, true) }
   expect(text(empty, ui)).toContain('No PRs')
+  expect(text(empty, ui)).toContain(prsEmptyHint('session'))
   expect(text({ ...empty, isFetchingPrs: true }, ui)).toContain('Checking for PRs…')
 })
 

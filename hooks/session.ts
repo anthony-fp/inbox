@@ -373,6 +373,24 @@ export function needsUpdate(s: Session): boolean {
   return s.pending.length > 0 || s.presence.ledgerState !== 'current'
 }
 
+/** Whether the session has a card, an item or a finding. */
+export function hasLedger(s: Session): boolean {
+  const { ledger } = s
+
+  return ledger.card !== null || ledger.items.length > 0 || ledger.findings.length > 0
+}
+
+/**
+ * A forked conversation continues its parent's ledger: the card, items, findings and closed records. It takes
+ * nothing else, since presses, queued messages, the stop and the running turn belong to the parent. A fork that
+ * already has turns or a card keeps its own.
+ */
+export function forkedFrom<S extends Session>(child: S, parent: Session): S {
+  if (child.ledger.turn !== 0 || child.ledger.card) return child
+
+  return { ...child, ledger: parent.ledger }
+}
+
 /** Whether the inbox has recorded nothing of the session: no turn counted, no exchange waiting, an empty ledger. */
 export function isUnseen(s: Session): boolean {
   const { ledger } = s

@@ -55,6 +55,7 @@ import {
   commandFindings,
   emptySession,
   endTurn,
+  forkedFrom,
   noteActivity as noteTurnActivity,
   pressOn,
   recordPrompt,
@@ -90,6 +91,7 @@ import {
   threadRowText,
   threadSentIn,
   GH_MISSING_TEXT,
+  prsEmptyHint,
 } from './pr-tab'
 import type { Applied, GhRun, PrAction, PrPress } from './pr-tab'
 import {
@@ -2181,7 +2183,7 @@ async function bringBack(
     isBrought = false
     if (!isLoading() || s.ledger.turn !== 0 || s.ledger.card) return s
     isBrought = true
-    if (isFork) return { ...s, ledger: loaded.ledger }
+    if (isFork) return forkedFrom(s, loaded)
     const lastActions = Object.fromEntries(
       Object.entries(loaded.lastActions).map(([id, a]) => [
         id,
@@ -4543,9 +4545,7 @@ export const register: Register = on => {
         <Box flexDirection="column" flexGrow={1}>
           {emptyState({
             title: prState.isFetching ? 'Checking for PRs…' : 'No PRs',
-            hint: prState.isGhMissing
-              ? GH_MISSING_TEXT
-              : 'Your PRs show here when this session opens or links one, or when your branch has one.',
+            hint: prState.isGhMissing ? GH_MISSING_TEXT : prsEmptyHint('session'),
           })}
         </Box>
       ) : (

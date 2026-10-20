@@ -4,6 +4,7 @@ import type { RowRecord } from '../../hooks/arrivals'
 import { closedState } from '../../hooks/ledger'
 import {
   GH_MISSING_TEXT,
+  prsEmptyHint,
   PR_GROUP_TITLES,
   PR_TONES,
   checkActions,
@@ -472,8 +473,10 @@ function prEntries(screen: PanelScreen, now: number): Entry[] {
     }
   }
   if (prs.olderText) out.push({ kind: 'note', text: prs.olderText })
-  if (prs.drawn.length === 0 && !screen.isGhMissing)
+  if (prs.drawn.length === 0 && !screen.isGhMissing) {
     out.push({ kind: 'note', text: screen.isFetchingPrs ? 'Checking for PRs…' : 'No PRs', isStrong: true })
+    out.push({ kind: 'note', text: prsEmptyHint('session') })
+  }
 
   return out
 }

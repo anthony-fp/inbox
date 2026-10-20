@@ -1392,6 +1392,11 @@ threads a root thread and its forks belong to. They differ after a fork.
   `forkedFromId`, `parentThreadId` ("only be set if this thread is a
   subagent"), `ephemeral`, `section`, `projectId` [source]
   (GH/codex-rs/app-server-protocol/schema/typescript/v2/Thread.ts).
+- **A fork's rollout names its parent.** [live] Codex 0.154.0, `thread/fork` on a rollout kept in a scratch
+  `CODEX_HOME`: the fork's rollout starts with its own `session_meta` row, which has `forked_from_id` set to the
+  parent's thread id, then the parent's rows including the parent's `session_meta`. A rollout that is not a fork has
+  no `forked_from_id`; a subagent's has `parent_thread_id` instead. Every hook's `transcript_path` is that rollout,
+  so the inbox reads the parent from the first row (`codex/src/transcript.ts:forkedFromId`).
 - **Hooks.** `session_id` on hook input. "Subagent hooks use the parent
   session id." (L/hooks#common-input-fields) The SessionEnd example uses
   `"thr_123"`. [inference] The hook `session_id` is a thread id.

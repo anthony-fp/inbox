@@ -2,12 +2,21 @@ import { spawn } from 'node:child_process'
 import { resolve } from 'node:path'
 
 import { dialogActivity } from '../../hooks/model-text'
-import { cleared, isUnseen, needsUpdate, noteActivity, noteCommandOutput, startContext } from '../../hooks/session'
+import {
+  cleared,
+  forkedFrom,
+  hasLedger,
+  isUnseen,
+  needsUpdate,
+  noteActivity,
+  noteCommandOutput,
+  startContext,
+} from '../../hooks/session'
 import { activityOf, endTurn, heardState, noteHook, notePrompt, patchFiles } from './core'
-import { updateState } from './state'
+import { readState, updateState } from './state'
 import type { SessionState } from './state'
 import { CODEX } from './texts'
-import { isNonInteractiveRun, readRollout, turnIn } from './transcript'
+import { forkedFromId, isNonInteractiveRun, readRollout, turnIn } from './transcript'
 
 export type HookInput = {
   hook_event_name: string
@@ -43,6 +52,14 @@ export async function handleHook(input: HookInput, deps: HookDeps): Promise<Reco
   const withRollout = (s: SessionState): SessionState =>
     rolloutPath !== null && s.transcriptPath !== rolloutPath ? { ...s, transcriptPath: rolloutPath } : s
   const withHost = (s: SessionState): SessionState => withRollout(withCli(s))
+  /** The first hook of a forked chat gives it the parent's ledger when the parent has one. */
+  const withForkedLedger = async (s: SessionState): Promise<SessionState> => {
+    if (heardState(s.heard) !== 'none' || rolloutPath === null) return s
+    const parentId = await forkedFromId(rolloutPath)
+    const parent = parentId === null ? null : await readState(dir, parentId).catch(() => null)
+
+    return parent !== null && hasLedger(parent) ? forkedFrom(s, parent) : s
+  }
   let isMarkedBehind = false
   /**
    * The first hook of a session the inbox has recorded nothing of marks the ledger `behind` when the rollout holds
@@ -59,11 +76,13 @@ export async function handleHook(input: HookInput, deps: HookDeps): Promise<Reco
     return { ...s, presence: { ...s.presence, ledgerState: 'behind' } }
   }
 
+  const withHistory = async (s: SessionState): Promise<SessionState> => withBehind(await withForkedLedger(s))
+
   switch (input.hook_event_name) {
     case 'SessionStart': {
       const root = input.cwd ?? ''
       const s = await updateState(dir, id, async s =>
-        noteHook(withHost(await withBehind({ ...(input.source === 'clear' ? cleared(s) : s), root })), 'start', now()),
+        noteHook(withHost(await withHistory({ ...(input.source === 'clear' ? cleared(s) : s), root })), 'start', now()),
       )
       if (isMarkedBehind) deps.startUpdate(id)
 
@@ -74,7 +93,7 @@ export async function handleHook(input: HookInput, deps: HookDeps): Promise<Reco
     case 'UserPromptSubmit': {
       let notes: string[] = []
       await updateState(dir, id, async s => {
-        const r = notePrompt(withHost(await withBehind(s)), input.prompt ?? '', now())
+        const r = notePrompt(withHost(await withHistory(s)), input.prompt ?? '', now())
         notes = r.notes
 
         return input.agent_id ? r.state : noteHook(r.state, 'prompt', now(), input.turn_id)
@@ -105,7 +124,7 @@ export async function handleHook(input: HookInput, deps: HookDeps): Promise<Reco
       const { dialogs, commands } = await turnIn(input.transcript_path, input.turn_id)
       const lines = dialogs.map(questions => dialogActivity(questions, { kind: 'open' }))
       const written = await updateState(dir, id, async s => {
-        const withLines = lines.reduce((x, line) => noteActivity(x, line), withHost(await withBehind(s)))
+        const withLines = lines.reduce((x, line) => noteActivity(x, line), withHost(await withHistory(s)))
         const withOutput = commands.reduce((x, c) => noteCommandOutput(x, c.command, c.output), withLines)
 
         return noteHook(endTurn(withOutput, reply, now()), 'stop', now())
