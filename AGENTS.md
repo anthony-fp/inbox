@@ -2,6 +2,13 @@
 
 The inbox is drawn in four looks: the Claude Code terminal, the Claude desktop app's pane, the Codex tab, and omp's panel. Before you change the UI or a rule, read [docs/looks.md](docs/looks.md). It says which file owns each rule, where the looks differ on purpose, and what to check after each kind of change. [GLOSSARY.md](GLOSSARY.md) defines the terms.
 
+## New features
+
+- Design each feature for every client from the start: the Claude Code terminal, the Claude desktop app, Codex and omp. Work out how each host gets the events and data the feature needs.
+- Put shared logic in the owner `docs/looks.md` names, so each host calls it.
+- Leave a host out only for a real host limit, recorded in "Differences on purpose" with its reason. Doing a host later is not a reason.
+- Give the feature a `FeatureId` in `hooks/clients.ts`, with an entry for every client. `./scripts/check.sh` fails on an entry that is not `full` and has no row.
+
 ## Every change
 
 - The repo is public. Keep private paths, other people's names and session content out of commits.

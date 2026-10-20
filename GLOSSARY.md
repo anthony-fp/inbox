@@ -94,6 +94,12 @@ terminal and desktop looks, `codex/src/tab.tsx` for the Codex tab,
 A behavior that differs between looks because one look cannot do something,
 or because the product decided so. Any other difference is drift.
 
+**Parity record**:
+`hooks/clients.ts`. It lists, for each host, whether each feature is `full`,
+`different` or `unsupported`, with a reason for the last two. Each such entry
+needs a row in "Differences on purpose" in `docs/looks.md`, and
+`scripts/check-structure.mjs` fails when one is missing.
+
 The engine has two terms of its own. Its `surface` is where Claude Code runs,
 and includes `mobile` and `vscode`; `lookOf` in `hooks/register.tsx` maps it to
 a look. Its `Client` is a drawn region that takes clicks over its whole shape,

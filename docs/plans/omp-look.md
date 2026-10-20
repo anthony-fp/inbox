@@ -1,6 +1,6 @@
 # A shared session core, then omp as the third host
 
-Status: built. All four steps are on the `session-core` branch, not yet merged.
+Status: built. Merged to main in #5.
 
 omp ([omp.sh](https://omp.sh/)) is a terminal coding agent forked from pi. It loads TypeScript extensions in its own Bun process. A throwaway extension showed that the shared modules in `hooks/` load in omp unchanged, and that omp can draw the band above the prompt and an `/inbox` panel and take its keys. That extension drew the shared demo data only. It never ran a real session.
 
@@ -62,7 +62,7 @@ A shared module holding the `SessionHost` type and the async work that runs thro
 | Member | What the host does | Codex | omp |
 | --- | --- | --- | --- |
 | `now` | The clock | `Date.now` | `Date.now` |
-| `read`, `update` | Read the session, and change it with a checkpoint before an external effect | a JSON file under a file lock | a JSON file under a lock held in the process |
+| `read`, `update` | Read the session, and change it under a lock | a JSON file under a file lock | a JSON file under a lock held in the process |
 | `exclusive` | Run the per-reply update while no other run holds the session | the `.updating` file lock | a flag held in the process |
 | `ask` | Call the inbox model with the prompt `buildPrompt` writes | `codex exec` | `completeSimple` on a model from omp's registry |
 | `deliver` | Send a message to the agent as if the person typed it | `codex queue` | `sendUserMessage` |
@@ -82,7 +82,7 @@ Codex keeps the MCP server, the tab, the hooks' input parsing, `codex queue` and
 ### Check
 
 - The Codex tests in `codex/tests` keep passing unchanged. They are the proof that Codex behaves as before.
-- `tests/session-script.ts` drives one scripted session through the shared functions and a `SessionHost`: a prompt, a `record` call, a turn end, the inbox model's answer, a press that sends, the arrival of that message, Done and Undo. It checks the rows, deliveries, turn counts and sent records after each event. `tests/session.test.ts` runs it with the in-memory host in `tests/session-fake-host.ts`. A later host runs it with its own `SessionHost`, which catches a host whose storage, checkpoint, lock or delivery breaks the shared flow. It calls the shared functions directly, so a host's event wiring needs its own tests.
+- `tests/session-script.ts` drives one scripted session through the shared functions and a `SessionHost`: a prompt, a `record` call, a turn end, the inbox model's answer, a press that sends, the arrival of that message, Done and Undo. It checks the rows, deliveries, turn counts and sent records after each event. `tests/session.test.ts` runs it with the in-memory host in `tests/session-fake-host.ts`. A later host runs it with its own `SessionHost`, which catches a host whose storage, lock or delivery breaks the shared flow. It calls the shared functions directly, so a host's event wiring needs its own tests.
 - `scripts/check-structure.mjs` lists the two new shared modules.
 
 ## Step 2: omp host and look
