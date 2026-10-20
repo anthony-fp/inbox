@@ -45,7 +45,7 @@ Capture each result and read the capture. A ✓ on a row lasts a few seconds bef
 | Finding | Point the agent at a bug outside its task. Press Explain, then Dismiss, then Undo. | A Findings row. Each press shows its result, and Undo brings the row back. |
 | Dialog | Have the agent ask through its question dialog. Answer one, and dismiss another: Escape in the terminal, the dialog's close button in Codex. In the desktop app, press Skip instead. | The answered question does not stay open. The dismissed one becomes a Needs you row. Skip sends the agent "[No preference]", so it adds no row. |
 | Reply while closing | Start typing a reply on a row, and have the agent close that row. | The row stays in place until you send or discard the reply. |
-| PRs | Open the PRs tab with `gh` signed in. Then hide `gh` from the agent's `PATH`, reopen the tab, and put `gh` back. | Your PRs, then "The inbox could not find gh, so it cannot read your PRs." |
+| PRs | Open the PRs tab with `gh` signed in. Then rename the `gh` binary, reopen the tab, and rename it back. Taking `gh` off `PATH` is not enough, since the inbox also looks for `/opt/homebrew/bin/gh` and `/usr/local/bin/gh`. | Your PRs, then "The inbox could not find gh, so it cannot read your PRs." |
 | Resume | Resume the session in Claude Code, or reopen the thread in Codex. Then ask a new question. | The rows come back, and the agent can still record. |
 | Agent replies | Read the agent's replies throughout the pass. | No reply shows an inbox id, such as `i3` or `f4`. |
 
