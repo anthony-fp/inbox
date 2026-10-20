@@ -3078,6 +3078,9 @@ export const register: Register = on => {
     const { Box, Button, Text } = $.ui.resolve(e)
     const [{ ledger, stop, view, showsDemoNotices, now }, theme] = await Promise.all([drawnState($), read($, THEME)])
     if (!stop && !ledger.card && ledger.items.length === 0 && ledger.findings.length === 0) return next(e)
+    // Every mod shares the band, and a tree without the drawing from next(e)
+    // hides what the mods after this one draw there.
+    const theirs = await next(e)
     const pal = paletteFor(theme, lookOf(e.surface))
     const counts = ROW_TABS.filter(t => view[t.id].count > 0).map(t => (
       <Text>
@@ -3104,7 +3107,13 @@ export const register: Register = on => {
         <Button key="open-inbox" label="Open inbox" onPress={() => void openInbox($)} />
       </Box>
     )
-    if (!stop) return countLine
+    if (!stop)
+      return (
+        <Box flexDirection="column">
+          {countLine}
+          {theirs}
+        </Box>
+      )
 
     // An API error resumes from
     // [Resume], which keeps its key while it sends, so the desktop app keeps the band's focus.
@@ -3137,6 +3146,7 @@ export const register: Register = on => {
         {countLine}
         {e.props.maxRows > 1 ? stopLine : null}
         {isNotSentOwnRow ? <Text color="error">{notSent}</Text> : null}
+        {theirs}
       </Box>
     )
   })
