@@ -1,7 +1,16 @@
 import { execFile } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 
@@ -41,6 +50,8 @@ type Case = {
   ledger?: Partial<Ledger>
   /** The inbox the tools answer from, when it differs from what the agent was shown. */
   toolLedger?: Partial<Ledger>
+  /** Files to put in the folder the agent runs in, by path within it. */
+  files?: Record<string, string>
   prompt: string
   checks: Check[]
   min?: Partial<Record<Agent, number>>
@@ -138,6 +149,10 @@ function sandbox(c: Case, agent: Agent) {
   const dir = mkdtempSync(join(tmpdir(), 'inbox-agent-eval-'))
   const work = join(dir, 'work')
   mkdirSync(work)
+  for (const [path, text] of Object.entries(c.files ?? {})) {
+    mkdirSync(dirname(join(work, path)), { recursive: true })
+    writeFileSync(join(work, path), text)
+  }
   const state = join(dir, 'state.json')
   const log = join(dir, 'calls.jsonl')
   writeFileSync(state, JSON.stringify({ agent, shown: c.ledger ?? {}, ledger: c.toolLedger ?? c.ledger ?? {} }))
@@ -274,13 +289,13 @@ async function codexIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome>
   return { reply, calls: s.calls(), error: r.code === 0 ? null : `codex exited ${r.code}: ${r.stderr.slice(0, 300)}` }
 }
 
-/** Throws unless the omp session offers exactly the probe's `record` and `close`, and no MCP server's tools. */
+/** Throws unless the omp session offers exactly its `bash` and the probe's `record` and `close`, and no MCP server's tools. */
 function assertOnlyOmpProbe(toolsFile: string) {
   if (!existsSync(toolsFile)) throw new Error('the omp probe wrote no tool list')
   const seen: { active: string[]; all: { name: string; source: string }[] } = JSON.parse(
     readFileSync(toolsFile, 'utf8'),
   )
-  const wanted = ['close', 'record']
+  const wanted = ['bash', 'close', 'record']
   if (seen.active.toSorted().join() !== wanted.join())
     throw new Error(`omp's active tools are not just ${wanted.join(' and ')}: ${seen.active.join(', ')}`)
   const mcp = seen.all.filter(t => /mcp/i.test(t.source))
@@ -288,8 +303,19 @@ function assertOnlyOmpProbe(toolsFile: string) {
 }
 
 /**
- * Runs omp in print mode with only the probe extension, in a fresh HOME that holds nothing of the person's omp
- * config. The API key reaches omp through the environment of this one command.
+ * A macOS sandbox profile that lets a process write only under `dir` and the system temp folder, as Codex's
+ * `-s read-only` keeps its shell from changing the person's files.
+ */
+function writesOnlyUnder(dir: string): string {
+  const paths = [realpathSync(dir), realpathSync(tmpdir())].map(p => `(subpath ${JSON.stringify(p)})`).join(' ')
+
+  return `(version 1)(allow default)(deny file-write*)(allow file-write* ${paths} (literal "/dev/null") (literal "/dev/tty") (regex #"^/dev/fd/"))`
+}
+
+/**
+ * Runs omp in print mode with its `bash` tool and the probe extension, in a fresh HOME that holds nothing of the
+ * person's omp config. Like Codex, it has a shell that can write only in the case's folder. The API key reaches omp
+ * through the environment of this one command.
  */
 async function ompIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome> {
   const home = join(s.dir, 'omp-home')
@@ -297,6 +323,9 @@ async function ompIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome> {
   const toolsFile = join(s.dir, 'tools.json')
   const r = await exec(
     [
+      'sandbox-exec',
+      '-p',
+      writesOnlyUnder(s.dir),
       'omp',
       '-p',
       '--mode',
@@ -305,7 +334,8 @@ async function ompIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome> {
       '--no-extensions',
       '-e',
       ompProbe,
-      '--no-tools',
+      '--tools=bash',
+      '--approval-mode=yolo',
       '--no-lsp',
       '--no-skills',
       '--no-rules',
