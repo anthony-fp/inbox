@@ -24,13 +24,13 @@ export type Ask = (prompt: string) => Promise<string | null>
 export type SessionHost<S extends Session> = {
   now(): number
   read(): Promise<S>
-  /** Changes the session under its lock. `checkpoint` saves an intermediate state before an external effect. */
-  update(change: (s: S, checkpoint: (state: S) => Promise<void>) => S | Promise<S>): Promise<S>
+  /** Changes the session under its lock. An external effect, such as a delivery, runs outside a change. */
+  update(change: (s: S) => S | Promise<S>): Promise<S>
   /** Runs `fn` unless another run holds the session's per-reply update. */
   exclusive<T>(fn: () => Promise<T>): Promise<{ acquired: true; value: T } | { acquired: false }>
   /** Calls the inbox model. Null when it fails. */
   ask: Ask
-  /** Sends a message to the agent as if the person typed it. */
+  /** Sends a message to the agent as if the person typed it. Runs outside a change, so it may change the session itself. */
   deliver(s: S, text: string): Promise<SendOutcome>
   /** Throws when `deliver` could not start. Run before a sent record is saved, so a message that cannot go leaves no record. */
   prepare?(s: S): Promise<void>
@@ -122,11 +122,13 @@ export async function wakeForDone<S extends Session>(host: WakeHost<S>): Promise
   const check = (s: S) =>
     doneWake(s.ledger, { now: host.now(), windowMs: host.settleWindowMs, isTurnRunning: s.turn.person !== null })
   if (!check(await host.read())) return
-  await host.update(async (s, checkpoint) => {
+  let attempt: { deliveryId: string; text: string } | null = null
+  await host.update(async s => {
     const wake = check(s)
     if (!wake) return s
     await host.prepare?.(s)
     const deliveryId = host.newId()
+    attempt = { deliveryId, text: wake.text }
     const lastActions = { ...s.lastActions }
     for (const closed of s.ledger.closed) {
       if (!wake.ids.includes(closed.id)) continue
@@ -155,12 +157,17 @@ export async function wakeForDone<S extends Session>(host: WakeHost<S>): Promise
         },
       ],
     }
-    await checkpoint(next)
-    const outcome = await host.deliver(next, wake.text)
-    const after = completedAttempt(next, deliveryId, outcome)
+
+    return next
+  })
+  const sending = attempt as { deliveryId: string; text: string } | null
+  if (!sending) return
+  const outcome = await host.deliver(await host.read(), sending.text)
+  await host.update(s => {
+    const after = completedAttempt(s, sending.deliveryId, outcome)
 
     return outcome.state === 'rejected'
-      ? { ...after, ledger: refuseDoneNotification(after.ledger, deliveryId, outcome.reason) }
+      ? { ...after, ledger: refuseDoneNotification(after.ledger, sending.deliveryId, outcome.reason) }
       : after
   })
 }
@@ -178,9 +185,9 @@ export type PressOutcome = {
 type PressHost<S extends Session> = Pick<SessionHost<S>, 'now' | 'read' | 'update' | 'deliver' | 'perform' | 'newId'>
 
 /**
- * Applies a press. When it sends a message, the sent record is saved before
- * delivery, and delivery runs inside the same update. Opens and copies run
- * after the update, so they run only once the press is saved.
+ * Applies a press. When it sends a message, the sent record is saved with the press, and delivery runs after that
+ * update, outside the session's lock, since a host's delivery can run the host's own handlers before it returns.
+ * Opens and copies run after the press is saved.
  */
 export async function press<S extends Session>(
   host: PressHost<S>,
@@ -190,14 +197,12 @@ export async function press<S extends Session>(
 ): Promise<PressOutcome> {
   const rowId = 'ref' in p ? prRowId(p) : p.id
   const localPressId = host.newId()
-  let checkpointSaved = false
-  let appliedSaved = false
   let isUnconfirmed = false
   let copy: PressOutcome['copy'] = null
   let error: string | null = null
   let note: PressOutcome['note'] = isStale ? 'stale' : null
-  const pressed: { r?: Pressed; deliveryId?: string } = {}
-  const hostFor = (change: (f: (s: S) => S | Promise<S>) => Promise<S>): EffectHost => ({
+  const pressed: { r?: Pressed; at?: number; deliveryId?: string } = {}
+  const effectHost: EffectHost = {
     now: host.now,
     deliveryId: () => pressed.deliveryId ?? host.newId(),
     perform: async e => {
@@ -205,32 +210,21 @@ export async function press<S extends Session>(
       return host.perform(await host.read(), e)
     },
     send: async (e, deliveryId) => {
-      let sentOutcome: SendOutcome | null = null
-      return change(async s => {
-        const outcome = await host.deliver(s, e.text)
-        sentOutcome = outcome
-        if (outcome.state === 'unconfirmed') isUnconfirmed = true
-        return completedAttempt(s, deliveryId, outcome)
-      }).then(
-        () =>
-          sentOutcome?.state === 'accepted'
-            ? { state: 'accepted' as const }
-            : sentOutcome?.state === 'rejected'
-              ? { state: 'rejected' as const, reason: sentOutcome.reason }
-              : { state: 'unconfirmed' as const, reason: sentOutcome?.reason ?? 'Queue outcome unknown' },
-        (err: unknown) => ({
-          state: 'unconfirmed' as const,
-          reason: err instanceof Error ? err.message : String(err),
-        }),
-      )
+      try {
+        const outcome = await host.deliver(await host.read(), e.text)
+        await host.update(s => completedAttempt(s, deliveryId, outcome))
+        return outcome.state === 'accepted' ? { state: 'accepted' as const } : outcome
+      } catch (err) {
+        return { state: 'unconfirmed' as const, reason: err instanceof Error ? err.message : String(err) }
+      }
     },
-    saveLasts: async f => (await change(s => ({ ...s, lastActions: f(s.lastActions) }))).lastActions,
+    saveLasts: async f => (await host.update(s => ({ ...s, lastActions: f(s.lastActions) }))).lastActions,
     saveLedger: async f => {
-      await change(s => ({ ...s, ledger: f(s.ledger) }))
+      await host.update(s => ({ ...s, ledger: f(s.ledger) }))
     },
-  })
+  }
   await host
-    .update(async (saved, checkpoint) => {
+    .update(saved => {
       const s: S = { ...saved, heldRows: Object.keys(holds.replies) }
       if (note) return s
       // Read under the lock, so the press is timed after every write that landed before it.
@@ -240,63 +234,55 @@ export async function press<S extends Session>(
         note = 'stale'
         return s
       }
-      pressed.r = r
       const firstSend = r.effects.find(e => e.kind === 'send')
-      pressed.deliveryId = firstSend ? host.newId() : undefined
+      const deliveryId = firstSend ? host.newId() : undefined
       const pressLasts =
-        firstSend && pressed.deliveryId
-          ? withDeliveryId(r.lasts, Object.keys(r.lasts), at, firstSend.text, pressed.deliveryId)
+        firstSend && deliveryId
+          ? withDeliveryId(r.lasts, Object.keys(r.lasts), at, firstSend.text, deliveryId)
           : r.lasts
-      let next: S = {
+      const next: S = {
         ...s,
         ledger: r.ledger,
         lastActions: withLasts(s.lastActions, pressLasts, r.drop),
         told: r.reopenedId ? { ...s.told, closed: s.told.closed.filter(id => id !== r.reopenedId) } : s.told,
       }
-      if (firstSend && pressed.deliveryId) {
-        next = {
-          ...next,
-          lastActions: withUnconfirmed(next.lastActions, firstSend.text, at, pressed.deliveryId),
-          sent: [
-            ...next.sent,
-            {
-              text: firstSend.text,
-              press: firstSend.by,
-              at: host.now(),
-              row: rowId,
-              queuedId: null,
-              pressedAt: at,
-              deliveryId: pressed.deliveryId,
-              phase: 'attempting',
-            },
-          ],
-        }
-        await checkpoint(next)
-        checkpointSaved = true
-      }
-      const held = hostFor(async f => (next = await f(next)))
-      const failed = await runSends(held, r.effects, rowId, Object.keys(r.lasts), at)
-      if (failed?.state === 'rejected') error = `Not sent: ${failed.reason}`
+      Object.assign(pressed, { r, at, deliveryId })
+      if (!firstSend || !deliveryId) return next
 
-      return next
-    })
-    .then(() => {
-      appliedSaved = true
+      return {
+        ...next,
+        lastActions: withUnconfirmed(next.lastActions, firstSend.text, at, deliveryId),
+        sent: [
+          ...next.sent,
+          {
+            text: firstSend.text,
+            press: firstSend.by,
+            at: host.now(),
+            row: rowId,
+            queuedId: null,
+            pressedAt: at,
+            deliveryId,
+            phase: 'attempting',
+          },
+        ],
+      }
     })
     .catch((err: unknown) => {
-      if (checkpointSaved) isUnconfirmed = true
-      error = checkpointSaved ? null : `Not sent: ${err instanceof Error ? err.message : String(err)}`
+      pressed.r = undefined
+      error = `Not sent: ${err instanceof Error ? err.message : String(err)}`
     })
-  const wakesForDone = pressed.r !== undefined && !('ref' in p) && p.action === 'done'
-  if (pressed.r && (appliedSaved || checkpointSaved))
-    await runLocalEffects(
-      hostFor(f => host.update(f)),
-      pressed.r.effects,
-      rowId,
-      pressed.r.lasts[rowId]?.result,
-    )
+  const r = pressed.r
+  if (!r || pressed.at === undefined) return { copy, error, note, isUnconfirmed, wakesForDone: false }
+  try {
+    const failed = await runSends(effectHost, r.effects, rowId, Object.keys(r.lasts), pressed.at)
+    if (failed?.state === 'rejected') error = `Not sent: ${failed.reason}`
+    if (failed?.state === 'unconfirmed') isUnconfirmed = true
+  } catch {
+    isUnconfirmed = true
+  }
+  await runLocalEffects(effectHost, r.effects, rowId, r.lasts[rowId]?.result)
 
-  return { copy, error, note, isUnconfirmed, wakesForDone }
+  return { copy, error, note, isUnconfirmed, wakesForDone: !('ref' in p) && p.action === 'done' }
 }
 
 const PRS_REFRESH_MS = 120_000

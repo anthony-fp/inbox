@@ -2936,12 +2936,14 @@ async function wakeForDone(host) {
   const check = (s) => doneWake(s.ledger, { now: host.now(), windowMs: host.settleWindowMs, isTurnRunning: s.turn.person !== null });
   if (!check(await host.read()))
     return;
-  await host.update(async (s, checkpoint) => {
+  let attempt = null;
+  await host.update(async (s) => {
     const wake = check(s);
     if (!wake)
       return s;
     await host.prepare?.(s);
     const deliveryId = host.newId();
+    attempt = { deliveryId, text: wake.text };
     const lastActions = { ...s.lastActions };
     for (const closed of s.ledger.closed) {
       if (!wake.ids.includes(closed.id))
@@ -2968,23 +2970,26 @@ async function wakeForDone(host) {
         }
       ]
     };
-    await checkpoint(next);
-    const outcome = await host.deliver(next, wake.text);
-    const after = completedAttempt(next, deliveryId, outcome);
-    return outcome.state === "rejected" ? { ...after, ledger: refuseDoneNotification(after.ledger, deliveryId, outcome.reason) } : after;
+    return next;
+  });
+  const sending = attempt;
+  if (!sending)
+    return;
+  const outcome = await host.deliver(await host.read(), sending.text);
+  await host.update((s) => {
+    const after = completedAttempt(s, sending.deliveryId, outcome);
+    return outcome.state === "rejected" ? { ...after, ledger: refuseDoneNotification(after.ledger, sending.deliveryId, outcome.reason) } : after;
   });
 }
 async function press(host, p, isStale, holds) {
   const rowId = "ref" in p ? prRowId(p) : p.id;
   const localPressId = host.newId();
-  let checkpointSaved = false;
-  let appliedSaved = false;
   let isUnconfirmed = false;
   let copy = null;
   let error = null;
   let note = isStale ? "stale" : null;
   const pressed2 = {};
-  const hostFor = (change) => ({
+  const effectHost = {
     now: host.now,
     deliveryId: () => pressed2.deliveryId ?? host.newId(),
     perform: async (e) => {
@@ -2993,80 +2998,76 @@ async function press(host, p, isStale, holds) {
       return host.perform(await host.read(), e);
     },
     send: async (e, deliveryId) => {
-      let sentOutcome = null;
-      return change(async (s) => {
-        const outcome = await host.deliver(s, e.text);
-        sentOutcome = outcome;
-        if (outcome.state === "unconfirmed")
-          isUnconfirmed = true;
-        return completedAttempt(s, deliveryId, outcome);
-      }).then(() => sentOutcome?.state === "accepted" ? { state: "accepted" } : sentOutcome?.state === "rejected" ? { state: "rejected", reason: sentOutcome.reason } : { state: "unconfirmed", reason: sentOutcome?.reason ?? "Queue outcome unknown" }, (err) => ({
-        state: "unconfirmed",
-        reason: err instanceof Error ? err.message : String(err)
-      }));
+      try {
+        const outcome = await host.deliver(await host.read(), e.text);
+        await host.update((s) => completedAttempt(s, deliveryId, outcome));
+        return outcome.state === "accepted" ? { state: "accepted" } : outcome;
+      } catch (err) {
+        return { state: "unconfirmed", reason: err instanceof Error ? err.message : String(err) };
+      }
     },
-    saveLasts: async (f) => (await change((s) => ({ ...s, lastActions: f(s.lastActions) }))).lastActions,
+    saveLasts: async (f) => (await host.update((s) => ({ ...s, lastActions: f(s.lastActions) }))).lastActions,
     saveLedger: async (f) => {
-      await change((s) => ({ ...s, ledger: f(s.ledger) }));
+      await host.update((s) => ({ ...s, ledger: f(s.ledger) }));
     }
-  });
-  await host.update(async (saved, checkpoint) => {
+  };
+  await host.update((saved) => {
     const s = { ...saved, heldRows: Object.keys(holds.replies) };
     if (note)
       return s;
     const at = host.now();
-    const r = pressOn(s, p, at, localPressId);
-    if ("stale" in r) {
+    const r2 = pressOn(s, p, at, localPressId);
+    if ("stale" in r2) {
       note = "stale";
       return s;
     }
-    pressed2.r = r;
-    const firstSend = r.effects.find((e) => e.kind === "send");
-    pressed2.deliveryId = firstSend ? host.newId() : undefined;
-    const pressLasts = firstSend && pressed2.deliveryId ? withDeliveryId(r.lasts, Object.keys(r.lasts), at, firstSend.text, pressed2.deliveryId) : r.lasts;
-    let next = {
+    const firstSend = r2.effects.find((e) => e.kind === "send");
+    const deliveryId = firstSend ? host.newId() : undefined;
+    const pressLasts = firstSend && deliveryId ? withDeliveryId(r2.lasts, Object.keys(r2.lasts), at, firstSend.text, deliveryId) : r2.lasts;
+    const next = {
       ...s,
-      ledger: r.ledger,
-      lastActions: withLasts(s.lastActions, pressLasts, r.drop),
-      told: r.reopenedId ? { ...s.told, closed: s.told.closed.filter((id) => id !== r.reopenedId) } : s.told
+      ledger: r2.ledger,
+      lastActions: withLasts(s.lastActions, pressLasts, r2.drop),
+      told: r2.reopenedId ? { ...s.told, closed: s.told.closed.filter((id) => id !== r2.reopenedId) } : s.told
     };
-    if (firstSend && pressed2.deliveryId) {
-      next = {
-        ...next,
-        lastActions: withUnconfirmed(next.lastActions, firstSend.text, at, pressed2.deliveryId),
-        sent: [
-          ...next.sent,
-          {
-            text: firstSend.text,
-            press: firstSend.by,
-            at: host.now(),
-            row: rowId,
-            queuedId: null,
-            pressedAt: at,
-            deliveryId: pressed2.deliveryId,
-            phase: "attempting"
-          }
-        ]
-      };
-      await checkpoint(next);
-      checkpointSaved = true;
-    }
-    const held = hostFor(async (f) => next = await f(next));
-    const failed = await runSends(held, r.effects, rowId, Object.keys(r.lasts), at);
+    Object.assign(pressed2, { r: r2, at, deliveryId });
+    if (!firstSend || !deliveryId)
+      return next;
+    return {
+      ...next,
+      lastActions: withUnconfirmed(next.lastActions, firstSend.text, at, deliveryId),
+      sent: [
+        ...next.sent,
+        {
+          text: firstSend.text,
+          press: firstSend.by,
+          at: host.now(),
+          row: rowId,
+          queuedId: null,
+          pressedAt: at,
+          deliveryId,
+          phase: "attempting"
+        }
+      ]
+    };
+  }).catch((err) => {
+    pressed2.r = undefined;
+    error = `Not sent: ${err instanceof Error ? err.message : String(err)}`;
+  });
+  const r = pressed2.r;
+  if (!r || pressed2.at === undefined)
+    return { copy, error, note, isUnconfirmed, wakesForDone: false };
+  try {
+    const failed = await runSends(effectHost, r.effects, rowId, Object.keys(r.lasts), pressed2.at);
     if (failed?.state === "rejected")
       error = `Not sent: ${failed.reason}`;
-    return next;
-  }).then(() => {
-    appliedSaved = true;
-  }).catch((err) => {
-    if (checkpointSaved)
+    if (failed?.state === "unconfirmed")
       isUnconfirmed = true;
-    error = checkpointSaved ? null : `Not sent: ${err instanceof Error ? err.message : String(err)}`;
-  });
-  const wakesForDone = pressed2.r !== undefined && !("ref" in p) && p.action === "done";
-  if (pressed2.r && (appliedSaved || checkpointSaved))
-    await runLocalEffects(hostFor((f) => host.update(f)), pressed2.r.effects, rowId, pressed2.r.lasts[rowId]?.result);
-  return { copy, error, note, isUnconfirmed, wakesForDone };
+  } catch {
+    isUnconfirmed = true;
+  }
+  await runLocalEffects(effectHost, r.effects, rowId, r.lasts[rowId]?.result);
+  return { copy, error, note, isUnconfirmed, wakesForDone: !("ref" in p) && p.action === "done" };
 }
 var PRS_REFRESH_MS = 120000;
 var NEW_PR_FETCH_MS = 15000;
@@ -4356,18 +4357,12 @@ async function updateState(dir, sessionId, change) {
   const path = statePath(dir, sessionId);
   return inTurn(path, async () => {
     const current = await readState(dir, sessionId);
-    const pruned = (state) => ({
-      ...state,
-      ledger: pruneClosed(state.ledger, new Set(state.heldRows))
-    });
-    const checkpoint = async (state) => {
-      await mkdir(join(dir, "sessions"), { recursive: true });
-      const tmp = `${path}.${process.pid}-${++tmpCount}.tmp`;
-      await writeFile(tmp, JSON.stringify(pruned(state)));
-      await rename(tmp, path);
-    };
-    const next = pruned(await change(current, checkpoint));
-    await checkpoint(next);
+    const changed = await change(current);
+    const next = { ...changed, ledger: pruneClosed(changed.ledger, new Set(changed.heldRows)) };
+    await mkdir(join(dir, "sessions"), { recursive: true });
+    const tmp = `${path}.${process.pid}-${++tmpCount}.tmp`;
+    await writeFile(tmp, JSON.stringify(next));
+    await rename(tmp, path);
     return next;
   });
 }

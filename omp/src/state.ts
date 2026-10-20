@@ -94,30 +94,24 @@ function inTurn<T>(key: string, fn: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Changes a session in turn with every other change to it in this process. `checkpoint` can save an intermediate
- * state before an external effect. Every save prunes the closed lists and keeps the records of `heldRows`.
+ * Changes a session in turn with every other change to it in this process. Every save prunes the closed lists and
+ * keeps the records of `heldRows`.
  */
 export async function updateState(
   dir: string,
   sessionId: string,
-  change: (s: OmpState, checkpoint: (state: OmpState) => Promise<void>) => OmpState | Promise<OmpState>,
+  change: (s: OmpState) => OmpState | Promise<OmpState>,
 ): Promise<OmpState> {
   const path = statePath(dir, sessionId)
 
   return inTurn(path, async () => {
     const current = await readState(dir, sessionId)
-    const pruned = (state: OmpState): OmpState => ({
-      ...state,
-      ledger: pruneClosed(state.ledger, new Set(state.heldRows)),
-    })
-    const checkpoint = async (state: OmpState) => {
-      await mkdir(join(dir, 'sessions'), { recursive: true })
-      const tmp = `${path}.${process.pid}-${++tmpCount}.tmp`
-      await writeFile(tmp, JSON.stringify(pruned(state)))
-      await rename(tmp, path)
-    }
-    const next = pruned(await change(current, checkpoint))
-    await checkpoint(next)
+    const changed = await change(current)
+    const next = { ...changed, ledger: pruneClosed(changed.ledger, new Set(changed.heldRows)) }
+    await mkdir(join(dir, 'sessions'), { recursive: true })
+    const tmp = `${path}.${process.pid}-${++tmpCount}.tmp`
+    await writeFile(tmp, JSON.stringify(next))
+    await rename(tmp, path)
 
     return next
   })

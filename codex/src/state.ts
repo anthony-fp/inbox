@@ -309,29 +309,22 @@ export async function tryWithLock<T>(
 }
 
 /**
- * Changes a session under its lock. `checkpoint` can save an intermediate state before an external effect. Every
- * save prunes the closed lists and keeps the records of `heldRows`.
+ * Changes a session under its lock. Every save prunes the closed lists and keeps the records of `heldRows`.
  */
 export async function updateState(
   dir: string,
   sessionId: string,
-  change: (s: SessionState, checkpoint: (state: SessionState) => Promise<void>) => SessionState | Promise<SessionState>,
+  change: (s: SessionState) => SessionState | Promise<SessionState>,
 ): Promise<SessionState> {
   const path = statePath(dir, sessionId)
 
   return withLock(`${path}.lock`, async () => {
     const current = await readState(dir, sessionId)
-    const pruned = (state: SessionState): SessionState => ({
-      ...state,
-      ledger: pruneClosed(state.ledger, new Set(state.heldRows)),
-    })
-    const checkpoint = async (state: SessionState) => {
-      const tmp = `${path}.${process.pid}.tmp`
-      await writeFile(tmp, JSON.stringify(pruned(state)))
-      await rename(tmp, path)
-    }
-    const next = pruned(await change(current, checkpoint))
-    await checkpoint(next)
+    const changed = await change(current)
+    const next = { ...changed, ledger: pruneClosed(changed.ledger, new Set(changed.heldRows)) }
+    const tmp = `${path}.${process.pid}.tmp`
+    await writeFile(tmp, JSON.stringify(next))
+    await rename(tmp, path)
 
     return next
   })

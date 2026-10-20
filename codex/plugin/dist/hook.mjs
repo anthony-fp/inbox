@@ -768,17 +768,11 @@ async function updateState(dir, sessionId, change) {
   const path = statePath(dir, sessionId);
   return withLock(`${path}.lock`, async () => {
     const current = await readState(dir, sessionId);
-    const pruned = (state) => ({
-      ...state,
-      ledger: pruneClosed(state.ledger, new Set(state.heldRows))
-    });
-    const checkpoint = async (state) => {
-      const tmp = `${path}.${process.pid}.tmp`;
-      await writeFile(tmp, JSON.stringify(pruned(state)));
-      await rename(tmp, path);
-    };
-    const next = pruned(await change(current, checkpoint));
-    await checkpoint(next);
+    const changed = await change(current);
+    const next = { ...changed, ledger: pruneClosed(changed.ledger, new Set(changed.heldRows)) };
+    const tmp = `${path}.${process.pid}.tmp`;
+    await writeFile(tmp, JSON.stringify(next));
+    await rename(tmp, path);
     return next;
   });
 }

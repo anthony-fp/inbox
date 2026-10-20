@@ -10,9 +10,7 @@ export const fakeHost: MakeHost = ask => {
   return fakeHostWith<Session>({
     read: async () => state,
     update: async change => {
-      state = await change(state, async saved => {
-        state = saved
-      })
+      state = await change(state)
       return state
     },
     exclusive: async fn => {

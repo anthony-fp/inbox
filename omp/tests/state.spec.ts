@@ -57,30 +57,6 @@ test('a failed update leaves the saved state and does not block the next one', a
   expect((await readState(dir, 's1')).presence.turnsStarted).toBe(2)
 })
 
-test('a checkpoint is on disk before the change returns', async () => {
-  const dir = tempDir()
-  let onDisk = -1
-  await updateState(dir, 's1', async (s, checkpoint) => {
-    await checkpoint(withTurns(5)(s))
-    onDisk = JSON.parse(readFileSync(statePath(dir, 's1'), 'utf8')).presence.turnsStarted
-
-    return withTurns(6)(s)
-  })
-  expect(onDisk).toBe(5)
-  expect((await readState(dir, 's1')).presence.turnsStarted).toBe(6)
-})
-
-test('a change that throws after a checkpoint keeps the checkpoint', async () => {
-  const dir = tempDir()
-  await expect(
-    updateState(dir, 's1', async (s, checkpoint) => {
-      await checkpoint(withTurns(3)(s))
-      throw new Error('delivery failed')
-    }),
-  ).rejects.toThrow('delivery failed')
-  expect((await readState(dir, 's1')).presence.turnsStarted).toBe(3)
-})
-
 test('a second exclusive run is refused while one holds the session', async () => {
   const dir = tempDir()
   let release = () => {}
