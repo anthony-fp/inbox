@@ -485,7 +485,8 @@ function notePrompt(host, s, text, isOpen) {
 function matchSent(s, text) {
   const matchingAt = s.sent.findIndex((x) => x.text === text);
   const matching = matchingAt >= 0 ? s.sent[matchingAt] : void 0;
-  const sentAt = matching && (matching.phase === void 0 || matching.phase === "accepted") ? matchingAt : -1;
+  const isMatchable = matching !== void 0 && (matching.phase === void 0 || matching.phase === "accepted" || matching.phase === "attempting" && matching.deliveryId !== null);
+  const sentAt = isMatchable ? matchingAt : -1;
   const sent = sentAt >= 0 ? s.sent[sentAt] : void 0;
   const eligible = sent?.deliveryId === null ? Object.fromEntries(
     Object.entries(s.lastActions).filter(

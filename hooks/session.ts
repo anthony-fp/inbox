@@ -152,7 +152,13 @@ export function notePrompt<S extends Session>(
 export function matchSent<S extends Session>(s: S, text: string): { state: S; sentBy: SentBy | null } {
   const matchingAt = s.sent.findIndex(x => x.text === text)
   const matching = matchingAt >= 0 ? s.sent[matchingAt] : undefined
-  const sentAt = matching && (matching.phase === undefined || matching.phase === 'accepted') ? matchingAt : -1
+  // A host's own send can arrive before its delivery returns, while its record still reads attempting.
+  const isMatchable =
+    matching !== undefined &&
+    (matching.phase === undefined ||
+      matching.phase === 'accepted' ||
+      (matching.phase === 'attempting' && matching.deliveryId !== null))
+  const sentAt = isMatchable ? matchingAt : -1
   const sent = sentAt >= 0 ? s.sent[sentAt] : undefined
   const eligible =
     sent?.deliveryId === null

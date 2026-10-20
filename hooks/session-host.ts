@@ -130,6 +130,8 @@ export async function wakeForDone<S extends Session>(host: WakeHost<S>): Promise
   if (!(await check(await host.read()))) return
   let attempt: { deliveryId: string; text: string } | null = null
   await host.update(async s => {
+    // A host may run the change again on a newer session, which can have nothing left to send.
+    attempt = null
     const wake = await check(s)
     if (!wake) return s
     await host.prepare?.(s)
@@ -241,6 +243,9 @@ export async function startPress<S extends Session>(
   }
   await host
     .update(async saved => {
+      // A host may run the change again on a newer session, where the press can be stale.
+      note = isStale ? 'stale' : null
+      Object.assign(pressed, { r: undefined, at: undefined, deliveryId: undefined })
       const s: S = { ...saved, heldRows: Object.keys(holds.replies) }
       if (note) return s
       // Read under the lock, so the press is timed after every write that landed before it.

@@ -218,17 +218,23 @@ async function changeSaved(
   id: string,
   change: (s: Session) => Session | Promise<Session>,
 ): Promise<Changed> {
-  const saved = await readSettled($, id)
-  if (!saved?.session) return { before: emptySession(), after: emptySession(), isDrawn: false }
-  const before = upgradeSession(saved.session)
-  const next = await change(before)
   savedWrites++
-  const write = saving.then(() => $.store.set(sessionKey(id), { savedAt: saved.session!.savedAt, ...next }))
+  // The read, the change and the write run in the save queue, so two changes to one saved session cannot both
+  // start from the same read.
+  const changed = saving.then(async (): Promise<Changed> => {
+    const saved = await readSaved($, id)
+    if (!saved?.session) return { before: emptySession(), after: emptySession(), isDrawn: false }
+    const before = upgradeSession(saved.session)
+    const after = await change(before)
+    await $.store.set(sessionKey(id), { savedAt: saved.session.savedAt, ...after })
+
+    return { before, after, isDrawn: false }
+  })
+  const write = changed.then(() => undefined)
   saving = write.catch(() => undefined)
   track(id, write)
-  await write
 
-  return { before, after: next, isDrawn: false }
+  return changed
 }
 
 export type SavedRecord = SavedSession & { savedAt: number }
@@ -360,10 +366,12 @@ export function arrived(s: Session, text: string, count: number): { state: Sessi
   if (stored.by.get(text)?.count === count) stored.by.set(text, { count, deliveryId: match.deliveryId })
   const lastActions = tracked
     .slice(index + 1)
-    .filter(x => x.text === text && x.pressedAt !== null)
+    .filter(x => x.text === text && x.row !== null)
     .reduce(
       (actions, later) => withUnconfirmed(actions, text, later.pressedAt ?? undefined, later.deliveryId),
-      match.pressedAt === null ? s.lastActions : withArrival(s.lastActions, text, match.pressedAt, match.deliveryId),
+      match.row === null
+        ? s.lastActions
+        : withArrival(s.lastActions, text, match.pressedAt ?? undefined, match.deliveryId),
     )
 
   return { state: { ...s, sent: s.sent.filter(x => x !== match), lastActions }, sentBy: { press: match.press } }

@@ -1666,7 +1666,8 @@ async function fetchPrsNow($: EngineInterface, findsBranchPr: boolean) {
   try {
     await fetchSessionPrs(hostOf($, owner), findsBranchPr)
   } finally {
-    if (isCurrent(owner)) await markFetching($, nextFetchFindsBranchPr !== null)
+    // Fetches run one at a time across conversations, so the drawn session reads whether one still runs.
+    await markFetching($, nextFetchFindsBranchPr !== null)
   }
   void followNewRows($).catch(() => undefined)
 }
@@ -2083,6 +2084,8 @@ async function drawnState(
     read($, DISCARDED),
     $.clock.now(),
     read($, REDRAW),
+    // The minute tick while the person is away redraws the ages.
+    read($, AWAY),
   ])
   const { ledger, stop, prViews, lastActions, presence } = session
   const turns = { turnsStarted: presence.turnsStarted, turnsApplied: presence.turnsApplied }
@@ -2266,7 +2269,8 @@ async function bringBack(
         a.delivery?.state === 'queued' ? { ...a, delivery: { ...a.delivery, state: 'unconfirmed' as const } } : a,
       ]),
     )
-    return cutOffUpdate({ ...loaded, lastActions })
+    // The stop and the running turn belong to the process that saved them.
+    return cutOffUpdate({ ...loaded, lastActions, stop: null, turn: emptySession().turn })
   })
   if (isBrought && !isFork)
     await update($, AWAY, a => (isLoading() ? { ...a, lastActiveAt: saved.savedAt, isAway: true } : a))

@@ -1206,10 +1206,11 @@ for (const failure of ['none', 'checkpoint', 'completion', 'queue', 'lookup'] as
     const undo = await call('inbox_press', { press: { action: 'undo', id: 'i1' }, thread: 's1' })
     assert.equal((undo?.result as { structuredContent: { note: string | null } }).structuredContent.note, 'stale')
     state = notePrompt(await readState(dir, 's1'), state.sent[0]!.text, now).state
-    assert.equal(state.sent.length, failure === 'none' ? 0 : 1)
+    const isOutcomeLost = failure === 'queue'
+    assert.equal(state.sent.length, isOutcomeLost ? 1 : 0)
     assert.deepEqual(
       viewOf(state, now).needsYou.closed.tasks.map(c => c.delivery),
-      failure === 'none' ? [null, null] : ['unconfirmed', 'unconfirmed'],
+      isOutcomeLost ? ['unconfirmed', 'unconfirmed'] : [null, null],
     )
   })
 }

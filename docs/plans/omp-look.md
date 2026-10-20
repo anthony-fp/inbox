@@ -1,6 +1,6 @@
 # A shared session core, then omp as the third host
 
-Status: building. Steps 1, 2 and 3 are built on the `session-core` branch, not yet merged. Step 4 has a gap list and a build order, waiting for review.
+Status: built. All four steps are on the `session-core` branch, not yet merged.
 
 omp ([omp.sh](https://omp.sh/)) is a terminal coding agent forked from pi. It loads TypeScript extensions in its own Bun process. A throwaway extension showed that the shared modules in `hooks/` load in omp unchanged, and that omp can draw the band above the prompt and an `/inbox` panel and take its keys. That extension drew the shared demo data only. It never ran a real session.
 
@@ -156,7 +156,7 @@ omp installs the plugin from a local checkout with `omp plugin marketplace add <
 
 ## Step 4: the mod on the shared session modules
 
-The mod keeps its session in `PluginState` in `types/index.d.ts`, and `hooks/register.tsx` runs both its host work and its two looks. This step maps `PluginState` onto `Session`, moves the mod's host work to a mod `SessionHost`, and leaves `register.tsx` drawing. Saved state outlives the code, so `upgradeState` converts each saved field that changes shape.
+Built. The mod keeps one `session` value of type `Session`, and runs its presses, Done messages, turns, updates and PR fetches through `hooks/session.ts` and `hooks/session-host.ts`. `hooks/claude-host.ts` holds the mod's `SessionHost`, how it stores and saves each conversation's session, and its effects. `hooks/register.tsx` handles Claude Code's events and draws the terminal and desktop looks.
 
 This step changes the most code, and runs last so that the `SessionHost` shape has been tested on two hosts first. After it, each host runs the same session code, and a new host supplies a `SessionHost`, a look and their tests.
 
@@ -187,7 +187,7 @@ The mod's host code does more than `Session` and `SessionHost` model. Each diffe
 - **Catching up.** When the ledger is `behind`, or a reload cut off an update, the mod catches up. It forks the conversation with `$.model.fork`, or reads the transcript when there is nothing to fork. This stays a mod step that runs before the shared `runUpdates`. Codex and omp have no fork.
 - **Delivery receipts.** The mod learns that a message arrived when Claude Code stores its prompt row, in `session.append`. It adds the inbox text at that point too. The shared `notePrompt` matches arrivals by the prompt's text. It is built from three parts: `matchSent` matches the arrival, `startTurn` counts the turn, and `recordPrompt` records the words and returns the notes. Codex and omp call `notePrompt`. The mod calls `recordPrompt` for the person's words and its own sends, and its `session.append` handler marks arrivals on the shared `sent` records.
 - **Conversation switches.** `/clear`, `/resume` and `/branch` switch conversations inside one process. The mod tracks which conversation a write belongs to, and drops a write that arrives after a switch. A branched conversation starts from its parent's saved state. The mod's `SessionHost.read` and `update` hold the conversation they were made for, and do nothing once it changes.
-- **An unreadable store.** When the store cannot read a conversation's saved state, the mod skips saves until a read succeeds, so it does not overwrite that state. This stays in the mod's `update`.
+- **An unreadable store.** When the store cannot read a conversation's saved state, the mod skips saves until a read succeeds, so it does not overwrite that state. This stays in `changeSession` in `hooks/claude-host.ts`.
 - **Claude Code's signals.** These stay in the mod's event handlers:
   - permission and question dialogs
   - away time and the minute tick
@@ -209,23 +209,23 @@ The mod's host code does more than `Session` and `SessionHost` model. Each diffe
 - **Press order.** The mod numbers each press in `lastActions` as `pressOrder`, so a press's late write cannot replace a later press's. The shared `press` applies each press inside one locked update, so its writes land in press order.
 - **The mod's record and close changes.** `runTool` applies `recordItem` and `recordClose` as the shared `recorded` does.
 - **The mod's PR merge.** The merge in `fetchPrsNow` keeps the same PRs as the shared `withFetchedPrs`.
-- **The mod's update queue.** An in-memory promise chain runs one exchange at a time, with no retry. The shared `runUpdates` saves the pending exchanges and tries a failed one once more.
+- **The mod's update queue.** An in-memory promise chain ran one exchange at a time. The shared `runUpdates` saves the pending exchanges instead. After a failed update the mod still catches up over the whole conversation on the next reply, before `runUpdates` runs.
 - **`SentPrompt`.** The shared `sent` record holds the same fields. The session id is unneeded, because each conversation saves its own session.
 
 ### How the mod saves its session
 
-Today the mod saves only `{ savedAt, ledger }` for each conversation, under `s:<id>`. It keeps everything else in separate `PluginState` fields that only the running process uses. After step 4, `PluginState` holds one `session` field of type `Session`, and the mod saves the whole session for each conversation, as Codex and omp do. The fields only the pane uses stay as they are: the tab, the selection, the typing row, drafts, folds, notes and the demo.
+Before step 4 the mod saved only `{ savedAt, ledger }` for each conversation, under `s:<id>`. It kept everything else in separate `PluginState` fields that only the running process used. Now `PluginState` holds one `session` field of type `Session`, and every write saves the whole session for its conversation, as Codex and omp do. The fields only the pane uses stay as they were: the tab, the selection, the typing row, drafts, folds, notes and the demo.
 
-`upgradeState` converts two older shapes:
+`Session` moved to `types/index.d.ts`, since the plugin's state contract may not import from `hooks/`. Two older shapes convert:
 
-- a saved `{ savedAt, ledger }`, which becomes a session with that ledger and empty other fields
-- the separate `PluginState` fields that a hot reload kept, which move into `session`
+- A saved `{ savedAt, ledger }` goes through `upgradeSession`, which every host uses. It becomes a session with that ledger and empty other fields.
+- The separate `PluginState` fields that a hot reload kept move into `session` in `upgradeDrawn`. An `untrackedSent` entry becomes an uncertain `sent` record. A queued message with no record also gets one, and its row reads unconfirmed.
 
 ### What people will notice in the mod
 
 - `/resume` brings back each row's last press and any update that had not run, not only the rows.
-- A failed update is tried once more, and the retry outlives a reload.
-- Nothing else should change. The tests in `tests/hooks.test.ts` that read separate `PluginState` fields will read `session` instead, and their expected results stay the same.
+- A PR fetch now saves, so a resumed conversation shows the PRs it last fetched.
+- Nothing else should change. The tests in `tests/hooks.test.ts` that read separate `PluginState` fields now read `session`, with the same expected results.
 
 ### Build order
 
@@ -235,3 +235,7 @@ Each part passes `./scripts/check.sh` and can be committed on its own.
 2. Move the mod's state into one `session` field, saved whole, and convert the older shapes.
 3. Give the mod a `SessionHost`, and route its tools, prompts, turn ends, updates, presses, Done messages and PR fetches through the shared functions. Delete what the "Drop" list names.
 4. Run `tests/session-script.ts` against the mod's `SessionHost`. Check the terminal and the desktop pane live, in a session with its own `CLAUDE_CONFIG_DIR`.
+
+Parts 2 and 3 were built as one, since the mod's `SessionHost` needs the single `session` value.
+
+Part 4 was checked in part. The script cannot run on the mod's storage, because a test in `claude plugin test` gets no `$.state`. The 145 tests in `tests/hooks.test.ts` run the mod's storage through its events instead. The terminal look was checked live: the demo pane, an answer press, a stop row from a failed turn, and `/clear`. The desktop pane was not checked live.

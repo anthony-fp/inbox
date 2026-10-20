@@ -2747,7 +2747,8 @@ function notePrompt(host, s, text, isOpen) {
 function matchSent(s, text) {
   const matchingAt = s.sent.findIndex((x) => x.text === text);
   const matching = matchingAt >= 0 ? s.sent[matchingAt] : undefined;
-  const sentAt = matching && (matching.phase === undefined || matching.phase === "accepted") ? matchingAt : -1;
+  const isMatchable = matching !== undefined && (matching.phase === undefined || matching.phase === "accepted" || matching.phase === "attempting" && matching.deliveryId !== null);
+  const sentAt = isMatchable ? matchingAt : -1;
   const sent = sentAt >= 0 ? s.sent[sentAt] : undefined;
   const eligible = sent?.deliveryId === null ? Object.fromEntries(Object.entries(s.lastActions).filter(([_id, last]) => (last.delivery?.state === "queued" || last.delivery?.state === "unconfirmed") && last.delivery.id === undefined)) : s.lastActions;
   const arrived = sent && sent.row !== null ? {
@@ -2981,6 +2982,7 @@ async function wakeForDone(host) {
     return;
   let attempt = null;
   await host.update(async (s) => {
+    attempt = null;
     const wake = await check(s);
     if (!wake)
       return s;
@@ -3056,6 +3058,8 @@ async function startPress(host, p, isStale, holds) {
     }
   };
   await host.update(async (saved) => {
+    note = isStale ? "stale" : null;
+    Object.assign(pressed2, { r: undefined, at: undefined, deliveryId: undefined });
     const s = { ...saved, heldRows: Object.keys(holds.replies) };
     if (note)
       return s;
