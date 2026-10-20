@@ -2156,6 +2156,30 @@ test('a PR’s Dismiss settles its block with Undo, which brings it back, a read
   expect(await pane.find({ text: /Branch work/ })).toBeDefined()
 })
 
+test('tool calls during a turn leave the saved session alone, and the turn’s update saves it', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  let saves = 0
+  storeSetHold = async key => {
+    if (key === 's:session-1') saves++
+  }
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'add a greeting cli', wait: false, origin: { kind: 'composer' } })
+  await $.turn.start({ text: 'add a greeting cli', turnId: 't1' })
+  await clock.settle()
+  const savesAtStart = saves
+  for (const command of ['ls', 'cat package.json', 'npm test'])
+    await $.tool.call({ tool: 'Bash', command, description: command } as never)
+  await clock.settle()
+  expect(saves).toBe(savesAtStart)
+
+  await $.turn.complete({ answer: 'Plan ready.', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.settle()
+  expect(saves).toBeGreaterThan(savesAtStart)
+  expect(JSON.parse(stored.get('s:session-1')!).presence.turnsApplied).toBe(1)
+})
+
 test('a stop and an open permission prompt lead the sidebar line until they clear', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [], { HERDR_PANE_ID: 'p1' })

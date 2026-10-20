@@ -176,7 +176,8 @@ export type Changed = { before: Session; after: Session; isDrawn: boolean }
  * Changes the session of `owner`. While its conversation is drawn, the change runs on the drawn session and is
  * written only if no other write landed meanwhile; otherwise it runs again on what landed. Once the conversation
  * moved on, the change goes to its saved session. Every write prunes the closed lists, keeping `held` rows and the
- * rows a press settled less than SETTLED_MS ago, which are still drawn, and saves.
+ * rows a press settled less than SETTLED_MS ago, which are still drawn. A write that changes more than the running
+ * turn saves.
  */
 export async function changeSession(
   $: EngineInterface,
@@ -191,6 +192,9 @@ export async function changeSession(
     const upgraded = upgradeSession(drawn)
     const before = { ...upgraded, prViews: { ...upgraded.prViews, isFetching: drawn.prViews.isFetching } }
     const changed = await change(before)
+    // A resume drops the running turn, so a write that changes only the turn, such as each tool call's activity,
+    // leaves the saved copy alone.
+    const isTurnOnly = (Object.keys(changed) as (keyof Session)[]).every(k => k === 'turn' || changed[k] === before[k])
     const now = await $.clock.now()
     const settling = Object.entries(changed.lastActions).flatMap(([id, a]) => (now - a.at < SETTLED_MS ? [id] : []))
     const kept = new Set([...held, ...settling])
@@ -206,7 +210,7 @@ export async function changeSession(
     })
     const written = landed as ModSession | null
     if (!written) continue
-    if ((await read($, UNREADABLE)) !== owner.id) await save($, owner, written)
+    if (!isTurnOnly && (await read($, UNREADABLE)) !== owner.id) await save($, owner, written)
     return { before, after: written, isDrawn: isCurrent(owner) }
   }
   throw new Error('The session kept changing under this write.')
