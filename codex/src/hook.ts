@@ -2,12 +2,12 @@ import { spawn } from 'node:child_process'
 import { resolve } from 'node:path'
 
 import { dialogActivity } from '../../hooks/model-text'
-import { cleared, noteActivity, startContext } from '../../hooks/session'
+import { cleared, noteActivity, noteCommandOutput, startContext } from '../../hooks/session'
 import { activityOf, endTurn, noteHook, notePrompt, patchFiles } from './core'
 import { updateState } from './state'
 import type { SessionState } from './state'
 import { CODEX } from './texts'
-import { dialogsInTurn, isNonInteractiveRun } from './transcript'
+import { isNonInteractiveRun, turnIn } from './transcript'
 
 export type HookInput = {
   hook_event_name: string
@@ -80,19 +80,14 @@ export async function handleHook(input: HookInput, deps: HookDeps): Promise<Reco
     }
     case 'Stop': {
       const reply = input.last_assistant_message ?? ''
-      const dialogs = await dialogsInTurn(input.transcript_path, input.turn_id)
+      const { dialogs, commands } = await turnIn(input.transcript_path, input.turn_id)
       const lines = dialogs.map(questions => dialogActivity(questions, { kind: 'open' }))
-      const written = await updateState(dir, id, s =>
-        noteHook(
-          endTurn(
-            lines.reduce((x, line) => noteActivity(x, line), withCli(s)),
-            reply,
-            now(),
-          ),
-          'stop',
-          now(),
-        ),
-      )
+      const written = await updateState(dir, id, s => {
+        const withLines = lines.reduce((x, line) => noteActivity(x, line), withCli(s))
+        const withOutput = commands.reduce((x, c) => noteCommandOutput(x, c.command, c.output), withLines)
+
+        return noteHook(endTurn(withOutput, reply, now()), 'stop', now())
+      })
       if (written.pending.length > 0) deps.startUpdate(id)
 
       return null

@@ -323,3 +323,67 @@ test('a PR link in the agent’s reply is linked to the session', async () => {
   )
   assert.deepEqual((await readState(dir, 's1')).ledger.prs, ['acme/app#12'])
 })
+
+test('a Stop reads the ending turn’s shell commands: local URLs become activity and gh pr create links the PR', async () => {
+  const dir = tempDir()
+  const transcript = join(tempDir(), 'rollout.jsonl')
+  const deps = hookDeps(dir)
+  const started = (turn: string) => ({ type: 'event_msg', payload: { type: 'task_started', turn_id: turn } })
+  const ran = (command: string, output: string) => ({
+    type: 'event_msg',
+    payload: {
+      type: 'item_completed',
+      item: {
+        type: 'CommandExecution',
+        command: ['/bin/zsh', '-lc', command],
+        aggregated_output: output,
+        exit_code: 0,
+      },
+    },
+  })
+  const call = (id: string, command: string[]) => ({
+    type: 'response_item',
+    payload: { type: 'function_call', name: 'shell', call_id: id, arguments: JSON.stringify({ command }) },
+  })
+  const result = (id: string, output: string) => ({
+    type: 'response_item',
+    payload: { type: 'function_call_output', call_id: id, output: JSON.stringify({ output }) },
+  })
+  writeFileSync(
+    transcript,
+    [
+      started('t1'),
+      ran('gh pr create --fill', 'https://github.com/acme/app/pull/3\n'),
+      started('t2'),
+      ran('npm run dev', 'ready at http://localhost:5173/\n'),
+      ran('gh pr create --fill', 'https://github.com/acme/app/pull/12\n'),
+      ran('cat notes.txt', 'https://github.com/acme/app/pull/77\n'),
+    ]
+      .map(row => JSON.stringify(row))
+      .join('\n'),
+  )
+  await handleHook(input('UserPromptSubmit', { prompt: 'Open a PR', turn_id: 't2' }), deps)
+  await handleHook(input('Stop', { turn_id: 't2', transcript_path: transcript, last_assistant_message: 'Done.' }), deps)
+  const ended = await readState(dir, 's1')
+  assert.deepEqual(ended.pending[0]?.ex.activity, ['URL in output: http://localhost:5173/'])
+  assert.deepEqual(ended.ledger.prs, ['acme/app#12'])
+
+  const older = join(tempDir(), 'older.jsonl')
+  writeFileSync(
+    older,
+    [
+      started('t3'),
+      call('c1', ['bash', '-lc', 'gh pr create']),
+      result('c1', 'https://github.com/acme/app/pull/20\n'),
+      call('c2', ['bash', '-lc', 'npm run dev']),
+      result('c2', 'on http://127.0.0.1:8080/x'),
+    ]
+      .map(row => JSON.stringify(row))
+      .join('\n'),
+  )
+  await handleHook(input('UserPromptSubmit', { prompt: 'Again', turn_id: 't3' }), deps)
+  await handleHook(input('Stop', { turn_id: 't3', transcript_path: older, last_assistant_message: 'Done.' }), deps)
+  const after = await readState(dir, 's1')
+  assert.deepEqual(after.pending[1]?.ex.activity, ['URL in output: http://127.0.0.1:8080/x'])
+  assert.deepEqual(after.ledger.prs, ['acme/app#12', 'acme/app#20'])
+})

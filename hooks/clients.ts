@@ -66,15 +66,11 @@ export const CLIENTS: Record<ClientId, Client> = {
         reason:
           "Codex's dialog tool returns at once and the answer arrives as the person's next prompt, so a dialog is noted as open and its outcome is never recorded.",
       },
-      'tool-output-urls': {
-        kind: 'unsupported',
-        reason:
-          "Not built in Codex yet; client-parity step 3 reads the turn's shell output from the rollout at Stop, not through a PostToolUse hook.",
-      },
+      'tool-output-urls': { kind: 'full' },
       'pr-link-from-output': {
-        kind: 'unsupported',
+        kind: 'different',
         reason:
-          'Not built in Codex yet; client-parity step 3 reads `gh pr create` output from the rollout at Stop. Until then a PR is linked only from the reply text.',
+          "Codex runs no hook for a long command's output, so the inbox reads the turn's shell commands from the rollout at Stop. A PR that `gh pr create` opened is linked when the turn ends, not when the command finishes.",
       },
       'pr-arrivals': {
         kind: 'unsupported',
@@ -127,16 +123,8 @@ export const CLIENTS: Record<ClientId, Client> = {
         reason: 'Not built in omp yet; client-parity step 6 sets `behind` when a session starts with earlier turns.',
       },
       'dialog-outcome': { kind: 'full' },
-      'tool-output-urls': {
-        kind: 'unsupported',
-        reason:
-          "Not built in omp yet; client-parity step 3 reads a shell result in omp's `tool_result` handler, which now handles only `ask`.",
-      },
-      'pr-link-from-output': {
-        kind: 'unsupported',
-        reason:
-          'Not built in omp yet; client-parity step 3 reads `gh pr create` output. Until then a PR is linked only from the reply text.',
-      },
+      'tool-output-urls': { kind: 'full' },
+      'pr-link-from-output': { kind: 'full' },
       'pr-arrivals': { kind: 'full' },
       'prs-empty-hint': {
         kind: 'unsupported',

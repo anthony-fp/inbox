@@ -11,7 +11,7 @@ import type { PrPress } from '../../hooks/pr-tab'
 import { ghFinder, ghIn } from '../../hooks/gh'
 import type { Run } from '../../hooks/gh'
 import type { RowPress } from '../../hooks/presses'
-import { endTurn, noteActivity, notePrompt, recorded, sessionView } from '../../hooks/session'
+import { endTurn, noteActivity, noteCommandOutput, notePrompt, recorded, sessionView } from '../../hooks/session'
 import type { SessionView } from '../../hooks/session'
 import {
   fetchPrs,
@@ -482,7 +482,24 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
   })
 
   pi.on('tool_result', async (event, ctx) => {
-    if (isUnattended(ctx) || event.toolName !== 'ask') return
+    if (isUnattended(ctx)) return
+    if (event.toolName === 'bash') {
+      const command = (event.input as { command?: unknown }).command
+      if (typeof command !== 'string') return
+      let isLinked = false
+      try {
+        await change(sessionIdOf(ctx), s => {
+          const after = noteCommandOutput(s, command, textOfBlocks(event.content))
+          isLinked = after.ledger !== s.ledger
+          return after
+        })
+      } catch {
+        return
+      }
+      if (isLinked) fetchPrsWhenDue(ctx)
+      return
+    }
+    if (event.toolName !== 'ask') return
     const questions = dialogQuestions((event.input as { questions?: unknown }).questions)
     await noteQuietly(ctx, dialogActivity(questions, askOutcome(event)))
   })

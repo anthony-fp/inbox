@@ -261,6 +261,37 @@ export function noteActivity<S extends Session>(s: S, line: string | null): S {
   return { ...s, turn: { ...s.turn, activity } }
 }
 
+export const LOCAL_URL = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|[\w.-]+\.localhost)(?::\d+)?[^\s"'`)\]]*/g
+
+const PR_CREATE = /\bgh\s+pr\s+create\b/
+
+/**
+ * What a finished shell command's output tells the inbox: an activity line for each local URL it printed, and, for
+ * `gh pr create`, the PRs it named.
+ */
+export function commandFindings(command: string, output: string): { lines: string[]; prRefs: string[] } {
+  return {
+    lines: [...new Set(output.match(LOCAL_URL) ?? [])].map(url => `URL in output: ${url}`),
+    prRefs: PR_CREATE.test(command) ? prRefs(output) : [],
+  }
+}
+
+/** Links the PRs of `refs` the ledger does not track yet. Those it tracks keep their place. */
+export function withNewPrRefs(ledger: Ledger, refs: string[]): Ledger {
+  const fresh = refs.filter(ref => !ledger.prs.includes(ref))
+
+  return fresh.length === 0 ? ledger : { ...ledger, prs: linkedPrs(ledger.prs, fresh) }
+}
+
+/** Notes a finished shell command's findings: its activity lines, and its PRs linked to the session. */
+export function noteCommandOutput<S extends Session>(s: S, command: string, output: string): S {
+  const found = commandFindings(command, output)
+  const noted = found.lines.reduce((x, line) => noteActivity(x, line), s)
+  const ledger = withNewPrRefs(noted.ledger, found.prRefs)
+
+  return ledger === noted.ledger ? noted : { ...noted, ledger }
+}
+
 /**
  * Queues the turn's exchange for the inbox model. A turn with no reply queues nothing unless
  * `queuesEmptyReply` is set, as for a turn whose question dialog the person dismissed. `tab` names the tab the

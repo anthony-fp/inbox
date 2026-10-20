@@ -1784,7 +1784,7 @@ at each Stop, to find the question dialogs the agent opened in the ending turn.
   next prompt. The call rows carry no turn id. A turn starts at the
   `event_msg` row with `payload.type: "task_started"` and a `payload.turn_id`.
   [inference] That id is the `turn_id` the hooks get.
-  `codex/src/transcript.ts:dialogsInTurn` reads the last 4 MB of the file and
+  `codex/src/transcript.ts:turnIn` reads the last 4 MB of the file and
   keeps the dialogs after the `task_started` row for the Stop hook's turn.
 - **Still plain JSONL** [live 2026-10-08]: 146 files in three days, none
   compressed, although `local_thread_store_compression` is on.

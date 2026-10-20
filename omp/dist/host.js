@@ -2849,6 +2849,24 @@ function noteActivity(s, line) {
     return s;
   return { ...s, turn: { ...s.turn, activity } };
 }
+var LOCAL_URL = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|[\w.-]+\.localhost)(?::\d+)?[^\s"'`)\]]*/g;
+var PR_CREATE = /\bgh\s+pr\s+create\b/;
+function commandFindings(command, output) {
+  return {
+    lines: [...new Set(output.match(LOCAL_URL) ?? [])].map((url) => `URL in output: ${url}`),
+    prRefs: PR_CREATE.test(command) ? prRefs(output) : []
+  };
+}
+function withNewPrRefs(ledger, refs) {
+  const fresh = refs.filter((ref) => !ledger.prs.includes(ref));
+  return fresh.length === 0 ? ledger : { ...ledger, prs: linkedPrs(ledger.prs, fresh) };
+}
+function noteCommandOutput(s, command, output) {
+  const found = commandFindings(command, output);
+  const noted = found.lines.reduce((x, line) => noteActivity(x, line), s);
+  const ledger = withNewPrRefs(noted.ledger, found.prRefs);
+  return ledger === noted.ledger ? noted : { ...noted, ledger };
+}
 function endTurn(host, s, reply, isOpen, { tab = null, queuesEmptyReply = false } = {}) {
   const refs = prRefs(reply);
   const base = {
@@ -4909,7 +4927,27 @@ function createInbox(pi, deps = defaultDeps) {
     await noteQuietly(ctx, activityOf(event.toolName, event.input));
   });
   pi.on("tool_result", async (event, ctx) => {
-    if (isUnattended(ctx) || event.toolName !== "ask")
+    if (isUnattended(ctx))
+      return;
+    if (event.toolName === "bash") {
+      const command = event.input.command;
+      if (typeof command !== "string")
+        return;
+      let isLinked = false;
+      try {
+        await change(sessionIdOf(ctx), (s) => {
+          const after = noteCommandOutput(s, command, textOfBlocks(event.content));
+          isLinked = after.ledger !== s.ledger;
+          return after;
+        });
+      } catch {
+        return;
+      }
+      if (isLinked)
+        fetchPrsWhenDue(ctx);
+      return;
+    }
+    if (event.toolName !== "ask")
       return;
     const questions = dialogQuestions(event.input.questions);
     await noteQuietly(ctx, dialogActivity(questions, askOutcome(event)));

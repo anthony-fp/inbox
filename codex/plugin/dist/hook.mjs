@@ -539,6 +539,24 @@ function noteActivity(s, line) {
   if (activity === s.turn.activity) return s;
   return { ...s, turn: { ...s.turn, activity } };
 }
+var LOCAL_URL = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|[\w.-]+\.localhost)(?::\d+)?[^\s"'`)\]]*/g;
+var PR_CREATE = /\bgh\s+pr\s+create\b/;
+function commandFindings(command, output) {
+  return {
+    lines: [...new Set(output.match(LOCAL_URL) ?? [])].map((url) => `URL in output: ${url}`),
+    prRefs: PR_CREATE.test(command) ? prRefs(output) : []
+  };
+}
+function withNewPrRefs(ledger, refs) {
+  const fresh = refs.filter((ref) => !ledger.prs.includes(ref));
+  return fresh.length === 0 ? ledger : { ...ledger, prs: linkedPrs(ledger.prs, fresh) };
+}
+function noteCommandOutput(s, command, output) {
+  const found = commandFindings(command, output);
+  const noted = found.lines.reduce((x, line) => noteActivity(x, line), s);
+  const ledger = withNewPrRefs(noted.ledger, found.prRefs);
+  return ledger === noted.ledger ? noted : { ...noted, ledger };
+}
 function endTurn(host, s, reply, isOpen, { tab = null, queuesEmptyReply = false } = {}) {
   const refs = prRefs(reply);
   const base = {
@@ -831,8 +849,38 @@ async function isNonInteractiveRun(path) {
 }
 var DIALOG_TOOL = "request_user_input_async";
 var TAIL_BYTES = 4 * 1024 * 1024;
-async function dialogsInTurn(path, turnId) {
-  if (path === null) return [];
+var SHELL_CALLS = /* @__PURE__ */ new Set(["shell", "shell_command", "exec_command", "container.exec"]);
+var MARKERS = ['"task_started"', DIALOG_TOOL, '"CommandExecution"', '"function_call', '"local_shell_call'];
+var isText = (v) => typeof v === "string";
+function commandText(command) {
+  if (isText(command)) return command;
+  if (!Array.isArray(command)) return "";
+  const argv = command.filter(isText);
+  const [, flag, script] = argv;
+  return argv.length === 3 && flag?.startsWith("-") && flag.endsWith("c") && script !== void 0 ? script : argv.join(" ");
+}
+function outputText(output) {
+  if (!isText(output)) return "";
+  try {
+    const parsed = JSON.parse(output);
+    return isText(parsed.output) ? parsed.output : output;
+  } catch {
+    return output;
+  }
+}
+function callCommand(p) {
+  if (p.type === "local_shell_call") return commandText(p.action?.command);
+  if (p.type !== "function_call" || !p.name || !SHELL_CALLS.has(p.name) || !isText(p.arguments)) return "";
+  try {
+    const args = JSON.parse(p.arguments);
+    return commandText(args.command ?? args.cmd);
+  } catch {
+    return "";
+  }
+}
+async function turnIn(path, turnId) {
+  const none = { dialogs: [], commands: [] };
+  if (path === null) return none;
   try {
     const file = await open(path, "r");
     try {
@@ -843,10 +891,11 @@ async function dialogsInTurn(path, turnId) {
       const lines = buf.subarray(0, bytesRead).toString("utf8").split("\n");
       if (start > 0) lines.shift();
       const byTurn = /* @__PURE__ */ new Map();
+      const newTurn = () => ({ dialogs: [], executions: [], calls: /* @__PURE__ */ new Map(), called: [] });
       let current = "";
       let newest = "";
       for (const line of lines) {
-        if (!line.includes('"task_started"') && !line.includes(DIALOG_TOOL)) continue;
+        if (!MARKERS.some((m) => line.includes(m))) continue;
         let row;
         try {
           row = JSON.parse(line);
@@ -854,27 +903,46 @@ async function dialogsInTurn(path, turnId) {
           continue;
         }
         const p = row.payload;
-        if (row.type === "event_msg" && p?.type === "task_started" && p.turn_id) {
+        if (!p) continue;
+        if (row.type === "event_msg" && p.type === "task_started" && p.turn_id) {
           current = p.turn_id;
           newest = current;
-          if (!byTurn.has(current)) byTurn.set(current, []);
-        } else if (row.type === "response_item" && p?.type === "function_call" && p.name === DIALOG_TOOL) {
+          if (!byTurn.has(current)) byTurn.set(current, newTurn());
+          continue;
+        }
+        const turn2 = byTurn.get(current) ?? newTurn();
+        byTurn.set(current, turn2);
+        if (row.type === "event_msg" && p.type === "item_completed" && p.item?.type === "CommandExecution") {
+          const output = p.item.aggregated_output;
+          turn2.executions.push({ command: commandText(p.item.command), output: isText(output) ? output : "" });
+        } else if (row.type === "response_item" && p.type === "function_call" && p.name === DIALOG_TOOL) {
           let args;
           try {
-            args = JSON.parse(p.arguments ?? "");
+            args = JSON.parse(isText(p.arguments) ? p.arguments : "");
           } catch {
             continue;
           }
-          byTurn.set(current, [...byTurn.get(current) ?? [], dialogQuestions(args.questions)]);
+          turn2.dialogs.push(dialogQuestions(args.questions));
+        } else if (row.type === "response_item" && (p.type === "function_call" || p.type === "local_shell_call")) {
+          const command = callCommand(p);
+          if (command !== "" && p.call_id) turn2.calls.set(p.call_id, { command, output: "" });
+        } else if (row.type === "response_item" && p.type === "function_call_output" && p.call_id) {
+          const call = turn2.calls.get(p.call_id);
+          if (call) turn2.called.push({ command: call.command, output: outputText(p.output) });
         }
       }
       const wanted = newest === "" ? "" : turnId ?? newest;
-      return (byTurn.get(wanted) ?? []).filter((questions) => questions.length > 0);
+      const turn = byTurn.get(wanted);
+      if (!turn) return none;
+      return {
+        dialogs: turn.dialogs.filter((questions) => questions.length > 0),
+        commands: turn.executions.length > 0 ? turn.executions : turn.called
+      };
     } finally {
       await file.close();
     }
   } catch {
-    return [];
+    return none;
   }
 }
 
@@ -920,21 +988,13 @@ async function handleHook(input, deps) {
     }
     case "Stop": {
       const reply = input.last_assistant_message ?? "";
-      const dialogs = await dialogsInTurn(input.transcript_path, input.turn_id);
+      const { dialogs, commands } = await turnIn(input.transcript_path, input.turn_id);
       const lines = dialogs.map((questions) => dialogActivity(questions, { kind: "open" }));
-      const written = await updateState(
-        dir,
-        id,
-        (s) => noteHook(
-          endTurn2(
-            lines.reduce((x, line) => noteActivity(x, line), withCli(s)),
-            reply,
-            now()
-          ),
-          "stop",
-          now()
-        )
-      );
+      const written = await updateState(dir, id, (s) => {
+        const withLines = lines.reduce((x, line) => noteActivity(x, line), withCli(s));
+        const withOutput = commands.reduce((x, c) => noteCommandOutput(x, c.command, c.output), withLines);
+        return noteHook(endTurn2(withOutput, reply, now()), "stop", now());
+      });
       if (written.pending.length > 0) deps.startUpdate(id);
       return null;
     }

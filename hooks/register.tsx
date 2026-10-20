@@ -52,6 +52,7 @@ import {
 import type { Owner, SavedRecord } from './claude-host'
 import {
   cleared,
+  commandFindings,
   emptySession,
   endTurn,
   noteActivity as noteTurnActivity,
@@ -60,6 +61,7 @@ import {
   recorded,
   startTurn,
   upgradeSession,
+  withNewPrRefs,
 } from './session'
 import type { SentBy, Session } from './session'
 import { fetchPrs as fetchSessionPrs, runUpdates, startPress, wakeForDone as wakeSessionForDone } from './session-host'
@@ -75,7 +77,6 @@ import {
   itemPrSteps,
   isDismissing,
   isTracked,
-  linkedPrs,
   olderPrsText,
   PR_GROUP_TITLES,
   PR_TONES,
@@ -543,7 +544,6 @@ const INLINE_RAIL_AT = 80
 const RAIL_GUTTER = 2
 const FOLD_KINDS: FoldKind[] = [...NEEDS_YOU_GROUPS.map(g => g.kind), 'issue', 'opportunity']
 const AWAY_MS = 15 * 60_000
-const LOCAL_URL = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|[\w.-]+\.localhost)(?::\d+)?[^\s"'`)\]]*/g
 
 let isTurnRunning = false
 let isOn = false
@@ -1617,7 +1617,7 @@ async function linkPrs($: EngineInterface, refs: string[]) {
   if (refs.length === 0) return
   const linked = (await read($, SESSION)).ledger.prs
   if (refs.every(r => linked.includes(r))) return
-  await commitLedger($, l => ({ ...l, prs: linkedPrs(l.prs, refs) }))
+  await commitLedger($, l => withNewPrRefs(l, refs))
   void fetchPrs($, await isPrsTabShown($))
 }
 
@@ -2448,9 +2448,9 @@ export const register: Register = on => {
     if (String(e.tool) === TURN_BOX_TOOL) turnBox = turnBoxText(input) ?? turnBox
     if (e.tool === 'Bash') {
       const ran = await run()
-      if ((await read($, SESSION)).turn.activity.length < 40)
-        for (const url of new Set(ran.text?.match(LOCAL_URL) ?? [])) await noteActivity($, `URL in output: ${url}`)
-      if (/\bgh\s+pr\s+create\b/.test(e.command)) void linkPrs($, prRefs(ran.text ?? ''))
+      const found = commandFindings(e.command, ran.text ?? '')
+      for (const line of found.lines) await noteActivity($, line)
+      void linkPrs($, found.prRefs)
 
       return ran
     }

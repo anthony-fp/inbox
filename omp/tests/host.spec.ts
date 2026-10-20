@@ -228,6 +228,23 @@ test('bash, edit and write calls become turn activity and other tools do not', a
   ])
 })
 
+test('a bash result notes local URLs it printed and links the PR gh pr create names', async () => {
+  createInbox(pi(), deps())
+  const result = (command: string, text: string, extra: Record<string, unknown> = {}) =>
+    call('tool_result', {
+      toolName: 'bash',
+      input: { command },
+      content: [{ type: 'text', text }],
+      isError: false,
+      ...extra,
+    })
+  await result('npm run dev', 'ready at http://localhost:3000/')
+  await result('gh pr create --fill', 'https://github.com/acme/app/pull/12\n')
+  await result('cat notes.txt', 'https://github.com/acme/app/pull/77\n')
+  expect(state().turn.activity).toEqual(['URL in output: http://localhost:3000/'])
+  expect(state().ledger.prs).toEqual(['acme/app#12'])
+})
+
 test('a turn that ends queues the exchange and the inbox model fills the ledger', async () => {
   createInbox(pi(), deps())
   await prompt('Add a greeting CLI')
