@@ -238,4 +238,6 @@ Each part passes `./scripts/check.sh` and can be committed on its own.
 
 Parts 2 and 3 were built as one, since the mod's `SessionHost` needs the single `session` value.
 
-Part 4 was checked in part. The script cannot run on the mod's storage, because a test in `claude plugin test` gets no `$.state`. The 145 tests in `tests/hooks.test.ts` run the mod's storage through its events instead. The terminal look was checked live: the demo pane, an answer press, a stop row from a failed turn, and `/clear`. The desktop pane was not checked live.
+The script does not run on the mod's storage, because a test in `claude plugin test` gets no `$.state`. The 145 tests in `tests/hooks.test.ts` run the mod's storage through its events instead.
+
+Both looks were checked live on the final code. In the terminal, with its own `CLAUDE_CONFIG_DIR`: the demo pane, an answer press, a stop row from a failed turn, and `/clear`. In the Claude app, in the inbox-ui VM: a task Claude recorded, Done on it, the Done message sent after the settle window and its closed row reading Done, and the empty pane after `/clear`. omp was not checked live after step 4. Its tests pass.
