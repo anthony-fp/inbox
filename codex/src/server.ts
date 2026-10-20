@@ -2,47 +2,21 @@ import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
 
-import {
-  applyPrPress,
-  fetchTracked,
-  isDismissing,
-  isTracked,
-  itemPrSteps,
-  prRowId,
-  splitLinked,
-} from '../../hooks/pr-tab'
-import type { Applied, PrPress } from '../../hooks/pr-tab'
-import {
-  applyPress,
-  demoRecord,
-  demoTurns,
-  doneWake,
-  localPath,
-  markSentToAgent,
-  recordPress,
-  withDeliveryId,
-  noteText,
-  openCommands,
-  runLocalEffects,
-  runSends,
-  withAcceptedSend,
-  withLasts,
-  withUnconfirmed,
-} from '../../hooks/presses'
-import type { EffectHost, RowPress } from '../../hooks/presses'
-import {
-  CLOSE_DESCRIPTION,
-  CLOSE_SCHEMA,
-  RECORD_SCHEMA,
-  recordDescription,
-  recordClose,
-  recordItem,
-} from '../../hooks/tools'
+import { ghFinder, ghIn } from '../../hooks/gh'
+import { isDismissing, isTracked } from '../../hooks/pr-tab'
+import type { PrPress } from '../../hooks/pr-tab'
+import { demoRecord, demoTurns, localPath, noteText, openCommands, withLasts } from '../../hooks/presses'
+import type { RowPress } from '../../hooks/presses'
+import { CLOSE_DESCRIPTION, CLOSE_SCHEMA, RECORD_SCHEMA, recordDescription } from '../../hooks/tools'
 import { noteToolCall, viewOf } from './core'
 import type { TabView } from './core'
 import { demoState } from './demo'
-import { ghFinder, ghIn } from './gh'
+import { codexStore } from './host'
 import { pruneClosed } from '../../hooks/ledger'
+import { pressOn, recorded } from '../../hooks/session'
+import type { SendOutcome } from '../../hooks/session'
+import { fetchPrs, isPrFetchDue, press, wakeForDone as wakeSessionForDone } from '../../hooks/session-host'
+import type { SessionHost } from '../../hooks/session-host'
 import { NO_HOLDS, SETTLED_MS } from '../../hooks/view'
 import type { ReplyHolds } from '../../hooks/view'
 import { SETTLE_WINDOW_MS } from './settle'
@@ -60,10 +34,6 @@ export function tabUri(tabHtml: string): string {
 const TAB_MIME = 'text/html;profile=mcp-app'
 
 const APP_ONLY = { ui: { visibility: ['app'] } }
-const PRS_REFRESH_MS = 120_000
-const NEW_PR_FETCH_MS = 15_000
-
-type Pressed = Exclude<Applied, { stale: true }>
 
 function viewsStillShown(
   prs: PrViews,
@@ -203,15 +173,7 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
   const prsFetchedAt = new Map<string, number>()
   let isGhMissing = false
 
-  async function queueMessage(
-    s: SessionState,
-    message: string,
-    resolvedCli?: string,
-  ): Promise<
-    | { state: 'accepted'; queuedId: string | null }
-    | { state: 'rejected'; reason: string }
-    | { state: 'unconfirmed'; reason: string }
-  > {
+  async function queueMessage(s: SessionState, message: string, resolvedCli?: string): Promise<SendOutcome> {
     let cli: string
     try {
       cli = resolvedCli ?? s.cliPath ?? (await deps.fallbackCli())
@@ -230,153 +192,38 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     }
   }
 
-  function completedAttempt(
-    state: SessionState,
-    deliveryId: string,
-    outcome: Awaited<ReturnType<typeof queueMessage>>,
-  ): SessionState {
-    if (outcome.state === 'rejected') return { ...state, sent: state.sent.filter(s => s.deliveryId !== deliveryId) }
-    const index = state.sent.findIndex(s => s.deliveryId === deliveryId)
-    const attempt = state.sent[index]
-    if (!attempt) return state
-    const earlierUnknown = state.sent
-      .slice(0, index)
-      .some(s => s.text === attempt.text && (s.phase === 'attempting' || s.phase === 'uncertain'))
-    let lastActions = state.lastActions
-    if (outcome.state === 'accepted' && !earlierUnknown) {
-      for (const [id, action] of Object.entries(lastActions)) {
-        if (action.delivery && 'id' in action.delivery && action.delivery.id === deliveryId)
-          lastActions = withAcceptedSend(lastActions, [id], action.at, attempt.text, deliveryId)
-      }
-    }
+  const hostFor = (id: string): Omit<SessionHost<SessionState>, 'ask'> => {
+    let preparedCli: string | undefined
     return {
-      ...state,
-      lastActions,
-      sent: state.sent.map(s =>
-        s.deliveryId === deliveryId
-          ? {
-              ...s,
-              phase: outcome.state === 'accepted' ? ('accepted' as const) : ('uncertain' as const),
-              queuedId: outcome.state === 'accepted' ? outcome.queuedId : null,
-            }
-          : s,
-      ),
+      ...codexStore(dir, id, now),
+      prepare: async s => {
+        preparedCli = s.cliPath ?? (await deps.fallbackCli())
+      },
+      deliver: (s, message) => queueMessage(s, message, preparedCli),
+      perform: async (s, e) => (e.kind === 'copy' ? null : open(s, e.target)),
+      gh: {
+        find: gh.find,
+        forget: gh.forget,
+        run: (s, bin, onUnstartable) => ghIn(deps.exec, bin, s.root, onUnstartable),
+        noteMissing: isMissing => {
+          isGhMissing = isMissing
+        },
+      },
+      settleWindowMs: SETTLE_WINDOW_MS,
+      newId: randomUUID,
     }
   }
 
-  async function wakeForDone(id: string) {
-    const check = (s: SessionState) =>
-      doneWake(s.ledger, { now: now(), windowMs: SETTLE_WINDOW_MS, isTurnRunning: s.turn.person !== null })
-    if (!check(await readState(dir, id))) return
-    await updateState(dir, id, async (s, checkpoint) => {
-      const wake = check(s)
-      if (!wake) return s
-      const cli = s.cliPath ?? (await deps.fallbackCli())
-      const deliveryId = randomUUID()
-      const lastActions = { ...s.lastActions }
-      for (const closed of s.ledger.closed) {
-        if (!wake.ids.includes(closed.id)) continue
-        const previous = lastActions[closed.id]
-        const last =
-          previous?.kind === 'mark' && previous.action === 'done' && previous.at === closed.at
-            ? previous
-            : recordPress('mark', 'done', 'Done', { now: closed.at, turnsStarted: s.presence.turnsStarted })
-        lastActions[closed.id] = { ...last, delivery: { state: 'unconfirmed', message: wake.text, id: deliveryId } }
-      }
-      const next: SessionState = {
-        ...s,
-        ledger: markSentToAgent(s.ledger, wake.ids),
-        lastActions,
-        sent: [
-          ...s.sent,
-          {
-            text: wake.text,
-            press: { id: wake.ids[0]!, action: 'done' },
-            at: now(),
-            row: wake.ids[0]!,
-            queuedId: null,
-            pressedAt: null,
-            deliveryId,
-            phase: 'attempting',
-          },
-        ],
-      }
-      await checkpoint(next)
-      return completedAttempt(next, deliveryId, await queueMessage(next, wake.text, cli))
-    })
-  }
+  const wakeForDone = (id: string) => wakeSessionForDone(hostFor(id))
 
   const currentPage = async () => (await deps.devPage?.()) ?? deps.tabHtml
-
-  const pressOn = (
-    s: SessionState,
-    p: RowPress | PrPress,
-    at = now(),
-    localPressId?: string,
-  ): Pressed | { stale: true } => {
-    const ctx = { now: at, turnsStarted: s.presence.turnsStarted, localPressId }
-    if ('ref' in p) return applyPrPress(s.ledger, s.prViews, s.lastActions, p, ctx)
-    const item = s.ledger.items.find(i => i.id === p.id)
-    const r = applyPress(s.ledger, s.lastActions[p.id], p, {
-      ...ctx,
-      extraSteps: item ? itemPrSteps(item, s.prViews, s.ledger.prs) : [],
-    })
-    if ('stale' in r) return r
-
-    return {
-      ledger: r.ledger,
-      lasts: r.last ? { [p.id]: r.last } : {},
-      drop: [],
-      effects: r.effects,
-      ...(r.reopenedId ? { reopenedId: r.reopenedId } : {}),
-    }
-  }
-
-  async function fetchPrs(id: string) {
-    const s = await readState(dir, id)
-    const bin = await gh.find()
-    isGhMissing = bin === null
-    if (bin === null) return
-    let sawUnstartable = false
-    const fetchWith = (path: string) =>
-      fetchTracked(
-        ghIn(deps.exec, path, s.root, () => {
-          sawUnstartable = true
-        }),
-        s.prViews,
-        s.ledger.prs,
-        true,
-      )
-    let fetch = await fetchWith(bin)
-    if (sawUnstartable) {
-      gh.forget()
-      const refound = await gh.find()
-      isGhMissing = refound === null
-      if (refound === null) return
-      if (refound !== bin) fetch = await fetchWith(refound)
-    }
-    const { views: fetched, branchRef } = fetch
-    await updateState(dir, id, cur => {
-      const at = now()
-      const views = Object.fromEntries(
-        Object.entries(fetched).filter(([ref]) => isTracked({ ...cur.prViews, branchRef }, cur.ledger.prs, ref)),
-      )
-      const dismissing = Object.fromEntries(
-        Object.entries(cur.prViews.views).filter(([ref]) => isDismissing(cur.lastActions, ref, at)),
-      )
-
-      return { ...cur, prViews: { views: { ...dismissing, ...views }, branchRef, isFetching: false } }
-    })
-  }
 
   function fetchPrsWhenDue(id: string, s: SessionState) {
     if (fetchingPrs.has(id)) return
     const last = prsFetchedAt.get(id)
-    const hasNewPr = splitLinked(s.ledger.prs).tracked.some(ref => !(ref in s.prViews.views))
-    const isDue = last === undefined || now() - last >= PRS_REFRESH_MS || (hasNewPr && now() - last >= NEW_PR_FETCH_MS)
-    if (!isDue) return
+    if (!isPrFetchDue(s, last, now())) return
     fetchingPrs.add(id)
-    void fetchPrs(id)
+    void fetchPrs(hostFor(id), true)
       .catch(() => undefined)
       .finally(() => {
         prsFetchedAt.set(id, now())
@@ -406,124 +253,13 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
   }
 
   async function onPress(id: string, p: RowPress | PrPress, thread: unknown, holds: ReplyHolds): Promise<PressReply> {
-    const rowId = 'ref' in p ? prRowId(p) : p.id
-    const localPressId = randomUUID()
-    let checkpointSaved = false
-    let appliedSaved = false
-    let isUnconfirmed = false
-    let copy: PressReply['copy'] = null
-    let error: string | null = null
-    let note: PressReply['note'] = thread === id ? null : 'stale'
-    const pressed: { r?: Pressed; deliveryId?: string } = {}
-    const hostFor = (
-      change: (f: (s: SessionState) => SessionState | Promise<SessionState>) => Promise<SessionState>,
-    ): EffectHost => ({
-      now,
-      deliveryId: () => pressed.deliveryId ?? randomUUID(),
-      perform: async e => {
-        if (e.kind === 'copy') {
-          copy = { text: e.text, name: e.name }
-          return null
-        }
-        return open(await readState(dir, id), e.target)
-      },
-      send: async (e, deliveryId) => {
-        let sentOutcome: Awaited<ReturnType<typeof queueMessage>> | null = null
-        return change(async s => {
-          const outcome = await queueMessage(s, e.text)
-          sentOutcome = outcome
-          if (outcome.state === 'unconfirmed') isUnconfirmed = true
-          return completedAttempt(s, deliveryId, outcome)
-        }).then(
-          () =>
-            sentOutcome?.state === 'accepted'
-              ? { state: 'accepted' as const }
-              : sentOutcome?.state === 'rejected'
-                ? { state: 'rejected' as const, reason: sentOutcome.reason }
-                : { state: 'unconfirmed' as const, reason: sentOutcome?.reason ?? 'Queue outcome unknown' },
-          (err: unknown) => ({
-            state: 'unconfirmed' as const,
-            reason: err instanceof Error ? err.message : String(err),
-          }),
-        )
-      },
-      saveLasts: async f => (await change(s => ({ ...s, lastActions: f(s.lastActions) }))).lastActions,
-      saveLedger: async f => {
-        await change(s => ({ ...s, ledger: f(s.ledger) }))
-      },
-    })
-    await updateState(dir, id, async (saved, checkpoint) => {
-      const s: SessionState = { ...saved, heldRows: Object.keys(holds.replies) }
-      if (note) return s
-      // Read under the lock, so the press is timed after every write that landed before it.
-      const at = now()
-      const r = pressOn(s, p, at, localPressId)
-      if ('stale' in r) {
-        note = 'stale'
-        return s
-      }
-      pressed.r = r
-      const firstSend = r.effects.find(e => e.kind === 'send')
-      pressed.deliveryId = firstSend ? randomUUID() : undefined
-      const pressLasts =
-        firstSend && pressed.deliveryId
-          ? withDeliveryId(r.lasts, Object.keys(r.lasts), at, firstSend.text, pressed.deliveryId)
-          : r.lasts
-      let next: SessionState = {
-        ...s,
-        ledger: r.ledger,
-        lastActions: withLasts(s.lastActions, pressLasts, r.drop),
-        told: r.reopenedId ? { ...s.told, closed: s.told.closed.filter(id => id !== r.reopenedId) } : s.told,
-      }
-      if (firstSend && pressed.deliveryId) {
-        next = {
-          ...next,
-          lastActions: withUnconfirmed(next.lastActions, firstSend.text, at, pressed.deliveryId),
-          sent: [
-            ...next.sent,
-            {
-              text: firstSend.text,
-              press: firstSend.by,
-              at: now(),
-              row: rowId,
-              queuedId: null,
-              pressedAt: at,
-              deliveryId: pressed.deliveryId,
-              phase: 'attempting',
-            },
-          ],
-        }
-        await checkpoint(next)
-        checkpointSaved = true
-      }
-      const held = hostFor(async f => (next = await f(next)))
-      const failed = await runSends(held, r.effects, rowId, Object.keys(r.lasts), at)
-      if (failed?.state === 'rejected') error = `Not sent: ${failed.reason}`
-
-      return next
-    })
-      .then(() => {
-        appliedSaved = true
-      })
-      .catch((err: unknown) => {
-        if (checkpointSaved) isUnconfirmed = true
-        error = checkpointSaved ? null : `Not sent: ${err instanceof Error ? err.message : String(err)}`
-      })
-    if (pressed.r && !('ref' in p) && p.action === 'done')
-      setTimeout(() => void wakeForDone(id).catch(() => undefined), SETTLE_WINDOW_MS).unref()
-    if (pressed.r && (appliedSaved || checkpointSaved))
-      await runLocalEffects(
-        hostFor(f => updateState(dir, id, f)),
-        pressed.r.effects,
-        rowId,
-        pressed.r.lasts[rowId]?.result,
-      )
+    const outcome = await press(hostFor(id), p, thread !== id, holds)
+    if (outcome.wakesForDone) setTimeout(() => void wakeForDone(id).catch(() => undefined), SETTLE_WINDOW_MS).unref()
+    const { isUnconfirmed, wakesForDone: _wakes, ...rest } = outcome
 
     return {
       view: await served(await readState(dir, id), id, false, holds),
-      copy,
-      error,
-      note,
+      ...rest,
       ...(isUnconfirmed ? { delivery: 'unconfirmed' as const } : {}),
     }
   }
@@ -566,7 +302,7 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
     holds: ReplyHolds,
   ): Promise<PressReply> {
     const s = demoOf(id)
-    const r = thread === id ? pressOn(s, p) : ({ stale: true } as const)
+    const r = thread === id ? pressOn(s, p, now()) : ({ stale: true } as const)
     if ('stale' in r) return { view: await served(s, id, true, holds), copy: null, error: null, note: 'stale' }
     const { lasts, isSample } = demoRecord(r.lasts, r.effects)
     const next: SessionState = {
@@ -603,9 +339,9 @@ export function makeServer(deps: ServerDeps): (m: Message) => Promise<Record<str
       case 'close': {
         let result = ''
         await updateState(dir, id, s => {
-          const r = (name === 'close' ? recordClose : recordItem)(CODEX, s.ledger, args, now())
+          const r = recorded(CODEX, s, name, args, now())
           result = r.result
-          return heard({ ...s, ledger: r.ledger })
+          return heard(r.state)
         })
         return text(result)
       }

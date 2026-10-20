@@ -1,7 +1,7 @@
 // Built by codex/build.mjs from codex/src and hooks/. Do not edit.
 
 // src/hook-main.ts
-import { dirname as dirname2, join as join2 } from "node:path";
+import { dirname as dirname2, join as join3 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/hook.ts
@@ -23,9 +23,9 @@ When you ask the user to decide something, say which option you recommend and wh
 
 When you ask the user to do something, such as review a page, sign in or run a command, give them what they need in the same reply: the link, file path or command, what to do there, and how the result gets back to you. If the result would stay where you cannot read it, such as in their browser, give them a way to send it to you.
 
-Ask in your reply, and record the same ask in that turn with mcp__inbox__record, so it stays in the inbox after the conversation moves on. Record a decision, an approval or information you need as a question, with its options and the one you recommend. Record an act you hold until the user says so the same way. Record a step only the user can take as a task, with its steps. Record each one once. Do not record rhetorical questions, offers to continue when continuing is the default, FYIs, or invitations to look at finished work.
+Ask in your reply, and record the same ask in that turn with ${host.recordTool}, so it stays in the inbox after the conversation moves on. Record a decision, an approval or information you need as a question, with its options and the one you recommend. Record an act you hold until the user says so the same way. Record a step only the user can take as a task, with its steps. Record each one once. Do not record rhetorical questions, offers to continue when continuing is the default, FYIs, or invitations to look at finished work.
 
-A finding is something you noticed that deserves the user's attention but is outside the current task: a bug, a risk, missing tests, tech debt, or a chance to improve something. Check it once before you record it, by reading the code or running a quick command, so the finding says what is true. Record it with mcp__inbox__record as a finding, then go on with the task; fixing it waits until the user asks. Record one too when you work around a problem instead of fixing it, such as copying files by hand because a tool does not reach them, and when part of your change cannot be checked from where you are. State those in your reply as well. Mention any other finding only when it bears on what the user asked.
+A finding is something you noticed that deserves the user's attention but is outside the current task: a bug, a risk, missing tests, tech debt, or a chance to improve something. Check it once before you record it, by reading the code or running a quick command, so the finding says what is true. Record it with ${host.recordTool} as a finding, then go on with the task; fixing it waits until the user asks. Record one too when you work around a problem instead of fixing it, such as copying files by hand because a tool does not reach them, and when part of your change cannot be checked from where you are. State those in your reply as well. Mention any other finding only when it bears on what the user asked.
 
 These are not findings. Handle them in the task and your reply instead:
 - A problem in your own change or inside the task: fix it.
@@ -35,7 +35,7 @@ These are not findings. Handle them in the task and your reply instead:
 
 The latest "inbox:" text beside the user's prompt is the current state. It lists every open item and finding with its id, such as (close id: i35), and anything it does not list is closed. Check it before telling the user that something is open or waits on them. The ids are for the inbox tools only. The user never sees them, so never write one to the user, not even in parentheses: name an item or finding by what it says, as "the deploy task" or "the migration finding".
 
-Close with mcp__inbox__close:
+Close with ${host.closeTool}:
 - When the user's message answers an open item, close it first, before other work, with their answer.
 - When an item or finding is done or no longer applies, close it with a short reason, without waiting to be asked.
 The answer to a question is the user's to give. Close a question with their answer, or once it no longer applies, and never with an answer of your own.`;
@@ -403,44 +403,90 @@ function linkedPrs(prs, refs) {
   return [...prs.filter((r) => !refs.includes(r)), ...refs];
 }
 
-// src/settle.ts
-var POLL_MS = 3e3;
-var SETTLE_WINDOW_MS = SETTLED_MS + 2 * POLL_MS;
-
-// src/texts.ts
-var CODEX = {
-  agent: "Codex",
-  surface: "the Inbox tab",
-  band: null,
-  findingsIn: "the Findings section of the Inbox tab",
-  intro: "The inbox plugin shows the user what waits on them: your open questions and the tasks only they can do, and your findings, in the Inbox tab beside the conversation."
-};
-
-// src/core.ts
-var TAB_OPEN_MS = 15e3;
-function isTabOpen(s, now) {
-  return now - s.tabSeenAt < TAB_OPEN_MS;
+// ../hooks/session.ts
+var NO_PRS = { views: {}, branchRef: null, isFetching: false };
+var NO_TURN = { person: null, trigger: null, activity: [], press: null };
+function emptySession() {
+  return {
+    ledger: EMPTY,
+    turn: NO_TURN,
+    told: TOLD_NOTHING,
+    presence: { turnsStarted: 0, turnsApplied: 0, ledgerState: "current", isUpdating: false },
+    pending: [],
+    sent: [],
+    lastActions: {},
+    heldRows: [],
+    prViews: NO_PRS,
+    stop: null
+  };
 }
-function startContext(s, source) {
+function upgradeSession(saved) {
+  const base = emptySession();
+  const views = saved.prViews?.views ?? {};
+  return {
+    ledger: saved.ledger ? { ...base.ledger, ...upgradeLedger({ ...saved.ledger, items: saved.ledger.items ?? [] }) } : base.ledger,
+    turn: { ...base.turn, ...saved.turn },
+    told: { ...base.told, ...saved.told },
+    presence: { ...base.presence, ...saved.presence },
+    pending: saved.pending ?? [],
+    sent: (saved.sent ?? []).map((x) => ({
+      ...x,
+      row: x.row ?? null,
+      queuedId: x.queuedId ?? null,
+      pressedAt: x.pressedAt ?? null,
+      deliveryId: x.deliveryId ?? null,
+      phase: x.phase ?? "accepted"
+    })),
+    lastActions: upgradeLastActions(saved.lastActions ?? {}),
+    heldRows: saved.heldRows ?? [],
+    prViews: {
+      ...NO_PRS,
+      ...saved.prViews,
+      // Threads saved before their times and `isLinesChanged` existed.
+      views: Object.fromEntries(
+        Object.entries(views).map(([ref, pr]) => [
+          ref,
+          {
+            ...pr,
+            threads: pr.threads.map((t) => ({
+              ...t,
+              isLinesChanged: t.isLinesChanged ?? false,
+              at: t.at ?? null,
+              reply: t.reply && { ...t.reply, at: t.reply.at ?? null }
+            }))
+          }
+        ])
+      ),
+      isFetching: false
+    },
+    stop: saved.stop ?? null
+  };
+}
+function startContext(host, s, source) {
   const carried = carryText(s.ledger, START_TITLE);
-  const parts = [source === "resume" ? null : guidanceText(CODEX), carried].filter((x) => x !== null);
+  const parts = [source === "resume" ? null : guidanceText(host), carried].filter((x) => x !== null);
   return parts.length > 0 ? parts.join("\n\n") : null;
 }
 function cleared(s) {
   return {
     ...s,
     ledger: EMPTY,
-    turn: { person: null, activity: [], press: null },
+    turn: NO_TURN,
     told: { inbox: null, closed: [] },
     pending: [],
-    lastActions: {}
+    lastActions: {},
+    stop: null
   };
 }
-function notePrompt(s, text, now) {
+function notePrompt(host, s, text, isOpen) {
+  const matched = matchSent(s, text);
+  return recordPrompt(host, startTurn(matched.state), text, isOpen, matched.sentBy);
+}
+function matchSent(s, text) {
   const matchingAt = s.sent.findIndex((x) => x.text === text);
   const matching = matchingAt >= 0 ? s.sent[matchingAt] : void 0;
-  const sentAt = matching && (matching.phase === void 0 || matching.phase === "accepted") ? matchingAt : -1;
-  const sentBy = sentAt >= 0 ? s.sent[sentAt]?.press ?? null : null;
+  const isMatchable = matching !== void 0 && (matching.phase === void 0 || matching.phase === "accepted" || matching.phase === "attempting" && matching.deliveryId !== null);
+  const sentAt = isMatchable ? matchingAt : -1;
   const sent = sentAt >= 0 ? s.sent[sentAt] : void 0;
   const eligible = sent?.deliveryId === null ? Object.fromEntries(
     Object.entries(s.lastActions).filter(
@@ -455,8 +501,17 @@ function notePrompt(s, text, now) {
     (actions, later) => later.text === text && later.row !== null ? withUnconfirmed(actions, text, later.pressedAt ?? void 0, later.deliveryId) : actions,
     arrived
   );
+  return {
+    state: { ...s, lastActions, sent: sent ? s.sent.filter((_x, i) => i !== sentAt) : s.sent },
+    sentBy: sent ? { press: sent.press } : null
+  };
+}
+function startTurn(s) {
+  return { ...s, presence: { ...s.presence, turnsStarted: s.presence.turnsStarted + 1 }, stop: null };
+}
+function recordPrompt(host, s, text, isOpen, sentBy) {
   const ledger = { ...s.ledger, turn: s.ledger.turn + 1 };
-  const r = promptNotes(CODEX, ledger, { text, isPress: sentAt >= 0, isOpen: isTabOpen(s, now) }, s.told);
+  const r = promptNotes(host, ledger, { text, isPress: sentBy !== null, isOpen }, s.told);
   const person = s.turn.person === null ? text : `${s.turn.person}
 
 ${text}`;
@@ -465,10 +520,7 @@ ${text}`;
       ...s,
       ledger,
       told: r.told,
-      lastActions,
-      sent: sentAt >= 0 ? s.sent.filter((_x, i) => i !== sentAt) : s.sent,
-      turn: { ...s.turn, person, press: sentBy ?? s.turn.press },
-      presence: { ...s.presence, turnsStarted: s.presence.turnsStarted + 1 }
+      turn: { ...s.turn, person, trigger: null, press: sentBy?.press ?? s.turn.press }
     },
     notes: r.notes
   };
@@ -478,30 +530,57 @@ function noteActivity(s, line) {
   if (activity === s.turn.activity) return s;
   return { ...s, turn: { ...s.turn, activity } };
 }
+function endTurn(host, s, reply, isOpen, { tab = null, queuesEmptyReply = false } = {}) {
+  const refs = prRefs(reply);
+  const base = {
+    ...s,
+    ledger: refs.length > 0 ? { ...s.ledger, prs: linkedPrs(s.ledger.prs, refs) } : s.ledger,
+    turn: NO_TURN
+  };
+  if (reply.trim() === "" && !queuesEmptyReply) return base;
+  const ex = {
+    person: s.turn.person,
+    trigger: s.turn.person === null ? s.turn.trigger ?? "unknown" : null,
+    activity: s.turn.activity,
+    reply,
+    turn: s.ledger.turn,
+    press: s.turn.press,
+    screen: screenText(host, isOpen, tab)
+  };
+  return { ...base, pending: [...base.pending, { ex, turnsStarted: s.presence.turnsStarted }] };
+}
+
+// src/settle.ts
+var POLL_MS = 3e3;
+var SETTLE_WINDOW_MS = SETTLED_MS + 2 * POLL_MS;
+
+// src/texts.ts
+var CODEX = {
+  agent: "Codex",
+  surface: "the Inbox tab",
+  band: null,
+  findingsIn: "the Findings section of the Inbox tab",
+  recordTool: "mcp__inbox__record",
+  closeTool: "mcp__inbox__close",
+  intro: "The inbox plugin shows the user what waits on them: your open questions and the tasks only they can do, and your findings, in the Inbox tab beside the conversation."
+};
+
+// src/core.ts
+var TAB_OPEN_MS = 15e3;
+function isTabOpen(s, now) {
+  return now - s.tabSeenAt < TAB_OPEN_MS;
+}
+function notePrompt2(s, text, now) {
+  return notePrompt(CODEX, s, text, isTabOpen(s, now));
+}
 function activityOf(tool, input) {
   return toolActivity(tool, input);
 }
 function patchFiles(patch) {
   return [...patch.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)].map((m) => (m[1] ?? "").trim()).filter(Boolean);
 }
-function endTurn(s, reply, now) {
-  const refs = prRefs(reply);
-  const base = {
-    ...s,
-    ledger: refs.length > 0 ? { ...s.ledger, prs: linkedPrs(s.ledger.prs, refs) } : s.ledger,
-    turn: { person: null, activity: [], press: null }
-  };
-  if (reply.trim() === "") return base;
-  const ex = {
-    person: s.turn.person,
-    trigger: s.turn.person === null ? "unknown" : null,
-    activity: s.turn.activity,
-    reply,
-    turn: s.ledger.turn,
-    press: s.turn.press,
-    screen: screenText(CODEX, isTabOpen(s, now), null)
-  };
-  return { ...base, pending: [...base.pending, { ex, turnsStarted: s.presence.turnsStarted }] };
+function endTurn2(s, reply, now) {
+  return endTurn(CODEX, s, reply, isTabOpen(s, now));
 }
 var MAX_PROMPT_TURNS = 10;
 function noteHook(s, hook, now, turnId) {
@@ -543,7 +622,6 @@ var NOTHING_HEARD = {
   stops: 0,
   promptMissedAt: null
 };
-var NO_PRS = { views: {}, branchRef: null, isFetching: false };
 function emptyState(sessionId) {
   return {
     version: 1,
@@ -551,25 +629,10 @@ function emptyState(sessionId) {
     root: "",
     home: homedir(),
     cliPath: null,
-    ledger: EMPTY,
-    turn: { person: null, activity: [], press: null },
-    told: TOLD_NOTHING,
-    presence: { turnsStarted: 0, turnsApplied: 0, ledgerState: "current", isUpdating: false },
-    pending: [],
-    sent: [],
-    lastActions: {},
-    heldRows: [],
-    prViews: NO_PRS,
+    ...emptySession(),
     tabSeenAt: 0,
     heard: NOTHING_HEARD
   };
-}
-function dataDir(env, pluginRoot) {
-  const fromEnv = env.INBOX_DATA || env.PLUGIN_DATA;
-  if (fromEnv) return fromEnv;
-  const m = pluginRoot.match(/^(.*)\/plugins\/cache\/([^/]+)\/([^/]+)\/[^/]+$/);
-  if (m) return `${m[1]}/plugins/data/${m[3]}-${m[2]}`;
-  return join(homedir(), ".codex", "inbox-dev");
 }
 function fileName(sessionId) {
   if (!/^[\w-]{1,100}$/.test(sessionId)) throw new Error(`Not a session id: ${sessionId}`);
@@ -587,24 +650,11 @@ function upgraded(saved, sessionId) {
   return {
     ...base,
     ...kept,
-    // The ledger's shape is the mod's, so a saved one converts the way the mod's does. It converts
-    // before the defaults fill in, since an empty `closed` would hide an old `decided`.
-    ledger: saved.ledger ? { ...base.ledger, ...upgradeLedger({ ...saved.ledger, items: saved.ledger.items ?? [] }) } : base.ledger,
-    turn: { ...base.turn, ...turn },
-    told: { ...base.told, ...saved.told },
-    presence: { ...base.presence, ...saved.presence },
-    pending: (saved.pending ?? []).map(({ ex: { checks: _exChecks, ...ex }, ...p }) => ({ ...p, ex })),
-    // A message sent before the server kept its row changes no row when it arrives.
-    sent: (saved.sent ?? []).map((x) => ({
-      ...x,
-      row: x.row ?? null,
-      queuedId: x.queuedId ?? null,
-      pressedAt: x.pressedAt ?? null,
-      deliveryId: x.deliveryId ?? null,
-      phase: x.phase ?? "accepted"
-    })),
-    lastActions: upgradeLastActions(saved.lastActions ?? {}),
-    prViews: { ...NO_PRS, ...saved.prViews, isFetching: false },
+    ...upgradeSession({
+      ...kept,
+      turn,
+      pending: (saved.pending ?? []).map(({ ex: { checks: _exChecks, ...ex }, ...p }) => ({ ...p, ex }))
+    }),
     // A file saved before the hooks kept this record came from hooks that ran, so it reads as heard.
     // Its turns were not recorded, so `promptAt` is set too: a tool call then falls back to the time rule.
     heard: saved.heard ? { ...NOTHING_HEARD, ...saved.heard } : {
@@ -748,17 +798,11 @@ async function updateState(dir, sessionId, change) {
   const path = statePath(dir, sessionId);
   return withLock(`${path}.lock`, async () => {
     const current = await readState(dir, sessionId);
-    const pruned = (state) => ({
-      ...state,
-      ledger: pruneClosed(state.ledger, new Set(state.heldRows))
-    });
-    const checkpoint = async (state) => {
-      const tmp = `${path}.${process.pid}.tmp`;
-      await writeFile(tmp, JSON.stringify(pruned(state)));
-      await rename(tmp, path);
-    };
-    const next = pruned(await change(current, checkpoint));
-    await checkpoint(next);
+    const changed = await change(current);
+    const next = { ...changed, ledger: pruneClosed(changed.ledger, new Set(changed.heldRows)) };
+    const tmp = `${path}.${process.pid}.tmp`;
+    await writeFile(tmp, JSON.stringify(next));
+    await rename(tmp, path);
     return next;
   });
 }
@@ -846,13 +890,13 @@ async function handleHook(input, deps) {
         id,
         (s2) => noteHook(withCli({ ...input.source === "clear" ? cleared(s2) : s2, root }), "start", now())
       );
-      const context = startContext(s, input.source);
+      const context = startContext(CODEX, s, input.source);
       return context ? { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context } } : null;
     }
     case "UserPromptSubmit": {
       let notes = [];
       await updateState(dir, id, (s) => {
-        const r = notePrompt(withCli(s), input.prompt ?? "", now());
+        const r = notePrompt2(withCli(s), input.prompt ?? "", now());
         notes = r.notes;
         return input.agent_id ? r.state : noteHook(r.state, "prompt", now(), input.turn_id);
       });
@@ -879,7 +923,7 @@ async function handleHook(input, deps) {
         dir,
         id,
         (s) => noteHook(
-          endTurn(
+          endTurn2(
             lines.reduce((x, line) => noteActivity(x, line), withCli(s)),
             reply,
             now()
@@ -905,6 +949,17 @@ function detachedUpdate(dir, env, script) {
   };
 }
 
+// src/data-dir.ts
+import { homedir as homedir2 } from "node:os";
+import { join as join2 } from "node:path";
+function dataDir(env, pluginRoot) {
+  const fromEnv = env.INBOX_DATA || env.PLUGIN_DATA;
+  if (fromEnv) return fromEnv;
+  const m = pluginRoot.match(/^(.*)\/plugins\/cache\/([^/]+)\/([^/]+)\/[^/]+$/);
+  if (m) return `${m[1]}/plugins/data/${m[3]}-${m[2]}`;
+  return join2(homedir2(), ".codex", "inbox-dev");
+}
+
 // src/hook-main.ts
 async function main() {
   let raw = "";
@@ -915,7 +970,7 @@ async function main() {
     dir,
     env: process.env,
     now: Date.now,
-    startUpdate: detachedUpdate(dir, process.env, join2(dist, "update.mjs"))
+    startUpdate: detachedUpdate(dir, process.env, join3(dist, "update.mjs"))
   });
   if (out) process.stdout.write(JSON.stringify(out));
 }

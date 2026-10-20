@@ -7,6 +7,10 @@ codex/plugin/dist/
 codex/test-dist/
 codex/package-lock.json
 launch-video/package-lock.json
+omp/bun.lock
+
+# Built by omp/build.ts
+omp/dist/
 
 # Worktrees Claude Code makes inside the repo, each with its own built files
 .claude/

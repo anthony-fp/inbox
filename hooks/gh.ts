@@ -1,5 +1,10 @@
-import type { GhRun } from '../../hooks/pr-tab'
-import type { Run } from './run'
+import type { GhRun } from './pr-tab'
+
+/** Runs a command and never throws: a command that cannot start, times out, is killed or overflows its output ends with code -1. */
+export type Run = (
+  args: string[],
+  opts: { cwd: string; timeoutMs: number },
+) => Promise<{ code: number; stdout: string; stderr: string }>
 
 const CANDIDATES = ['gh', '/opt/homebrew/bin/gh', '/usr/local/bin/gh']
 
@@ -10,7 +15,7 @@ const UNSTARTABLE_CODE = -1
 /**
  * Finds the first gh that starts: `exec` ends with code -1 for a command it cannot start. The one found is kept
  * until `forget` is called; while none starts, each call looks again, since the person may install gh without
- * restarting Codex.
+ * restarting the host.
  */
 export function ghFinder(exec: Run): { find: () => Promise<string | null>; forget: () => void } {
   let found: string | null = null

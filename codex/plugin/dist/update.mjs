@@ -4,6 +4,17 @@
 import { dirname as dirname2 } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// src/data-dir.ts
+import { homedir } from "node:os";
+import { join } from "node:path";
+function dataDir(env, pluginRoot) {
+  const fromEnv = env.INBOX_DATA || env.PLUGIN_DATA;
+  if (fromEnv) return fromEnv;
+  const m = pluginRoot.match(/^(.*)\/plugins\/cache\/([^/]+)\/([^/]+)\/[^/]+$/);
+  if (m) return `${m[1]}/plugins/data/${m[3]}-${m[2]}`;
+  return join(homedir(), ".codex", "inbox-dev");
+}
+
 // src/state.ts
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -21,8 +32,8 @@ import {
   unlink,
   writeFile
 } from "node:fs/promises";
-import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { homedir as homedir2 } from "node:os";
+import { basename, dirname, isAbsolute, join as join2, resolve } from "node:path";
 
 // ../hooks/text.ts
 var NL = "\n";
@@ -598,10 +609,10 @@ function upgradedLastAction(key, old) {
   const action = found ? typeof found[1] === "function" ? found[1](old.action) : found[1] : null;
   if (action === null) return null;
   const { isHandoff, ...kept } = old;
-  const isHandedOff = isHandoff ?? HANDOFF_IDS.test(action);
+  const isHandedOff2 = isHandoff ?? HANDOFF_IDS.test(action);
   return {
     ...kept,
-    kind: isHandedOff ? "handoff" : "talk",
+    kind: isHandedOff2 ? "handoff" : "talk",
     action,
     // Earlier builds saved "Explain sent" or "Sent to Claude to fix"; a last action is now the label pressed.
     text: /^Sent to (Claude|Codex) to /.test(old.text) ? "Address" : old.text.replace(/ sent$/, "")
@@ -623,6 +634,98 @@ function upgradeLastActions(saved) {
   );
 }
 
+// ../hooks/view.ts
+var CHOICE_KEYS = [..."abcfghilm"];
+var TABS = [
+  { id: "needsYou", label: "Needs you", hotkey: "1" },
+  { id: "findings", label: "Findings", hotkey: "2" },
+  { id: "prs", label: "PRs", hotkey: "3" }
+];
+var ROW_TABS = TABS.filter((t) => t.id !== "prs");
+
+// ../hooks/session.ts
+var NO_PRS = { views: {}, branchRef: null, isFetching: false };
+var NO_TURN = { person: null, trigger: null, activity: [], press: null };
+function emptySession() {
+  return {
+    ledger: EMPTY,
+    turn: NO_TURN,
+    told: TOLD_NOTHING,
+    presence: { turnsStarted: 0, turnsApplied: 0, ledgerState: "current", isUpdating: false },
+    pending: [],
+    sent: [],
+    lastActions: {},
+    heldRows: [],
+    prViews: NO_PRS,
+    stop: null
+  };
+}
+function upgradeSession(saved) {
+  const base = emptySession();
+  const views = saved.prViews?.views ?? {};
+  return {
+    ledger: saved.ledger ? { ...base.ledger, ...upgradeLedger({ ...saved.ledger, items: saved.ledger.items ?? [] }) } : base.ledger,
+    turn: { ...base.turn, ...saved.turn },
+    told: { ...base.told, ...saved.told },
+    presence: { ...base.presence, ...saved.presence },
+    pending: saved.pending ?? [],
+    sent: (saved.sent ?? []).map((x) => ({
+      ...x,
+      row: x.row ?? null,
+      queuedId: x.queuedId ?? null,
+      pressedAt: x.pressedAt ?? null,
+      deliveryId: x.deliveryId ?? null,
+      phase: x.phase ?? "accepted"
+    })),
+    lastActions: upgradeLastActions(saved.lastActions ?? {}),
+    heldRows: saved.heldRows ?? [],
+    prViews: {
+      ...NO_PRS,
+      ...saved.prViews,
+      // Threads saved before their times and `isLinesChanged` existed.
+      views: Object.fromEntries(
+        Object.entries(views).map(([ref, pr]) => [
+          ref,
+          {
+            ...pr,
+            threads: pr.threads.map((t) => ({
+              ...t,
+              isLinesChanged: t.isLinesChanged ?? false,
+              at: t.at ?? null,
+              reply: t.reply && { ...t.reply, at: t.reply.at ?? null }
+            }))
+          }
+        ])
+      ),
+      isFetching: false
+    },
+    stop: saved.stop ?? null
+  };
+}
+function applied(s, reply, now, promptAt) {
+  const next = s.pending[0];
+  if (!next) return s;
+  const { ex } = next;
+  const parsed = reply === null ? null : parseReply(reply, [ex.reply, ...ex.activity].join("\n"));
+  if (!parsed && !next.failed)
+    return {
+      ...s,
+      pending: [{ ...next, failed: true }, ...s.pending.slice(1)],
+      presence: { ...s.presence, ledgerState: "failed" }
+    };
+  const ledger = parsed ? applyExchangeUpdate(s.ledger, parsed, ex, now, promptAt) : s.ledger;
+  return {
+    ...s,
+    ledger,
+    pending: s.pending.slice(1),
+    presence: {
+      ...s.presence,
+      ledgerState: parsed ? "current" : "failed",
+      turnsApplied: Math.max(s.presence.turnsApplied, next.turnsStarted)
+    }
+  };
+}
+
 // src/state.ts
 var NOTHING_HEARD = {
   startAt: null,
@@ -633,40 +736,24 @@ var NOTHING_HEARD = {
   stops: 0,
   promptMissedAt: null
 };
-var NO_PRS = { views: {}, branchRef: null, isFetching: false };
 function emptyState(sessionId) {
   return {
     version: 1,
     sessionId,
     root: "",
-    home: homedir(),
+    home: homedir2(),
     cliPath: null,
-    ledger: EMPTY,
-    turn: { person: null, activity: [], press: null },
-    told: TOLD_NOTHING,
-    presence: { turnsStarted: 0, turnsApplied: 0, ledgerState: "current", isUpdating: false },
-    pending: [],
-    sent: [],
-    lastActions: {},
-    heldRows: [],
-    prViews: NO_PRS,
+    ...emptySession(),
     tabSeenAt: 0,
     heard: NOTHING_HEARD
   };
-}
-function dataDir(env, pluginRoot) {
-  const fromEnv = env.INBOX_DATA || env.PLUGIN_DATA;
-  if (fromEnv) return fromEnv;
-  const m = pluginRoot.match(/^(.*)\/plugins\/cache\/([^/]+)\/([^/]+)\/[^/]+$/);
-  if (m) return `${m[1]}/plugins/data/${m[3]}-${m[2]}`;
-  return join(homedir(), ".codex", "inbox-dev");
 }
 function fileName(sessionId) {
   if (!/^[\w-]{1,100}$/.test(sessionId)) throw new Error(`Not a session id: ${sessionId}`);
   return sessionId;
 }
 function statePath(dir, sessionId) {
-  return join(dir, "sessions", `${fileName(sessionId)}.json`);
+  return join2(dir, "sessions", `${fileName(sessionId)}.json`);
 }
 function upgraded(saved, sessionId) {
   if (saved.version !== void 0 && saved.version !== 1)
@@ -677,24 +764,11 @@ function upgraded(saved, sessionId) {
   return {
     ...base,
     ...kept,
-    // The ledger's shape is the mod's, so a saved one converts the way the mod's does. It converts
-    // before the defaults fill in, since an empty `closed` would hide an old `decided`.
-    ledger: saved.ledger ? { ...base.ledger, ...upgradeLedger({ ...saved.ledger, items: saved.ledger.items ?? [] }) } : base.ledger,
-    turn: { ...base.turn, ...turn },
-    told: { ...base.told, ...saved.told },
-    presence: { ...base.presence, ...saved.presence },
-    pending: (saved.pending ?? []).map(({ ex: { checks: _exChecks, ...ex }, ...p }) => ({ ...p, ex })),
-    // A message sent before the server kept its row changes no row when it arrives.
-    sent: (saved.sent ?? []).map((x) => ({
-      ...x,
-      row: x.row ?? null,
-      queuedId: x.queuedId ?? null,
-      pressedAt: x.pressedAt ?? null,
-      deliveryId: x.deliveryId ?? null,
-      phase: x.phase ?? "accepted"
-    })),
-    lastActions: upgradeLastActions(saved.lastActions ?? {}),
-    prViews: { ...NO_PRS, ...saved.prViews, isFetching: false },
+    ...upgradeSession({
+      ...kept,
+      turn,
+      pending: (saved.pending ?? []).map(({ ex: { checks: _exChecks, ...ex }, ...p }) => ({ ...p, ex }))
+    }),
     // A file saved before the hooks kept this record came from hooks that ran, so it reads as heard.
     // Its turns were not recorded, so `promptAt` is set too: a tool call then falls back to the time rule.
     heard: saved.heard ? { ...NOTHING_HEARD, ...saved.heard } : {
@@ -790,7 +864,7 @@ async function recoverLock(path, observedLiveAt) {
   const target = await lockTarget(path);
   if (!target || !isAbsolute(target)) return false;
   const owner = basename(target) === LOCK_CHILD ? dirname(target) : target;
-  if (target !== owner && target !== join(owner, LOCK_CHILD)) return false;
+  if (target !== owner && target !== join2(owner, LOCK_CHILD)) return false;
   const prefix = `${basename(path)}.owner-`;
   if (!basename(owner).startsWith(prefix)) return false;
   if (await realpath(dirname(owner)).catch(() => null) !== dirname(path)) return false;
@@ -803,17 +877,17 @@ async function recoverLock(path, observedLiveAt) {
     if (!entry.startsWith(recoverPrefix)) continue;
     const recovering = lockOwner(entry.slice(recoverPrefix.length));
     if (!recovering || isLive(recovering, entry, observedLiveAt)) continue;
-    if (await removeOwnedLock(path, target, owner, join(dirname(path), entry))) return true;
+    if (await removeOwnedLock(path, target, owner, join2(dirname(path), entry))) return true;
   }
   return false;
 }
 async function withLock(path, fn, waitMs = LOCK_WAIT_MS) {
   path = resolve(path);
   await mkdir(dirname(path), { recursive: true });
-  path = join(await realpath(dirname(path)), basename(path));
+  path = join2(await realpath(dirname(path)), basename(path));
   const identity = processIdentity(process.pid);
   const owner = `${path}.owner-${process.pid}-${randomUUID()}${identity ? `-${identity}` : ""}`;
-  const target = join(owner, LOCK_CHILD);
+  const target = join2(owner, LOCK_CHILD);
   await mkdir(owner);
   const until = Date.now() + waitMs;
   const observedLiveAt = /* @__PURE__ */ new Map();
@@ -857,17 +931,11 @@ async function updateState(dir, sessionId, change) {
   const path = statePath(dir, sessionId);
   return withLock(`${path}.lock`, async () => {
     const current = await readState(dir, sessionId);
-    const pruned = (state) => ({
-      ...state,
-      ledger: pruneClosed(state.ledger, new Set(state.heldRows))
-    });
-    const checkpoint = async (state) => {
-      const tmp = `${path}.${process.pid}.tmp`;
-      await writeFile(tmp, JSON.stringify(pruned(state)));
-      await rename(tmp, path);
-    };
-    const next = pruned(await change(current, checkpoint));
-    await checkpoint(next);
+    const changed = await change(current);
+    const next = { ...changed, ledger: pruneClosed(changed.ledger, new Set(changed.heldRows)) };
+    const tmp = `${path}.${process.pid}.tmp`;
+    await writeFile(tmp, JSON.stringify(next));
+    await rename(tmp, path);
     return next;
   });
 }
@@ -891,7 +959,44 @@ var run = (args, { cwd, timeoutMs }) => new Promise((resolve2) => {
 // src/update.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
 import { mkdir as mkdir2, readFile as readFile2, rm, writeFile as writeFile2 } from "node:fs/promises";
-import { join as join2 } from "node:path";
+import { join as join3 } from "node:path";
+
+// ../hooks/session-host.ts
+async function runUpdates(host) {
+  while ((await host.read()).pending.length > 0) {
+    const held = await host.exclusive(async () => {
+      try {
+        for (; ; ) {
+          const s = await host.update((x) => ({
+            ...x,
+            presence: { ...x.presence, isUpdating: x.pending.length > 0 }
+          }));
+          const next = s.pending[0];
+          if (!next) break;
+          const promptAt = await host.now();
+          const reply = await host.ask(buildPrompt(s.ledger, next.ex)).catch(() => null);
+          const after = await host.update(
+            async (x) => x.pending[0]?.turnsStarted === next.turnsStarted && x.pending[0].ex.turn === next.ex.turn ? applied(x, reply, await host.now(), promptAt) : x
+          );
+          if (after.pending[0]?.failed && !next.failed) return "retry";
+        }
+      } finally {
+        await host.update((x) => ({ ...x, presence: { ...x.presence, isUpdating: false } }));
+      }
+    });
+    if (!held.acquired || held.value === "retry") return;
+  }
+}
+
+// src/host.ts
+function codexStore(dir, sessionId, now) {
+  return {
+    now,
+    read: () => readState(dir, sessionId),
+    update: (change) => updateState(dir, sessionId, change),
+    exclusive: (fn) => tryWithLock(`${statePath(dir, sessionId)}.updating`, fn)
+  };
+}
 
 // src/texts.ts
 var CODEX = {
@@ -899,6 +1004,8 @@ var CODEX = {
   surface: "the Inbox tab",
   band: null,
   findingsIn: "the Findings section of the Inbox tab",
+  recordTool: "mcp__inbox__record",
+  closeTool: "mcp__inbox__close",
   intro: "The inbox plugin shows the user what waits on them: your open questions and the tasks only they can do, and your findings, in the Inbox tab beside the conversation."
 };
 
@@ -925,9 +1032,9 @@ var OFF = [
 ];
 function codexAsk(exec, cli, dir) {
   return async (prompt) => {
-    const work = join2(dir, "exec");
-    const system = join2(dir, "inbox-system.md");
-    const out = join2(work, `reply-${randomUUID2()}.txt`);
+    const work = join3(dir, "exec");
+    const system = join3(dir, "inbox-system.md");
+    const out = join3(work, `reply-${randomUUID2()}.txt`);
     await mkdir2(work, { recursive: true });
     const instructions = systemText(CODEX);
     if (await readFile2(system, "utf8").catch(() => "") !== instructions) await writeFile2(system, instructions);
@@ -974,63 +1081,13 @@ function codexAsk(exec, cli, dir) {
     return null;
   };
 }
-function applied(s, reply, now, promptAt) {
-  const next = s.pending[0];
-  if (!next) return s;
-  const { ex } = next;
-  const parsed = reply === null ? null : parseReply(reply, [ex.reply, ...ex.activity].join("\n"));
-  if (!parsed && !next.failed)
-    return {
-      ...s,
-      pending: [{ ...next, failed: true }, ...s.pending.slice(1)],
-      presence: { ...s.presence, ledgerState: "failed" }
-    };
-  const ledger = parsed ? applyExchangeUpdate(s.ledger, parsed, ex, now, promptAt) : s.ledger;
-  return {
-    ...s,
-    ledger,
-    pending: s.pending.slice(1),
-    presence: {
-      ...s.presence,
-      ledgerState: parsed ? "current" : "failed",
-      turnsApplied: Math.max(s.presence.turnsApplied, next.turnsStarted)
-    }
-  };
-}
-async function runUpdates(dir, sessionId, ask, now) {
-  const lock = `${statePath(dir, sessionId)}.updating`;
-  while ((await readState(dir, sessionId)).pending.length > 0) {
-    const held = await tryWithLock(lock, async () => {
-      try {
-        for (; ; ) {
-          const s = await updateState(dir, sessionId, (x) => ({
-            ...x,
-            presence: { ...x.presence, isUpdating: x.pending.length > 0 }
-          }));
-          const next = s.pending[0];
-          if (!next) break;
-          const promptAt = now();
-          const reply = await ask(buildPrompt(s.ledger, next.ex)).catch(() => null);
-          const after = await updateState(
-            dir,
-            sessionId,
-            (x) => x.pending[0]?.turnsStarted === next.turnsStarted && x.pending[0].ex.turn === next.ex.turn ? applied(x, reply, now(), promptAt) : x
-          );
-          if (after.pending[0]?.failed && !next.failed) return "retry";
-        }
-      } finally {
-        await updateState(dir, sessionId, (x) => ({ ...x, presence: { ...x.presence, isUpdating: false } }));
-      }
-    });
-    if (!held.acquired || held.value === "retry") return;
-  }
-}
+var runUpdates2 = (dir, sessionId, ask, now) => runUpdates({ ...codexStore(dir, sessionId, now), ask });
 
 // src/update-main.ts
 async function main() {
   const sessionId = process.argv[2] ?? "";
   const dir = dataDir(process.env, dirname2(dirname2(fileURLToPath(import.meta.url))));
   const { cliPath } = await readState(dir, sessionId);
-  await runUpdates(dir, sessionId, codexAsk(run, cliPath ?? "codex", dir), Date.now);
+  await runUpdates2(dir, sessionId, codexAsk(run, cliPath ?? "codex", dir), Date.now);
 }
 main().catch(() => process.exit(0));

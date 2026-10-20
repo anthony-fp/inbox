@@ -1,7 +1,8 @@
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { dataDir, readState } from './state'
+import { dataDir } from './data-dir'
+import { readState } from './state'
 import { run } from './run'
 import { codexAsk, runUpdates } from './update'
 

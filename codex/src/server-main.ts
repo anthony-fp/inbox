@@ -8,7 +8,7 @@ import { createInterface } from 'node:readline'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import type { createHandler } from './server-handler'
-import { dataDir, devBuild } from './state'
+import { dataDir, devBuild } from './data-dir'
 
 type Handler = ReturnType<typeof createHandler>
 

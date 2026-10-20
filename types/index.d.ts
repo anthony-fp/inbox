@@ -91,6 +91,7 @@ export type Delivery =
   | { state: 'arrived' }
   | { state: 'failed'; reason: string; id?: string }
 
+/** A message the mod sent, as builds before the shared session saved it. */
 export type SentPrompt = { id: string; sessionId: string; text: string; pressedAt: number | null }
 
 export type LocalPart = {
@@ -215,23 +216,19 @@ export type Dialog = {
   key: string
 }
 
-export type Presence = {
+/** Whether the person is away from the mod's session, and the minute of the last clock tick while away, so the pane's ages redraw each minute. */
+export type Away = {
   lastActiveAt: number
   isAway: boolean
+  minute: number
+}
+
+/** The mod's presence as builds before the shared session kept it. */
+export type OldPresence = Away & {
   isUpdating: boolean
-  /**
-   * `behind` and `failed`: the ledger may have missed a turn, so the next
-   * update re-reads the whole conversation. Only `failed` shows in the pane.
-   */
   ledgerState: 'current' | 'behind' | 'failed'
-  /**
-   * The turns started in this process, and how many of them reached the
-   * ledger. A load that finds more started than applied catches up.
-   */
   turnsStarted: number
   turnsApplied: number
-  /** The minute of the last clock tick while away, so the pane's ages redraw each minute. */
-  minute: number
 }
 
 export type Tab = 'needsYou' | 'findings' | 'prs'
@@ -252,7 +249,11 @@ export type PrViews = {
   isGhMissing?: boolean
 }
 
-export type Turns = Pick<Presence, 'turnsStarted' | 'turnsApplied'>
+/**
+ * The turns started in this session, and how many of them reached the
+ * ledger. A load that finds more started than applied catches up.
+ */
+export type Turns = { turnsStarted: number; turnsApplied: number }
 
 /**
  * The sample state `/inbox demo` shows in place of the session's own. Presses
@@ -268,17 +269,84 @@ export type DemoCopy = {
   turns: Turns
 }
 
+export type Exchange = {
+  /** What the person typed; null when something else started the turn. */
+  person: string | null
+  trigger: string | null
+  activity: string[]
+  reply: string
+  /** The person-prompt count when the reply was written. */
+  turn: number
+  press: Press | null
+  screen: string
+}
+
+export type Press = { id: string; action: 'answer' | 'explain' | 'run' | 'done' }
+
+/** The inbox text the agent last read beside a prompt, and the closed items it was told about. */
+export type Told = { inbox: string | null; closed: string[] }
+
+/** One conversation's inbox: what every host saves and the shared session functions change. */
+export type Session = {
+  ledger: Ledger
+  /** What the turn running now gathered for the per-reply update. */
+  turn: {
+    person: string | null
+    /** What started the turn when the person's words did not, such as a task notification. */
+    trigger: string | null
+    activity: string[]
+    press: Press | null
+  }
+  /** The inbox text the agent last read beside a prompt, and the closed items it was told about. */
+  told: Told
+  presence: {
+    /** Prompts that started a turn, and how many of those turns the inbox model has summarized. */
+    turnsStarted: number
+    turnsApplied: number
+    /** `behind`: the ledger may have missed a turn, and a host that can catch up does. Only `failed` shows. */
+    ledgerState: 'current' | 'behind' | 'failed'
+    isUpdating: boolean
+  }
+  /**
+   * Exchanges waiting for the inbox model, oldest first, with the turns started when each ended. `failed` marks
+   * one whose first update failed: the next update tries it once more, then drops it.
+   */
+  pending: { ex: Exchange; turnsStarted: number; failed?: true }[]
+  /**
+   * Messages a press sent, saved before delivery. A prompt that arrives can match an accepted
+   * record by its text; an uncertain one stays to block false matches with later presses.
+   */
+  sent: {
+    text: string
+    press: Press | null
+    at: number
+    row: string | null
+    queuedId: string | null
+    /** The row press's time in milliseconds; null for older records or messages without a row. */
+    pressedAt: number | null
+    /** The local press identity; null for older records or messages without a row. */
+    deliveryId: string | null
+    phase?: 'attempting' | 'accepted' | 'uncertain'
+  }[]
+  lastActions: Record<string, LastAction>
+  /** The rows the person's replies in progress held at the latest view or press. Every write keeps their closed records. */
+  heldRows: string[]
+  /** The PRs tab's data: each PR's latest view and the current branch's PR. `isFetching` is always false here; the host knows what runs. */
+  prViews: PrViews
+  /** Why the last turn stopped, until the next turn starts. */
+  stop: Stop | null
+}
+
 declare module 'claude-code' {
   interface PluginState {
     inbox: {
       /** The Claude Code theme in use, such as `dark` or `light-ansi`; '' until read. */
       theme: string
-      ledger: Ledger
-      presence: Presence
+      /** The drawn conversation's session. `revision` counts its writes. */
+      session: Session & { revision: number }
+      away: Away
       tab: Tab
-      prViews: PrViews
       selection: Record<Tab, Cursor>
-      stop: Stop | null
       dialogs: Dialog[]
       /** The row whose free-text field is open, if any. */
       typing: string | null
@@ -288,12 +356,6 @@ declare module 'claude-code' {
       discarded: Record<string, number>
       /** Each row's latest note, by the row's id. */
       notes: Record<string, RowNote>
-      /** Each row's last action, by the row's id. */
-      lastActions: Record<string, LastAction>
-      /** Prompts this mod submitted without an observed stored prompt row. */
-      sent: SentPrompt[]
-      /** Message texts whose older unsaved send history cannot be matched safely. */
-      untrackedSent: { sessionId: string; text: string }[]
       /** The Needs you groups and the kinds of finding whose closed items show. Each starts folded. */
       unfolded: FoldKind[]
       foldHover: FoldKind | null
@@ -306,6 +368,16 @@ declare module 'claude-code' {
       isDemoRecording: boolean
       /** The conversation whose saved session the store could not read. Saves skip it until a read succeeds. */
       unreadable: string | null
+      /** A fresh value redraws the pane, as when a row's note or a Queued label is due. */
+      redraw: number
+      /** Builds before the shared session kept the session in these fields. `upgradeDrawn` moves them into `session`. */
+      ledger: Ledger
+      presence: OldPresence
+      prViews: PrViews
+      stop: Stop | null
+      lastActions: Record<string, LastAction>
+      sent: SentPrompt[]
+      untrackedSent: { sessionId: string; text: string }[]
     }
   }
 }

@@ -1,0 +1,11 @@
+{
+  "name": "inbox-omp",
+  "owner": { "name": "Pete Petrash" },
+  "plugins": [
+    {
+      "name": "inbox",
+      "source": "./omp",
+      "description": "The inbox for omp: a band above the prompt and an /inbox panel for the questions, tasks and findings the agent leaves for you"
+    }
+  ]
+}

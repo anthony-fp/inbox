@@ -6,15 +6,20 @@
 # after a change to systemText or buildPrompt, and when a model alias moves.
 #
 # The agent suite is the agent that uses the inbox: the cases in evals/agent-cases.json on Claude Code with Opus,
-# Codex, or both. Each run gives the agent the shipped guidance and a stand-in MCP server named probe, and checks
-# its record and close calls and its reply. Run it before a release, and after a change to guidanceText, a tool
-# description or a tool answer.
+# Codex, omp, or a set of them. Each run gives the agent the shipped guidance and a stand-in for the inbox, and
+# checks its record and close calls and its reply. Claude Code and Codex get an MCP server named probe. omp gets an
+# extension, evals/omp-probe.ts, that registers the two tools as native omp tools. Run it before a release, and
+# after a change to guidanceText, a tool description or a tool answer.
 #
-# Needs the claude CLI for Sonnet and Opus and the codex CLI, or CODEX_CLI_PATH, for Codex.
+# Needs the claude CLI for Sonnet and Opus, the codex CLI, or CODEX_CLI_PATH, for Codex, and the omp CLI and
+# OPENROUTER_API_KEY in the environment for omp.
 #
-# Usage: ./scripts/eval.sh [--suite model|agent] [--agent claude|codex|both] [--claude-model opus|haiku|...]
+# Usage: ./scripts/eval.sh [--suite model|agent] [--agent claude|codex|omp|both|all]
+#                          [--claude-model opus|haiku|...] [--omp-model provider/model]
 #                          [--runs N] [--case name,name] [--out results.json]
+# --agent both runs claude and codex. --agent all runs claude, codex and omp.
 # --claude-model sets the model of the Claude agent in the agent suite. It defaults to opus.
+# --omp-model sets the model of the omp agent. It defaults to the newest Claude Opus on OpenRouter.
 # Runs default to 8 for the model suite and 5 for the agent suite.
 
 set -eu
@@ -35,7 +40,7 @@ case "$suite" in
         node "$bundle/run.mjs" --cases "$DIR/evals/cases.json" "$@"
         ;;
     agent)
-        "$esbuild" "$DIR/evals/agent.ts" "$DIR/evals/probe.ts" --bundle --platform=node --format=esm \
+        "$esbuild" "$DIR/evals/agent.ts" "$DIR/evals/probe.ts" "$DIR/evals/omp-probe.ts" --bundle --platform=node --format=esm \
             --outdir="$bundle" --out-extension:.js=.mjs --log-level=warning
         node "$bundle/agent.mjs" --cases "$DIR/evals/agent-cases.json" "$@"
         ;;

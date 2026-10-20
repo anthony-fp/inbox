@@ -38,6 +38,7 @@ import {
   replyHint,
   rowMark,
   rowFeedbackText,
+  outcomeLabel,
   settledLabel,
   ROW_COPY,
   SETTLED_MS,
@@ -72,7 +73,8 @@ import type { TabView as View } from './core'
 import type { PressReply } from './server'
 import { ENTER_MS, EXIT_MS, isMoving, MOVE_MS, ROW_STATE_MS, stepRow } from './rows'
 import type { RowState, RowTarget, RowTrack } from './rows'
-import { drawnSettled, POLL_MS, PRESS_TIMEOUT_MS, settledIds, settledSeen } from './settle'
+import { PRESS_TIMEOUT_MS } from '../../hooks/session'
+import { drawnSettled, POLL_MS, settledIds, settledSeen } from './settle'
 
 type Tone = 'needsYou' | 'issue' | 'findings' | 'done' | 'error'
 
@@ -1304,6 +1306,7 @@ type ClosedLine = {
   id: string
   ask: string
   outcome: string
+  askedAs?: string
   state: ClosedState
   at: number
   delivery: Parameters<typeof settledLabel>[1]
@@ -1369,7 +1372,7 @@ function GroupEnd({
                 <span class="mark">{d.delivery === null ? CLOSED_MARKS[d.state] : ''}</span>
                 <div class="content tight">
                   <div class="muted">{d.ask}</div>
-                  <div class="outcome">{settledLabel(capitalized(d.outcome), d.delivery)}</div>
+                  <div class="outcome">{settledLabel(outcomeLabel(d), d.delivery)}</div>
                   {d.delivery && typeof d.delivery === 'object' && d.delivery.canUndo ? (
                     <button
                       type="button"
@@ -1445,6 +1448,7 @@ function Findings({ v, lists, now }: { v: View; lists: Lists; now: number }) {
       id: f.id,
       ask: f.title,
       outcome: f.outcome,
+      askedAs: f.askedAs,
       state: closedState(f),
       at: f.closedAt,
       delivery: f.delivery,

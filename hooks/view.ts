@@ -9,6 +9,7 @@ import type {
   LocalResult,
   PressKind,
   RowNote,
+  Stop,
   Tab,
   Turns,
 } from '../types'
@@ -49,6 +50,11 @@ export const FINDING_GROUPS: Record<Finding['kind'], { title: string; mark: stri
   issue: { title: 'Issues', mark: '▲', tone: 'issue' },
   opportunity: { title: 'Opportunities', mark: '✦', tone: 'done' },
 }
+
+export const NEEDS_YOU_GROUPS: { kind: Item['kind']; title: string; list: 'questions' | 'tasks' }[] = [
+  { kind: 'question', title: 'Questions', list: 'questions' },
+  { kind: 'task', title: 'Tasks', list: 'tasks' },
+]
 
 export const CLOSED_MARKS: Record<ClosedState, string> = { handled: '✓', dismissed: '✕', lapsed: '–' }
 
@@ -125,8 +131,10 @@ export type Feedback =
   | { is: 'note'; note: RowNote['note']; at: number }
   | { is: 'closed'; label: string; at: number }
 
-export type Look = 'terminal' | 'desktop' | 'codex'
-export type ModLook = Exclude<Look, 'codex'>
+export type Look = 'terminal' | 'desktop' | 'codex' | 'omp'
+export type ModLook = Exclude<Look, 'codex' | 'omp'>
+
+const isTerminalLike = (look: Look) => look === 'terminal' || look === 'omp'
 
 export type ActionEmphasis = 'primary' | 'normal' | 'quiet'
 export type ActionIcon = 'done' | 'retry' | 'open' | 'copy' | 'run'
@@ -175,7 +183,7 @@ export function rowMark(row: RowView, look: Look): { text: string; tone?: 'done'
     const group = FINDING_GROUPS[row.finding.kind]
     return { text: group.mark, tone: group.tone }
   }
-  return { text: look === 'terminal' ? row.handle : '' }
+  return { text: isTerminalLike(look) ? row.handle : '' }
 }
 
 export function replyHint(row: RowView, agent: string): string {
@@ -244,6 +252,39 @@ export function shortAgo(ms: number): string {
 
 export function groupEmptyText(title: string): string {
   return `No open ${title.toLowerCase()}`
+}
+
+/** The message Resume sends after an API error stopped a turn. */
+export const RESUME_TEXT = 'Continue'
+
+export function stopText(stop: Stop): string {
+  switch (stop.kind) {
+    case 'sign-in':
+      return 'sign-in expired'
+    case 'billing':
+      return 'billing problem'
+    case 'usage-limit':
+      return 'usage limit reached'
+    default:
+      return stop.detail === 'rate_limit'
+        ? 'the API is limiting requests'
+        : stop.detail === 'overloaded'
+          ? 'the API is overloaded'
+          : `API error (${stop.detail})`
+  }
+}
+
+export function stopFix(stop: Stop): string {
+  switch (stop.kind) {
+    case 'sign-in':
+      return 'Run /login, then send a message to resume.'
+    case 'billing':
+      return 'Check billing in the Claude console, then resume.'
+    case 'usage-limit':
+      return stop.resets ? `Resume after ${stop.resets}.` : 'Resume when the limit resets.'
+    default:
+      return 'Send a message to resume.'
+  }
 }
 
 export const DEMO_NOTICE = 'Sample entries. Presses send nothing.'
@@ -331,7 +372,7 @@ export function hasAge(
 }
 
 const runIt = (look: Look) =>
-  look === 'terminal' ? 'Run it in a terminal, or type ! and paste.' : 'Run it in Terminal.'
+  isTerminalLike(look) ? 'Run it in a terminal, or type ! and paste.' : 'Run it in Terminal.'
 const VERBS = {
   open: { pending: 'Opening', done: 'Opened', failed: 'open' },
   copy: { pending: 'Copying', done: 'Copied', failed: 'copy' },
@@ -699,7 +740,7 @@ export function inboxView({
 
       return {
         is: 'settled',
-        label: capitalized(closed.outcome),
+        label: outcomeLabel(closed),
         at,
         canUndo: isUndoable(closed),
         isLapsed: isLapsed(closed),
@@ -827,6 +868,11 @@ export function inboxView({
     },
     status,
   }
+}
+
+/** A closed record's outcome as a look shows it. A finding a question replaced says where it went. */
+export function outcomeLabel(c: { outcome: string; askedAs?: string }): string {
+  return c.askedAs ? 'Now a question in Needs you' : capitalized(c.outcome)
 }
 
 function heldLabel(c: Pick<Closed, 'how' | 'outcome'>): string {

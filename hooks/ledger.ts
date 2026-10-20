@@ -1,4 +1,6 @@
-import type { Card, Closed, ClosedFinding, Finding, Help, Item, Ledger } from '../types'
+import type { Card, Closed, ClosedFinding, Exchange, Finding, Help, Item, Ledger, Press } from '../types'
+
+export type { Exchange, Press } from '../types'
 import type { Host } from './model-text'
 import { codeBlocks } from './text'
 
@@ -118,20 +120,6 @@ const NEEDS_PERSON =
  */
 const PERSON_ONLY_REASON =
   /credential|password|passphrase|secret|\btoken|\b2fa\b|\bmfa\b|\bdevice\b|phone|android|tablet|account|sign(?:ed)?[- ]?in|log(?:ged)?[- ]?in|only you|you hold|your (?:mac|machine|laptop|computer|keychain)|\bsudo\b/i
-
-export type Exchange = {
-  /** What the person typed; null when something else started the turn. */
-  person: string | null
-  trigger: string | null
-  activity: string[]
-  reply: string
-  /** The person-prompt count when the reply was written. */
-  turn: number
-  press: Press | null
-  screen: string
-}
-
-export type Press = { id: string; action: 'answer' | 'explain' | 'run' | 'done' }
 
 export type Update = {
   card: Card

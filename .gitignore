@@ -8,6 +8,9 @@
 codex/node_modules/
 codex/test-dist/
 
+# The omp extension's tools
+omp/node_modules/
+
 # The tab page `npm --prefix codex run dev` keeps built
 codex/.dev/
 

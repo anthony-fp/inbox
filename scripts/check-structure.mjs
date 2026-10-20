@@ -9,6 +9,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SHARED = [
   'arrivals',
   'demo',
+  'gh',
   'inline',
   'layout',
   'ledger',
@@ -16,6 +17,8 @@ const SHARED = [
   'pr-tab',
   'presses',
   'prs',
+  'session',
+  'session-host',
   'text',
   'tones',
   'tools',
@@ -139,7 +142,10 @@ function checkImports() {
   const sharedTargets = new Set(sharedFiles.map(path => realpathSync(join(ROOT, path))))
   const hooks = `${realpathSync(join(ROOT, 'hooks'))}${sep}`
   const types = `${realpathSync(join(ROOT, 'types'))}${sep}`
-  const files = [...sharedFiles, ...sourceFiles('codex/src'), ...sourceFiles('codex/tests')]
+  const codex = `${realpathSync(join(ROOT, 'codex'))}${sep}`
+  const sharedTests = `${realpathSync(ROOT)}${sep}tests${sep}`
+  const ompFiles = exists('omp') ? [...sourceFiles('omp/src'), ...sourceFiles('omp/tests')] : []
+  const files = [...sharedFiles, ...sourceFiles('codex/src'), ...sourceFiles('codex/tests'), ...ompFiles]
   const api = new API({ cwd: ROOT })
   try {
     const snapshot = api.updateSnapshot({ openFiles: files.map(path => join(ROOT, path)) })
@@ -152,7 +158,8 @@ function checkImports() {
       if (source) sourceByPath.set(canonical, source)
       return source
     }
-    const queue = files.map(path => ({ path, mode: sharedFiles.includes(path) ? 'shared' : 'codex' }))
+    const modeOf = path => (sharedFiles.includes(path) ? 'shared' : ompFiles.includes(path) ? 'omp' : 'codex')
+    const queue = files.map(path => ({ path, mode: modeOf(path) }))
     const visited = new Set()
     while (queue.length) {
       const { path, mode } = queue.shift()
@@ -179,6 +186,14 @@ function checkImports() {
             errors.push(
               `${relative} imports '${from}'. A shared dependency imports only other shared modules and types/.`,
             )
+        } else if (mode === 'omp') {
+          if (target?.startsWith(hooks) && !sharedTargets.has(target))
+            errors.push(`${relative} imports '${from}', which is not a shared module. omp can only use shared modules.`)
+          if (target?.startsWith(codex)) errors.push(`${relative} imports '${from}'. omp does not import from codex/.`)
+          if (target?.startsWith(sharedTests) && !relative.startsWith('omp/tests/'))
+            errors.push(`${relative} imports '${from}'. Only omp's tests import the shared session test.`)
+          if (from.startsWith('@oh-my-pi/') && relative !== 'omp/src/host.ts')
+            errors.push(`${relative} imports '${from}'. Only omp/src/host.ts imports omp's packages.`)
         } else if (target?.startsWith(hooks) && !sharedTargets.has(target)) {
           errors.push(
             `${relative} imports '${from}', which is not a shared module. Codex can only bundle shared modules.`,

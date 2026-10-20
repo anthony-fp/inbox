@@ -6,7 +6,7 @@ Inbox provides immediately apparent relief here by giving your agent an organize
 
 Even better, Inbox provides your agent a place to surface latent issues and opportunities, ones that it might otherwise gloss over in the interest of exclusively addressing the task at hand.
 
-Inbox is available for Claude Code in the terminal and desktop app, and Codex in the ChatGPT desktop app. Each variant is uniquely crafted for each platform, but works in same fundamental way in all three.
+Inbox is available for Claude Code in the terminal and desktop app, Codex in the ChatGPT desktop app, and omp in the terminal. Each variant is uniquely crafted for each platform, but works in same fundamental way in all of them.
 
 ## How it works
 https://github.com/user-attachments/assets/a493119c-4d8b-46e0-a18a-bd0ecf041b6b
@@ -76,13 +76,36 @@ of the window, then choose More tools, then Inbox.
 [codex/README.md](codex/README.md) covers updating and running the `codex`
 command from inside the app.
 
-### For both
+### omp
+
+```sh
+omp plugin marketplace add petekp/inbox
+omp plugin install inbox@inbox-omp
+```
+
+The inbox starts working in the next omp session. `omp plugin list` shows it
+as `inbox@inbox-omp`. It reads `.omp-plugin/marketplace.json`, which omp looks
+for before the `.claude-plugin/` folder that Claude Code reads.
+
+To update, run these, then restart omp:
+
+```sh
+omp plugin marketplace update inbox-omp
+omp plugin upgrade inbox@inbox-omp
+```
+
+The inbox runs the update after each reply on a Sonnet model from your omp
+providers, and falls back to omp's `@smol` model role. The panel's footer says
+which model it uses. Without a provider that offers a model, the panel says "no
+inbox model" and the inbox cannot update.
+
+### For all
 
 The PRs tab needs the GitHub CLI, `gh`, signed in.
 
 ## Using it
 
-Type `/inbox` in Claude Code, or open the Inbox tab in the ChatGPT app. The
+Type `/inbox` in Claude Code or omp, or open the Inbox tab in the ChatGPT app. The
 inbox has three tabs.
 
 ### Needs you
@@ -137,11 +160,16 @@ the agent replies, then "✓ Discussed".
 - **Claude desktop app:** you click. Type `/inbox` to open the pane.
 - **ChatGPT app:** you click, or press the same keys as in the terminal. The
   tab shows no letters.
+- **omp:** `/inbox` opens the panel over the conversation, and esc closes it.
+  Each action shows the letter that runs it, and Reply is `r`. Arrow keys move
+  between rows and between a row's buttons, and enter presses the focused
+  button. Tab, or `1`, `2` and `3`, switch tabs.
 
 In Claude Code, a line above your prompt counts what needs you and the
 findings waiting, with a button that opens the panel. When Claude stops on an
 error, a second line says why, with a Resume button after an API error. The
-ChatGPT app has no such line. Inside the Herdr terminal, the counts also show
+ChatGPT app has no such line. omp has a line with the same counts. It says
+`/inbox` opens the panel, and it has no stop line. Inside the Herdr terminal, the counts also show
 in its sidebar.
 
 To see every part with sample items in Claude Code, run `/inbox demo`. Presses
@@ -171,7 +199,9 @@ includes. It counts toward your plan's usage.
 ## What it runs, sends and changes
 
 This covers the Claude Code mod. [codex/README.md](codex/README.md) covers
-the Codex plugin.
+the Codex plugin. The omp extension runs the same `gh` queries. Its update
+request goes through omp's own connection to the provider of the model it
+uses, and holds the same things as the Claude Code request.
 
 **What leaves your machine.** Three things, and nothing else:
 
@@ -240,7 +270,7 @@ It also adds the `/inbox` command.
 ## Developing
 
 Read [AGENTS.md](AGENTS.md) first. [docs/looks.md](docs/looks.md) says which
-file owns each rule and where the three apps differ on purpose.
+file owns each rule and where the four looks differ on purpose.
 
 Run the mod from a clone:
 
@@ -260,7 +290,19 @@ npm --prefix codex run build
 
 [codex/README.md](codex/README.md) covers trying a build in Codex.
 
+The omp extension in `omp/` shares the rules in `hooks/` too. It runs on Bun,
+and omp installs it from a bundle, so rebuild the bundle after changing
+`omp/src` or the shared modules:
+
+```sh
+bun install --cwd omp --frozen-lockfile --ignore-scripts   # once
+npm --prefix omp run build
+```
+
+Try a build in omp with a fresh `HOME`, so it cannot touch your own omp
+settings or inbox: `env HOME=/path/to/empty/folder omp -e omp/src/host.ts`.
+
 `./scripts/check.sh` runs Prettier, `claude plugin validate`, a type check and
-the tests, and checks the Codex bundles are current. The type check needs the
+the tests, and checks the Codex bundles and the omp bundle are current. The type check needs the
 types Claude Code writes to `.claude-plugin/types/` the first time it loads
 the mod.

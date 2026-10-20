@@ -2,10 +2,10 @@
 # Checks the mod: formatting with Prettier, its plugin structure with
 # `claude plugin validate`, the imports and docs that keep the three looks in
 # step with scripts/check-structure.mjs, its types with tsc, and its tests with
-# `claude plugin test`. Then the Codex plugin in codex/. Exits 1 on any failure,
-# and when a check cannot run.
+# `claude plugin test`. Then the Codex plugin in codex/ and the omp extension in
+# omp/. Exits 1 on any failure, and when a check cannot run.
 #
-# Needs npx and the claude CLI.
+# Needs npx, bun and the claude CLI.
 #
 # Usage: ./scripts/check.sh
 
@@ -66,6 +66,20 @@ if [ -d "$DIR/codex/node_modules" ]; then
 else
     echo "  x codex: not checked. Install its tools once: npm --prefix $DIR/codex ci"
     status=1
+fi
+
+# The omp extension in omp/: its committed bundle matches its sources, its types and its tests. omp runs on Bun, and its
+# types come from omp's own packages in omp/node_modules.
+if ! command -v bun >/dev/null 2>&1; then
+    echo "  x omp: not checked. Install Bun: https://bun.sh"
+    status=1
+elif [ ! -d "$DIR/omp/node_modules" ]; then
+    echo "  x omp: not checked. Install its tools once: bun install --cwd $DIR/omp --frozen-lockfile --ignore-scripts"
+    status=1
+else
+    check "omp bundle" npm --prefix "$DIR/omp" run --silent check
+    check "omp types" npm --prefix "$DIR/omp" run --silent types
+    check "omp tests" bun test --cwd "$DIR/omp" tests
 fi
 
 exit "$status"

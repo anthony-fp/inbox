@@ -24,14 +24,46 @@ import type {
   PrThread,
   PrView,
   PrViews,
-  Presence,
   LastAction,
   PressKind,
   RowNote,
-  SentPrompt,
   Stop,
   Tab,
 } from '../types'
+import {
+  NO_SESSION,
+  PRESENT,
+  arrived,
+  askLedgerModel,
+  changeSession,
+  conversation,
+  currentOwner,
+  deliver,
+  forgetStored,
+  isCurrent,
+  noteStored,
+  readSaved,
+  readSettled,
+  replaceDrawn,
+  savedWriteCount,
+  sessionHost,
+  upgradeDrawn,
+} from './claude-host'
+import type { Owner, SavedRecord } from './claude-host'
+import {
+  cleared,
+  emptySession,
+  endTurn,
+  noteActivity as noteTurnActivity,
+  pressOn,
+  recordPrompt,
+  recorded,
+  startTurn,
+  upgradeSession,
+} from './session'
+import type { SentBy, Session } from './session'
+import { fetchPrs as fetchSessionPrs, runUpdates, startPress, wakeForDone as wakeSessionForDone } from './session-host'
+import type { SessionHost } from './session-host'
 import { demoView, isDemoCopy } from './demo'
 import type { Exchange, Press, Update } from './ledger'
 import {
@@ -107,9 +139,7 @@ import {
   resetTime,
   readCommandRow,
   statusLine,
-  stopFix,
   stopKindOf,
-  stopText,
   transcriptText,
   TURN_BOX_TOOL,
   turnBoxText,
@@ -140,6 +170,10 @@ import type { Effect, EffectHost, RowPress } from './presses'
 import {
   closedShown,
   DOT,
+  NEEDS_YOU_GROUPS,
+  RESUME_TEXT,
+  stopFix,
+  stopText,
   drawnLists,
   emptyText,
   ROW_TABS,
@@ -164,6 +198,7 @@ import {
   PRESS_GUARD_MS,
   QUEUED_AFTER_MS,
   rowKeyPlan,
+  outcomeLabel,
   settledLabel,
   actionLabel,
   replyHint,
@@ -196,45 +231,24 @@ import type { LinksProps } from './links-client'
 import type { RowProps } from './row-client'
 import { TAB_COUNT_GAP, TAB_HEIGHT, type TabsProps } from './tabs-client'
 
-const LEDGER = atom({ plugin: 'inbox', key: 'ledger' } as const, EMPTY)
-const PRESENCE = atom(
-  { plugin: 'inbox', key: 'presence' } as const,
-  {
-    lastActiveAt: 0,
-    isAway: false,
-    isUpdating: false,
-    ledgerState: 'current',
-    turnsStarted: 0,
-    turnsApplied: 0,
-    minute: 0,
-  } as Presence,
-)
 const TAB = atom({ plugin: 'inbox', key: 'tab' } as const, 'needsYou' as Tab)
 const NO_CURSOR: Cursor = { id: null, index: 0, openedAt: 0 }
 const NO_SELECTION: Record<Tab, Cursor> = { needsYou: NO_CURSOR, findings: NO_CURSOR, prs: NO_CURSOR }
 const SELECTION = atom({ plugin: 'inbox', key: 'selection' } as const, NO_SELECTION)
 const THEME = atom({ plugin: 'inbox', key: 'theme' } as const, '')
-const PR_VIEWS = atom(
-  { plugin: 'inbox', key: 'prViews' } as const,
-  { views: {}, branchRef: null, isFetching: false } as PrViews,
-)
-const STOP = atom({ plugin: 'inbox', key: 'stop' } as const, null as Stop | null)
 const DIALOGS = atom({ plugin: 'inbox', key: 'dialogs' } as const, [] as Dialog[])
 const TYPING = atom({ plugin: 'inbox', key: 'typing' } as const, null as string | null)
 const DRAFTS = atom({ plugin: 'inbox', key: 'drafts' } as const, {} as Record<string, Draft>)
 const DISCARDED = atom({ plugin: 'inbox', key: 'discarded' } as const, {} as Record<string, number>)
 const NOTES = atom({ plugin: 'inbox', key: 'notes' } as const, {} as Record<string, RowNote>)
-const LAST_ACTIONS = atom({ plugin: 'inbox', key: 'lastActions' } as const, {} as Record<string, LastAction>)
-const SENT = atom({ plugin: 'inbox', key: 'sent' } as const, [] as SentPrompt[])
-const UNTRACKED_SENT = atom(
-  { plugin: 'inbox', key: 'untrackedSent' } as const,
-  [] as { sessionId: string; text: string }[],
-)
+const REDRAW = atom({ plugin: 'inbox', key: 'redraw' } as const, 0)
+const SESSION = atom({ plugin: 'inbox', key: 'session' } as const, NO_SESSION)
+const AWAY = atom({ plugin: 'inbox', key: 'away' } as const, PRESENT)
+const UNREADABLE = atom({ plugin: 'inbox', key: 'unreadable' } as const, null as string | null)
 const UNFOLDED = atom({ plugin: 'inbox', key: 'unfolded' } as const, [] as FoldKind[])
 const FOLD_HOVER = atom({ plugin: 'inbox', key: 'foldHover' } as const, null as FoldKind | null)
 const OPTIONS_SHOWN = atom({ plugin: 'inbox', key: 'optionsShown' } as const, [] as string[])
 const IS_KEY_LIST_SHOWN = atom({ plugin: 'inbox', key: 'isKeyListShown' } as const, false)
-const UNREADABLE = atom({ plugin: 'inbox', key: 'unreadable' } as const, null as string | null)
 const LEAVE_BAR_CELLS = 12
 const LEAVE_BAR_STEPS = LEAVE_BAR_CELLS * 2
 const RESIZE_SCROLL_MS = 100
@@ -529,28 +543,17 @@ function paletteFor(theme: string, look: ModLook): Palette {
 const TAB_PAD = '  '
 const INLINE_RAIL_AT = 80
 const RAIL_GUTTER = 2
-const NEEDS_YOU_GROUPS: { kind: Item['kind']; title: string; list: 'questions' | 'tasks' }[] = [
-  { kind: 'question', title: 'Questions', list: 'questions' },
-  { kind: 'task', title: 'Tasks', list: 'tasks' },
-]
 const FOLD_KINDS: FoldKind[] = [...NEEDS_YOU_GROUPS.map(g => g.kind), 'issue', 'opportunity']
-const MODEL = 'sonnet'
 const AWAY_MS = 15 * 60_000
 const LOCAL_URL = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|[\w.-]+\.localhost)(?::\d+)?[^\s"'`)\]]*/g
 
-let activity: string[] = []
-let person: string | null = null
-let trigger: string | null = null
 let isTurnRunning = false
 let isOn = false
 let turningOn: Promise<void> | null = null
 let intervals: Timer[] = []
-let press: Press | null = null
 let sentBack: string[] = []
 let turnBox: string | null = null
 let isDialogDismissed = false
-let sessionId = ''
-let root = ''
 let fetchingPrs: Promise<void> = Promise.resolve()
 let nextFetchFindsBranchPr: boolean | null = null
 let recordedRows: { isDemo: boolean; ids: RowRecord<Tab> } | null = null
@@ -577,30 +580,11 @@ function suspendUndoReveal(): number {
   if (pendingUndoScroll) pendingUndoScroll.revealUndo = false
   return ++undoScrollRevision
 }
-let saving: Promise<void> = Promise.resolve()
-const savesBySession = new Map<string, Promise<void>>()
-const prunedSaves = new Set<string>()
-const resolvedSaves = new Map<string, number>()
-const commitsBySession = new Map<string, Set<Promise<void>>>()
-let ledgerRevision = 0
 let loadRevision = 0
-let doneRefusalRevision = 0
 let applyingConversation: Promise<void> = Promise.resolve()
 let queue: Promise<void> = Promise.resolve()
-let conversation = 0
-type ConversationOwner = { id: string; generation: number }
-
-function ownsConversation(owner: ConversationOwner): boolean {
-  return owner.id === sessionId && owner.generation === conversation
-}
-let told: Told = TOLD_NOTHING
 let published: string | null = null
 let publishing: Promise<void> = Promise.resolve()
-const contextFor = new Map<string, string[]>()
-const storedAt = new Map<string, number>()
-const storedBy = new Map<string, { count: number; receiptId: string | null }>()
-let storedCount = 0
-let pressOrder = 0
 let shellCommand: string | null = null
 let toolsRefused = false
 let isReadingAgain = false
@@ -638,21 +622,21 @@ let stopGeneration = 0
 const fieldSeeds = new Map<string, string>()
 
 function resetTurn() {
-  activity = []
-  person = null
-  trigger = null
-  press = null
   sentBack = []
   turnBox = null
   isDialogDismissed = false
 }
 
-function notePerson(line: string) {
-  person = person === null ? line : `${person}\n\n${line}`
+/** Adds the person's words to the turn, as a shell command row does. */
+function notePerson($: EngineInterface, line: string) {
+  return commit($, currentOwner(), s => ({
+    ...s,
+    turn: { ...s.turn, person: s.turn.person === null ? line : `${s.turn.person}\n\n${line}` },
+  }))
 }
 
-function noteActivity(line: string) {
-  activity = addActivity(activity, line)
+function noteActivity($: EngineInterface, line: string) {
+  return commit($, currentOwner(), s => noteTurnActivity(s, line))
 }
 
 function messageText(message: SessionAppendMessage): string {
@@ -664,57 +648,14 @@ async function syncTheme($: EngineInterface) {
   await update($, THEME, () => (typeof theme === 'string' ? theme : ''))
 }
 
-function save($: EngineInterface, ledger: Ledger, owner: ConversationOwner, revision: number): Promise<void> {
-  const key = `s:${owner.id}`
-  const generation = `${owner.id}:${owner.generation}`
-  const next = Promise.all([saving, $.clock.now()]).then(async ([, savedAt]) => {
-    if (revision < (resolvedSaves.get(generation) ?? 0)) return
-    await $.store.set(key, { savedAt, ledger })
-    if (prunedSaves.has(generation)) return
-    const keys = await $.store.keys()
-    const sessions = keys.filter(k => k.startsWith('s:'))
-    const ages = await Promise.all(
-      sessions.map(async candidate => {
-        try {
-          const saved = (await $.store.get(candidate)) as SavedSession | undefined
-          return saved && Number.isFinite(saved.savedAt) && saved.ledger && typeof saved.ledger === 'object'
-            ? { key: candidate, savedAt: saved.savedAt }
-            : null
-        } catch {
-          return null
-        }
-      }),
-    )
-    const stale = ages
-      .filter((entry): entry is { key: string; savedAt: number } => entry !== null && entry.key !== key)
-      .sort((a, b) => a.savedAt - b.savedAt || a.key.localeCompare(b.key))
-      .slice(0, Math.max(0, sessions.length - KEPT_SESSIONS))
-      .map(entry => entry.key)
-    // `p:` keys held the last-session offer, which earlier builds saved per folder.
-    await Promise.all([...stale, ...keys.filter(k => k.startsWith('p:'))].map(old => $.store.delete(old)))
-    prunedSaves.add(generation)
-  })
-  saving = next.catch(() => undefined)
-  savesBySession.set(owner.id, next)
-  void next
-    .finally(() => {
-      if (savesBySession.get(owner.id) === next) savesBySession.delete(owner.id)
-    })
-    .catch(() => undefined)
-  return next
-}
-
 function publishStatus($: EngineInterface, isEnding = false): Promise<void> {
   publishing = publishing
     .then(async () => {
       const pane = await $.env.get('HERDR_PANE_ID')
       if (!pane) return
-      const [ledger, stop, dialogs, lastActions, presence, now] = await Promise.all([
-        read($, LEDGER),
-        read($, STOP),
+      const [{ ledger, stop, lastActions, presence }, dialogs, now] = await Promise.all([
+        read($, SESSION),
         read($, DIALOGS),
-        read($, LAST_ACTIONS),
-        read($, PRESENCE),
         $.clock.now(),
       ])
       const { needsYou, findings } = viewOf({ ledger, lastActions, notes: {}, turns: presence, now }, presence)
@@ -736,27 +677,30 @@ function publishStatus($: EngineInterface, isEnding = false): Promise<void> {
 }
 
 async function setStop($: EngineInterface, stop: Stop | null) {
-  if (stop === null && (await read($, STOP)) === null) return
+  if (stop === null && (await read($, SESSION)).stop === null) return
   stopGeneration++
   resuming = null
-  await update($, STOP, () => stop)
+  await commit($, currentOwner(), s => ({ ...s, stop }))
   void publishStatus($)
+}
+
+function redraw($: EngineInterface) {
+  return update($, REDRAW, n => n + 1)
 }
 
 async function resume($: EngineInterface) {
   // [Resume] keeps its key while it reads "Resuming…", so a second press lands here.
   if (resuming?.is === 'sending') return
-  const id = sessionId
-  const at = conversation
+  const owner = currentOwner()
   const generation = stopGeneration
-  const redraw = () => update($, STOP, s => (s ? { ...s } : s))
+  const isSameStop = () => isCurrent(owner) && generation === stopGeneration
   resuming = { is: 'sending' }
-  await redraw()
-  if (id !== sessionId || at !== conversation || generation !== stopGeneration) return
-  const sent = await send($, 'Continue')
-  if ('notSent' in sent && id === sessionId && at === conversation && generation === stopGeneration) {
-    resuming = { is: 'refused', why: sent.notSent }
-    await redraw()
+  await redraw($)
+  if (!isSameStop()) return
+  const sent = await deliver($, owner, RESUME_TEXT, crypto.randomUUID())
+  if (sent.state === 'rejected' && isSameStop()) {
+    resuming = { is: 'refused', why: sent.reason }
+    await redraw($)
   }
 }
 
@@ -824,54 +768,13 @@ function permissionText(tool: string, input: Record<string, unknown>): string {
   }
 }
 
+/** Changes the ledger of `owner`'s session. */
 function commitLedger(
   $: EngineInterface,
   change: (l: Ledger) => Ledger,
-  owner: ConversationOwner = { id: sessionId, generation: conversation },
-): Promise<void> {
-  if (!ownsConversation(owner)) return Promise.resolve()
-  const task = (async () => {
-    const [unreadable, typing, drafts] = await Promise.all([read($, UNREADABLE), read($, TYPING), read($, DRAFTS)])
-    const canSave = unreadable !== owner.id
-    const held = new Set(Object.keys(heldReplies(typing, drafts)))
-    if (!ownsConversation(owner)) return
-    let before: Ledger = EMPTY
-    let applied = false
-    let revision = 0
-    const after = await update($, LEDGER, l => {
-      if (!ownsConversation(owner)) {
-        applied = false
-        return l
-      }
-      // A tool call can land after a hot reload and before turnOn converts the ledger an older build saved.
-      before = upgradeLedger(l)
-      const changed = pruneClosed(change(before), held)
-      revision = ++ledgerRevision
-      applied = true
-      return changed
-    })
-    if (!applied) return
-    const generation = `${owner.id}:${owner.generation}`
-    resolvedSaves.set(generation, Math.max(resolvedSaves.get(generation) ?? 0, revision))
-    if (canSave) await save($, after, owner, revision)
-    if (!ownsConversation(owner)) return
-    void publishStatus($)
-    if (hasNewClose(before, after)) {
-      const closedAt = Math.max(...after.closed.map(d => d.at), ...after.closedFindings.map(f => f.closedAt))
-      redrawWhileLeaving($, closedAt + SETTLED_MS)
-    }
-    void followNewRows($).catch(() => undefined)
-  })()
-  const pending = commitsBySession.get(owner.id) ?? new Set<Promise<void>>()
-  pending.add(task)
-  commitsBySession.set(owner.id, pending)
-  void task
-    .finally(() => {
-      pending.delete(task)
-      if (pending.size === 0) commitsBySession.delete(owner.id)
-    })
-    .catch(() => undefined)
-  return task
+  owner: Owner = currentOwner(),
+): Promise<Session> {
+  return commit($, owner, s => ({ ...s, ledger: change(s.ledger) }))
 }
 
 function isOpenIn(ledger: Ledger, id: string): boolean {
@@ -886,6 +789,36 @@ function hasNewClose(before: Ledger, after: Ledger): boolean {
   const was = new Set(closes(before))
 
   return closes(after).some(c => !was.has(c))
+}
+
+/**
+ * Changes `owner`'s session, keeping the rows the person replies on. After a write to the drawn session, the status
+ * line follows it, rows that just closed redraw as they leave, and the pane moves to rows that arrived.
+ */
+async function commit(
+  $: EngineInterface,
+  owner: Owner,
+  change: (s: Session) => Session | Promise<Session>,
+): Promise<Session> {
+  const [typing, drafts] = await Promise.all([read($, TYPING), read($, DRAFTS)])
+  const { before, after, isDrawn } = await changeSession(
+    $,
+    owner,
+    change,
+    new Set(Object.keys(heldReplies(typing, drafts))),
+  )
+  if (!isDrawn) return after
+  void publishStatus($)
+  if (hasNewClose(before.ledger, after.ledger)) {
+    const closedAt = Math.max(
+      ...after.ledger.closed.map(d => d.at),
+      ...after.ledger.closedFindings.map(f => f.closedAt),
+    )
+    redrawWhileLeaving($, closedAt + SETTLED_MS)
+  }
+  void followNewRows($).catch(() => undefined)
+
+  return after
 }
 
 function viewOf(
@@ -905,7 +838,7 @@ function viewOf(
     replies?: Record<string, number>
     discarded?: Record<string, number>
   },
-  presence: Presence,
+  presence: Pick<Session['presence'], 'isUpdating' | 'ledgerState'>,
 ): InboxView {
   return inboxView({
     ledger,
@@ -935,7 +868,7 @@ function redrawWhileLeaving($: EngineInterface, expiresAt: number) {
       paneLook === 'desktop' ? 1 : Math.max(1, Math.ceil(remaining / Math.ceil(SETTLED_MS / LEAVE_BAR_STEPS)))
     for (let n = 1; n <= steps; n++) {
       await $.clock.sleep(Math.max(0, Math.ceil(startedAt + (n * remaining) / steps - (await $.clock.now()))))
-      await Promise.all([update($, LAST_ACTIONS, a => ({ ...a })), update($, DEMO, d => d && { ...d })])
+      await Promise.all([redraw($), update($, DEMO, d => d && { ...d })])
     }
     await openLeftRows($)
     await finishPendingUndoScroll($)
@@ -966,14 +899,13 @@ async function redrawAfterReload($: EngineInterface) {
 
 type ModelResult = Awaited<ReturnType<EngineInterface['model']['fork']>>
 
-type LedgerState = Presence['ledgerState']
+type LedgerState = Session['presence']['ledgerState']
 
 async function applyLedgerReply(
   $: EngineInterface,
-  owner: ConversationOwner,
+  owner: Owner,
   r: ModelResult,
   source: string | null,
-  change: (l: Ledger, u: Update, now: number) => Ledger,
 ): Promise<LedgerState> {
   if (!r.isAnswered) {
     // A fork has nothing to read until this process sends its first request,
@@ -981,128 +913,92 @@ async function applyLedgerReply(
     return r.reason === 'nothing-to-fork' ? 'behind' : 'failed'
   }
   const parsed = parseReply(r.text, source)
-  if (!parsed || !ownsConversation(owner)) return 'failed'
+  if (!parsed || !isCurrent(owner)) return 'failed'
   const now = await $.clock.now()
-  await commitLedger($, l => change(l, parsed, now), owner)
+  await commitLedger($, l => applyUpdate(l, parsed, now, l.turn), owner)
 
-  return ownsConversation(owner) ? 'current' : 'failed'
+  return isCurrent(owner) ? 'current' : 'failed'
 }
 
-function askLedgerModel($: EngineInterface, prompt: string, timeoutMs: number): Promise<ModelResult> {
-  const system = [{ text: systemText(CLAUDE_CODE), cache: true as const }]
-
-  return $.model.complete({ model: MODEL, system, prompt, maxTokens: 1600, effort: 'low', timeoutMs })
-}
-
-async function runUpdate($: EngineInterface, owner: ConversationOwner, ex: Exchange): Promise<LedgerState> {
-  const promptAt = await $.clock.now()
-  const r = await askLedgerModel($, buildPrompt(await read($, LEDGER), ex), 45_000)
-  return applyLedgerReply($, owner, r, [ex.reply, ...ex.activity].join('\n'), (l, u, now) =>
-    applyExchangeUpdate(l, u, ex, now, promptAt),
-  )
-}
-
-async function catchUp($: EngineInterface, owner: ConversationOwner): Promise<LedgerState> {
-  const [ledger, shown] = await Promise.all([read($, LEDGER), screen($)])
-  const change = (l: Ledger, u: Update, now: number) => applyUpdate(l, u, now, l.turn)
+/** Reads the whole conversation into the ledger: by forking it, or from the transcript when there is nothing to fork. */
+async function catchUpLedger($: EngineInterface, owner: Owner): Promise<LedgerState> {
+  const [{ ledger }, shown] = await Promise.all([read($, SESSION), screen($)])
   const forked = await $.model.fork({ prompt: catchUpPrompt(CLAUDE_CODE, ledger, shown) })
-  if (forked.isAnswered || forked.reason !== 'nothing-to-fork') return applyLedgerReply($, owner, forked, null, change)
+  if (forked.isAnswered || forked.reason !== 'nothing-to-fork') return applyLedgerReply($, owner, forked, null)
   // A resumed conversation has no request of this process's to fork until its
   // first reply, so the model reads the transcript instead, uncached.
   const transcript = transcriptText(await $.session.messages())
   if (!transcript) return 'behind'
   const r = await askLedgerModel($, transcriptCatchUpPrompt(ledger, shown, transcript), 90_000)
 
-  return applyLedgerReply($, owner, r, transcript, change)
+  return applyLedgerReply($, owner, r, transcript)
 }
 
-function queueUpdate($: EngineInterface, pending: { ex: Exchange; turnsStarted: number } | null) {
-  const owner = { id: sessionId, generation: conversation }
+/**
+ * Catches up over the whole conversation, which covers every exchange still pending. The turns it covers are
+ * the ones started when it began.
+ */
+async function catchUp($: EngineInterface, owner: Owner) {
+  const host = hostOf($, owner)
+  await host.exclusive(async () => {
+    const { turnsStarted } = (await host.read()).presence
+    await host.update(s => ({ ...s, presence: { ...s.presence, isUpdating: true } }))
+    const state = await catchUpLedger($, owner).catch((): LedgerState => 'failed')
+    await host.update(s => ({
+      ...s,
+      pending: s.pending.filter(p => p.turnsStarted > turnsStarted),
+      presence: {
+        ...s.presence,
+        ledgerState: state,
+        isUpdating: false,
+        turnsApplied: Math.max(s.presence.turnsApplied, turnsStarted),
+      },
+    }))
+  })
+}
+
+/**
+ * Runs the per-reply update for the conversation, one at a time: the pending exchanges, or a catch-up when the
+ * ledger may have missed a turn, as after a failed update or a reload that cut one off.
+ */
+function updateLedger($: EngineInterface, owner: Owner = currentOwner(), { catchesUp = false } = {}) {
   queue = queue.then(async () => {
-    if (!ownsConversation(owner)) return
-    const { ledgerState, turnsStarted } = await update($, PRESENCE, p =>
-      ownsConversation(owner) ? { ...p, isUpdating: true } : p,
-    )
-    if (!ownsConversation(owner)) return
-    const state = await (
-      ledgerState !== 'current' || pending === null ? catchUp($, owner) : runUpdate($, owner, pending.ex)
-    ).catch((): LedgerState => 'failed')
-    if (!ownsConversation(owner)) return
-    const applied = pending?.turnsStarted ?? turnsStarted
-    await update($, PRESENCE, p =>
-      ownsConversation(owner)
-        ? {
-            ...p,
-            ledgerState: state,
-            isUpdating: false,
-            turnsApplied: Math.max(p.turnsApplied, applied),
-          }
-        : p,
-    )
-    if (!ownsConversation(owner)) return
-    void publishStatus($)
+    if (!isCurrent(owner)) return
+    const { presence, pending } = await read($, SESSION)
+    const needsCatchUp =
+      catchesUp ||
+      presence.ledgerState !== 'current' ||
+      (pending.length === 0 && presence.turnsStarted > presence.turnsApplied)
+    if (needsCatchUp) await catchUp($, owner)
+    else await runUpdates(hostOf($, owner))
+    if (isCurrent(owner)) void publishStatus($)
   })
   // A rejected link would skip every later update, so the chain swallows it.
   queue = queue.catch(() => undefined)
 }
 
+/** The mod's SessionHost for `owner`'s conversation. A press passes its surface, which copies go to. */
+function hostOf($: EngineInterface, owner: Owner, surface?: UiPressArgument['surface']): SessionHost<Session> {
+  return sessionHost($, owner, {
+    update: change => commit($, owner, change),
+    surface,
+    isTurnRunning: () => isTurnRunning,
+    settleWindowMs: SETTLED_MS,
+    onGhMissing: isGhMissing =>
+      void commit($, owner, s =>
+        s.prViews.isGhMissing === isGhMissing ? s : { ...s, prViews: { ...s.prViews, isGhMissing } },
+      ).catch(() => undefined),
+  })
+}
+
 async function tick($: EngineInterface) {
   const now = await $.clock.now()
-  const p = await read($, PRESENCE)
-  if (p.isAway) {
-    await update($, PRESENCE, q => ({ ...q, minute: Math.floor(now / 60_000) }))
-  } else if (!isTurnRunning && p.lastActiveAt > 0 && now - p.lastActiveAt > AWAY_MS) {
-    await update($, PRESENCE, q => ({ ...q, isAway: true, minute: Math.floor(now / 60_000) }))
+  const away = await read($, AWAY)
+  if (away.isAway) {
+    await update($, AWAY, a => ({ ...a, minute: Math.floor(now / 60_000) }))
+  } else if (!isTurnRunning && away.lastActiveAt > 0 && now - away.lastActiveAt > AWAY_MS) {
+    await update($, AWAY, a => ({ ...a, isAway: true, minute: Math.floor(now / 60_000) }))
   }
-}
-
-async function send(
-  $: EngineInterface,
-  text: string,
-  sentBy: Press | null = null,
-  pressedAt: number | null = null,
-  deliveryId = crypto.randomUUID(),
-): Promise<Sent> {
-  const [toldBefore, pressBefore] = [told, press]
-  const context = await notePrompt($, text, sentBy)
-  const toldSent = told
-  // The engine may run the prompt now, after the running turn, or inside it, so
-  // the context goes in when the prompt's own row is stored (session.append).
-  if (context.length > 0) contextFor.set(text, context)
-  const since = storedCount
-  const id = deliveryId
-  await update($, SENT, pending => [...pending, { id, sessionId, text, pressedAt }])
-  const sent = await $.prompt.submit({ text, asUser: true }).then(
-    (r): Sent => (r.drop === undefined ? { entered: r.text, since, id } : { notSent: r.drop }),
-    (err: unknown): Sent =>
-      isStoredSince(text, since)
-        ? { entered: text, since, id }
-        : { notSent: (err instanceof Error ? err.message : String(err)) || 'the session refused it' },
-  )
-  if ('entered' in sent) {
-    if (sent.entered !== text && contextFor.get(text) === context) {
-      contextFor.delete(text)
-      if (!isStoredSince(sent.entered, since)) contextFor.set(sent.entered, context)
-    }
-    if (sent.entered !== text)
-      await update($, SENT, pending => pending.map(p => (p.id === id ? { ...p, text: sent.entered } : p)))
-
-    return sent
-  }
-  await update($, SENT, pending => pending.filter(p => p.id !== id))
-  if (told === toldSent) told = toldBefore
-  if (person === text) person = null
-  else if (person?.endsWith(`\n\n${text}`)) person = person.slice(0, -(text.length + 2))
-  if (sentBy && press === sentBy) press = pressBefore
-  if (contextFor.get(text) === context) contextFor.delete(text)
-
-  return sent
-}
-
-type Sent = { entered: string; since: number; id: string } | { notSent: string }
-
-function isStoredSince(text: string, since: number): boolean {
-  return (storedAt.get(text) ?? 0) > since
 }
 
 async function appendContext($: EngineInterface, context: string[]) {
@@ -1110,47 +1006,36 @@ async function appendContext($: EngineInterface, context: string[]) {
   await $.session.append({ message: { type: 'user', content } }).catch(() => undefined)
 }
 
-async function notePrompt($: EngineInterface, text: string, sentBy: Press | null): Promise<string[]> {
-  const [now, ledger, isShown] = await Promise.all([
-    $.clock.now(),
-    update($, LEDGER, l => ({ ...l, turn: l.turn + 1 })),
-    isPaneShown($),
-  ])
-  await update($, PRESENCE, p => ({ ...p, lastActiveAt: now, isAway: false }))
-  const r = promptNotes(CLAUDE_CODE, ledger, { text, isPress: sentBy !== null, isOpen: isShown }, told)
-  const notes = r.notes
-  told = r.told
-
-  if (sentBy) press = sentBy
-  notePerson(text)
-  trigger = null
+/**
+ * Records a prompt's words for the turn and returns what Claude reads beside it. `match` finds the press that sent a
+ * message of the mod's own, when its row is stored.
+ */
+async function notePrompt(
+  $: EngineInterface,
+  text: string,
+  match: (s: Session) => { state: Session; sentBy: SentBy | null } = s => ({ state: s, sentBy: null }),
+): Promise<string[]> {
+  const [now, isShown] = await Promise.all([$.clock.now(), isPaneShown($)])
+  await update($, AWAY, a => ({ ...a, lastActiveAt: now, isAway: false }))
+  let notes: string[] = []
+  await commit($, currentOwner(), s => {
+    const matched = match(s)
+    const r = recordPrompt(CLAUDE_CODE, matched.state, text, isShown, matched.sentBy)
+    notes = r.notes
+    return r.state
+  })
 
   return notes
 }
 
-async function openPath($: EngineInterface, raw: string): Promise<string | null> {
-  const path = localPath(raw, root, (await $.env.get('HOME')) ?? '')
-  if (!(await $.fs.exists(path))) return 'it no longer exists'
-  const stat = await $.fs.stat(path)
-  const isFile = stat.kind === 'file'
-  const isExecutable = isFile && (await $.process.run(['test', '-x', path])).exitCode === 0
-  const { argv, fallback } = openCommands(path, isFile, isExecutable)
-  const r = await $.process.run(argv)
-  const retry = r.exitCode !== 0 && fallback ? await $.process.run(fallback) : r
-
-  return retry.exitCode === 0 ? null : retry.stderr.trim() || `open exited ${retry.exitCode}`
-}
-
 /**
- * A reload keeps $.state, so a running session can still hold findings
- * under `notes`, and `notes` as its tab, and the Needs you tab as `waiting`,
- * with item kinds `decide` and `do`, PR threads without a time or
- * `isLinesChanged`, last actions saved by button key without a kind, and drafts saved as bare text.
+ * A reload keeps $.state, so a running session can still hold its parts in the separate fields of an older build,
+ * `notes` as its tab, and the Needs you tab as `waiting`, and drafts saved as bare text.
  */
 async function upgradeState($: EngineInterface): Promise<Ledger> {
-  const [upgradingSession, now] = await Promise.all([$.session.id(), $.clock.now()])
-  const [ledger] = await Promise.all([
-    update($, LEDGER, upgradeLedger),
+  const now = await $.clock.now()
+  const [session] = await Promise.all([
+    upgradeDrawn($),
     update($, TAB, t => ((t as string) === 'notes' ? 'findings' : (t as string) === 'waiting' ? 'needsYou' : t)),
     update($, SELECTION, ({ waiting, ...s }: Record<Tab, Cursor> & { waiting?: Cursor }) => {
       const cursors: Record<Tab, Cursor> = { ...NO_SELECTION, ...(waiting ? { needsYou: waiting } : {}), ...s }
@@ -1167,71 +1052,24 @@ async function upgradeState($: EngineInterface): Promise<Ledger> {
     ),
     // A demo an earlier build seeded may lack a field this one draws, so it ends; /inbox demo seeds a new one.
     update($, DEMO, d => (d === null || isDemoCopy(d) ? d : null)),
-    // Last actions an earlier build saved by button key, without a kind. Those for Open, Open log,
-    // a session check and a PR check's Fix record nothing now, so they go.
-    update($, LAST_ACTIONS, upgradeLastActions),
-    update($, SENT, pending => pending ?? []),
-    update($, UNTRACKED_SENT, texts => texts ?? []),
     // A draft saved as bare text began before now, so a row that closed before this load stays closed.
     update($, DRAFTS, (d: Record<string, Draft | string>) =>
       Object.fromEntries(
         Object.entries(d).map(([id, draft]) => [id, typeof draft === 'string' ? { text: draft, since: now } : draft]),
       ),
     ),
-    // Presence from before the turn counts existed cannot say whether the last
-    // turn's update landed, so that load catches up once.
-    update($, PRESENCE, p => ({ ...p, turnsStarted: p.turnsStarted ?? 1, turnsApplied: p.turnsApplied ?? 0 })),
-    update($, PR_VIEWS, v => ({
-      ...v,
-      views: Object.fromEntries(
-        Object.entries(v.views).map(([ref, pr]) => [
-          ref,
-          {
-            ...pr,
-            threads: pr.threads.map(t => ({
-              ...t,
-              isLinesChanged: t.isLinesChanged ?? false,
-              at: t.at ?? null,
-              reply: t.reply && { ...t.reply, at: t.reply.at ?? null },
-            })),
-          },
-        ]),
-      ),
-    })),
   ])
 
-  const [pending, actions] = await Promise.all([read($, SENT), read($, LAST_ACTIONS)])
-  pressOrder = Math.max(pressOrder, ...Object.values(actions).map(action => action.pressOrder ?? 0))
-  const untracked = Object.entries(actions).flatMap(([row, action]) => {
-    const delivery = action.delivery
-    return /^[if]\d+$/.test(row) &&
-      delivery?.state === 'queued' &&
-      !pending.some(p =>
-        delivery.id ? p.id === delivery.id : p.text === delivery.message && p.pressedAt === action.at,
-      )
-      ? [{ sessionId: upgradingSession, text: delivery.message }]
-      : []
-  })
-  if (untracked.length > 0) {
-    await update($, UNTRACKED_SENT, texts => [
-      ...texts,
-      ...untracked.filter(entry => !texts.some(t => t.sessionId === entry.sessionId && t.text === entry.text)),
-    ])
-    await update($, LAST_ACTIONS, current =>
-      untracked.reduce((next, entry) => withUnconfirmed(next, entry.text), current),
-    )
-  }
-
-  return ledger
+  return session.ledger
 }
 
-async function runTool($: EngineInterface, tool: typeof recordItem, input: Record<string, unknown>): Promise<string> {
+async function runTool($: EngineInterface, tool: 'record' | 'close', input: Record<string, unknown>): Promise<string> {
   const now = await $.clock.now()
   let result = ''
-  await commitLedger($, l => {
-    const r = tool(CLAUDE_CODE, l, input, now)
+  await commit($, currentOwner(), s => {
+    const r = recorded(CLAUDE_CODE, s, tool, input, now)
     result = r.result
-    return r.ledger
+    return r.state
   })
 
   return result
@@ -1324,7 +1162,7 @@ async function showTab($: EngineInterface, tab: Tab) {
  */
 async function findPrs($: EngineInterface) {
   if (await read($, DEMO)) return
-  await update($, PR_VIEWS, v => ({ ...v, isFetching: true }))
+  await markFetching($, true)
   void fetchPrs($, true)
 }
 
@@ -1501,7 +1339,7 @@ function settledScrollKey(key: string, layout: string): string {
 
 async function revealPendingUndo($: EngineInterface): Promise<boolean> {
   const pending = pendingUndoScroll
-  if (!pending || !pending.revealUndo || !isInlineTerminalPane || pending.sessionId !== sessionId) return false
+  if (!pending || !pending.revealUndo || !isInlineTerminalPane || pending.sessionId !== conversation.id) return false
   const [tab, selection, drawn] = await Promise.all([read($, TAB), read($, SELECTION), drawnState($)])
   if (pendingUndoScroll !== pending) return false
   if (tab !== pending.tab || !sameCursor(selection[tab], pending.cursor) || drawn.now >= pending.expiresAt) return false
@@ -1523,7 +1361,7 @@ async function keepUndoVisible($: EngineInterface, key: string, block: UiScrollB
     cursor: selection[tab],
     block,
     expiresAt: at + SETTLED_MS,
-    sessionId,
+    sessionId: conversation.id,
     revealUndo: true,
   }
   pendingUndoScroll = pending
@@ -1537,7 +1375,7 @@ async function finishPendingUndoScroll($: EngineInterface) {
   const [tab, selection, drawn] = await Promise.all([read($, TAB), read($, SELECTION), drawnState($)])
   if (pendingUndoScroll !== pending || revision !== undoScrollRevision) return
   const cursor = selection[tab]
-  if (tab === pending.tab && isInlineTerminalPane && sessionId === pending.sessionId) {
+  if (tab === pending.tab && isInlineTerminalPane && conversation.id === pending.sessionId) {
     const prs = drawnPrs(drawn.prViews, drawn.ledger.prs, drawn.lastActions, drawn.now)
     const openId =
       cursor.id ??
@@ -1779,7 +1617,7 @@ async function screen($: EngineInterface) {
 }
 
 async function closeTasksRunBy($: EngineInterface, command: string) {
-  const ran = tasksRunBy(await read($, LEDGER), command)
+  const ran = tasksRunBy((await read($, SESSION)).ledger, command)
   if (ran.length === 0) return
   const now = await $.clock.now()
   await commitLedger($, l =>
@@ -1787,32 +1625,25 @@ async function closeTasksRunBy($: EngineInterface, command: string) {
   )
 }
 
-async function gh($: EngineInterface, args: string[]) {
-  return $.process.run(['gh', ...args], { cwd: root, timeoutMs: 20_000 })
-}
-
-/**
- * `$.process.run` rejects when the command cannot start, and also when it is still running at the timeout. Asking
- * for `gh --version` tells them apart: only a gh that cannot start makes this reject too.
- */
-async function isGhUnstartable($: EngineInterface): Promise<boolean> {
-  try {
-    await gh($, ['--version'])
-
-    return false
-  } catch {
-    return true
-  }
-}
-
 async function linkPrs($: EngineInterface, refs: string[]) {
   if (refs.length === 0) return
-  const linked = (await read($, LEDGER)).prs
+  const linked = (await read($, SESSION)).ledger.prs
   if (refs.every(r => linked.includes(r))) return
   await commitLedger($, l => ({ ...l, prs: linkedPrs(l.prs, refs) }))
   void fetchPrs($, await isPrsTabShown($))
 }
 
+/** Marks whether a PR fetch runs, which the PRs tab shows. */
+function markFetching($: EngineInterface, isFetching: boolean) {
+  return commit($, currentOwner(), s =>
+    s.prViews.isFetching === isFetching ? s : { ...s, prViews: { ...s.prViews, isFetching } },
+  )
+}
+
+/**
+ * Fetches the session's PRs, one fetch at a time. A fetch asked for while one runs follows it, and finds the
+ * branch's PR when any of the asks wanted it.
+ */
 function fetchPrs($: EngineInterface, findsBranchPr: boolean): Promise<void> {
   if (nextFetchFindsBranchPr !== null) {
     nextFetchFindsBranchPr ||= findsBranchPr
@@ -1831,190 +1662,77 @@ function fetchPrs($: EngineInterface, findsBranchPr: boolean): Promise<void> {
 }
 
 async function fetchPrsNow($: EngineInterface, findsBranchPr: boolean) {
-  const state = await update($, PR_VIEWS, v => ({ ...v, isFetching: true }))
+  const owner = currentOwner()
+  await markFetching($, true)
   try {
-    const linked = (await read($, LEDGER)).prs
-    const run: GhRun = args => gh($, args)
-    const { views: fetched, branchRef } = await fetchTracked(run, state, linked, findsBranchPr)
-    const [stillLinked, lastActions, now] = await Promise.all([
-      read($, LEDGER).then(l => l.prs),
-      read($, LAST_ACTIONS),
-      $.clock.now(),
-    ])
-    const views = Object.fromEntries(
-      Object.entries(fetched).filter(([ref]) => isTracked({ ...state, branchRef }, stillLinked, ref)),
-    )
-    await update($, PR_VIEWS, v => ({
-      isGhMissing: false,
-      views: {
-        ...views,
-        ...Object.fromEntries(
-          Object.entries(v.views).filter(([ref]) => !(ref in views) && isDismissing(lastActions, ref, now)),
-        ),
-      },
-      branchRef,
-      isFetching: nextFetchFindsBranchPr !== null,
-    }))
-  } catch {
-    const isGhMissing = await isGhUnstartable($)
-    await update($, PR_VIEWS, v => ({ ...v, isGhMissing, isFetching: nextFetchFindsBranchPr !== null }))
+    await fetchSessionPrs(hostOf($, owner), findsBranchPr)
+  } finally {
+    // Fetches run one at a time across conversations, so the drawn session reads whether one still runs.
+    await markFetching($, nextFetchFindsBranchPr !== null)
   }
   void followNewRows($).catch(() => undefined)
 }
 
 async function pollPrs($: EngineInterface) {
-  const [presence, ledger, prs, findsBranchPr] = await Promise.all([
-    read($, PRESENCE),
-    read($, LEDGER),
-    read($, PR_VIEWS),
+  const [away, { ledger, prViews }, findsBranchPr] = await Promise.all([
+    read($, AWAY),
+    read($, SESSION),
     isPrsTabShown($),
   ])
-  if (presence.isAway || (!findsBranchPr && ledger.prs.length === 0 && prs.branchRef === null)) return
+  if (away.isAway || (!findsBranchPr && ledger.prs.length === 0 && prViews.branchRef === null)) return
   await fetchPrs($, findsBranchPr)
 }
 
-async function openUrl($: EngineInterface, url: string): Promise<string | null> {
-  const r = await $.process.run(['open', url])
-
-  return r.exitCode === 0 ? null : r.stderr.trim() || `open exited ${r.exitCode}`
-}
-
+/** Takes a dismissed PR off the tab once its row settles, unless it is still tracked or the Dismiss was undone. */
 function leavePr($: EngineInterface, ref: string, at: number) {
-  later($, SETTLED_MS, async () => {
-    const [linked, mark] = await Promise.all([
-      read($, LEDGER).then(l => l.prs),
-      read($, LAST_ACTIONS).then(a => a[prMarkId(ref)]),
-    ])
-    if (mark?.action !== 'pr-dismiss' || mark.at !== at) return
-    await update($, PR_VIEWS, v => {
-      if (isTracked(v, linked, ref) || !(ref in v.views)) return v
-      const { [ref]: _left, ...views } = v.views
-      return { ...v, views }
-    })
-  })
+  const owner = currentOwner()
+  later($, SETTLED_MS, () =>
+    commit($, owner, s => {
+      const mark = s.lastActions[prMarkId(ref)]
+      if (mark?.action !== 'pr-dismiss' || mark.at !== at) return s
+      if (isTracked(s.prViews, s.ledger.prs, ref) || !(ref in s.prViews.views)) return s
+      const { [ref]: _left, ...views } = s.prViews.views
+      return { ...s, prViews: { ...s.prViews, views } }
+    }),
+  )
 }
 
 function pressRowId(p: RowPress | PrPress): string {
   return 'ref' in p ? prRowId(p) : p.id
 }
 
-const COPY_FAILURES: Record<Extract<UiCopyResult, { isCopied: false }>['reason'], string> = {
-  'no-surface': 'no app is attached',
-  'no-clipboard': 'the clipboard did not take it',
-  refused: 'another plugin refused it',
-}
-
-async function perform(
-  $: EngineInterface,
-  effect: Exclude<Effect, { kind: 'send' }>,
-  surface: UiPressArgument['surface'],
-): Promise<string | null> {
-  try {
-    if (effect.kind === 'open')
-      return await (/^[a-z][a-z\d+.-]*:\/\//i.test(effect.target)
-        ? openUrl($, effect.target)
-        : openPath($, effect.target))
-    const r = await $.ui.copy({ text: effect.text, surface })
-    return r.isCopied ? null : COPY_FAILURES[r.reason]
-  } catch (err) {
-    return err instanceof Error ? err.message : String(err)
-  }
-}
-
-function recordDoneRefusal($: EngineInterface, id: string, notificationId: string, reason: string): Promise<void> {
-  const change = (ledger: Ledger) => refuseDoneNotification(ledger, notificationId, reason)
-  const recording = applyingConversation
-    .then(async () => {
-      const owner = { id, generation: conversation }
-      if (
-        ownsConversation(owner) &&
-        (await read($, LEDGER)).closed.some(c => c.doneNotification?.id === notificationId)
-      ) {
-        await commitLedger($, change, owner)
-        if (ownsConversation(owner)) return
-      }
-      await Promise.all([...(commitsBySession.get(id) ?? [])].map(commit => commit.catch(() => undefined)))
-      const next = saving.then(async () => {
-        const saved = (await $.store.get(`s:${id}`)) as SavedSession | undefined
-        if (saved?.ledger) await $.store.set(`s:${id}`, { ...saved, ledger: change(upgradeLedger(saved.ledger)) })
-      })
-      saving = next.catch(() => undefined)
-      savesBySession.set(id, next)
-      try {
-        await next
-      } finally {
-        if (savesBySession.get(id) === next) savesBySession.delete(id)
-      }
-    })
-    .finally(() => {
-      doneRefusalRevision++
-    })
-  applyingConversation = recording.catch(() => undefined)
-  return recording
-}
-
+/** Tells Claude about rows closed with Done once their settle window has passed, unless a turn runs. */
 async function wakeForDone($: EngineInterface) {
-  const owner = { id: sessionId, generation: conversation }
-  const notificationId = crypto.randomUUID()
-  const now = await $.clock.now()
-  let wake: ReturnType<typeof doneWake> = null
-  await commitLedger(
-    $,
-    l => {
-      wake = doneWake(l, { now, windowMs: SETTLED_MS, isTurnRunning })
-      return wake ? markSentToAgent(l, wake.ids, notificationId) : l
-    },
-    owner,
-  )
-  const sending = wake as ReturnType<typeof doneWake>
-  if (!sending) return
-  if (!ownsConversation(owner)) {
-    await recordDoneRefusal($, owner.id, notificationId, 'Session changed before notification was sent')
-    return
-  }
-  const result = await send($, sending.text, { id: sending.ids[0] ?? '', action: 'done' })
-  if ('notSent' in result) await recordDoneRefusal($, owner.id, notificationId, result.notSent)
+  if (isTurnRunning) return
+  await wakeSessionForDone(hostOf($, currentOwner()))
 }
 
 async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPressArgument['surface']) {
   const mayStayOnRow = 'ref' in p ? ['pr-open', 'thread-open', 'log'].includes(p.action) : p.action === 'step'
   const undoRevision = mayStayOnRow ? suspendUndoReveal() : cancelUndoScroll()
-  const order = ++pressOrder
   const rowId = pressRowId(p)
   if (p.action !== 'undo' && !rowId.startsWith('pr:')) await keepPressedOpen($, rowId)
   const wasWaiting = (await shownWaits($)).rows.some(r => r.id === rowId && r.isWaiting)
   if (await read($, DEMO)) return runDemoPress($, p, wasWaiting, undoRevision, surface)
-  const [now, presence, lastActions, prState] = await Promise.all([
-    $.clock.now(),
-    read($, PRESENCE),
-    read($, LAST_ACTIONS),
-    read($, PR_VIEWS),
-  ])
-  const ctx = { now, turnsStarted: presence.turnsStarted, localPressId: crypto.randomUUID() }
+  const [now, { ledger }] = await Promise.all([$.clock.now(), read($, SESSION)])
   const draft = !('ref' in p) && p.action === 'type' ? (await read($, DRAFTS))[p.id] : undefined
-  let isReplyToClosed = false
-  let applied = { stale: true } as Applied
-  if ('ref' in p && p.action !== 'pr-dismiss' && p.action !== 'pr-undo') {
-    applied = applyAnyPress(await read($, LEDGER), prState, lastActions, p, ctx)
-  } else {
-    if (!('ref' in p) && p.action === 'type') {
-      // A held row stays drawn by its draft's words once its field closes, until the press records its reply.
-      await update($, DRAFTS, d => {
-        const typed = d[p.id]
-        return typed ? { ...d, [p.id]: { ...typed, text: p.text } } : d
-      })
-      await update($, TYPING, t => (t === p.id ? null : t))
-    }
-    await commitLedger($, l => {
-      applied = applyAnyPress(l, prState, lastActions, p, ctx)
-      isReplyToClosed = !('ref' in p) && p.action === 'type' && !isOpenIn(l, p.id)
-      return 'stale' in applied ? l : applied.ledger
+  const isReplyToClosed = !('ref' in p) && p.action === 'type' && !isOpenIn(ledger, p.id)
+  if (!('ref' in p) && p.action === 'type') {
+    // A held row stays drawn by its draft's words once its field closes, until the press records its reply.
+    await update($, DRAFTS, d => {
+      const typed = d[p.id]
+      return typed ? { ...d, [p.id]: { ...typed, text: p.text } } : d
     })
+    await update($, TYPING, t => (t === p.id ? null : t))
   }
-
-  const pressed = applied
-  if (mayStayOnRow && !('stale' in pressed) && pressed.effects.some(e => e.kind === 'send')) cancelUndoScroll()
-  if ('stale' in pressed) {
+  const [typing, drafts, discarded] = await Promise.all([read($, TYPING), read($, DRAFTS), read($, DISCARDED)])
+  const started = await startPress(hostOf($, currentOwner(), surface), p, false, {
+    replies: heldReplies(typing, drafts),
+    discarded,
+  })
+  const effects = started.effects
+  if (!effects) {
+    if ((await started.finish()).note !== 'stale') return
     await Promise.all([
       update($, NOTES, n => ({ ...n, [rowId]: { note: 'stale' as const, at: now } })),
       'id' in p && p.action === 'type'
@@ -2030,20 +1748,9 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
     )
     return
   }
-  const firstSend = pressed.effects.find(e => e.kind === 'send')
-  const pressDeliveryId = firstSend ? crypto.randomUUID() : null
-  const deliveryLasts =
-    firstSend && pressDeliveryId
-      ? withDeliveryId(pressed.lasts, Object.keys(pressed.lasts), now, firstSend.text, pressDeliveryId)
-      : pressed.lasts
-  const pressLasts = Object.fromEntries(
-    Object.entries(deliveryLasts).map(([id, last]) => [id, { ...last, pressOrder: order }]),
-  )
-  const lasts = Object.values(pressLasts)
+  const sends = effects.some(e => e.kind === 'send')
+  if (mayStayOnRow && sends) cancelUndoScroll()
   await Promise.all([
-    lasts.length > 0 || pressed.drop.length > 0
-      ? update($, LAST_ACTIONS, a => withLasts(a, pressLasts, pressed.drop, order))
-      : undefined,
     update($, NOTES, n => {
       if (!(rowId in n)) return n
       const { [rowId]: _gone, ...rest } = n
@@ -2056,101 +1763,32 @@ async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPr
         })
       : undefined,
   ])
-  if (lasts.some(l => l.kind === 'handoff')) void publishStatus($)
   const undoKey = await undoKeyAfterPress($, p, surface)
   const canRevealUndo = undoKey !== null && undoRevision === undoScrollRevision
   const { isMoved, undoBlock } = await openAfterClose($, rowId, wasWaiting, canRevealUndo)
   if (canRevealUndo) await keepUndoVisible($, undoKey, undoBlock, now, undoRevision)
   if (!('ref' in p) && p.action === 'done') later($, SETTLED_MS, () => wakeForDone($))
   if (!('ref' in p) && p.action === 'address') redrawWhileLeaving($, now + SETTLED_MS)
-  if (isReplyToClosed && pressed.effects.length > 0) redrawWhileLeaving($, now + SETTLED_MS)
+  if (isReplyToClosed && effects.length > 0) redrawWhileLeaving($, now + SETTLED_MS)
   if ('ref' in p && p.action === 'pr-dismiss') {
     redrawWhileLeaving($, now + SETTLED_MS)
     leavePr($, p.ref, now)
   }
-  if (pressed.reopenedId) told = { ...told, closed: told.closed.filter(id => id !== pressed.reopenedId) }
   if (!('ref' in p) && p.action === 'undo') await selectRestored($, p.id)
-  const rows = Object.keys(pressLasts)
-  const host: EffectHost = {
-    now: () => $.clock.now(),
-    deliveryId: () => pressDeliveryId ?? crypto.randomUUID(),
-    perform: effect => perform($, effect, surface),
-    send: async (effect, deliveryId) => {
-      const sent = await send($, effect.text, effect.by, now, deliveryId)
-      if (!('entered' in sent)) return { state: 'rejected' as const, reason: sent.notSent }
-      if (sent.entered !== effect.text) await awaitRewritten($, rows, now, effect.text, sent)
-      return { state: 'accepted' as const }
-    },
-    saveLasts: change => update($, LAST_ACTIONS, change),
-    saveLedger: change => commitLedger($, change),
-  }
-  const result = await runLocalEffects(host, pressed.effects, rowId, pressed.lasts[rowId]?.result)
-  // A success note clears after SETTLED_MS. A fresh value is what redraws the pane then.
-  if (result?.state === 'done') later($, SETTLED_MS, () => update($, LAST_ACTIONS, a => ({ ...a })))
-  // A message still on its way after QUEUED_AFTER_MS reads Queued from then. A fresh value is what redraws the pane.
-  if (pressed.effects.some(effect => effect.kind === 'send'))
-    later($, QUEUED_AFTER_MS, () => update($, LAST_ACTIONS, a => ({ ...a })))
-  const failed = await runSends(host, pressed.effects, rowId, rows, now)
-  if (!failed || failed.state === 'unconfirmed') return
-  if (failed.isRowFailed && !('ref' in p) && p.action === 'type')
+  // A success note clears after SETTLED_MS, and a message still on its way after QUEUED_AFTER_MS reads Queued from
+  // then. A fresh value is what redraws the pane at each.
+  if (effects.some(e => e.kind !== 'send')) later($, SETTLED_MS, () => redraw($))
+  if (sends) later($, QUEUED_AFTER_MS, () => redraw($))
+  const outcome = await started.finish()
+  if (!outcome.isRowFailed) return
+  if (!('ref' in p) && p.action === 'type')
     await update($, DRAFTS, d => (d[p.id] ? d : { ...d, [p.id]: { text: p.text, since: draft?.since ?? now } }))
-  if (failed.isRowFailed && isMoved) {
+  if (isMoved) {
     cancelUndoScroll()
     await reopenPressed($, rowId)
     if (undoKey) await scrollToRow($, rowId)
   }
   void publishStatus($)
-}
-
-async function awaitRewritten(
-  $: EngineInterface,
-  rows: string[],
-  at: number,
-  message: string,
-  sent: Extract<Sent, { entered: string }>,
-) {
-  const stored = isStoredSince(sent.entered, sent.since)
-  const pending = await read($, SENT)
-  const matches = pending.filter(p => p.sessionId === sessionId && p.text === sent.entered)
-  const hasUniqueReceipt = matches.length === 1 && matches[0]?.id === sent.id
-  const hasUnmatchedAppend = storedBy.get(sent.entered)?.receiptId === null
-  const isUntracked = (await read($, UNTRACKED_SENT)).some(p => p.sessionId === sessionId && p.text === sent.entered)
-  const isConfirmed = stored && hasUniqueReceipt && hasUnmatchedAppend && !isUntracked
-  await update($, LAST_ACTIONS, a => {
-    const moved = withRewrite(a, rows, at, message, sent.entered, sent.id)
-
-    return isConfirmed
-      ? withArrival(moved, sent.entered, at, sent.id)
-      : stored
-        ? withUnconfirmed(moved, sent.entered, at, sent.id)
-        : moved
-  })
-  if (isConfirmed || (stored && isUntracked)) await update($, SENT, pending => pending.filter(p => p.id !== sent.id))
-  void publishStatus($)
-}
-
-function applyAnyPress(
-  ledger: Ledger,
-  prState: PrViews,
-  lastActions: Record<string, LastAction>,
-  p: RowPress | PrPress,
-  ctx: { now: number; turnsStarted: number; localPressId?: string },
-): Applied {
-  if ('ref' in p) return applyPrPress(ledger, prState, lastActions, p, ctx)
-  const item = ledger.items.find(i => i.id === p.id)
-  const r = applyPress(ledger, lastActions[p.id], p, {
-    ...ctx,
-    extraSteps: item ? itemPrSteps(item, prState, ledger.prs) : [],
-  })
-  if ('stale' in r) return r
-
-  return {
-    ledger: r.ledger,
-    lasts: r.last ? { [p.id]: r.last } : {},
-    drop: [],
-    effects: r.effects,
-    ...(r.reopenedId ? { reopenedId: r.reopenedId } : {}),
-  }
 }
 
 async function undoKeyAfterPress(
@@ -2238,7 +1876,18 @@ async function runDemoPress(
   const held = new Set(Object.keys(heldReplies(typing, drafts)))
   await update($, DEMO, d => {
     if (!d) return d
-    const r = applyAnyPress(d.ledger, d.prViews, d.lastActions, p, { now, turnsStarted: d.turns.turnsStarted })
+    const sample = emptySession()
+    const r = pressOn(
+      {
+        ...sample,
+        ledger: d.ledger,
+        prViews: d.prViews,
+        lastActions: d.lastActions,
+        presence: { ...sample.presence, turnsStarted: d.turns.turnsStarted },
+      },
+      p,
+      now,
+    )
     applied = r
     const { [rowId]: _replaced, ...notes } = d.notes
     if ('stale' in r) return { ...d, notes: { ...notes, [rowId]: { note: 'stale' as const, at: now } } }
@@ -2387,11 +2036,8 @@ function rowKeyActions($: EngineInterface, r: RowView, isAllShown: boolean): { k
 }
 
 type ClosedLine = Pick<Closed, 'id' | 'ask' | 'at' | 'how' | 'outcome'> & {
+  askedAs?: string
   delivery: Parameters<typeof settledLabel>[1]
-}
-
-function outcomeText(d: Pick<Closed, 'outcome'>): string {
-  return capitalized(d.outcome)
 }
 
 function desktopTabSizes(
@@ -2425,27 +2071,9 @@ function desktopTabSizes(
 async function drawnState(
   $: EngineInterface,
 ): Promise<DemoCopy & { view: InboxView; isDemo: boolean; showsDemoNotices: boolean; isUnread: boolean; now: number }> {
-  const [
-    ledger,
-    stop,
-    prViews,
-    lastActions,
-    notes,
-    presence,
-    demo,
-    isDemoRecording,
-    unreadable,
-    typing,
-    drafts,
-    discarded,
-    now,
-  ] = await Promise.all([
-    read($, LEDGER),
-    read($, STOP),
-    read($, PR_VIEWS),
-    read($, LAST_ACTIONS),
+  const [session, notes, demo, isDemoRecording, unreadable, typing, drafts, discarded, now] = await Promise.all([
+    read($, SESSION),
     read($, NOTES),
-    read($, PRESENCE),
     read($, DEMO),
     read($, DEMO_RECORDING),
     read($, UNREADABLE),
@@ -2453,11 +2081,15 @@ async function drawnState(
     read($, DRAFTS),
     read($, DISCARDED),
     $.clock.now(),
+    read($, REDRAW),
+    // The minute tick while the person is away redraws the ages.
+    read($, AWAY),
   ])
+  const { ledger, stop, prViews, lastActions, presence } = session
   const turns = { turnsStarted: presence.turnsStarted, turnsApplied: presence.turnsApplied }
   const drawn = demo ?? { ledger, stop, prViews, lastActions, notes, turns }
 
-  const isUnread = demo === null && unreadable === sessionId
+  const isUnread = demo === null && unreadable === conversation.id
 
   return {
     ...drawn,
@@ -2542,24 +2174,14 @@ function loadConversation($: EngineInterface, id: string, forkedFrom?: string): 
   return prepareConversation($, id, revision, forkedFrom)
 }
 
-/** The saved state of conversation `id`, once its pending saves and commits have landed. */
-function readSettled($: EngineInterface, id: string) {
-  const pendingSave = savesBySession.get(id)
-  const pendingCommits = [...(commitsBySession.get(id) ?? [])]
-
-  return Promise.all([
-    pendingSave?.catch(() => undefined),
-    ...pendingCommits.map(commit => commit.catch(() => undefined)),
-  ]).then(() => readSaved($, id))
-}
-
 async function prepareConversation($: EngineInterface, id: string, revision: number, forkedFrom?: string) {
-  const refusalRevision = doneRefusalRevision
+  const savedWrites = savedWriteCount()
   const [sessionRoot, saved] = await Promise.all([$.session.root(), readSettled($, id)])
   if (revision !== loadRevision) return
   const applying = applyingConversation.then(async () => {
     if (revision !== loadRevision) return
-    const latest = refusalRevision === doneRefusalRevision ? saved : await readSaved($, id)
+    // A write to a saved session after the read above, such as a refused Done message, is read again.
+    const latest = savedWrites === savedWriteCount() ? saved : await readSettled($, id)
     // A fork continues its parent's inbox, so a new id with no saved state starts from the parent's.
     const parent = latest?.session || !forkedFrom ? null : await readSettled($, forkedFrom)
     await applyConversation($, id, revision, sessionRoot, latest, parent?.session)
@@ -2573,87 +2195,97 @@ async function applyConversation(
   id: string,
   revision: number,
   sessionRoot: string,
-  saved: { session: SavedSession | undefined } | null,
-  parent?: SavedSession,
+  saved: { session: SavedRecord | undefined } | null,
+  parent?: SavedRecord,
 ) {
   if (revision !== loadRevision) return
-  const isCurrent = () => revision === loadRevision && sessionId === id
+  const isLoading = () => revision === loadRevision && conversation.id === id
   cancelUndoScroll()
   stopGeneration++
   resuming = null
-  sessionId = id
-  root = sessionRoot
+  conversation.id = id
+  conversation.root = sessionRoot
   recordedRows = null
   isReadingAgain = false
   // A reload stops any update the previous load had running, and state outlives
   // it, so an update in flight at load was cut off: record it as failed.
   // The theme read at the start is gone after /clear, so each conversation reads it.
-  const [presence, current] = await Promise.all([
-    update($, PRESENCE, p => (p.isUpdating ? { ...p, isUpdating: false, ledgerState: 'failed' as const } : p)),
-    upgradeState($),
-    syncTheme($),
-  ])
+  const [current] = await Promise.all([upgradeState($), syncTheme($)])
+  await replaceDrawn($, cutOffUpdate)
   if (revision !== loadRevision) return
   const isFresh = current.turn === 0 && !current.card
   const isUnread =
     (await update($, UNREADABLE, u =>
-      isCurrent() ? (isFresh ? (saved === null ? id : null) : u === id ? u : null) : u,
+      isLoading() ? (isFresh ? (saved === null ? id : null) : u === id ? u : null) : u,
     )) === id
-  if (!isCurrent()) return
-  const loaded =
-    saved === null
-      ? current
-      : parent
-        ? await bringBack($, current, parent, isCurrent, false)
-        : await bringBack($, current, saved.session, isCurrent)
-  if (!isCurrent()) return
-  const isEmpty = !loaded.card && loaded.items.length === 0
-  const { turnsStarted, turnsApplied } = await read($, PRESENCE)
+  if (!isLoading()) return
+  if (saved !== null) await bringBack($, parent ?? saved.session, isLoading, parent !== undefined)
+  if (!isLoading()) return
+  const { ledger, presence } = await read($, SESSION)
+  const isEmpty = !ledger.card && ledger.items.length === 0
   const needsCatchUp =
     presence.ledgerState !== 'current' ||
-    turnsStarted > turnsApplied ||
+    presence.turnsStarted > presence.turnsApplied ||
     (!isUnread && isEmpty && (await $.session.turns().catch(() => 0)) > 0)
-  if (!isCurrent()) return
-  if (needsCatchUp) queueUpdate($, null)
+  if (!isLoading()) return
+  if (needsCatchUp) updateLedger($, currentOwner(), { catchesUp: true })
   void publishStatus($)
-  if (loaded.prs.length > 0) void fetchPrs($, false)
+  if (ledger.prs.length > 0) void fetchPrs($, false)
 }
 
-type SavedSession = { savedAt: number; ledger: Ledger }
-
-async function readSaved($: EngineInterface, id: string): Promise<{ session: SavedSession | undefined } | null> {
-  try {
-    return { session: (await $.store.get(`s:${id}`)) as SavedSession | undefined }
-  } catch {
-    return null
-  }
+/** An update a reload cut off reads as failed, so the next one catches up. */
+function cutOffUpdate<S extends Session>(s: S): S {
+  return s.presence.isUpdating ? { ...s, presence: { ...s.presence, isUpdating: false, ledgerState: 'failed' } } : s
 }
 
+/** Row presses keep only their PR records, whose rows outlive a conversation's items. */
+function withoutRowActions(lastActions: Record<string, LastAction>): Record<string, LastAction> {
+  return Object.fromEntries(Object.entries(lastActions).filter(([k]) => !/^[if]\d+$/.test(k)))
+}
+
+/**
+ * Brings back a saved session into a conversation that has not run yet. A fork takes only its parent's ledger.
+ * A message the saved session still waited on may never arrive now, so it reads unconfirmed.
+ */
 async function bringBack(
   $: EngineInterface,
-  current: Ledger,
-  session: SavedSession | undefined,
-  isCurrent: () => boolean = () => true,
-  isAway = true,
-): Promise<Ledger> {
-  if (current.turn !== 0 || current.card || !session) return current
-  const loaded = upgradeLedger(session.ledger)
-  await update($, LEDGER, l => (isCurrent() ? loaded : l))
-  if (!isCurrent()) return current
-  if (isAway) await update($, PRESENCE, p => (isCurrent() ? { ...p, lastActiveAt: session.savedAt, isAway: true } : p))
-
-  return isCurrent() ? loaded : current
+  saved: SavedRecord | undefined,
+  isLoading: () => boolean,
+  isFork = false,
+): Promise<void> {
+  if (!saved) return
+  const loaded = upgradeSession(saved)
+  let isBrought = false
+  await replaceDrawn($, s => {
+    isBrought = false
+    if (!isLoading() || s.ledger.turn !== 0 || s.ledger.card) return s
+    isBrought = true
+    if (isFork) return { ...s, ledger: loaded.ledger }
+    const lastActions = Object.fromEntries(
+      Object.entries(loaded.lastActions).map(([id, a]) => [
+        id,
+        a.delivery?.state === 'queued' ? { ...a, delivery: { ...a.delivery, state: 'unconfirmed' as const } } : a,
+      ]),
+    )
+    // The stop and the running turn belong to the process that saved them.
+    return cutOffUpdate({ ...loaded, lastActions, stop: null, turn: emptySession().turn })
+  })
+  if (isBrought && !isFork)
+    await update($, AWAY, a => (isLoading() ? { ...a, lastActiveAt: saved.savedAt, isAway: true } : a))
 }
 
-async function restore($: EngineInterface, current: Ledger, saved: Ledger): Promise<Ledger> {
-  conversation += 1
-  const loaded = upgradeLedger(saved)
-  const [restored] = await Promise.all([
-    update($, LEDGER, () => ({ ...loaded, turn: loaded.turn + current.turn })),
+/** Brings back a saved ledger once the store reads it again, under the turns the session ran meanwhile. */
+async function restore($: EngineInterface, saved: SavedRecord) {
+  conversation.generation += 1
+  const loaded = upgradeSession(saved).ledger
+  await Promise.all([
+    replaceDrawn($, s => ({
+      ...s,
+      ledger: { ...loaded, turn: loaded.turn + s.ledger.turn },
+      lastActions: withoutRowActions(s.lastActions),
+    })),
     forgetRowState($),
   ])
-
-  return restored
 }
 
 async function forgetRowState($: EngineInterface) {
@@ -2665,7 +2297,6 @@ async function forgetRowState($: EngineInterface) {
     update($, DRAFTS, () => ({})),
     update($, DISCARDED, () => ({})),
     update($, NOTES, () => ({})),
-    update($, LAST_ACTIONS, a => Object.fromEntries(Object.entries(a).filter(([k]) => !/^[if]\d+$/.test(k)))),
   ])
   fieldSeeds.clear()
 }
@@ -2673,30 +2304,29 @@ async function forgetRowState($: EngineInterface) {
 async function readAgain($: EngineInterface) {
   if (isReadingAgain) return
   isReadingAgain = true
-  const id = sessionId
+  const id = conversation.id
   if ((await read($, UNREADABLE)) !== id) {
     isReadingAgain = false
     return
   }
   await redrawPane($)
   const saved = await readSaved($, id)
-  if (sessionId !== id) return
+  if (conversation.id !== id) return
   isReadingAgain = false
   if (saved !== null) {
     await update($, UNREADABLE, () => null)
-    const current = await read($, LEDGER)
+    const current = (await read($, SESSION)).ledger
     const hasRun = current.turn !== 0 || current.card !== null
-    const loaded =
-      hasRun && saved.session
-        ? await restore($, current, saved.session.ledger)
-        : await bringBack($, current, saved.session)
+    if (hasRun && saved.session) await restore($, saved.session)
+    else await bringBack($, saved.session, () => conversation.id === id)
+    const { ledger } = await read($, SESSION)
     if (
       (hasRun && saved.session) ||
-      (!loaded.card && loaded.items.length === 0 && (await $.session.turns().catch(() => 0)) > 0)
+      (!ledger.card && ledger.items.length === 0 && (await $.session.turns().catch(() => 0)) > 0)
     )
-      queueUpdate($, null)
+      updateLedger($, currentOwner(), { catchesUp: true })
     void publishStatus($)
-    if (loaded.prs.length > 0) void fetchPrs($, false)
+    if (ledger.prs.length > 0) void fetchPrs($, false)
     void followNewRows($).catch(() => undefined)
   }
   await redrawPane($)
@@ -2728,8 +2358,8 @@ export const register: Register = on => {
     // $.session.id() still names the previous conversation here, so the new id comes
     // from the event. A start with --resume also raises this, for the conversation
     // session.start already loaded.
-    if (isOn && e.session_id !== sessionId)
-      await loadConversation($, e.session_id, e.source === 'fork' ? sessionId : undefined)
+    if (isOn && e.session_id !== conversation.id)
+      await loadConversation($, e.session_id, e.source === 'fork' ? conversation.id : undefined)
 
     return r
   })
@@ -2740,7 +2370,7 @@ export const register: Register = on => {
     resuming = null
     if (isOn) {
       await Promise.all([
-        update($, STOP, () => null),
+        replaceDrawn($, s => (s.stop ? { ...s, stop: null } : s)),
         update($, DIALOGS, () => []),
         update($, DEMO, () => null),
         update($, DEMO_RECORDING, () => false),
@@ -2749,18 +2379,21 @@ export const register: Register = on => {
     }
     // /clear, /resume and /branch (which reports resume) go on in this process with another conversation.
     if (isOn && (e.reason === 'clear' || e.reason === 'resume')) {
-      conversation += 1
+      conversation.generation += 1
       await Promise.all([
-        update($, LEDGER, () => EMPTY),
+        replaceDrawn($, s => ({
+          ...cleared(s),
+          lastActions: withoutRowActions(s.lastActions),
+          sent: [],
+          heldRows: [],
+          presence: { ...s.presence, isUpdating: false, ledgerState: 'current' },
+        })),
         forgetRowState($),
-        update($, PRESENCE, p => ({ ...p, isAway: false, isUpdating: false, ledgerState: 'current' as const })),
+        update($, AWAY, a => ({ ...a, isAway: false })),
       ])
       resetTurn()
       shellCommand = null
-      told = TOLD_NOTHING
-      contextFor.clear()
-      storedAt.clear()
-      storedBy.clear()
+      forgetStored()
     }
 
     return next(e)
@@ -2774,12 +2407,12 @@ export const register: Register = on => {
     const isPersonsWords =
       origin.kind === 'composer' || origin.kind === 'bridge' || (origin.kind === 'plugin' && origin.asUser === true)
     if (!isPersonsWords) {
-      if (!e.turnId) trigger = origin.kind
+      if (!e.turnId) await commit($, currentOwner(), s => ({ ...s, turn: { ...s.turn, trigger: origin.kind } }))
 
       return next(e)
     }
 
-    const notes = await notePrompt($, e.text, null)
+    const notes = await notePrompt($, e.text)
 
     return notes.length === 0 ? next(e) : next({ ...e, context: [...(e.context ?? []), ...notes] })
   })
@@ -2789,8 +2422,15 @@ export const register: Register = on => {
     isTurnRunning = true
     // Counted here, before the
     // turn can end, since a reload can cut off its end-of-turn hook.
-    if (isOn)
-      await Promise.all([setStop($, null), update($, PRESENCE, p => ({ ...p, turnsStarted: p.turnsStarted + 1 }))])
+    if (isOn) {
+      const before = await read($, SESSION)
+      await commit($, currentOwner(), startTurn)
+      if (before.stop) {
+        stopGeneration++
+        resuming = null
+        void publishStatus($)
+      }
+    }
 
     return next(e)
   })
@@ -2807,11 +2447,11 @@ export const register: Register = on => {
 
   on('tool.describe', { tool: RECORD_TOOL }, async ($, e, next) => ({ ...(await next(e)), isDeferred: false }))
   on('tool.call', { tool: RECORD_TOOL }, async ($, e) => ({
-    result: await runTool($, recordItem, e as unknown as Record<string, unknown>),
+    result: await runTool($, 'record', e as unknown as Record<string, unknown>),
   }))
   on('tool.describe', { tool: CLOSE_TOOL }, async ($, e, next) => ({ ...(await next(e)), isDeferred: false }))
   on('tool.call', { tool: CLOSE_TOOL }, async ($, e) => ({
-    result: await runTool($, recordClose, e as unknown as Record<string, unknown>),
+    result: await runTool($, 'close', e as unknown as Record<string, unknown>),
   }))
 
   on('tool.call', async ($, e, next) => {
@@ -2821,12 +2461,13 @@ export const register: Register = on => {
     const run = () => clearingDialog($, key, () => next(e))
     if (e.agentId) return run()
     const line = toolActivity(String(e.tool), input)
-    if (line) noteActivity(line)
+    if (line) await noteActivity($, line).catch(() => undefined)
     if (String(e.tool) === TURN_BOX_TOOL) turnBox = turnBoxText(input) ?? turnBox
     if (e.tool === 'Bash') {
       const ran = await run()
-      if (activity.length < 40)
-        for (const url of new Set(ran.text?.match(LOCAL_URL) ?? [])) noteActivity(`URL in output: ${url}`)
+      if ((await read($, SESSION)).turn.activity.length < 40)
+        for (const url of new Set(ran.text?.match(LOCAL_URL) ?? []))
+          await noteActivity($, `URL in output: ${url}`).catch(() => undefined)
       if (/\bgh\s+pr\s+create\b/.test(e.command)) void linkPrs($, prRefs(ran.text ?? ''))
 
       return ran
@@ -2837,7 +2478,7 @@ export const register: Register = on => {
       await openDialog($, { kind: 'question', text: question, key })
       const ran = await run()
       const outcome = dialogOutcome(ran)
-      noteActivity(dialogActivity(dialogQuestions(input.questions), outcome))
+      await noteActivity($, dialogActivity(dialogQuestions(input.questions), outcome)).catch(() => undefined)
       if (outcome.kind === 'dismissed') isDialogDismissed = true
 
       return ran
@@ -2894,21 +2535,21 @@ export const register: Register = on => {
     const isAnswered = e.reason === 'answer' && hasReply
     if (!isAnswered && !isDialogDismissed) return r
 
-    const [ledger, shown, now] = await Promise.all([read($, LEDGER), screen($), $.clock.now()])
+    const [tab, isShown, now, before] = await Promise.all([
+      read($, TAB),
+      isPaneShown($),
+      $.clock.now(),
+      read($, SESSION),
+    ])
     const reply = [...sentBack, e.answer, turnBox ?? ''].filter(text => text.trim() !== '').join('\n\n')
-    const ex: Exchange = {
-      person,
-      trigger,
-      activity,
-      reply,
-      turn: ledger.turn,
-      press,
-      screen: shown,
-    }
+    const queuesEmptyReply = isDialogDismissed
     resetTurn()
-    const { turnsStarted } = await update($, PRESENCE, p => ({ ...p, lastActiveAt: now }))
-    queueUpdate($, { ex, turnsStarted })
-    await linkPrs($, prRefs(reply))
+    await update($, AWAY, a => ({ ...a, lastActiveAt: now }))
+    await commit($, currentOwner(), s =>
+      endTurn(CLAUDE_CODE, s, reply, isShown, { tab: TABS.find(t => t.id === tab)?.label ?? tab, queuesEmptyReply }),
+    )
+    updateLedger($)
+    if (prRefs(reply).some(ref => !before.ledger.prs.includes(ref))) void fetchPrs($, await isPrsTabShown($))
 
     return r
   })
@@ -2916,7 +2557,7 @@ export const register: Register = on => {
   on('prompt.context', async ($, e, next) => {
     const r = await next(e)
     if (!isOn) return r
-    const text = carryText(await read($, LEDGER), START_TITLE)
+    const text = carryText((await read($, SESSION)).ledger, START_TITLE)
 
     return text ? { ...r, blocks: [...r.blocks, { name: 'inbox', text }] } : r
   })
@@ -2927,49 +2568,11 @@ export const register: Register = on => {
     async ($, e, next) => {
       if (!isOn || e.agentId) return next(e)
       const text = messageText(e.message)
-      const count = ++storedCount
-      storedAt.set(text, count)
-      storedBy.set(text, { count, receiptId: null })
-      const context = contextFor.get(text)
-      contextFor.delete(text)
-      if (context) await appendContext($, context)
-      const r = await next(e)
-      if ((await read($, UNTRACKED_SENT)).some(p => p.sessionId === sessionId && p.text === text)) {
-        await update($, SENT, pending => {
-          const index = pending.findIndex(p => p.sessionId === sessionId && p.text === text)
-          return index < 0 ? pending : pending.filter((_p, i) => i !== index)
-        })
-        await update($, LAST_ACTIONS, actions => withUnconfirmed(actions, text))
-        void publishStatus($)
-        return r
-      }
-      let matched: SentPrompt | undefined
-      let laterPrompts: SentPrompt[] = []
-      await update($, SENT, pending => {
-        const index = pending.findIndex(p => p.sessionId === sessionId && p.text === text)
-        if (index < 0) return pending
-        matched = pending[index]
-        laterPrompts = pending.slice(index + 1).filter(p => p.sessionId === sessionId && p.text === text)
-        return pending.filter((_p, i) => i !== index)
-      })
-      if (matched) {
-        if (storedBy.get(text)?.count === count) storedBy.set(text, { count, receiptId: matched.id })
-        const arrivedAt = matched.pressedAt
-        await update($, LAST_ACTIONS, actions => {
-          const arrived = arrivedAt === null ? actions : withArrival(actions, text, arrivedAt, matched?.id)
-          return laterPrompts.reduce(
-            (current, pending) =>
-              pending.pressedAt === null ? current : withUnconfirmed(current, text, pending.pressedAt, pending.id),
-            arrived,
-          )
-        })
-        void publishStatus($)
-      } else {
-        await update($, LAST_ACTIONS, actions => withUnconfirmed(actions, text))
-        void publishStatus($)
-      }
+      const count = noteStored(text)
+      const notes = await notePrompt($, text, current => arrived(current, text, count))
+      if (notes.length > 0) await appendContext($, notes)
 
-      return r
+      return next(e)
     },
   )
 
@@ -2979,7 +2582,7 @@ export const register: Register = on => {
     const row = readCommandRow(messageText(e.message))
     if (!row) return r
     const line = commandRowLine(row)
-    if (line) notePerson(line)
+    if (line) await notePerson($, line)
     if (row.kind === 'shell') {
       shellCommand = row.command
     } else if (row.kind === 'output') {
@@ -2987,7 +2590,7 @@ export const register: Register = on => {
       // task here.
       if (shellCommand && !row.stderr) await closeTasksRunBy($, shellCommand)
       shellCommand = null
-    } else if (row.name === 'login' && (await read($, STOP))?.kind === 'sign-in') {
+    } else if (row.name === 'login' && (await read($, SESSION)).stop?.kind === 'sign-in') {
       await setStop($, null)
     }
 
@@ -4503,7 +4106,7 @@ export const register: Register = on => {
                 {d.ask}
               </Text>,
               <Text wrap="wrap" color={pal.age}>
-                {settledLabel(outcomeText(d), d.delivery)}
+                {settledLabel(outcomeLabel(d), d.delivery)}
               </Text>,
               refusedUndo(d),
             ],
@@ -4517,7 +4120,7 @@ export const register: Register = on => {
                   {d.ask}
                 </Text>
                 <Text wrap="wrap" color={pal.age}>
-                  {settledLabel(outcomeText(d), d.delivery)}
+                  {settledLabel(outcomeLabel(d), d.delivery)}
                 </Text>
                 {refusedUndo(d)}
               </Box>
@@ -4840,6 +4443,7 @@ export const register: Register = on => {
           at: f.closedAt,
           how: f.how,
           outcome: f.outcome,
+          askedAs: f.askedAs,
           delivery: f.delivery,
         }))
         return section([
