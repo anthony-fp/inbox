@@ -3063,11 +3063,17 @@ export const register: Register = on => {
           return { key: a.key, label, width: label.length / DESKTOP_CHARS_PER_CELL + 0.5 }
         }),
         gap: 1.5,
+        fallbackColumns: listColumns - DESKTOP_MARK_CELLS - DESKTOP_SIDE_CELLS - 1,
         isGuarded: isOpenGuarded,
         colors: { muted: pal.muted, hover: null },
       }
 
-      return <elements.Client key={`links-${rowId}`} module="./links-client.tsx" props={props} />
+      // A Client takes no flexShrink or minWidth, so this Box gives it the room left on its line.
+      return (
+        <Box flexGrow={1} flexShrink={1} minWidth={0}>
+          <elements.Client key={`links-${rowId}`} module="./links-client.tsx" width="100%" props={props} />
+        </Box>
+      )
     }
     const keyRow = (rowId: string, keys: KeyAction[], more: KeyAction[] = []) => (
       <Box
@@ -3404,7 +3410,7 @@ export const register: Register = on => {
             </Box>
           ) : null}
         </Box>
-        <Box flexDirection="column" flexShrink={1} flexGrow={1}>
+        <Box flexDirection="column" flexShrink={1} flexGrow={1} minWidth={0}>
           {children}
         </Box>
         <Box minWidth={DESKTOP_SIDE_CELLS} flexShrink={0} flexDirection="row" justifyContent="flex-end" paddingLeft={1}>
@@ -3496,7 +3502,7 @@ export const register: Register = on => {
         <Box flexDirection="column" marginTop={blankLine}>
           {isTyping ? (
             look === 'desktop' ? (
-              <Box flexDirection="row" alignItems="center" columnGap={space.buttonGap}>
+              <Box flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={space.buttonGap} rowGap={1}>
                 <Box flexShrink={1}>{field}</Box>
                 {/* The desktop Input supplies its own Send button. */}
                 {keyRow(
