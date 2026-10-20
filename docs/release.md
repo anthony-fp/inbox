@@ -10,7 +10,7 @@ Send each command's output to a log file and check its exit status. Each must ex
 | --- | --- |
 | `./scripts/check.sh` | Formatting, plugin validation, structure, type checks, all test suites, and that the Codex and omp bundles match their sources. |
 | `./scripts/eval.sh` | The inbox model on every case in `evals/cases.json`, on Sonnet and on Codex. |
-| `./scripts/eval.sh --suite agent --agent all` | How Claude, Codex and omp use the `record` and `close` tools under the inbox's guidance, on every case in `evals/agent-cases.json`. The omp runs need `OPENROUTER_API_KEY` in the environment. |
+| `./scripts/eval.sh --suite agent --agent all` | How Claude, Codex and omp use the `record` and `close` tools under the inbox's guidance, on every case in `evals/agent-cases.json`. The omp runs need a Claude sign-in in omp: run `omp`, then `/login`. |
 
 The evals call models, so they take a while and use your plans.
 

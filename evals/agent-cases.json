@@ -34,7 +34,7 @@
         "count": 0
       },
       {
-        "reply": "(ran|passed|not run|n.t run|haven.t)[\\s\\S]*test|test[\\s\\S]*(ran|passed|not run|n.t run|haven.t)"
+        "reply": "(ran|pass(es|ed)?|not run|n.t run|haven.t|hasn.t)[\\s\\S]*test|test[\\s\\S]*(ran|pass(es|ed)?|not run|n.t run|haven.t|hasn.t)"
       }
     ]
   },

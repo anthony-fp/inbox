@@ -12,14 +12,15 @@
 # after a change to guidanceText, a tool description or a tool answer.
 #
 # Needs the claude CLI for Sonnet and Opus, the codex CLI, or CODEX_CLI_PATH, for Codex, and the omp CLI and
-# OPENROUTER_API_KEY in the environment for omp.
+# a Claude sign-in in omp (run omp, then /login) for omp.
 #
 # Usage: ./scripts/eval.sh [--suite model|agent] [--agent claude|codex|omp|both|all]
 #                          [--claude-model opus|haiku|...] [--omp-model provider/model]
 #                          [--runs N] [--case name,name] [--out results.json]
 # --agent both runs claude and codex. --agent all runs claude, codex and omp.
 # --claude-model sets the model of the Claude agent in the agent suite. It defaults to opus.
-# --omp-model sets the model of the omp agent. It defaults to the newest Claude Opus on OpenRouter.
+# --omp-model sets the model of the omp agent. It defaults to Claude Opus 5.5, which omp lists from 18.12.3. A run
+# fails when omp runs another model, as it does for a model its catalog lacks.
 # Runs default to 8 for the model suite and 5 for the agent suite.
 
 set -eu

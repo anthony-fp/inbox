@@ -61,8 +61,7 @@ type Call = { tool: string; args: Record<string, unknown>; result: string }
 
 const MIN = 0.75
 const PROBE = 'probe'
-/** The newest Claude Opus on OpenRouter in omp 18.1.17's model list, without the `-fast` and `:batch` variants. */
-const OMP_MODEL = 'openrouter/anthropic/claude-opus-5.5'
+const OMP_MODEL = 'anthropic/claude-opus-5-5'
 
 const { values } = parseArgs({
   options: {
@@ -96,6 +95,7 @@ const ompProbe = values['omp-probe'] ?? fileURLToPath(new URL('./omp-probe.mjs',
 const CODEX_EFFORT = 'medium'
 const CLAUDE_MODEL = values['claude-model']
 const OMP_RUN_MODEL = values['omp-model']
+const OMP_RUN_MODEL_ID = OMP_RUN_MODEL.split('/').at(-1)
 const TIMEOUT_MS = 300_000
 
 /**
@@ -349,7 +349,7 @@ async function ompIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome> {
       env: {
         PATH: process.env.PATH,
         HOME: home,
-        OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+        ANTHROPIC_OAUTH_TOKEN: ompToken,
         INBOX_EVAL_STATE: s.state,
         INBOX_EVAL_LOG: s.log,
         INBOX_EVAL_TOOLS: toolsFile,
@@ -373,13 +373,19 @@ async function ompIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome> {
   const lastAssistant = end?.messages?.findLast((m: { role: string }) => m.role === 'assistant')
   const failed =
     r.code !== 0 || !end || lastAssistant?.stopReason === 'error' || lastAssistant?.stopReason === 'aborted'
+  // omp runs the nearest model its catalog has when it lacks the one named, and says so only in each message.
+  const otherModel = events.find(
+    e => e.type === 'message_end' && e.message?.role === 'assistant' && e.message.model !== OMP_RUN_MODEL_ID,
+  )?.message.model
 
   return {
     reply,
     calls: s.calls(),
     error: failed
       ? `omp ${r.code === -1 ? 'timed out or was killed' : `exited ${r.code}`}${end ? '' : ' without agent_end'}: ${lastAssistant?.errorMessage ?? r.stderr.slice(0, 300)}`
-      : null,
+      : otherModel !== undefined
+        ? `omp ran ${otherModel}, not ${OMP_RUN_MODEL}`
+        : null,
   }
 }
 
@@ -457,10 +463,16 @@ async function assertNoInboxServer() {
   rmSync(probe.dir, { recursive: true, force: true })
 }
 
+/** The Claude sign-in of your own omp profile, which each run's empty `HOME` gets through its environment. */
+let ompToken = ''
+
 /** One trivial omp run, which fails when the session offers any tool besides the probe's, or any MCP server's. */
 async function assertOnlyOmpProbeSession() {
   if (!agents.includes('omp')) return
-  if (!process.env.OPENROUTER_API_KEY) throw new Error('The omp agent needs OPENROUTER_API_KEY in the environment.')
+  const token = await exec(['omp', 'token', 'anthropic'], { cwd: tmpdir(), env: process.env })
+  ompToken = token.stdout.trim()
+  if (token.code !== 0 || ompToken === '')
+    throw new Error(`The omp agent needs a Claude sign-in in omp (run omp, then /login):\n${token.stderr}`)
   const o = await runOmp({ name: 'preflight', about: '', prompt: 'Reply with the word ok.', checks: [] })
   if (o.error) throw new Error(`omp preflight failed: ${o.error}`)
 }
