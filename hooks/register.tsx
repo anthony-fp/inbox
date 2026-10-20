@@ -215,7 +215,7 @@ import {
   shortAgo,
 } from './view'
 import type { ActionEmphasis, ActionIcon, DrawnEntry, InboxView, ModLook, PlannedKey, RowView, RowWait } from './view'
-import { CLOSE_DESCRIPTION, CLOSE_SCHEMA, RECORD_SCHEMA, recordDescription, recordClose, recordItem } from './tools'
+import { agentTools, recordClose, recordItem } from './tools'
 import type { UndoProps } from './undo-client'
 import { closedGroups, followTo, isTabEmpty, listedRowIds, openRowIds, recordRows } from './arrivals'
 import { parseInline } from './inline'
@@ -2127,11 +2127,9 @@ async function initializeInbox($: EngineInterface) {
   const refused = () => {
     toolsRefused = true
   }
-  const recordText = recordDescription(CLAUDE_CODE)
   await Promise.all([
     registerInboxCommand($),
-    $.tool.register({ name: 'record', description: recordText, inputSchema: RECORD_SCHEMA }).catch(refused),
-    $.tool.register({ name: 'close', description: CLOSE_DESCRIPTION, inputSchema: CLOSE_SCHEMA }).catch(refused),
+    ...agentTools(CLAUDE_CODE).map(tool => $.tool.register(tool).catch(refused)),
   ])
   // A pane kept across a hot reload is already drawn.
   if (toolsRefused) await redrawPane($)

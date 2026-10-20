@@ -2,14 +2,7 @@ import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
 
 import { EMPTY } from '../hooks/ledger'
 import { guidanceText, promptNotes, TOLD_NOTHING } from '../hooks/model-text'
-import {
-  CLOSE_DESCRIPTION,
-  CLOSE_SCHEMA,
-  RECORD_SCHEMA,
-  recordClose,
-  recordDescription,
-  recordItem,
-} from '../hooks/tools'
+import { agentTools, recordClose, recordItem } from '../hooks/tools'
 import { OMP } from '../omp/src/texts'
 import type { Ledger } from '../types'
 
@@ -105,6 +98,5 @@ export default function (pi: Pi): void {
       },
     })
   }
-  tool('record', recordDescription(OMP), RECORD_SCHEMA)
-  tool('close', CLOSE_DESCRIPTION, CLOSE_SCHEMA)
+  for (const { name, description, inputSchema } of agentTools(OMP)) tool(name, description, inputSchema)
 }

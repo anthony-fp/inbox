@@ -4,14 +4,7 @@ import { parseArgs } from 'node:util'
 
 import { EMPTY } from '../hooks/ledger'
 import { CLAUDE_CODE } from '../hooks/model-text'
-import {
-  CLOSE_DESCRIPTION,
-  CLOSE_SCHEMA,
-  RECORD_SCHEMA,
-  recordClose,
-  recordDescription,
-  recordItem,
-} from '../hooks/tools'
+import { agentTools, recordClose, recordItem } from '../hooks/tools'
 import { CODEX } from '../codex/src/texts'
 import type { Ledger } from '../types'
 
@@ -20,10 +13,7 @@ const state: { agent: 'claude' | 'codex'; ledger: Partial<Ledger> } = JSON.parse
 const host = state.agent === 'codex' ? CODEX : CLAUDE_CODE
 let ledger = { ...EMPTY, ...state.ledger } as Ledger
 
-const TOOLS = [
-  { name: 'record', description: recordDescription(host), inputSchema: RECORD_SCHEMA },
-  { name: 'close', description: CLOSE_DESCRIPTION, inputSchema: CLOSE_SCHEMA },
-]
+const TOOLS = agentTools(host)
 
 function send(id: unknown, result: unknown) {
   process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id, result })}\n`)

@@ -8,7 +8,7 @@ import { isDismissing, isTracked } from '../../hooks/pr-tab'
 import type { PrPress } from '../../hooks/pr-tab'
 import { demoAfterPress, demoTurns, noteText, openTarget } from '../../hooks/presses'
 import type { PathProbe, RowPress } from '../../hooks/presses'
-import { CLOSE_DESCRIPTION, CLOSE_SCHEMA, RECORD_SCHEMA, recordDescription } from '../../hooks/tools'
+import { agentTools } from '../../hooks/tools'
 import { noteToolCall, viewOf } from './core'
 import type { TabView } from './core'
 import { demoState } from './demo'
@@ -46,8 +46,7 @@ function viewsStillShown(
 }
 
 const toolsFor = (uri: string) => [
-  { name: 'record', description: recordDescription(CODEX), inputSchema: RECORD_SCHEMA },
-  { name: 'close', description: CLOSE_DESCRIPTION, inputSchema: CLOSE_SCHEMA },
+  ...agentTools(CODEX),
   // No resourceUri: Codex mounts every model-called MCP App inline in the transcript.
   { name: 'inbox', description: INBOX_DESCRIPTION, inputSchema: { type: 'object', properties: {} } },
   {

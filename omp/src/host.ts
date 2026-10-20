@@ -22,7 +22,7 @@ import {
   wakeForDone,
 } from '../../hooks/session-host'
 import type { PressOutcome, SessionHost } from '../../hooks/session-host'
-import { CLOSE_DESCRIPTION, CLOSE_SCHEMA, RECORD_SCHEMA, recordDescription } from '../../hooks/tools'
+import { agentTools } from '../../hooks/tools'
 import { DARK_TONES, LIGHT_TONES } from '../../hooks/tones'
 import { clip } from '../../hooks/text'
 import { NO_HOLDS, RESUME_TEXT, SETTLED_MS } from '../../hooks/view'
@@ -549,8 +549,7 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
       },
     })
   }
-  tool('record', recordDescription(OMP), RECORD_SCHEMA)
-  tool('close', CLOSE_DESCRIPTION, CLOSE_SCHEMA)
+  for (const { name, description, inputSchema } of agentTools(OMP)) tool(name, description, inputSchema)
 
   const modelNameOf = (ctx: ExtensionContext) => {
     const model = inboxModel(ctx)

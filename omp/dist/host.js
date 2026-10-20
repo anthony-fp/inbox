@@ -2621,6 +2621,12 @@ function recordDescription(host) {
 Do not record rhetorical questions, offers to continue when continuing is the default, FYIs, or invitations to look at finished work.`;
 }
 var CLOSE_DESCRIPTION = `Close an open item or finding by its id, such as i35 or f12, as listed in the latest "inbox:" text beside the user's prompt. Pass the user's answer when their message answered it, and a reason otherwise.`;
+function agentTools(host) {
+  return [
+    { name: "record", description: recordDescription(host), inputSchema: RECORD_SCHEMA },
+    { name: "close", description: CLOSE_DESCRIPTION, inputSchema: CLOSE_SCHEMA }
+  ];
+}
 function cut(value, max) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
@@ -4968,8 +4974,8 @@ function createInbox(pi, deps = defaultDeps) {
       }
     });
   };
-  tool("record", recordDescription(OMP), RECORD_SCHEMA);
-  tool("close", CLOSE_DESCRIPTION, CLOSE_SCHEMA);
+  for (const { name, description, inputSchema } of agentTools(OMP))
+    tool(name, description, inputSchema);
   const modelNameOf = (ctx) => {
     const model = inboxModel(ctx);
     return model ? model.name ?? model.id : null;

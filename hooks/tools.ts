@@ -4,7 +4,7 @@ import type { Closed, Ledger } from '../types'
 
 const NAME_BY_CONTENT = 'Name it by what it says, never by its id.'
 
-export const RECORD_SCHEMA = {
+const RECORD_SCHEMA = {
   type: 'object',
   properties: {
     kind: {
@@ -49,7 +49,7 @@ export const RECORD_SCHEMA = {
   required: ['kind'],
 }
 
-export const CLOSE_SCHEMA = {
+const CLOSE_SCHEMA = {
   type: 'object',
   properties: {
     id: { type: 'string', description: 'The id of the open item or finding, such as i35 or f32.' },
@@ -65,7 +65,7 @@ export const CLOSE_SCHEMA = {
   required: ['id'],
 }
 
-export function recordDescription(host: Host): string {
+function recordDescription(host: Host): string {
   return `Record something the user must see in ${host.surface}, and still say it in your reply. Use it in the turn you raise it, once for each thing.
 - question: a decision, approval or piece of information only the user has, which you need before you go on. Give options, and rec when you recommend one. This includes an act you hold until they say so, such as "say when you want those committed".
 - task: a step only the user can do, such as signing in or running a command with their password. Put the commands, files and links in steps.
@@ -73,7 +73,17 @@ export function recordDescription(host: Host): string {
 Do not record rhetorical questions, offers to continue when continuing is the default, FYIs, or invitations to look at finished work.`
 }
 
-export const CLOSE_DESCRIPTION = `Close an open item or finding by its id, such as i35 or f12, as listed in the latest "inbox:" text beside the user's prompt. Pass the user's answer when their message answered it, and a reason otherwise.`
+const CLOSE_DESCRIPTION = `Close an open item or finding by its id, such as i35 or f12, as listed in the latest "inbox:" text beside the user's prompt. Pass the user's answer when their message answered it, and a reason otherwise.`
+
+/** The tools the agent calls. A host registers these through its own API and answers each call itself. */
+export function agentTools(
+  host: Host,
+): { name: 'record' | 'close'; description: string; inputSchema: Record<string, unknown> }[] {
+  return [
+    { name: 'record', description: recordDescription(host), inputSchema: RECORD_SCHEMA },
+    { name: 'close', description: CLOSE_DESCRIPTION, inputSchema: CLOSE_SCHEMA },
+  ]
+}
 
 function cut(value: unknown, max: number): string {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''

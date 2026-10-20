@@ -22,7 +22,7 @@ Every feature works the same way for the person in every client, unless a host c
 ## Steps
 
 1. **Parity record and its check.** Add `hooks/clients.ts` with all three hosts and the check. Fix the drift in `docs/looks.md` and `docs/plans/omp-look.md`.
-2. **One list for the `record` and `close` tools.** Export their name, description and schema once in `hooks/tools.ts`. Each host keeps its own registration. Run `./scripts/eval.sh --suite agent --agent all`.
+2. **One list for the `record` and `close` tools.** Built: `agentTools(host)` in `hooks/tools.ts` returns each tool's name, description and schema. The mod, Codex, omp and both eval probes build their lists from it, and each keeps its own registration and handlers. The names, descriptions and schemas each agent receives are unchanged. Still to run: `./scripts/eval.sh --suite agent --agent all`.
 3. **Shell output in every host.** One shared function in `hooks/session.ts` reads a command's output for local URLs and PR links. The mod calls it from its tool-call handler, Codex from the rollout at Stop, and omp from `tool_result`.
 4. **Share `flattenConversation`.** Move the transcript flattening into a shared module, once a second host has a catch-up.
 5. **Run `runSessionScript` against Codex storage.** Add a Codex spec beside `omp/tests/session.spec.ts`.
