@@ -48,9 +48,16 @@ export const CLIENTS: Record<ClientId, Client> = {
   },
   codex: {
     support: {
-      'catch-up': { kind: 'full' },
+      'catch-up': {
+        kind: 'different',
+        reason:
+          'Codex runs no hook when a chat is opened, so a resumed chat catches up at the hook its next message runs, not when it is opened.',
+      },
       'failed-update-recovery': { kind: 'full' },
-      'ledger-behind-state': { kind: 'full' },
+      'ledger-behind-state': {
+        kind: 'different',
+        reason: 'A resumed chat is marked behind at its next hook, since Codex runs no hook when a chat is opened.',
+      },
       'dialog-outcome': {
         kind: 'different',
         reason:
@@ -72,7 +79,11 @@ export const CLIENTS: Record<ClientId, Client> = {
         reason:
           'The maintainer chose to keep each host rule. The mod opens a link with any scheme. Codex opens only https links and treats anything else as a path.',
       },
-      'fork-ledger': { kind: 'full' },
+      'fork-ledger': {
+        kind: 'different',
+        reason:
+          "Codex runs no hook when a chat is opened, so a fork takes its parent's ledger at the hook its first message runs.",
+      },
       'band-and-stop-rows': {
         kind: 'unsupported',
         reason: 'Codex has no line above its prompt, and shows no stops.',
