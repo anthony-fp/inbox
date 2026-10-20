@@ -365,6 +365,17 @@ describe('applyUpdate', () => {
     expect(both.items[0]).toMatchObject({ id: 'i1', options: ['hello.mjs', 'hello.mts'], rec: 'hello.mjs' })
   })
 
+  test('questions in the same frame from one batch are all added, and a later turn restating one is not', () => {
+    const question = (ask: string) => ({ kind: 'question' as const, ask, options: [], rec: null, helps: [] })
+    const license = addAgentItem(EMPTY, question('Which license do you prefer for greet?'), 1).ledger
+    const both = addAgentItem(license, question('Which minimum Node version do you prefer for greet?'), 2)
+    expect(both.is).toBe('added')
+    expect(addAgentItem({ ...both.ledger, turn: 1 }, question('Which license should greet use?'), 3).is).toBe('open')
+    const reply =
+      'NEW: decide | - | Which license do you prefer for greet? | MIT / Apache-2.0 | -\nNEW: decide | - | Which minimum Node version do you prefer for greet? | 20 / 18 | -'
+    expect(applyUpdate(EMPTY, parseReply(reply)!, 1, 1).items.length).toBe(2)
+  })
+
   test('does not add an item that is already open', () => {
     const first = applyUpdate(EMPTY, parseReply(REPLY)!, 1, 1)
     const again = applyUpdate(first, parseReply('NEW: decide | 1 | rename greet.mjs to hello.mjs | - | -')!, 2, 2)

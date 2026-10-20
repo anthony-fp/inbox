@@ -382,9 +382,21 @@ function sameAsk(a: string, b: string): boolean {
   return norm(a) !== '' && norm(a) === norm(b)
 }
 
-function matchOpen(items: Pick<Item, 'id' | 'kind' | 'ask'>[], a: Update['added'][number]): number {
+/**
+ * The open item `a` repeats. Items in `sameBatch` came from the same writer and turn as `a` and count as distinct
+ * asks, so they match only on the same words or label: "Which license do you prefer?" and "Which Node version do you
+ * prefer?" from one dialog are two questions.
+ */
+function matchOpen(
+  items: Pick<Item, 'id' | 'kind' | 'ask'>[],
+  a: Update['added'][number],
+  sameBatch: ReadonlySet<string> = new Set(),
+): number {
   return items.findIndex(
-    i => i.id === a.label || sameAsk(i.ask, a.ask) || (i.kind === a.kind && restates(i.ask, a.ask)),
+    i =>
+      i.id === a.label ||
+      sameAsk(i.ask, a.ask) ||
+      (!sameBatch.has(i.id) && i.kind === a.kind && restates(i.ask, a.ask)),
   )
 }
 
@@ -603,7 +615,7 @@ export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number
       addedIds.push(null)
       continue
     }
-    const at = matchOpen(items, a)
+    const at = matchOpen(items, a, created)
     const restated = items[at]
     if (restated) {
       items[at] = { ...restated, helps: a.helps.reduce((all, h) => withHelp(all, h), restated.helps) }
@@ -725,7 +737,8 @@ export function addAgentItem(
   now: number,
 ): AgentItemResult {
   const candidate = { ...entry, label: null }
-  const open = matchOpen(ledger.items, candidate)
+  const recordedThisTurn = new Set(ledger.items.filter(i => i.turn === ledger.turn).map(i => i.id))
+  const open = matchOpen(ledger.items, candidate, recordedThisTurn)
   const openItem = ledger.items[open]
   if (openItem) return { ledger, is: 'open', id: openItem.id }
   const repeated = ledger.closed.findLast(c => c.how !== 'expired' && matchOpen([c], candidate) >= 0)

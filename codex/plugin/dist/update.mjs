@@ -305,9 +305,9 @@ function sameAsk(a, b) {
   const norm = (s) => words(s).join(" ");
   return norm(a) !== "" && norm(a) === norm(b);
 }
-function matchOpen(items, a) {
+function matchOpen(items, a, sameBatch = /* @__PURE__ */ new Set()) {
   return items.findIndex(
-    (i) => i.id === a.label || sameAsk(i.ask, a.ask) || i.kind === a.kind && restates(i.ask, a.ask)
+    (i) => i.id === a.label || sameAsk(i.ask, a.ask) || !sameBatch.has(i.id) && i.kind === a.kind && restates(i.ask, a.ask)
   );
 }
 function repeatsClosed(closed, a, since) {
@@ -422,7 +422,7 @@ function applyUpdate(ledger, u, now, turn, promptAt = now) {
       addedIds.push(null);
       continue;
     }
-    const at = matchOpen(items, a);
+    const at = matchOpen(items, a, created);
     const restated = items[at];
     if (restated) {
       items[at] = { ...restated, helps: a.helps.reduce((all, h) => withHelp(all, h), restated.helps) };

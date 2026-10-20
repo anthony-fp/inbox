@@ -656,8 +656,8 @@ function sameAsk(a, b) {
   const norm = (s) => words(s).join(" ");
   return norm(a) !== "" && norm(a) === norm(b);
 }
-function matchOpen(items, a) {
-  return items.findIndex((i) => i.id === a.label || sameAsk(i.ask, a.ask) || i.kind === a.kind && restates(i.ask, a.ask));
+function matchOpen(items, a, sameBatch = new Set) {
+  return items.findIndex((i) => i.id === a.label || sameAsk(i.ask, a.ask) || !sameBatch.has(i.id) && i.kind === a.kind && restates(i.ask, a.ask));
 }
 function repeatsClosed(closed, a, since) {
   const recent = closed.filter((c) => c.at >= since);
@@ -791,7 +791,7 @@ function applyUpdate(ledger, u, now, turn, promptAt = now) {
       addedIds.push(null);
       continue;
     }
-    const at = matchOpen(items, a);
+    const at = matchOpen(items, a, created);
     const restated = items[at];
     if (restated) {
       items[at] = { ...restated, helps: a.helps.reduce((all, h) => withHelp(all, h), restated.helps) };
@@ -880,7 +880,8 @@ function addFinding(ledger, finding) {
 }
 function addAgentItem(ledger, entry, now) {
   const candidate = { ...entry, label: null };
-  const open = matchOpen(ledger.items, candidate);
+  const recordedThisTurn = new Set(ledger.items.filter((i) => i.turn === ledger.turn).map((i) => i.id));
+  const open = matchOpen(ledger.items, candidate, recordedThisTurn);
   const openItem = ledger.items[open];
   if (openItem)
     return { ledger, is: "open", id: openItem.id };
