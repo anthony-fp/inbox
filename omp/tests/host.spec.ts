@@ -289,6 +289,27 @@ test('a turn with no reply text queues nothing', async () => {
   expect(state().turn.person).toBeNull()
 })
 
+test('a turn the person ended by dismissing an ask dialog reaches the inbox model with the dismissed question', async () => {
+  createInbox(pi(), deps())
+  await prompt('Pick a license')
+  const input = { questions: [{ question: 'MIT or Apache?', options: [{ label: 'MIT' }, { label: 'Apache' }] }] }
+  const cancelled = [{ type: 'text', text: 'Ask tool was cancelled by the user' }]
+  await call('tool_result', { toolName: 'ask', input, content: cancelled, isError: true })
+  await call('agent_end', {
+    type: 'agent_end',
+    messages: [
+      { role: 'assistant', content: [{ type: 'toolCall' }], stopReason: 'toolUse' },
+      { role: 'toolResult', toolName: 'ask', content: cancelled, isError: true },
+      { role: 'assistant', content: [], stopReason: 'aborted' },
+    ],
+  })
+  await settle()
+  expect(completions).toHaveLength(1)
+  expect(completions[0]!.prompt).toContain(
+    '"MIT or Apache?" (options: MIT / Apache); the user dismissed it without answering',
+  )
+})
+
 test('a failing inbox model marks the update failed, and the next turn retries the exchange', async () => {
   createInbox(pi(), deps())
   reply = new Error('offline')

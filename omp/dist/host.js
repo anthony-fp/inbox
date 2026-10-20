@@ -4842,6 +4842,10 @@ function askOutcome(event) {
     return { kind: "dismissed" };
   return { kind: details.timedOut ? "timed-out" : "answered", answer };
 }
+function isDismissedAsk(message) {
+  const m = message;
+  return m?.role === "toolResult" && m.toolName === "ask" && Array.isArray(m.content) && askOutcome({ content: m.content, isError: m.isError === true, details: m.details }).kind === "dismissed";
+}
 function conversationOf(entries) {
   const path = entries;
   const messages2 = path.slice(path.findLastIndex((e) => e.type === "reset_boundary") + 1).flatMap((e) => e.type === "message" && e.message ? [e.message] : []);
@@ -5159,7 +5163,11 @@ function createInbox(pi, deps = defaultDeps) {
     const last = lastAssistant(event.messages);
     const reply = last ? textOfBlocks(last.content) : "";
     const stop = await stopOf(last, deps.isUsageLimit, deps.now());
-    const written = await change(id, (s) => ({ ...endTurn(OMP, s, reply, openPanels.has(id)), stop })).catch(() => null);
+    const isDialogDismissed = event.messages.some(isDismissedAsk);
+    const written = await change(id, (s) => ({
+      ...endTurn(OMP, s, reply, openPanels.has(id), { queuesEmptyReply: isDialogDismissed }),
+      stop
+    })).catch(() => null);
     if (!written)
       return;
     const host = hostFor(ctx);

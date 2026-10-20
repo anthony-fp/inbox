@@ -280,6 +280,18 @@ function askOutcome(event: {
   return { kind: details.timedOut ? 'timed-out' : 'answered', answer }
 }
 
+/** Whether a message is the result of an ask dialog the person dismissed. */
+function isDismissedAsk(message: unknown): boolean {
+  const m = message as { role?: unknown; toolName?: unknown; content?: unknown; isError?: unknown; details?: unknown }
+
+  return (
+    m?.role === 'toolResult' &&
+    m.toolName === 'ask' &&
+    Array.isArray(m.content) &&
+    askOutcome({ content: m.content, isError: m.isError === true, details: m.details }).kind === 'dismissed'
+  )
+}
+
 type Entry = { type?: unknown; message?: unknown }
 
 type Message = {
@@ -679,7 +691,12 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
     const last = lastAssistant(event.messages)
     const reply = last ? textOfBlocks(last.content) : ''
     const stop = await stopOf(last, deps.isUsageLimit, deps.now())
-    const written = await change(id, s => ({ ...endTurn(OMP, s, reply, openPanels.has(id)), stop })).catch(() => null)
+    // Escape on the ask dialog aborts the turn, so it ends with no reply text.
+    const isDialogDismissed = event.messages.some(isDismissedAsk)
+    const written = await change(id, s => ({
+      ...endTurn(OMP, s, reply, openPanels.has(id), { queuesEmptyReply: isDialogDismissed }),
+      stop,
+    })).catch(() => null)
     if (!written) return
     const host = hostFor(ctx)
     if (needsUpdate(written)) deps.background(runUpdates(updateHostFor(ctx)))
