@@ -2,157 +2,142 @@
 
 Status: proposed. Nothing in it is built.
 
-The live pass in [release.md](../release.md) step 4 is run by hand in a macOS VM, one look at a time. It takes about three hours, and it gets longer with each client the inbox adds. This plan makes it a script: one list of rows, a driver for each look, and a checker that decides each row from evidence. It also moves the checks that do not need a real app out of the VM.
+The live pass in [release.md](../release.md) step 4 is the last check before a release reaches people. Today it is run by hand in a macOS VM, one look at a time. This plan makes it trustworthy as the inbox adds clients, in two tiers:
+
+- **Tier 1, process.** Test the exact build that ships, installed the way people install it, and decide each check from recorded evidence. It needs no new tools, and it gates the next release.
+- **Tier 2, tools.** Turn the checks into data, script them for each look, and move what does not need a real app into the repo's tests.
+
+In this plan, a **check** is one line of the pass, such as Question or Dialog, and a **look** is one of the four places the inbox is drawn ([GLOSSARY.md](../../GLOSSARY.md)). A **candidate** is a commit that already holds the version bump and has not been tagged.
 
 ## What the pass misses now
 
-- **The build.** Each look is checked on whatever commit exists when its turn comes. The bump commit always comes after the pass, so no look is ever checked on the exact commit that ships.
-- **The install.** The pass loads the build from a plugin folder, or in omp with `-e`. People get the inbox from a marketplace, and most of them get 0.2.10 as an update from 0.2.9. That update is never tried.
-- **The model.** A new install of Claude Code in the VM runs Haiku. The agent's side of a row, such as recording a question, is checked on a smaller model than most people use.
-- **The verdict.** Whoever drives a row also writes its verdict. Nothing checks the verdict against the evidence.
-- **The machine.** Each run backs up the VM's saved state and restores it by hand afterwards. A missed restore leaks into the next run.
+- **The build.** Each look is checked on whatever commit exists when its turn comes. The bump comes after the pass, so no look is checked on the exact commit that ships.
+- **The install.** The pass loads the build from a plugin folder, or in omp with `-e`. People install from a marketplace: a new install takes `main`, and an existing one updates when the version changes. Neither path is tried.
+- **The model.** Claude Code in the test VM ran Haiku. The agent's side of a check, such as recording a question, was checked on a smaller model than the evals use.
+- **The verdict.** Whoever drives a check also writes its verdict, and the release owner reads only some captures.
+- **The machine.** Each run backs up the VM's saved state and restores it by hand.
 
-## Three layers
+## The two bugs the 0.2.10 pass found
 
-Each check runs in the cheapest place that can catch what it is for.
+Any design has to catch both. Today's checks would miss both on a rerun.
 
-| Layer | Checks | Runs | Exists now |
-| --- | --- | --- | --- |
-| 1. Drawing snapshots | What each look draws for each row state, from saved state, with no model and no app | On the host, in `check.sh` | Partly. omp's `render()` in `omp/src/panel.ts` returns text lines. The mod's tests mount trees with `$.ui.mount` but cannot print one. The Codex tab has only happy-dom tests. |
-| 2. Agent evals | Whether each agent records and closes as the guidance says | On the host, `./scripts/eval.sh` | Yes |
-| 3. Live pass | What only the real app shows: install and update, hooks, a press reaching the agent, saved state from the last release, layout in the app's own engine, and the app's own UI around the inbox | In VM clones, scripted | By hand |
+- **The desktop reply field's Discard button ran off the pane at the narrowest width.** It is the Claude app's own layout engine, so only the real app shows it. No check narrows the pane, and "Reply while closing" expects only that the row stays. An accessibility press on the clipped button still works, so pressing it proves nothing.
+- **A question dismissed in omp's dialog showed only after the next message.** omp cancels a dialog with this event order: `tool_result` (an error) → `turn_end` → `turn_start` → `message_end` (aborted) → `turn_end` → `agent_end`. The turn ends with no reply text, which the shared `endTurn` drops unless told otherwise. omp's list of checks in release.md leaves out Dialog. A check that reads the saved state after the next step would pass with the bug in place.
 
-Layer 1 does not replace layer 3. This release's pass found two bugs, and layer 1 would have caught neither:
+## Tier 1: process
 
-- **The desktop reply field's Discard button ran off the pane.** That is the Claude app's own layout engine at its narrowest pane. `$.ui.mount` does not run that engine. The desktop rows in layer 3 keep a capture at the narrowest pane, read against the row's expected result.
-- **A question dismissed in omp's dialog showed only after the next message.** That came from the order in which omp sends its events when a dialog is cancelled. It needs the real omp. A stand-in model can still drive it: the model only asks the question, and omp itself runs the cancel.
+1. **Push the candidate.** Commit the bump, the rebuilt bundles and a passing `check.sh` on a branch, push the branch, and leave `main` and the tag alone.
+2. **Run every eval on the candidate:** `./scripts/eval.sh`, then `./scripts/eval.sh --suite agent --agent all`. Keep their results and model names.
+3. **Install from GitHub at the candidate's branch** where the agent allows it. `codex plugin marketplace add` takes `owner/repo@ref`. Where an agent takes no ref, the pass names the source type it used. The probes below settle Claude Code and omp.
+4. **Prove the build.** The first check in each look compares the installed files' sha256 with `git show <candidate>:<path>`, and records the model name from the transcript and the app and engine versions. Each look repeats it after the app restarts, since the ChatGPT app reinstalls the plugin from GitHub when it opens.
+5. **Run each look on its agent's default sign-in**, with the model set to the one the evals use.
+6. **Clone the VM for each run** from a base image, and delete the clone afterwards. Stop only the VMs the run started, by process id.
+7. **Decide from evidence.** A check passes only with the evidence its expectation names. A check with no evidence fails. The release owner reads every capture a check depends on.
+8. **Promote the same commit.** After the pass, fast-forward `main` to the candidate, tag it and publish. Then run a short smoke in a fresh clone through the real update from GitHub.
 
-## Repeatable model turns
+Any change after the pass makes a new candidate and a new run.
 
-A row such as Finding needs an agent turn. A real model answers differently each run, costs plan usage, and takes a minute. A stand-in model server returns a scripted answer for each row instead. It replaces only the model: the agent, the app and the inbox stay real.
+## Tier 2: tools
 
-The server answers two kinds of call:
+### Where each check runs
 
-- **The agent's turns.** For example: "call `record` with this finding, then reply with this text".
-- **The inbox model's calls.** After each reply, the inbox asks a model to update its rows. That is `$.model.complete` in the mod, `codex exec` in Codex and the `inboxModel` in omp. They go through the same model endpoint, so the server must answer them too, in the format the inbox expects.
-
-Each agent speaks a different protocol, and whether each one accepts a stand-in is the open question this plan depends on:
-
-| Agent | How it would reach the server | Known |
+| Layer | Catches | Runs |
 | --- | --- | --- |
-| Claude Code in a terminal | `ANTHROPIC_BASE_URL`, with an API key in its own config folder | Documented, not yet tried here |
-| Claude Code in the Claude app | Signed in through the app | Unknown |
-| Codex in the ChatGPT app | A custom model provider in `config.toml`, OpenAI Responses protocol | Unknown whether the app honors it |
-| omp | A custom provider | Unknown |
+| Drawing | What a look draws for a state: buttons, order, labels | `check.sh`. The mod's test kit returns a mounted tree as plain data with `drawn()`, and omp's `render()` in `omp/src/panel.ts` returns text lines. |
+| Host replay | Event order, timing and saved state in each host | `check.sh`. Sequences recorded from the real hosts replay through `omp/tests/host.spec.ts`, the Codex tests and `tests/session-fake-host.ts`. |
+| Agent evals | Whether each agent records and closes as the guidance says | `./scripts/eval.sh`, both suites |
+| Live pass | Install and update, the app's own layout, hooks, a press reaching the agent, and app UI around the inbox | VM clones |
 
-Where the probe fails, the fallback for that look is:
+The host replay layer catches the omp bug without a VM. Feed the six recorded events and assert that the dismissed question reaches the inbox model's prompt after `agent_end`, with no further event. Each layer's tests name the future failure they catch, as the repo's test rules require. There are no broad snapshots.
 
-- seed the inbox's saved state directly, for the rows about drawing and presses;
-- keep real model turns, on the model the evals use, for the rows that need the agent: Question, Finding, Dialog and Resume.
+The live pass still runs the same check in omp, since the event order belongs to omp and can change in its next release.
 
-Every look keeps one real-model turn in every run, so the wiring to a real model is checked even where the stand-in works.
+### Checks as data
 
-## A fresh VM for every run
-
-One base VM holds:
-
-- the apps signed in, and `gh` signed in;
-- a sample project whose GitHub remote has an open PR;
-- the previous release installed from its marketplace, as a person installs it;
-- at least four sessions with saved state in each agent.
-
-Each run clones the base (Tart clones are copy-on-write and take seconds), boots the clone, runs and deletes it. There is no backup and no restore. After each release, the base is rebuilt with that release as the new "previous release".
-
-A sign-in in the base expires eventually. Every run starts with a check row that each agent is signed in, so an expired sign-in fails in the first minute instead of halfway through.
-
-The harness stops only the VMs it started, by their process id. Other sessions use VMs on the same Mac.
-
-## Parallel runs
-
-macOS runs at most two macOS VMs at a time on one Mac, and other projects use VMs too. When two are free, the run splits:
-
-- **Clone A: terminal and omp, side by side.** Each runs in its own tmux session with its own config folder or `HOME`. Neither needs the screen.
-- **Clone B: the Claude app, then the ChatGPT app.** Their drivers post real input events, so only one app can have them at a time. The release doc already says to quit the other app.
-
-When only one VM is free, the clones run one after the other.
-
-The same terminal and omp drivers also run on the host, with their own config folder and the stand-in model, as `mods/scripts/live.sh` in petekp/claude-code-setup does today. That is a fast loop while building. The release pass itself stays in the VM, so it cannot touch a real inbox.
-
-## Rows as data
-
-The rows in release.md step 4 become one data file, `scripts/release-pass/rows.json`. Each row names:
+The checks become one file, `scripts/release-pass/checks.json`. The table in release.md is generated from it, so there is one source. Each check names:
 
 - the looks it runs in;
-- its setup: seeded state, scripted turns, or a real turn;
-- its steps, in terms of the inbox, such as "press Explain on the finding";
-- what it expects: a condition on the saved state, text on screen, or a capture to read;
-- the moments to capture.
+- its setup;
+- its steps, in the inbox's terms, such as "press Explain on the finding";
+- its expectation, as conditions the checker can test: saved state, screen text, an accessibility frame, a transcript line, or a deadline such as "within 10 s of Escape, with no further input";
+- the captures to keep.
 
-`check.sh` checks that the table in release.md and the rows file list the same rows. The omp-only rows and the Codex session-pruning check go in the file too.
+New and changed checks:
 
-Each look has a driver that turns the steps into input:
+- **Identity:** installed files, model and versions, as in Tier 1.
+- **Dialog in omp:** a real `ask` dialog, cancelled with Escape. The dismissed question must be in the inbox within the deadline, before any other message.
+- **Narrow pane on desktop:** drag the pane to its narrowest, open a reply field, and assert that every control's accessibility frame lies inside the pane's frame. Then click Discard where it is drawn. Repeat at the default width.
+- **Reply while closing:** typed through a click on the field and real keystrokes, not an accessibility action.
+- **PR press:** press an action on a PR row, beyond the empty and missing-`gh` states.
+- **Missing `gh`:** rename the binary, then force a fresh fetch. A reopened tab can show cached PRs.
+- **Agent replies:** a search of every transcript for an inbox id.
+- **First install:** each agent from nothing. omp has no earlier release, so 0.2.10 is omp's first install.
 
-| Look | Input | Reads the screen with |
+Codex's row animations stay in the local-page measurement that AGENTS.md describes. This pass does not time 200 ms moves.
+
+### Drivers
+
+| Look | Input | Reads |
 | --- | --- | --- |
-| Terminal | tmux keys, and mouse clicks as live.sh sends them | `tmux capture-pane` text |
+| Terminal | tmux keys, started from a Terminal window so Claude Code can read its keychain sign-in | `tmux capture-pane` text |
 | omp | tmux keys | `tmux capture-pane` text |
-| Claude app | Accessibility: press a button by its label, without moving the pointer. Pointer events for the inbox's tab bar, which shows no accessibility buttons. | The accessibility tree's text, and window captures |
-| ChatGPT app | Accessibility if the Inbox tab's web content shows in the tree; pointer events if not | Same, if exposed |
+| Claude app | Accessibility presses by label, pointer events for the tab bar and anything drawn in a `Client`, real keystrokes for typing, and a drag for the pane width | The accessibility tree's text and frames, and window captures |
+| ChatGPT app | Accessibility, if the Inbox tab shows in the tree; pointer events if not | Same, if it shows |
 
-Finding a button by its label survives app updates that move things. Coordinates do not.
+In the clone, each driver uses the VM user's real config folders, where the previous release and its saved sessions live. Window captures come from the host, with the clone's window on screen, and the driver moves the pointer before each capture, since an idle VM screen stops repainting.
 
-Adding a client means writing its driver and marking the rows it runs.
+### Real model turns, not a stand-in
 
-## Evidence and verdicts
+Every check that needs an agent turn uses a real one, on the evals' model. A scripted stand-in model cannot be pointed at all four agents:
 
-For each row, the driver keeps:
+- Codex's inbox model runs `codex exec --ignore-user-config` (`codex/src/update.ts`), so a custom provider never reaches it.
+- omp picks a Sonnet from the signed-in `anthropic` provider first (`inboxModel` in `omp/src/host.ts`).
+- Claude Code reaches a stand-in only by an API key, which changes the sign-in path that mods behave differently under.
 
-- the saved state before and after;
-- the screen text;
-- timestamped captures;
-- the agent's transcript.
+A real turn varies. A check that fails is run again at most twice. Every attempt is kept, and a check that passes only on a retry is marked flaky and goes to the release owner. It is never reported as a plain pass.
 
-The checker decides each row from that evidence, not the driver. A row whose condition is on saved state or screen text passes or fails mechanically. A row that needs eyes, such as layout at the narrowest pane, goes to a reviewer that did not drive it. The reviewer reads the capture against the row's expected result and names the capture in its verdict. A row with no evidence fails. The report lists each row's verdict, its evidence, and the states nobody saw.
+A stand-in model server is still useful for the drivers' own fast loop on the host, as `mods/scripts/live.sh` in petekp/claude-code-setup runs Claude Code on a placeholder key. It never decides a release.
 
-The run's folder stays outside the repo, since captures can show private data.
+### The base image
 
-## Release order
+A script in the repo builds the base image, so it can be rebuilt:
 
-The bump moves before the pass:
+- install the apps and `gh`;
+- record each app's version;
+- install the previous release from its marketplace;
+- create saved sessions in each agent from a fixed set of prompts.
 
-1. Commit the bump on a candidate branch: the five version fields, the rebuilt bundles and `check.sh`.
-2. Run the evals and the scripted pass on that commit, installed in each agent as an update from the previous release.
-3. Write the release notes, push the same commit, tag it and publish.
+Signing in stays by hand. Every run records the app versions it saw, and the identity check fails if an app updated itself mid-run.
 
-The pass then runs on the exact commit that ships. Any change after it means a new candidate and a new run.
+macOS runs at most two macOS VMs at a time, and other projects share them. With two free, one clone runs terminal and omp while the other runs the Claude app, then the ChatGPT app. With one free, the looks run one after another.
 
 ## Steps
 
-1. **Probes**, before anything is built. Each answer picks a path above.
-   - Does the stand-in model server work in each agent, including the inbox model's call?
-   - Do the Claude app's inbox pane and the ChatGPT app's Inbox tab show in the accessibility tree inside the VM?
-   - Does each agent update from 0.2.9 to a local candidate the way it updates from GitHub?
-   - How long does a clone take, and how much disk does a run use?
-2. **The base VM and the clone scripts.**
-3. **The rows file, the checker, and the terminal and omp drivers.** Run them on the host, then in a clone.
-4. **The 0.2.10 pass.** Terminal and omp are scripted. The Claude app and the ChatGPT app run by hand under the same rules: marketplace update, the evals' model, and a reviewer reads every capture.
-5. **The Claude app and ChatGPT app drivers.**
-6. **Layer 1.** Snapshot tests for omp's text lines, a printer for the mod's trees, and the Codex tab in a headless browser. Add them to `check.sh`.
-7. **release.md** points at the harness and the new order.
+1. **Tier 1 for 0.2.10.** The pass is by hand, under Tier 1's rules, with the new Dialog and narrow-pane checks.
+2. **Probes:**
+   - Can Claude Code and omp install from a git branch?
+   - Does the ChatGPT app's Inbox tab show in the accessibility tree?
+   - Can the driver drag the desktop pane's divider?
+   - What does a clone cost in time and disk?
+   - Does a clone keep its sign-ins?
+3. **Host replay tests** for the omp cancel order, and for the other event orders the hosts depend on.
+4. **The checks file and the generated release.md table.**
+5. **The terminal and omp drivers, and the checker.**
+6. **The base-image script and the clone scripts.**
+7. **The Claude app and ChatGPT app drivers.**
 
 ## What needs approval
 
 This is release tooling, so each piece needs Pete's yes before it is built:
 
-- a new folder, `scripts/release-pass/`, with the rows file, the drivers, the checker and the clone scripts;
-- the stand-in model server;
-- additions to `check.sh`: the rows-file check and the layer 1 snapshots;
-- release.md: the new order and the harness steps;
-- the base VM image, which lives outside the repo.
+- release.md: the candidate branch, the new order, the generated table and the new checks;
+- AGENTS.md: "before you bump" becomes "on the candidate";
+- `scripts/release-pass/`: the checks file, drivers, checker, base-image script and clone scripts;
+- `check.sh`: the generated-table check and the host replay tests;
+- pushing candidate branches to GitHub.
 
-## Costs and risks
+## Risks
 
-- **Building.** Several days of agent work. The probes come first, so nothing is built on a stand-in that an app ignores.
-- **Upkeep.** The Claude app updates itself, and an update can break a driver. Labels hold up better than coordinates, but a broken driver still blocks a release until it is fixed.
-- **Drift.** Scripted turns show what the inbox does with a given turn, not what a real model would do. The real-model turn in every look and the evals cover that.
-- **Shared VMs.** Two at a time on one Mac, shared with other projects, so a run sometimes waits.
+- **Upkeep.** The Claude app and Claude Code update themselves. An update can break a driver, and a broken driver blocks a release until it is fixed.
+- **Real turns.** Checks that need the agent stay slower and less certain than scripted ones. The evals hold the line on agent behavior, and the pass checks that the wiring works.
+- **Shared VMs.** A run sometimes waits for a free VM.
