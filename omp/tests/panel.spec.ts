@@ -8,6 +8,7 @@ import {
   threadActions,
   threadSentIn,
 } from '../../hooks/pr-tab'
+import { version } from '../package.json'
 import { failingChecks, waitingThreads } from '../../hooks/prs'
 import type { LastAction, Stop } from '../../types'
 import { closeItem } from '../../hooks/ledger'
@@ -433,6 +434,16 @@ test('the footer puts the inbox model on its own line when it does not fit besid
   expect(named).toContain('inbox model Claude Sonnet 4.5')
   const [, none] = lastLines(screenOf({ modelName: null }), 48)
   expect(none).toContain('no inbox model: set @inbox')
+})
+
+test('the footer shows the version after the inbox model, beside the hints or on the model’s own line', () => {
+  const lastLines = (width: number) => drawn(screenOf(), INITIAL_UI, width).map(strip).slice(-2)
+  const [, wide] = lastLines(140)
+  expect(wide).toContain('tab switch')
+  expect(wide?.trimEnd()).toEndWith(`inbox model Claude Sonnet 4.5  v${version}`)
+  const [hints, named] = lastLines(60)
+  expect(hints).not.toContain(`v${version}`)
+  expect(named?.trimEnd()).toEndWith(`inbox model Claude Sonnet 4.5  v${version}`)
 })
 
 test('the demo says its presses send nothing', () => {
