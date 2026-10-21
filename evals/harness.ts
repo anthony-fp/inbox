@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 /** The repo: `scripts/eval.sh` names it, since the runners run as bundles in a temporary folder. */
@@ -96,6 +96,60 @@ export function writeResults(out: string | undefined, about: Provenance, results
   return path
 }
 
+/** A case's pass count from a run long enough to judge later runs by, keyed `<agent> <case>`. */
+export type Baseline = { passed: number; runs: number; commit: string; date: string; models: string[] }
+export type Baselines = Record<string, Baseline>
+
+const BASELINES = join(ROOT, 'evals', 'baselines.json')
+/** A later run is below a baseline when a pass count that low would happen less often than this by chance. */
+const BELOW = 0.05
+
+export function readBaselines(suite: string): Baselines {
+  if (!existsSync(BASELINES)) return {}
+  const all: Record<string, Baselines> = JSON.parse(readFileSync(BASELINES, 'utf8'))
+
+  return all[suite] ?? {}
+}
+
+/** Saves each case's counts from these results as its baseline, replacing the case's earlier one. */
+export function writeBaselines(suite: string, about: Provenance, results: Run[]) {
+  const all: Record<string, Baselines> = existsSync(BASELINES) ? JSON.parse(readFileSync(BASELINES, 'utf8')) : {}
+  const mine = { ...all[suite] }
+  for (const key of new Set(results.map(r => `${r.agent} ${r.name}`))) {
+    const runs = results.filter(r => `${r.agent} ${r.name}` === key)
+    mine[key] = {
+      passed: runs.filter(r => !r.error && r.failed.length === 0).length,
+      runs: runs.length,
+      commit: about.commit,
+      date: about.date,
+      models: [...new Set(runs.map(r => r.model).filter((m): m is string => m !== null))],
+    }
+  }
+  writeFileSync(BASELINES, `${JSON.stringify({ ...all, [suite]: mine }, null, 2)}\n`)
+}
+
+/** P(X <= passed) for X ~ Binomial(runs, rate). */
+function chanceOfAtMost(passed: number, runs: number, rate: number): number {
+  let sum = 0
+  let term = (1 - rate) ** runs
+  for (let k = 0; k <= passed; k++) {
+    sum += term
+    term *= ((runs - k) / (k + 1)) * (rate / (1 - rate))
+  }
+
+  return Math.min(1, sum)
+}
+
+/**
+ * Whether a pass count is unlikely under the baseline's rate. The rate is smoothed, (passed + 1) / (runs + 2), so a
+ * baseline of 20 of 20 does not flag every later miss.
+ */
+export function isBelowBaseline(passed: number, runs: number, b: Baseline): boolean {
+  const rate = (b.passed + 1) / (b.runs + 2)
+
+  return chanceOfAtMost(passed, runs, rate) < BELOW
+}
+
 /**
  * Prints each case's result and returns whether every case passed. A case with a run that could not be graded is
  * reported as not run: its failed calls say nothing about the text under test.
@@ -105,6 +159,7 @@ export function report<C extends { name: string; min?: Partial<Record<string, nu
   cases: C[],
   results: Run[],
   min: number,
+  baselines: Baselines,
   extra: (agent: string, c: C, mine: Run[]) => string = () => '',
 ): boolean {
   let isPassing = true
@@ -121,9 +176,14 @@ export function report<C extends { name: string; min?: Partial<Record<string, nu
         for (const r of unrun) console.log(`       ${r.error}`)
         continue
       }
-      const isPass = passed / mine.length >= (c.min?.[agent] ?? min)
+      const baseline = baselines[`${agent} ${c.name}`]
+      const isBelow = baseline !== undefined && isBelowBaseline(passed, mine.length, baseline)
+      const isPass = passed / mine.length >= (c.min?.[agent] ?? min) && !isBelow
       isPassing &&= isPass
-      console.log(`${isPass ? '  ok' : '  x '} ${agent} ${c.name}: ${passed} of ${mine.length} (${models})${note}`)
+      const against = baseline ? `, baseline ${baseline.passed} of ${baseline.runs}${isBelow ? ': below it' : ''}` : ''
+      console.log(
+        `${isPass ? '  ok' : '  x '} ${agent} ${c.name}: ${passed} of ${mine.length} (${models})${against}${note}`,
+      )
       if (!isPass) for (const r of mine) if (r.failed.length > 0) console.log(`       ${r.failed.join('; ')}`)
     }
 

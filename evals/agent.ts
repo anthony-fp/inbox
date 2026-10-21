@@ -22,7 +22,16 @@ import { CODEX } from '../codex/src/texts'
 import { OMP } from '../omp/src/texts'
 import { MODEL } from '../codex/src/update'
 import { codexCli } from './codex-cli'
-import { provenance, report, runCount, runJobs, selectCases, writeResults } from './harness'
+import {
+  provenance,
+  readBaselines,
+  report,
+  runCount,
+  runJobs,
+  selectCases,
+  writeBaselines,
+  writeResults,
+} from './harness'
 import type { Run } from './harness'
 
 type Agent = 'claude' | 'codex' | 'omp'
@@ -75,6 +84,7 @@ const { values } = parseArgs({
     runs: { type: 'string', default: '5' },
     case: { type: 'string' },
     out: { type: 'string' },
+    'set-baseline': { type: 'boolean', default: false },
     cases: { type: 'string', default: 'evals/agent-cases.json' },
     probe: { type: 'string' },
     'omp-probe': { type: 'string' },
@@ -525,6 +535,10 @@ const about = provenance(isGuided ? 'agent' : 'agent-no-guidance', { claude: 'cl
 const jobs = agents.flatMap(a => cases.flatMap(c => Array.from({ length: runs }, (_, n) => () => once(a, c, n))))
 const results = (await runJobs(jobs)) as Result[]
 const path = writeResults(values.out, about, results)
-const isPassing = report(agents, cases, results, MIN)
+const isPassing = report(agents, cases, results, MIN, readBaselines(about.suite))
 console.log(`Results: ${path}${about.isDirty ? ' (the tree had uncommitted changes)' : ''}`)
+if (values['set-baseline']) {
+  writeBaselines(about.suite, about, results)
+  console.log('Saved these counts as the baselines for these cases.')
+}
 process.exit(isPassing ? 0 : 1)

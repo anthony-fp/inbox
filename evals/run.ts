@@ -11,7 +11,16 @@ import type { Ledger } from '../types'
 import { run } from '../codex/src/run'
 import { codexAsk, MODEL } from '../codex/src/update'
 import { codexCli } from './codex-cli'
-import { provenance, report, runCount, runJobs, selectCases, writeResults } from './harness'
+import {
+  provenance,
+  readBaselines,
+  report,
+  runCount,
+  runJobs,
+  selectCases,
+  writeBaselines,
+  writeResults,
+} from './harness'
 import type { Run } from './harness'
 
 type Agent = 'claude' | 'codex'
@@ -49,6 +58,7 @@ const { values } = parseArgs({
     runs: { type: 'string', default: '8' },
     case: { type: 'string' },
     out: { type: 'string' },
+    'set-baseline': { type: 'boolean', default: false },
     cases: { type: 'string', default: 'evals/cases.json' },
   },
 })
@@ -212,10 +222,14 @@ const about = provenance('model', { claude: 'claude', codex: codexCli })
 const jobs = agents.flatMap(a => cases.flatMap(c => Array.from({ length: runs }, (_, n) => () => once(a, c, n))))
 const results = (await runJobs(jobs)) as Result[]
 const path = writeResults(values.out, about, results)
-const isPassing = report(agents, cases, results, MIN, (_agent, _c, mine) => {
+const isPassing = report(agents, cases, results, MIN, readBaselines(about.suite), (_agent, _c, mine) => {
   const masked = (mine as Result[]).reduce((sum, r) => sum + r.masked, 0)
 
   return masked > 0 ? `, ${masked} NEW lines dropped by the code` : ''
 })
 console.log(`Results: ${path}${about.isDirty ? ' (the tree had uncommitted changes)' : ''}`)
+if (values['set-baseline']) {
+  writeBaselines(about.suite, about, results)
+  console.log('Saved these counts as the baselines for these cases.')
+}
 process.exit(isPassing ? 0 : 1)
