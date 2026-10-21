@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { screenText, systemText } from '../../hooks/model-text'
@@ -40,13 +40,40 @@ const OFF = [
   'personality',
 ]
 
-/** Null when it fails. */
-export function codexAsk(exec: Run, cli: string, dir: string): Ask {
+/**
+ * A Codex home for the inbox model that holds only a link to the person's `auth.json`. Codex reads the home's
+ * `AGENTS.md` even with `--ignore-user-config` and `project_doc_max_bytes=0`, so the person's own instructions would
+ * reach the inbox model. Codex saves a refreshed sign-in by writing `auth.json` in place, which goes through the link.
+ * Null when the person has no `auth.json`, as with a keyring sign-in: the model then runs in their own home.
+ */
+async function modelHome(dir: string, personHome: string): Promise<string | null> {
+  const auth = join(personHome, 'auth.json')
+  const hasSignInFile = await access(auth).then(
+    () => true,
+    () => false,
+  )
+  if (!hasSignInFile) return null
+  const home = join(dir, 'model-home')
+  const link = join(home, 'auth.json')
+  await mkdir(home, { recursive: true })
+  const isLinked = (await readlink(link).catch(() => null)) === auth
+  if (!isLinked) {
+    const made = `${link}.${randomUUID()}`
+    await symlink(auth, made)
+    await rename(made, link)
+  }
+
+  return home
+}
+
+/** Null when it fails. `personHome` is the person's Codex home, which holds their sign-in. */
+export function codexAsk(exec: Run, cli: string, dir: string, personHome: string): Ask {
   return async prompt => {
     const work = join(dir, 'exec')
     const system = join(dir, 'inbox-system.md')
     const out = join(work, `reply-${randomUUID()}.txt`)
     await mkdir(work, { recursive: true })
+    const home = await modelHome(dir, personHome)
     const instructions = systemText(CODEX)
     if ((await readFile(system, 'utf8').catch(() => '')) !== instructions) await writeFile(system, instructions)
     let off = [...OFF]
@@ -77,7 +104,7 @@ export function codexAsk(exec: Run, cli: string, dir: string): Ask {
           out,
           prompt,
         ],
-        { cwd: work, timeoutMs: TIMEOUT_MS },
+        { cwd: work, timeoutMs: TIMEOUT_MS, env: home ? { CODEX_HOME: home } : {} },
       )
       const unknown = r.stderr.match(/Unknown feature flag: (\S+)/)?.[1]
       if (r.code !== 0 && unknown && off.includes(unknown)) {

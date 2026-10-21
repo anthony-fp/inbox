@@ -1,7 +1,8 @@
 // Built by codex/build.mjs from codex/src and hooks/. Do not edit.
 
 // src/update-main.ts
-import { dirname as dirname2 } from "node:path";
+import { homedir as homedir3 } from "node:os";
+import { dirname as dirname2, join as join4 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/data-dir.ts
@@ -1054,12 +1055,12 @@ async function updateState(dir, sessionId, change) {
 
 // src/run.ts
 import { execFile } from "node:child_process";
-var run = (args, { cwd, timeoutMs }) => new Promise((resolve3) => {
+var run = (args, { cwd, timeoutMs, env }) => new Promise((resolve3) => {
   const [file = "", ...rest] = args;
   const child = execFile(
     file,
     rest,
-    { cwd, timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, encoding: "utf8" },
+    { cwd, env: { ...process.env, ...env }, timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, encoding: "utf8" },
     (err, stdout, stderr) => {
       const code = err ? typeof err.code === "number" ? err.code : -1 : 0;
       resolve3({ code, stdout: String(stdout), stderr: String(stderr) });
@@ -1070,7 +1071,7 @@ var run = (args, { cwd, timeoutMs }) => new Promise((resolve3) => {
 
 // src/update.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
-import { mkdir as mkdir2, readFile as readFile2, rm, writeFile as writeFile2 } from "node:fs/promises";
+import { access, mkdir as mkdir2, readFile as readFile2, readlink as readlink2, rename as rename2, rm, symlink as symlink2, writeFile as writeFile2 } from "node:fs/promises";
 import { join as join3 } from "node:path";
 
 // ../hooks/session-host.ts
@@ -1360,12 +1361,31 @@ var OFF = [
   "sleep_tool",
   "personality"
 ];
-function codexAsk(exec, cli, dir) {
+async function modelHome(dir, personHome) {
+  const auth = join3(personHome, "auth.json");
+  const hasSignInFile = await access(auth).then(
+    () => true,
+    () => false
+  );
+  if (!hasSignInFile) return null;
+  const home = join3(dir, "model-home");
+  const link = join3(home, "auth.json");
+  await mkdir2(home, { recursive: true });
+  const isLinked = await readlink2(link).catch(() => null) === auth;
+  if (!isLinked) {
+    const made = `${link}.${randomUUID2()}`;
+    await symlink2(auth, made);
+    await rename2(made, link);
+  }
+  return home;
+}
+function codexAsk(exec, cli, dir, personHome) {
   return async (prompt) => {
     const work = join3(dir, "exec");
     const system = join3(dir, "inbox-system.md");
     const out = join3(work, `reply-${randomUUID2()}.txt`);
     await mkdir2(work, { recursive: true });
+    const home = await modelHome(dir, personHome);
     const instructions = systemText(CODEX);
     if (await readFile2(system, "utf8").catch(() => "") !== instructions) await writeFile2(system, instructions);
     let off = [...OFF];
@@ -1396,7 +1416,7 @@ function codexAsk(exec, cli, dir) {
           out,
           prompt
         ],
-        { cwd: work, timeoutMs: TIMEOUT_MS }
+        { cwd: work, timeoutMs: TIMEOUT_MS, env: home ? { CODEX_HOME: home } : {} }
       );
       const unknown = r.stderr.match(/Unknown feature flag: (\S+)/)?.[1];
       if (r.code !== 0 && unknown && off.includes(unknown)) {
@@ -1427,6 +1447,7 @@ async function main() {
   const sessionId = process.argv[2] ?? "";
   const dir = dataDir(process.env, dirname2(dirname2(fileURLToPath(import.meta.url))));
   const { cliPath } = await readState(dir, sessionId);
-  await runUpdates2(dir, sessionId, codexAsk(run, cliPath ?? "codex", dir), Date.now);
+  const personHome = process.env.CODEX_HOME || join4(homedir3(), ".codex");
+  await runUpdates2(dir, sessionId, codexAsk(run, cliPath ?? "codex", dir, personHome), Date.now);
 }
 main().catch(() => process.exit(0));

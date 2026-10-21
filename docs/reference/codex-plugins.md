@@ -1537,6 +1537,18 @@ threads a root thread and its forks belong to. They differ after a fork.
   `-o/--output-last-message`, `--json`. `--full-auto` is deprecated.
   (L/developer-commands?surface=cli, exec table) The 0.160.1 `--help` also
   shows `--thread-source <SOURCE>` [live 2026-10-08].
+- **Global AGENTS.md.** `exec` reads `$CODEX_HOME/AGENTS.md` even with
+  `--ignore-user-config`, `--ignore-rules` and `-c project_doc_max_bytes=0`:
+  asked for its instructions, it quoted the file [live 0.163.0, 2026-10-20].
+  No flag or feature skips it. `codexAsk` runs the inbox model in its own
+  `CODEX_HOME`, `<data dir>/model-home`, which holds only a link to the
+  person's `auth.json`; asked the same, it quoted nothing from the file
+  [live 0.163.0]. The file store saves a refreshed sign-in by opening
+  `auth.json` in place (`FileAuthStorage::save`,
+  codex-rs/login/src/auth/storage.rs), so the refresh goes through the link
+  to the person's file. A keyring store keys by the home's path, so a
+  separate home would miss it; `codexAsk` keeps the person's home when they
+  have no `auth.json`.
 - Stdin: "If you omit the prompt argument, Codex reads the prompt from stdin".
   With both, the piped content is added as context. (L/non-interactive-mode)
   Live: "`exec` waits on stdin unless it is given `/dev/null`" [live]

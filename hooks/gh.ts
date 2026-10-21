@@ -3,7 +3,7 @@ import type { GhRun } from './pr-tab'
 /** Runs a command and never throws: a command that cannot start, times out, is killed or overflows its output ends with code -1. */
 export type Run = (
   args: string[],
-  opts: { cwd: string; timeoutMs: number },
+  opts: { cwd: string; timeoutMs: number; env?: Record<string, string> },
 ) => Promise<{ code: number; stdout: string; stderr: string }>
 
 const CANDIDATES = ['gh', '/opt/homebrew/bin/gh', '/usr/local/bin/gh']

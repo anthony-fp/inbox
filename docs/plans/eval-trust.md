@@ -9,7 +9,7 @@ Every release relies on the two eval suites in `./scripts/eval.sh` (AGENTS.md, "
 | Problem | Effect |
 | --- | --- |
 | The model suite's Claude calls load the person's own `CLAUDE.md` | `claude -p` without `--setting-sources ''` read the runner's private rules: a probe asked for its instructions and got their first line. Results depend on whose machine ran them. |
-| The Codex calls load the person's `~/.codex/AGENTS.md` | The agent suite links it into each run's `CODEX_HOME`. The model suite's call, the product's own `codexAsk`, reads it too, despite `--ignore-user-config` and `project_doc_max_bytes=0`. |
+| The Codex calls load the person's `~/.codex/AGENTS.md` | The agent suite links it into each run's `CODEX_HOME`. The model suite's call, the product's own `codexAsk`, reads it too, despite `--ignore-user-config` and `project_doc_max_bytes=0`. So does every user's inbox model in Codex. |
 | The model suite runs Sonnet at the CLI's default effort | The product runs it at `effort: 'low'` (`hooks/claude-host.ts`). The eval is kinder than the product. |
 | The model suite grades with `applyUpdate` | The product applies `applyExchangeUpdate`, which keeps an item the person asked to explain open. The eval is stricter than the product there. |
 | `--agent omp` in the model suite runs Claude and labels it omp | `run.ts` casts any value to an agent. An unknown `--case` name is dropped, and a selection with no cases passes. |
@@ -29,7 +29,8 @@ Every release relies on the two eval suites in `./scripts/eval.sh` (AGENTS.md, "
 
 No model calls, except one targeted run per changed check.
 
-- The model suite runs Claude with `--setting-sources ''` and `--effort low`, and Codex with a `CODEX_HOME` that holds only `auth.json`. The agent suite stops linking `AGENTS.md`.
+- The model suite runs Claude with `--setting-sources ''` and `--effort low`. The agent suite stops linking `AGENTS.md`.
+- `codexAsk` runs the inbox model in its own `CODEX_HOME`, which holds only a link to the person's `auth.json`. This fixes the product too, so the model suite tests the product's own isolation.
 - The model suite grades with `applyExchangeUpdate`, as the product does.
 - Both runners reject an unknown agent, an unknown case and an empty selection.
 - Every run writes its results, by default to `evals/results/`, which Git ignores. Each file records the commit, whether the tree had changes, the date, the CLI versions and the model each answer came from.
@@ -67,4 +68,3 @@ A red case is not rerun until it is green. It gets one rerun at three times its 
 - The agent suite on Haiku and Sonnet. A past id leak (30e03f0) showed only on Haiku.
 - omp's inbox model, and its fallback to omp's `@smol` model.
 - Agent cases showing the closed, carried-over and answer notes, and Codex's guidance delivered as the plugin delivers it, at session start.
-- The Codex inbox model reading the person's `AGENTS.md` in the product.

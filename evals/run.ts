@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync } from 'node:fs'
+import { mkdtempSync, readFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
@@ -111,21 +111,12 @@ function claude(prompt: string): Promise<Answer> {
   })
 }
 
-/**
- * A Codex home that holds only the sign-in, so the runner's own AGENTS.md never reaches the model. Codex reads
- * `~/.codex/AGENTS.md` even with `--ignore-user-config` and `project_doc_max_bytes=0`.
- */
-function codexHome(): string {
-  const home = mkdtempSync(join(tmpdir(), 'inbox-eval-codex-home-'))
-  const auth = join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'auth.json')
-  if (existsSync(auth)) symlinkSync(auth, join(home, 'auth.json'))
-
-  return home
-}
-
-// The product's codex call inherits this process's environment, so the eval points it at the bare home.
-if (agents.includes('codex')) process.env.CODEX_HOME = codexHome()
-const askCodex = codexAsk(run, codexCli, mkdtempSync(join(tmpdir(), 'inbox-eval-')))
+const askCodex = codexAsk(
+  run,
+  codexCli,
+  mkdtempSync(join(tmpdir(), 'inbox-eval-')),
+  process.env.CODEX_HOME || join(homedir(), '.codex'),
+)
 
 function failures(before: Ledger, after: Ledger, checks: Check[]): string[] {
   const has = (pattern: string, text: string | null) => text !== null && new RegExp(pattern, 'i').test(text)
