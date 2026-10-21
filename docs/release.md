@@ -67,4 +67,4 @@ Fix what the pass finds before you bump. A problem you ship anyway goes in the r
 1. Set the new version in `.claude-plugin/plugin.json`, `codex/plugin/.codex-plugin/plugin.json`, `serverInfo` in `codex/src/server.ts`, `appInfo` in `codex/src/tab.tsx` and `version` in `omp/package.json`.
 2. Run `npm --prefix codex run build` and `npm --prefix omp run build`, then `./scripts/check.sh`.
 3. Commit as "Bump to x.y.z", tag it `vx.y.z`, and push both.
-4. Publish a GitHub release for the tag. Follow the last release's notes: one line on what is new, how to update in each agent, then what changed, from the user's side.
+4. Publish a GitHub release for the tag. Write the notes with the `release-notes` skill from [petekp/claude-code-setup](https://github.com/petekp/claude-code-setup/tree/main/skills/release-notes). Without it, use its order: one line on the effect people will notice most, what they'll notice in each look, how to update in each agent, then the technical changes.
