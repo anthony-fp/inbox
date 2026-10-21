@@ -192,8 +192,7 @@ function sandbox(c: Case, agent: Agent) {
 const PROBE_TOOLS = [`mcp__${PROBE}__record`, `mcp__${PROBE}__close`]
 
 /** Throws unless the session has exactly the connected probe server and no tool besides its two. */
-function assertOnlyProbe(init: Record<string, any> | undefined) {
-  if (!init) throw new IsolationError('claude printed no init event')
+function assertOnlyProbe(init: Record<string, any>) {
   const servers: { name: string; status: string }[] = init.mcp_servers ?? []
   const tools: string[] = init.tools ?? []
   if (servers.length !== 1 || servers[0]!.name !== PROBE || servers[0]!.status !== 'connected')
@@ -239,6 +238,14 @@ async function claudeIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome
   )
   const events = lines(r.stdout)
   const init = events.find(e => e.type === 'system' && e.subtype === 'init')
+  if (!init)
+    return {
+      reply: '',
+      calls: s.calls(),
+      error: `claude exited ${r.code} before it started a session: ${r.stderr.slice(0, 300)}`,
+      model: null,
+      raw: r.stdout,
+    }
   assertOnlyProbe(init)
   const reply = events
     .filter(e => e.type === 'assistant')
@@ -423,6 +430,8 @@ async function ompIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome> {
       raw: r.stdout,
     }
   }
+  if (!existsSync(toolsFile))
+    return { reply: '', calls: s.calls(), error: 'omp did not load the probe extension', model: null, raw: r.stdout }
   assertOnlyOmpProbe(toolsFile)
   // Like the Claude run, the reply is every assistant message's text, since the text after a tool call is not the whole reply.
   const reply = events
@@ -556,6 +565,10 @@ const about = provenance(
       ]),
     ),
     cases: readFileSync(values.cases, 'utf8'),
+    models: JSON.stringify(REQUESTED),
+    runner: readFileSync(process.argv[1]!, 'utf8'),
+    probe: readFileSync(probeServer, 'utf8'),
+    'omp probe': readFileSync(ompProbe, 'utf8'),
   },
 )
 const firstRuns = earlierRuns<Result>(values.with, about)

@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
@@ -85,6 +85,8 @@ const about = provenance(
     'systemText claude': systemText(CLAUDE_CODE),
     'systemText codex': systemText(CODEX),
     cases: readFileSync(values.cases, 'utf8'),
+    models: JSON.stringify({ claude: CLAUDE_MODEL, codex: MODEL }),
+    runner: readFileSync(process.argv[1]!, 'utf8'),
   },
 )
 const firstRuns = earlierRuns<Result>(values.with, about)
@@ -134,12 +136,11 @@ function claude(prompt: string): Promise<Answer> {
   }).finally(() => rmSync(cwd, { recursive: true, force: true }))
 }
 
-const askCodex = codexAsk(
-  run,
-  codexCli,
-  mkdtempSync(join(tmpdir(), 'inbox-eval-')),
-  process.env.CODEX_HOME || join(homedir(), '.codex'),
-)
+const codexHome = process.env.CODEX_HOME || join(homedir(), '.codex')
+// Without auth.json, codexAsk runs the model in the person's own Codex home, where it reads their AGENTS.md.
+if (agents.includes('codex') && !existsSync(join(codexHome, 'auth.json')))
+  throw new Error(`The Codex runs need a Codex sign-in in ${join(codexHome, 'auth.json')}, not the keyring`)
+const askCodex = codexAsk(run, codexCli, mkdtempSync(join(tmpdir(), 'inbox-eval-')), codexHome)
 
 /** Pairs each check with its own item, so one item cannot pass two checks, by augmenting paths. */
 function matchEach<C, I>(checks: C[], items: I[], fits: (c: C, i: I) => boolean): Map<C, I> {

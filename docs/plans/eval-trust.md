@@ -48,7 +48,7 @@ The agent suite gets `--no-guidance`. One run of Claude on all 15 cases, at 5 ru
 
 Result, on 0195b98 with a clean tree (`evals/results/agent-no-guidance-2026-10-21T06-35-46.075Z.json`): 14 of the 15 cases pass without the guidance. Only `no-finding-user-only` fails, 2 of 5: Claude listed the options without asking a question. `record-question` passed 4 of 5 and missed the same way once. Every other case passed 5 of 5.
 
-So the agent suite tests one rule of the guidance, that the agent asks in its reply as a direct question. The tool descriptions in `hooks/tools.ts` and the inbox text carry the rest. A change to `guidanceText` that breaks any other rule would pass this suite. A change to a tool description is what the suite does test. Cases that fail without the guidance are follow-up work: see "Not in these steps".
+So on Claude, the agent suite shows it needs the guidance for one rule: that the agent asks in its reply as a direct question. The tool descriptions in `hooks/tools.ts` and the inbox text are enough for the other 14 cases. This is a control of 5 runs on one agent, with the whole guidance removed. It does not show how Codex or omp behave without the guidance, or what removing one rule would do. It does show that these cases cannot catch the loss of the whole guidance on Claude, so they cannot be counted on to catch the loss of one rule. Cases that fail without the guidance are follow-up work: see "Not in these steps".
 
 ### 3. Mutation tests
 
@@ -59,16 +59,16 @@ Each mutant is applied in a throwaway worktree and never committed. Predictions 
 | M1: remove the sentence in `systemText` saying a reason is not a recommendation (2312d4f) | `reason-not-recommendation`, Sonnet, 8 runs | Below the bar. History measured 3 of 8 without it. |
 | `<decided>` removed from the inbox model's prompt | `dismissed-question-stays-closed`, `old-dismissed-question-stays-closed`, Sonnet, 8 runs | The cases pass, while the raw answers re-add the dismissed question. That proves the code masks the regression. If the cases fail, the code is not masking it. |
 
-Results, on 0195b98 with each mutant applied:
+Results, on 0195b98 with each mutant applied. The files are in `evals/results/`, named `mutant-m1-model-…` and `mutant-decided-model-…`:
 
 | Mutant | Result |
 | --- | --- |
 | M1 | 5 of 8: below the bar, as predicted. The failures are the reason read as a recommendation. The margin is one run. |
 | `<decided>` removed | 16 of 16 passed, as predicted. Every raw answer re-added the dismissed question, and the code dropped all 16. |
 
-The dismissed cases now also check `{"dropped": 0}`: the code must drop no NEW line. Today's prompt passes it 32 of 32, on Sonnet and Codex. With `<decided>` removed, Sonnet fails both cases 0 of 8, and Codex fails `old-dismissed-question-stays-closed` 0 of 8. Codex still passes `dismissed-question-stays-closed` 8 of 8 without the block, so that case does not test the rule on Codex.
+The dismissed cases now also check `{"dropped": 0}`: the code must drop no NEW line. Today's prompt passes it 32 of 32, on Sonnet and Codex (`model-2026-10-21T06-41-22.448Z.json`). With `<decided>` removed, Sonnet fails both cases 0 of 8, and Codex fails `old-dismissed-question-stays-closed` 0 of 8. Codex still passes `dismissed-question-stays-closed` 8 of 8 without the block, so that case does not test the rule on Codex.
 
-M2, restoring the old rule for unrelated items, waits for step 4, since its cases flip now. M4, softening the id rule, is dropped: step 2 showed the id cases pass with no guidance at all, so removing the id rule from the guidance cannot fail them.
+M2, restoring the old rule for unrelated items, waits for step 4, since its cases flip now. M4, softening the id rule, is not run on Claude: step 2 showed the id cases pass there with no guidance at all, so removing the id rule cannot fail them. It stays open for Codex and omp, after a control run on each.
 
 ### 4. Settle the flipping cases and add baselines
 

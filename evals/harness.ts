@@ -82,7 +82,10 @@ export type Provenance = {
   suite: string
   args: string[]
   clis: Record<string, string | null>
-  /** A SHA-256 of each text the models read, as this run built it, so two runs can be compared without the commit. */
+  /**
+   * A SHA-256 of each text the models read, the cases, the models asked for, and the bundled runner, which holds the
+   * prompt building and the grading, so two runs can be compared without the commit.
+   */
   texts: Record<string, string>
 }
 
@@ -142,13 +145,15 @@ export async function runJobs<R extends Run>(
           let r = await attempt(job)
           const earlier: string[] = []
           for (let tries = 1; r.error && tries <= RETRIES && stopped === null; tries++) {
-            earlier.push(r.error)
             await wait(RETRY_WAIT_MS * tries)
+            if (stopped !== null) break
+            earlier.push(r.error)
             r = await attempt(job)
           }
           results.push({ ...r, attempts: earlier.length + 1, earlier })
         } catch (e) {
           stopped = String(e)
+          results.push(job.unrun(`stopped the run: ${String(e)}`))
         }
         onResult(results)
       }
@@ -219,13 +224,13 @@ export function writeBaselines(suite: string, about: Provenance, results: Run[])
   writeFileSync(BASELINES, `${JSON.stringify({ ...all, [suite]: mine }, null, 2)}\n`)
 }
 
-/** P(X <= passed) for X ~ Binomial(runs, rate). */
+/** P(X <= passed) for X ~ Binomial(runs, rate), summed in logs so a long run does not underflow to 0. */
 function chanceOfAtMost(passed: number, runs: number, rate: number): number {
   let sum = 0
-  let term = (1 - rate) ** runs
+  let logTerm = runs * Math.log(1 - rate)
   for (let k = 0; k <= passed; k++) {
-    sum += term
-    term *= ((runs - k) / (k + 1)) * (rate / (1 - rate))
+    sum += Math.exp(logTerm)
+    logTerm += Math.log(runs - k) - Math.log(k + 1) + Math.log(rate) - Math.log(1 - rate)
   }
 
   return Math.min(1, sum)
@@ -306,10 +311,11 @@ export function finish(
   if (stopped !== null) console.log(`Stopped: ${stopped}`)
   console.log(`Results: ${path}${about.isDirty ? ' (the tree had uncommitted changes)' : ''}`)
   if (isSettingBaseline) {
+    const isUngraded = results.some(r => r.error !== null)
     const unfit =
       stopped !== null
         ? 'the run stopped'
-        : verdict === 'not run'
+        : isUngraded
           ? 'a case could not be graded'
           : about.isDirty
             ? 'the tree had uncommitted changes'
