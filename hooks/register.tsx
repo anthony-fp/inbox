@@ -3891,14 +3891,10 @@ export const register: Register = on => {
         </Box>
       </Box>
     )
-    const statusText = look === 'desktop' ? <Text color={pal.age}>{status}</Text> : <Text dimColor>{status}</Text>
-    const versionText = version ? (
-      look === 'desktop' ? (
-        <Text color={pal.age}>v{version}</Text>
-      ) : (
-        <Text dimColor>v{version}</Text>
-      )
-    ) : null
+    const faint = (text: string) =>
+      look === 'desktop' ? <Text color={pal.age}>{text}</Text> : <Text dimColor>{text}</Text>
+    const statusText = faint(status)
+    const versionText = version ? faint(`v${version}`) : null
     const rail = (
       <Box flexDirection="column" flexShrink={0} paddingLeft={1} marginRight={RAIL_GUTTER}>
         {TABS.map(({ id, label }) => {
