@@ -1,0 +1,85 @@
+{
+  "agent": {
+    "claude no-finding-user-only": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "8cf54b98b934fbee3d4b17f01d1f0144e3c15d97",
+      "date": "2026-10-21T07:16:18.231Z",
+      "models": [
+        "claude-opus-5-5"
+      ]
+    },
+    "claude record-question": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "8cf54b98b934fbee3d4b17f01d1f0144e3c15d97",
+      "date": "2026-10-21T07:16:18.231Z",
+      "models": [
+        "claude-opus-5-5"
+      ]
+    },
+    "claude close-answered-says-answer": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "8cf54b98b934fbee3d4b17f01d1f0144e3c15d97",
+      "date": "2026-10-21T07:16:18.231Z",
+      "models": [
+        "claude-opus-5-5"
+      ]
+    },
+    "codex no-finding-user-only": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "8cf54b98b934fbee3d4b17f01d1f0144e3c15d97",
+      "date": "2026-10-21T07:16:18.231Z",
+      "models": [
+        "gpt-6.1-sol (requested)"
+      ]
+    },
+    "codex record-question": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "8cf54b98b934fbee3d4b17f01d1f0144e3c15d97",
+      "date": "2026-10-21T07:16:18.231Z",
+      "models": [
+        "gpt-6.1-sol (requested)"
+      ]
+    },
+    "codex close-answered-says-answer": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "8cf54b98b934fbee3d4b17f01d1f0144e3c15d97",
+      "date": "2026-10-21T07:16:18.231Z",
+      "models": [
+        "gpt-6.1-sol (requested)"
+      ]
+    },
+    "omp no-finding-user-only": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "8cf54b98b934fbee3d4b17f01d1f0144e3c15d97",
+      "date": "2026-10-21T07:16:18.231Z",
+      "models": [
+        "claude-opus-5-5"
+      ]
+    },
+    "omp record-question": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "8cf54b98b934fbee3d4b17f01d1f0144e3c15d97",
+      "date": "2026-10-21T07:16:18.231Z",
+      "models": [
+        "claude-opus-5-5"
+      ]
+    },
+    "omp close-answered-says-answer": {
+      "passed": 19,
+      "runs": 20,
+      "commit": "8cf54b98b934fbee3d4b17f01d1f0144e3c15d97",
+      "date": "2026-10-21T07:16:18.231Z",
+      "models": [
+        "claude-opus-5-5"
+      ]
+    }
+  }
+}
