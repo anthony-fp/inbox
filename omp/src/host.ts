@@ -163,8 +163,8 @@ const defaultDeps: HostDeps = {
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
 /**
- * True for a session nobody watches: a subagent, or a main session run without a UI (print mode). omp 18.1.17 gives
- * an extension no field for the agent kind, and starts a subagent with no UI. A build that adds `ctx.agent` also counts.
+ * True for a session nobody watches: a subagent, or a main session run without a UI, such as print mode. omp 18.1.17
+ * gives an extension no `ctx.agent`, and starts a subagent with no UI, so the read is guarded.
  */
 function isUnattended(ctx: ExtensionContext): boolean {
   const agent = (ctx as { agent?: { kind?: unknown } }).agent
@@ -567,8 +567,15 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
     return notes
   }
 
-  const start = (ctx: ExtensionContext, parentFile?: string) => {
-    if (isUnattended(ctx)) return
+  /** Takes record and close out of a session nobody watches, so its agent does not spend calls on them. */
+  const dropTools = async () => {
+    const active = pi.getActiveTools()
+    const kept = active.filter(name => name !== 'record' && name !== 'close')
+    if (kept.length !== active.length) await pi.setActiveTools(kept)
+  }
+
+  const start = async (ctx: ExtensionContext, parentFile?: string) => {
+    if (isUnattended(ctx)) return dropTools()
     prepare(ctx)
     showBand(ctx)
     deps.background(
@@ -579,6 +586,9 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
   }
   pi.on('session_start', (_event, ctx) => start(ctx))
   pi.on('session_switch', (event, ctx) => start(ctx, event.reason === 'fork' ? event.previousSessionFile : undefined))
+  // A `/btw` promotion, a fork from an entry and a command's branch give the session a new id, with the old file as
+  // `previousSessionFile`. A `/branch` in the same file keeps the id, and the fork step then finds nothing to copy.
+  pi.on('session_branch', (event, ctx) => start(ctx, event.previousSessionFile))
   pi.on('session_shutdown', (_event, ctx) => {
     const id = sessionIdOf(ctx)
     openPanels.delete(id)
@@ -620,7 +630,7 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
     await change(sessionIdOf(ctx), s => (s.stop ? { ...s, stop: null } : s)).catch(() => undefined)
   })
 
-  /** Activity notes are best effort. A failed write must not reject, because omp blocks the tool call when a tool_call handler throws. */
+  /** Activity notes are best effort, so a failed write never surfaces as an extension error. */
   const noteQuietly = async (ctx: ExtensionContext, line: string | null) => {
     if (!line) return
     try {
@@ -630,9 +640,10 @@ export function createInbox(pi: ExtensionAPI, deps: HostDeps = defaultDeps): Inb
     }
   }
 
-  pi.on('tool_call', async (event, ctx) => {
+  // Noted as the tool starts, not in tool_call, which omp waits on before every tool runs.
+  pi.on('tool_execution_start', async (event, ctx) => {
     if (isUnattended(ctx)) return
-    await noteQuietly(ctx, activityOf(event.toolName, event.input as Record<string, unknown>))
+    await noteQuietly(ctx, activityOf(event.toolName, (event.args ?? {}) as Record<string, unknown>))
   })
 
   pi.on('tool_result', async (event, ctx) => {

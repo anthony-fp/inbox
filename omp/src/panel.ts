@@ -110,6 +110,8 @@ export type PanelUi = {
   unfolded: FoldKind[]
   /** A Resume press for the stop that began at `stopAt`. */
   resuming: { stopAt: number; is: 'sending' } | { stopAt: number; is: 'refused'; why: string } | null
+  /** A handed-off row the person opened again with Enter. Moving the selection off it folds it again. */
+  opened: string | null
 }
 
 export const INITIAL_UI: PanelUi = {
@@ -122,6 +124,7 @@ export const INITIAL_UI: PanelUi = {
   notice: null,
   unfolded: [],
   resuming: null,
+  opened: null,
 }
 
 export function holdsOf(ui: Pick<PanelUi, 'typing' | 'drafts' | 'discarded'>): ReplyHolds {
@@ -168,6 +171,8 @@ type Line = {
   isWaiting: boolean
   /** Shows the detail when the line is not selected. */
   isDetailShown: boolean
+  /** A handed-off row, drawn as its one line until the person opens it. */
+  isFolded: boolean
 }
 
 type Entry =
@@ -193,6 +198,7 @@ const blankLine = (id: string): Line => ({
   isStatic: false,
   isWaiting: true,
   isDetailShown: false,
+  isFolded: false,
 })
 
 const wrapIndex = (i: number, n: number) => ((i % n) + n) % n
@@ -260,7 +266,8 @@ function lineOfRow(row: RowView): Line {
     lead: settledLead ?? leadOf(row),
     title: row.title,
     isDim: state.is === 'settled',
-    age: row.at,
+    // As in the terminal, a row a press finished reads the press's age.
+    age: f?.is === 'done' ? f.at : row.at,
     detail: row.detail,
     file: row.fileName,
     feedback: feedbackLabel && f ? { text: feedbackLabel, tone: feedbackTone(f) } : null,
@@ -271,6 +278,7 @@ function lineOfRow(row: RowView): Line {
     buttons: state.is === 'settled' ? [] : rowButtons(row),
     row,
     isWaiting: isWaitingRow(row),
+    isFolded: state.is === 'handedOff',
   }
 }
 
@@ -503,6 +511,8 @@ function entriesOf(screen: PanelScreen, ui: PanelUi, tab: Tab, now: number): Ent
 const linesOf = (entries: Entry[]): Line[] => entries.flatMap(e => (e.kind === 'row' ? [e.line] : []))
 const waitsOf = (lines: Line[]) => lines.map(l => ({ id: l.id, isWaiting: isSelectable(l) && l.isWaiting }))
 const isSelectable = (line: Line) => line.settled === null && !line.isStatic
+/** A folded line the person has not opened: it draws one line and takes only Enter. */
+const isShut = (line: Line, ui: Pick<PanelUi, 'opened'>) => line.isFolded && ui.opened !== line.id
 
 function resolveSelected(lines: Line[], selectedId: string | null): Line | null {
   const selectable = lines.filter(isSelectable)
@@ -527,7 +537,21 @@ const focusOf = (line: Line, ui: PanelUi): number =>
 export type KeyResult = { ui: PanelUi; press?: PanelPress; close?: true }
 
 function withSelection(ui: PanelUi, id: string | null): PanelUi {
-  return { ...ui, selectedId: id, focus: null }
+  return { ...ui, selectedId: id, focus: null, opened: ui.opened === id ? ui.opened : null }
+}
+
+/**
+ * After a press hands off the selected row, the selection moves to the next row that waits, as the terminal's does.
+ * The row stays selected when none waits. A failed send leaves the row open, so it stays selected and unfolded.
+ */
+export function afterHandOff(screen: PanelScreen, ui: PanelUi, id: string, now: number): PanelUi {
+  if (ui.selectedId !== id) return ui
+  const lines = linesOf(entriesOf(screen, ui, ui.tab, now))
+  const line = lines.find(l => l.id === id)
+  if (!line?.isFolded) return ui
+  const next = rowAfterClose(waitsOf(lines), id)
+
+  return next === null ? { ...ui, focus: null, opened: null } : withSelection(ui, next)
 }
 
 function activate(screen: PanelScreen, ui: PanelUi, line: Line, button: Button, now: number): KeyResult {
@@ -610,6 +634,8 @@ export function handleKey(screen: PanelScreen, ui: PanelUi, key: string, now: nu
 
     return { ui: { ...base, unfolded } }
   }
+  if (selected && isShut(selected, base))
+    return key === 'enter' ? { ui: { ...base, opened: selected.id } } : { ui: base }
   if (!selected || selected.buttons.length === 0) return { ui: base }
   if (key === 'left' || key === 'right') {
     const index = wrapIndex(focusOf(selected, base) + (key === 'left' ? -1 : 1), selected.buttons.length)
@@ -816,12 +842,13 @@ function drawLine(line: Line, isSelected: boolean, d: Draw): string[] {
   const cursor = isSelected ? s.tone('accent', '▸') : ' '
   const age = line.age !== null && line.settled === null ? s.dim(ago(now - line.age)) : ''
   out.push(spread(` ${' '.repeat(pad)}${cursor} ${leadText(line.lead, s)} ${title}${status}${after}`, `${age} `, width))
-  if (line.settled) return out
+  if (line.settled || isShut(line, ui)) return out
   const indent = INDENT + pad
   if (line.detail && (isSelected || line.isDetailShown)) out.push(...indented(line.detail, indent, width, 4, s.dim))
   if (!isSelected) return out
   if (line.file) out.push(' '.repeat(indent) + s.tone('accent', line.file))
-  if (line.buttons.length > 0) out.push(...buttonLines(line, ui, indent - 1, width, s))
+  // As in the terminal, an open reply field replaces the row's buttons: Enter sends, so no button reads as focused.
+  if (line.buttons.length > 0 && ui.typing !== line.id) out.push(...buttonLines(line, ui, indent - 1, width, s))
   if (ui.typing === line.id) {
     const hint = line.row ? replyHint(line.row, AGENT) : 'Your reply'
     const text = ui.drafts[line.id]?.text ?? ''

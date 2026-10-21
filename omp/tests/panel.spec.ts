@@ -15,7 +15,7 @@ import { CLOSED_SHOWN, SETTLED_MS, NO_HOLDS, allRows, earlierLabel, foldLabel, r
 import type { RowView } from '../../hooks/view'
 import { sessionView } from '../../hooks/session'
 import { demoSource, demoState } from '../src/demo'
-import { INITIAL_UI, bandLines, followRows, handleKey, holdsOf, render } from '../src/panel'
+import { INITIAL_UI, afterHandOff, bandLines, followRows, handleKey, holdsOf, render } from '../src/panel'
 import type { PanelScreen, PanelUi, Style } from '../src/panel'
 import { emptyState } from '../src/state'
 
@@ -71,7 +71,7 @@ test('a selected row draws its buttons in the shared key plan order', () => {
   expect(rows.length).toBeGreaterThan(5)
   for (const row of rows) {
     const tab = row.type === 'finding' ? 'findings' : 'needsYou'
-    const line = buttonLine(screen, { ...onRow(row), tab })
+    const line = buttonLine(screen, { ...onRow(row), tab, opened: row.id })
     let from = 0
     for (const label of plannedLabels(row)) {
       const at = line.indexOf(label, from)
@@ -161,7 +161,7 @@ test('moving through rows wraps from the last to the first, and stops on each Cl
   expect(keys(screen, INITIAL_UI, 'k').selectedId).toBe(open.at(-1)!.id)
 })
 
-test('r opens a reply field and Enter sends the typed words as a type press', () => {
+test('r opens a reply field in place of the buttons, and Enter sends the typed words as a type press', () => {
   const screen = screenOf()
   const row = firstQuestion(screen)
   let ui = handleKey(screen, onRow(row), 'r', NOW).ui
@@ -171,6 +171,7 @@ test('r opens a reply field and Enter sends the typed words as a type press', ()
   ui = handleKey(screen, ui, 'space', NOW, ' ').ui
   ui = handleKey(screen, ui, 'a', NOW, 'a').ui
   expect(text(screen, ui)).toContain('hi a')
+  expect(text(screen, ui)).not.toContain(`↵ ${row.item!.rec}`)
   const sent = handleKey(screen, ui, 'enter', NOW)
   expect(sent.press).toEqual({ action: 'type', id: row.id, text: 'hi a' })
   expect(sent.ui.typing).toBeNull()
@@ -280,6 +281,34 @@ test('a settled row is skipped when moving and the selection leaves it', async (
 test('a handed-off row keeps its mark and reads Still open when nothing changed', async () => {
   const demo = await afterPresses({ action: 'explain', id: 'd11' })
   expect(text(await demo.advance(), INITIAL_UI)).toContain('Still open')
+})
+
+async function afterReply() {
+  const row = firstQuestion(screenOf())
+  const demo = await afterPresses({ action: 'type', id: row.id, text: 'go with B' })
+
+  return { row, screen: await demo.screen() }
+}
+
+test('a reply folds its row to one line with its mark and label, and the selection moves to the next row that waits', async () => {
+  const { row, screen } = await afterReply()
+  const lines = text(screen, onRow(row)).split('\n')
+  const at = lines.findIndex(l => l.includes(row.title))
+  expect(lines[at]).toMatch(/▸ ✓ .*Replied/)
+  expect(lines[at + 1]).not.toContain('↵')
+
+  const moved = afterHandOff(screen, onRow(row), row.id, NOW)
+  expect(moved.selectedId).not.toBe(row.id)
+  expect(waiting(screen, moved.selectedId!).state.is).toBe('open')
+})
+
+test('Enter opens a folded row again, and moving off it folds it', async () => {
+  const { row, screen } = await afterReply()
+  expect(handleKey(screen, onRow(row), 'b', NOW).press).toBeUndefined()
+  const opened = keys(screen, onRow(row), 'enter')
+  expect(text(screen, opened)).toContain('r Reply')
+  expect(keys(screen, opened, 'down', 'up').opened).toBeNull()
+  expect(text(screen, keys(screen, opened, 'down', 'up'))).not.toContain('r Reply')
 })
 
 test('a dismissed PR shows its label and Undo, and u returns pr-undo', async () => {

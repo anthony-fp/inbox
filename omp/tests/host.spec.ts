@@ -51,9 +51,10 @@ let isIdle: boolean
 let execResults: Map<string, { code: number; stdout?: string; stderr?: string; killed?: boolean } | Error>
 let execCalls: { command: string; args: string[] }[]
 let copied: string[]
-let agentKind: string | undefined
+let agentKind: 'main' | 'sub' | undefined
 let hasUI: boolean
 let branch: unknown[]
+let activeTools: string[]
 
 const pi = () =>
   ({
@@ -72,6 +73,10 @@ const pi = () =>
       if (result instanceof Error) throw result
 
       return { stdout: '', stderr: '', killed: false, ...result }
+    },
+    getActiveTools: () => activeTools,
+    setActiveTools: async (names: string[]) => {
+      activeTools = names
     },
   }) as never
 
@@ -157,9 +162,10 @@ beforeEach(() => {
   execResults = new Map()
   execCalls = []
   copied = []
-  agentKind = undefined
+  agentKind = 'main'
   hasUI = true
   branch = []
+  activeTools = ['read', 'bash', 'record', 'close']
 })
 
 afterEach(() => {
@@ -226,13 +232,15 @@ test('a close call closes the recorded item', async () => {
   expect(state().ledger.closed).toHaveLength(1)
 })
 
-test('bash, edit and write calls become turn activity and other tools do not', async () => {
+test('bash, edit and write runs become turn activity and other tools do not', async () => {
   createInbox(pi(), deps())
-  await call('tool_call', { toolName: 'bash', input: { command: 'npm test' } })
-  await call('tool_call', { toolName: 'bash', input: { command: 'sleep 9', async: true } })
-  await call('tool_call', { toolName: 'edit', input: { path: '/work/a.ts' } })
-  await call('tool_call', { toolName: 'write', input: { path: '/work/b.ts', content: '' } })
-  await call('tool_call', { toolName: 'read', input: { path: '/work/c.ts' } })
+  const run = (toolName: string, args: Record<string, unknown>) =>
+    call('tool_execution_start', { type: 'tool_execution_start', toolCallId: 'c', toolName, args })
+  await run('bash', { command: 'npm test' })
+  await run('bash', { command: 'sleep 9', async: true })
+  await run('edit', { path: '/work/a.ts' })
+  await run('write', { path: '/work/b.ts', content: '' })
+  await run('read', { path: '/work/c.ts' })
   expect(state().turn.activity).toEqual([
     'ran: npm test',
     'started in background: sleep 9',
@@ -360,11 +368,13 @@ test('with no usable model the update fails and the panel shows no model', async
   expect((await inbox.screen(makeCtx())).modelName).toBeNull()
 })
 
-test('a session with no UI leaves no state, as an omp without an agent kind runs a subagent', async () => {
+test('a session with no UI leaves no state and takes record and close out of its tools', async () => {
   hasUI = false
   createInbox(pi(), deps())
+  await call('session_start', { type: 'session_start' })
+  expect(activeTools).toEqual(['read', 'bash'])
   const result = await prompt('hello')
-  await call('tool_call', { toolName: 'bash', input: { command: 'ls' } })
+  await call('tool_execution_start', { toolName: 'bash', args: { command: 'ls' } })
   await endAgent('Done.')
   const recorded = await record({ kind: 'task', ask: 'Try it' })
   await settle()
@@ -374,14 +384,36 @@ test('a session with no UI leaves no state, as an omp without an agent kind runs
   expect(() => state()).toThrow()
 })
 
-test('a subagent that omp marks with an agent kind leaves no state', async () => {
+test('a subagent leaves no state and takes record and close out of its tools', async () => {
   agentKind = 'sub'
   createInbox(pi(), deps())
+  await call('session_start', { type: 'session_start' })
+  expect(activeTools).toEqual(['read', 'bash'])
   await prompt('hello')
   await endAgent('Done.')
   await settle()
   expect(completions).toEqual([])
   expect(() => state()).toThrow()
+})
+
+test('an omp that gives no agent kind still watches a main session and skips one with no UI', async () => {
+  agentKind = undefined
+  createInbox(pi(), deps())
+  await call('session_start', { type: 'session_start' })
+  expect(activeTools).toEqual(['read', 'bash', 'record', 'close'])
+  await prompt('hello')
+  expect(() => state()).not.toThrow()
+  hasUI = false
+  await call('session_start', { type: 'session_start' }, makeCtx('quiet'))
+  expect(activeTools).toEqual(['read', 'bash'])
+  await prompt('hello', makeCtx('quiet'))
+  expect(() => state('quiet')).toThrow()
+})
+
+test('a watched session keeps record and close in its tools', async () => {
+  createInbox(pi(), deps())
+  await call('session_start', { type: 'session_start' })
+  expect(activeTools).toEqual(['read', 'bash', 'record', 'close'])
 })
 
 test('the guidance names the tools as omp registers them', () => {
@@ -390,11 +422,11 @@ test('the guidance names the tools as omp registers them', () => {
   expect(guidanceText(OMP)).not.toContain('mcp__')
 })
 
-test('a tool call still goes through when the session file cannot be written', async () => {
+test('an activity note or an ask result still settles when the session file cannot be written', async () => {
   createInbox(pi(), deps())
   await prompt('hello')
   writeFileSync(join(dir, 'sessions', 's1.json'), '{not json')
-  expect(await call('tool_call', { toolName: 'bash', input: { command: 'ls' } })).toBeUndefined()
+  expect(await call('tool_execution_start', { toolName: 'bash', args: { command: 'ls' } })).toBeUndefined()
   expect(await call('tool_result', { toolName: 'ask', input: {}, content: [], isError: false })).toBeUndefined()
 })
 
@@ -840,6 +872,25 @@ test('a forked session takes its parent’s ledger and does not catch up, and ca
   await settle()
   expect(completions).toHaveLength(1)
   expect(state('orphan').ledger.items.map((i: { ask: string }) => i.ask)).toEqual(['Use Node or Python?'])
+})
+
+test('a branch into a new session takes the parent’s ledger, and a branch in the same session copies nothing', async () => {
+  createInbox(pi(), deps())
+  await record({ kind: 'task', ask: 'Try the CLI by hand' }, makeCtx('parent'))
+  await call('session_start', { type: 'session_start' }, makeCtx('parent'))
+  await settle()
+
+  branch = earlierBranch()
+  const { previousSessionFile } = forkOf('parent')
+  await call('session_branch', { type: 'session_branch', reason: 'btw', previousSessionFile }, makeCtx('child'))
+  await settle()
+  expect(completions).toEqual([])
+  expect(state('child').ledger.items).toEqual(state('parent').ledger.items)
+
+  await call('session_branch', { type: 'session_branch', reason: 'branch', previousSessionFile }, makeCtx('parent'))
+  await settle()
+  expect(completions).toEqual([])
+  expect(state('parent').ledger.items.map((i: { ask: string }) => i.ask)).toEqual(['Try the CLI by hand'])
 })
 
 test('a resume keeps its own ledger even when the event names another session file', async () => {

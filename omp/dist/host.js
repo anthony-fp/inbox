@@ -3491,7 +3491,8 @@ var INITIAL_UI = {
   discarded: {},
   notice: null,
   unfolded: [],
-  resuming: null
+  resuming: null,
+  opened: null
 };
 function holdsOf(ui) {
   return { replies: heldReplies(ui.typing, ui.drafts), discarded: ui.discarded };
@@ -3517,7 +3518,8 @@ var blankLine = (id) => ({
   fold: null,
   isStatic: false,
   isWaiting: true,
-  isDetailShown: false
+  isDetailShown: false,
+  isFolded: false
 });
 var wrapIndex = (i, n) => (i % n + n) % n;
 function feedbackTone(f) {
@@ -3576,14 +3578,15 @@ function lineOfRow(row) {
     lead: settledLead ?? leadOf(row),
     title: row.title,
     isDim: state.is === "settled",
-    age: row.at,
+    age: f?.is === "done" ? f.at : row.at,
     detail: row.detail,
     file: row.fileName,
     feedback: feedbackLabel && f ? { text: feedbackLabel, tone: feedbackTone(f) } : null,
     settled: state.is === "settled" ? { label: settledLabel(state.label, state.delivery), undo: state.canUndo && undo ? undo.press : null } : null,
     buttons: state.is === "settled" ? [] : rowButtons(row),
     row,
-    isWaiting: isWaitingRow(row)
+    isWaiting: isWaitingRow(row),
+    isFolded: state.is === "handedOff"
   };
 }
 var settledIn = (g) => new Set(g.rows.filter((r) => r.state.is === "settled").map((r) => r.id));
@@ -3791,6 +3794,7 @@ function entriesOf(screen, ui, tab, now) {
 var linesOf = (entries) => entries.flatMap((e) => e.kind === "row" ? [e.line] : []);
 var waitsOf = (lines) => lines.map((l) => ({ id: l.id, isWaiting: isSelectable(l) && l.isWaiting }));
 var isSelectable = (line) => line.settled === null && !line.isStatic;
+var isShut = (line, ui) => line.isFolded && ui.opened !== line.id;
 function resolveSelected(lines, selectedId) {
   const selectable = lines.filter(isSelectable);
   const current = lines.find((l) => l.id === selectedId);
@@ -3805,7 +3809,17 @@ function defaultFocus(line) {
 }
 var focusOf = (line, ui) => ui.focus?.rowId === line.id ? Math.min(ui.focus.index, line.buttons.length - 1) : defaultFocus(line);
 function withSelection(ui, id) {
-  return { ...ui, selectedId: id, focus: null };
+  return { ...ui, selectedId: id, focus: null, opened: ui.opened === id ? ui.opened : null };
+}
+function afterHandOff(screen, ui, id, now) {
+  if (ui.selectedId !== id)
+    return ui;
+  const lines = linesOf(entriesOf(screen, ui, ui.tab, now));
+  const line = lines.find((l) => l.id === id);
+  if (!line?.isFolded)
+    return ui;
+  const next = rowAfterClose(waitsOf(lines), id);
+  return next === null ? { ...ui, focus: null, opened: null } : withSelection(ui, next);
 }
 function activate(screen, ui, line, button, now) {
   const { press: press2 } = button;
@@ -3880,6 +3894,8 @@ function handleKey(screen, ui, key, now, text) {
     const unfolded = base.unfolded.includes(kind) ? base.unfolded.filter((k) => k !== kind) : [...base.unfolded, kind];
     return { ui: { ...base, unfolded } };
   }
+  if (selected && isShut(selected, base))
+    return key === "enter" ? { ui: { ...base, opened: selected.id } } : { ui: base };
   if (!selected || selected.buttons.length === 0)
     return { ui: base };
   if (key === "left" || key === "right") {
@@ -4028,7 +4044,7 @@ function drawLine(line, isSelected, d) {
   const cursor = isSelected ? s.tone("accent", "\u25B8") : " ";
   const age = line.age !== null && line.settled === null ? s.dim(ago(now - line.age)) : "";
   out.push(spread(` ${" ".repeat(pad)}${cursor} ${leadText(line.lead, s)} ${title}${status}${after}`, `${age} `, width));
-  if (line.settled)
+  if (line.settled || isShut(line, ui))
     return out;
   const indent = INDENT + pad;
   if (line.detail && (isSelected || line.isDetailShown))
@@ -4037,7 +4053,7 @@ function drawLine(line, isSelected, d) {
     return out;
   if (line.file)
     out.push(" ".repeat(indent) + s.tone("accent", line.file));
-  if (line.buttons.length > 0)
+  if (line.buttons.length > 0 && ui.typing !== line.id)
     out.push(...buttonLines(line, ui, indent - 1, width, s));
   if (ui.typing === line.id) {
     const hint = line.row ? replyHint(line.row, AGENT) : "Your reply";
@@ -4146,14 +4162,14 @@ function createPanel(deps) {
       animation = null;
     }
   };
-  async function refresh() {
+  async function refresh(pressedId) {
     const mine = ++version;
     const next = await source.screen(holdsOf(ui)).catch(() => null);
     if (mine !== version || next === null)
       return;
     screen = next;
     const followed = followRows(next, ui, seen, isOpening, deps.now());
-    ui = followed.ui;
+    ui = pressedId === undefined ? followed.ui : afterHandOff(next, followed.ui, pressedId, deps.now());
     seen = followed.seen;
     isOpening = false;
     syncAnimation();
@@ -4178,7 +4194,7 @@ function createPanel(deps) {
     const notice = noticeFor(outcome, now);
     if (notice)
       ui = { ...ui, notice };
-    await refresh();
+    await refresh("ref" in p ? undefined : p.id);
   }
   return {
     render: (width) => screen ? render(screen, ui, width, deps.now(), style, deps.height()) : [" Loading\u2026"],
@@ -5066,9 +5082,15 @@ function createInbox(pi, deps = defaultDeps) {
     });
     return notes;
   }
-  const start = (ctx, parentFile) => {
+  const dropTools = async () => {
+    const active = pi.getActiveTools();
+    const kept = active.filter((name) => name !== "record" && name !== "close");
+    if (kept.length !== active.length)
+      await pi.setActiveTools(kept);
+  };
+  const start = async (ctx, parentFile) => {
     if (isUnattended(ctx))
-      return;
+      return dropTools();
     prepare(ctx);
     showBand(ctx);
     deps.background(continueFork(ctx, parentFile).catch(() => {
@@ -5077,6 +5099,7 @@ function createInbox(pi, deps = defaultDeps) {
   };
   pi.on("session_start", (_event, ctx) => start(ctx));
   pi.on("session_switch", (event, ctx) => start(ctx, event.reason === "fork" ? event.previousSessionFile : undefined));
+  pi.on("session_branch", (event, ctx) => start(ctx, event.previousSessionFile));
   pi.on("session_shutdown", (_event, ctx) => {
     const id = sessionIdOf(ctx);
     openPanels.delete(id);
@@ -5128,10 +5151,10 @@ function createInbox(pi, deps = defaultDeps) {
       return;
     }
   };
-  pi.on("tool_call", async (event, ctx) => {
+  pi.on("tool_execution_start", async (event, ctx) => {
     if (isUnattended(ctx))
       return;
-    await noteQuietly(ctx, activityOf(event.toolName, event.input));
+    await noteQuietly(ctx, activityOf(event.toolName, event.args ?? {}));
   });
   pi.on("tool_result", async (event, ctx) => {
     if (isUnattended(ctx))

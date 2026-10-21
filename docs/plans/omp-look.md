@@ -106,12 +106,12 @@ omp and pi change their extension API often. Keeping every omp import in `host.t
 | Guidance in the system prompt | `before_agent_start`, returning `systemPrompt` with `guidanceText(OMP)` added |
 | The `inbox:` text beside each prompt | `before_agent_start`, returning a hidden custom message (`display: false`) with `notePrompt`'s notes. The message stays in the session, as the inbox text does in Claude Code and Codex. |
 | `record` and `close` | `pi.registerTool`, with the descriptions, schemas and answers from `hooks/tools.ts` |
-| Turn activity | `tool_call` events, through `toolActivity` |
+| Turn activity | `tool_execution_start` events, through `toolActivity`. Not `tool_call`, which omp waits on before every tool runs |
 | Turn end | `agent_end`, then `endTurn` and `runUpdates` |
 | Send a press's message | `pi.sendUserMessage`, delivered as a follow-up while a turn runs |
 | `/inbox` and the band | `registerCommand('inbox')`, `ctx.ui.custom` for the panel, `ctx.ui.setWidget` above the editor for the band |
 | PRs | `pi.exec('gh', …)` through `fetchTracked` |
-| Session id | `ctx.sessionManager.getSessionId()`. A session with no UI (`ctx.hasUI` false) is skipped. That covers subagents, which omp 18.1.17 starts with no UI and gives an extension no agent kind for, and it also skips print mode. |
+| Session id | `ctx.sessionManager.getSessionId()`. A subagent (`ctx.agent.kind` is `sub`) and a session with no UI (`ctx.hasUI` false, as in print mode) are skipped, and their `session_start` takes `record` and `close` out of the active tools. omp 18.1.17 gives an extension no `ctx.agent` and starts a subagent with no UI, so the read of `ctx.agent` is guarded and `hasUI` covers a subagent there. |
 
 ### The omp look
 
