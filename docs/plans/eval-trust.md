@@ -1,6 +1,6 @@
 # Evals the release can trust
 
-Status: building. Steps 1 and 2 are done. Steps 3 and 4 are next.
+Status: building. Steps 1 to 3 are done. Step 4 runs on the 0.2.10 candidate.
 
 Every release relies on the two eval suites in `./scripts/eval.sh` (AGENTS.md, "Text a model reads"). An audit of both, checked by two adversarial reviews, found that a green run shows only that nothing broke badly on these fixtures. It does not show that a wording change is safe. This plan makes a run's result mean what the release takes it to mean.
 
@@ -58,6 +58,15 @@ Each mutant is applied in a throwaway worktree and never committed. Predictions 
 | --- | --- | --- |
 | M1: remove the sentence in `systemText` saying a reason is not a recommendation (2312d4f) | `reason-not-recommendation`, Sonnet, 8 runs | Below the bar. History measured 3 of 8 without it. |
 | `<decided>` removed from the inbox model's prompt | `dismissed-question-stays-closed`, `old-dismissed-question-stays-closed`, Sonnet, 8 runs | The cases pass, while the raw answers re-add the dismissed question. That proves the code masks the regression. If the cases fail, the code is not masking it. |
+
+Results, on 0195b98 with each mutant applied:
+
+| Mutant | Result |
+| --- | --- |
+| M1 | 5 of 8: below the bar, as predicted. The failures are the reason read as a recommendation. The margin is one run. |
+| `<decided>` removed | 16 of 16 passed, as predicted. Every raw answer re-added the dismissed question, and the code dropped all 16. |
+
+The dismissed cases now also check `{"dropped": 0}`: the code must drop no NEW line. Today's prompt passes it 32 of 32, on Sonnet and Codex. With `<decided>` removed, Sonnet fails both cases 0 of 8, and Codex fails `old-dismissed-question-stays-closed` 0 of 8. Codex still passes `dismissed-question-stays-closed` 8 of 8 without the block, so that case does not test the rule on Codex.
 
 M2, restoring the old rule for unrelated items, waits for step 4, since its cases flip now. M4, softening the id rule, is dropped: step 2 showed the id cases pass with no guidance at all, so removing the id rule from the guidance cannot fail them.
 

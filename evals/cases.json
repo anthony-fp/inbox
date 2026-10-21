@@ -211,6 +211,9 @@
     "checks": [
       {
         "notNew": "flag"
+      },
+      {
+        "dropped": 0
       }
     ]
   },
@@ -330,6 +333,9 @@
       },
       {
         "added": 0
+      },
+      {
+        "dropped": 0
       }
     ]
   },

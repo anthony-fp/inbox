@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
@@ -40,6 +40,8 @@ type Check =
   | { item: string; rec?: string; options?: string }
   | { waiting: string; options?: string; rec?: string }
   | { openItems: number }
+  /** NEW lines the code dropped as repeats, which the other checks cannot see. */
+  | { dropped: number }
 
 type Case = {
   name: string
@@ -93,7 +95,9 @@ type Answer = { text: string | null; model: string | null; outputTokens: number 
  * Sonnet as the mod calls it: at low effort, and with no settings, so the runner's own CLAUDE.md never reaches it.
  */
 function claude(prompt: string): Promise<Answer> {
-  return new Promise(resolve => {
+  const cwd = mkdtempSync(join(tmpdir(), 'inbox-eval-claude-'))
+
+  return new Promise<Answer>(resolve => {
     const child = execFile(
       'claude',
       [
@@ -111,7 +115,7 @@ function claude(prompt: string): Promise<Answer> {
         '--system-prompt',
         systemText(CLAUDE_CODE),
       ],
-      { maxBuffer: 1 << 22, timeout: 300_000, cwd: mkdtempSync(join(tmpdir(), 'inbox-eval-claude-')) },
+      { maxBuffer: 1 << 22, timeout: 300_000, cwd },
       (err, out) => {
         if (err) return resolve({ text: null, model: null, outputTokens: null })
         try {
@@ -127,7 +131,7 @@ function claude(prompt: string): Promise<Answer> {
       },
     )
     child.stdin?.end(prompt)
-  })
+  }).finally(() => rmSync(cwd, { recursive: true, force: true }))
 }
 
 const askCodex = codexAsk(
@@ -155,7 +159,7 @@ function matchEach<C, I>(checks: C[], items: I[], fits: (c: C, i: I) => boolean)
   return new Map([...owner].map(([i, c]) => [c, i]))
 }
 
-function failures(before: Ledger, after: Ledger, checks: Check[]): string[] {
+function failures(before: Ledger, after: Ledger, checks: Check[], masked: string[]): string[] {
   const has = (pattern: string, text: string | null) => text !== null && new RegExp(pattern, 'i').test(text)
   const added = after.items.filter(i => !before.items.some(b => b.id === i.id))
   const isOpen = (id: string) => after.items.some(i => i.id === id) || after.findings.some(f => f.id === id)
@@ -201,7 +205,9 @@ function failures(before: Ledger, after: Ledger, checks: Check[]): string[] {
         out.push(
           `no open item like /${c.waiting}/: ${after.items.map(i => `"${i.ask}" options=${i.options.join(' / ')} rec=${i.rec}`).join(', ')}`,
         )
-    } else if ('openItems' in c && after.items.length !== c.openItems)
+    } else if ('dropped' in c && masked.length !== c.dropped)
+      out.push(`the code dropped ${masked.length} NEW lines: ${masked.map(a => `"${a}"`).join(', ')}`)
+    else if ('openItems' in c && after.items.length !== c.openItems)
       out.push(`${after.items.length} open items: ${after.items.map(i => `"${i.ask}"`).join(', ')}`)
     else if ('item' in c) {
       const item = after.items.find(i => i.id === c.item)
@@ -251,7 +257,9 @@ async function once(agent: Agent, c: Case, n: number): Promise<Result> {
   if (update === null) return { ...base, error: null, failed: ['no answer the mod can read'], masked: [] }
   const after = applyExchangeUpdate(ledger, update, ex, NOW, NOW)
 
-  return { ...base, error: null, failed: failures(ledger, after, c.checks), masked: maskedAsks(update, ledger, after) }
+  const masked = maskedAsks(update, ledger, after)
+
+  return { ...base, error: null, failed: failures(ledger, after, c.checks, masked), masked }
 }
 
 function job(agent: Agent, c: Case, n: number) {
