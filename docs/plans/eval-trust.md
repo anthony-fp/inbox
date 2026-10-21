@@ -1,6 +1,6 @@
 # Evals the release can trust
 
-Status: building. Step 1 is built. Steps 2 to 4 are next.
+Status: building. Steps 1 and 2 are done. Steps 3 and 4 are next.
 
 Every release relies on the two eval suites in `./scripts/eval.sh` (AGENTS.md, "Text a model reads"). An audit of both, checked by two adversarial reviews, found that a green run shows only that nothing broke badly on these fixtures. It does not show that a wording change is safe. This plan makes a run's result mean what the release takes it to mean.
 
@@ -21,7 +21,7 @@ Every release relies on the two eval suites in `./scripts/eval.sh` (AGENTS.md, "
 | Some checks are too loose | `numbered-questions-all-kept` passes when five questions are merged into one. `narrowed-question-new-options` checks neither the count nor the recommendation. The id check also flags "F1". |
 | 0.2.10's rule to say how the agent took an answer has no check | Reverting it would pass. |
 | Four cases flip between runs | `device-command-is-terminal`, `dialog-about-finding-escaped`, `done-message-independent-task` and `done-message-blocked-task` caused every red run in the last seven full logs. `set-aside-finding-stays-open` keeps a stale `min.codex: 0.4`. |
-| The agent suite may not test the guidance | The tool descriptions and the case prompts already say much of what the guidance says, and no run has measured the suite without it. |
+| The agent suite may not test the guidance | The tool descriptions and the case prompts already say much of what the guidance says, and no run has measured the suite without it. Step 2 measured it: 14 of 15 cases pass without the guidance. |
 
 ## Steps
 
@@ -44,7 +44,11 @@ No model calls, except one targeted run per changed check.
 
 ### 2. Measure the guidance
 
-The agent suite gets `--no-guidance`. One run of Claude on all 14 cases, at 5 runs each, is 70 sessions. A case that passes without the guidance tests the tool descriptions and the prompt, not the guidance. The plan then marks it as such.
+The agent suite gets `--no-guidance`. One run of Claude on all 15 cases, at 5 runs each, is 75 sessions. A case that passes without the guidance tests the tool descriptions and the prompt, not the guidance.
+
+Result, on 0195b98 with a clean tree (`evals/results/agent-no-guidance-2026-10-21T06-35-46.075Z.json`): 14 of the 15 cases pass without the guidance. Only `no-finding-user-only` fails, 2 of 5: Claude listed the options without asking a question. `record-question` passed 4 of 5 and missed the same way once. Every other case passed 5 of 5.
+
+So the agent suite tests one rule of the guidance, that the agent asks in its reply as a direct question. The tool descriptions in `hooks/tools.ts` and the inbox text carry the rest. A change to `guidanceText` that breaks any other rule would pass this suite. A change to a tool description is what the suite does test. Cases that fail without the guidance are follow-up work: see "Not in these steps".
 
 ### 3. Mutation tests
 
@@ -55,7 +59,7 @@ Each mutant is applied in a throwaway worktree and never committed. Predictions 
 | M1: remove the sentence in `systemText` saying a reason is not a recommendation (2312d4f) | `reason-not-recommendation`, Sonnet, 8 runs | Below the bar. History measured 3 of 8 without it. |
 | `<decided>` removed from the inbox model's prompt | `dismissed-question-stays-closed`, `old-dismissed-question-stays-closed`, Sonnet, 8 runs | The cases pass, while the raw answers re-add the dismissed question. That proves the code masks the regression. If the cases fail, the code is not masking it. |
 
-M2, restoring the old rule for unrelated items, waits for step 4, since its cases flip now. M4, softening the id rule, waits for step 2's result on the id cases.
+M2, restoring the old rule for unrelated items, waits for step 4, since its cases flip now. M4, softening the id rule, is dropped: step 2 showed the id cases pass with no guidance at all, so removing the id rule from the guidance cannot fail them.
 
 ### 4. Settle the flipping cases and add baselines
 
@@ -68,6 +72,8 @@ M2, restoring the old rule for unrelated items, waits for step 4, since its case
 A red case is not rerun until it is green. It gets one rerun at three times its runs. The bar applies to the combined count, and every attempt stays in the results.
 
 ## Not in these steps
+
+- Agent cases that fail without the guidance, one for each of its rules, so a change to `guidanceText` is tested.
 
 - The agent suite on Haiku and Sonnet. A past id leak (30e03f0) showed only on Haiku.
 - omp's inbox model, and its fallback to omp's `@smol` model.
