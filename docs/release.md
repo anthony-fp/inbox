@@ -64,7 +64,10 @@ Fix what the pass finds before you bump. A problem you ship anyway goes in the r
 
 ## 5. Bump and release
 
-1. Set the new version in `.claude-plugin/plugin.json`, `codex/plugin/.codex-plugin/plugin.json`, `serverInfo` in `codex/src/server.ts`, `appInfo` in `codex/src/tab.tsx` and `version` in `omp/package.json`.
-2. Run `npm --prefix codex run build` and `npm --prefix omp run build`, then `./scripts/check.sh`.
-3. Commit as "Bump to x.y.z", tag it `vx.y.z`, and push both.
-4. Publish a GitHub release for the tag. Write the notes with the `release-notes` skill from [petekp/claude-code-setup](https://github.com/petekp/claude-code-setup/tree/main/skills/release-notes). Without it, use its order: one line on the effect people will notice most, what they'll notice in each look, how to update in each agent, then the technical changes.
+Installs update as soon as the bump is pushed, so the release notes are written first and published right after the push.
+
+1. Write the release notes to a file outside the repo, with the `release-notes` skill from [petekp/claude-code-setup](https://github.com/petekp/claude-code-setup/tree/main/skills/release-notes). Without it, use its order: one line on the effect people will notice most, what they'll notice in each look, how to update in each agent, then the technical changes.
+2. Set the new version in `.claude-plugin/plugin.json`, `codex/plugin/.codex-plugin/plugin.json`, `serverInfo` in `codex/src/server.ts`, `appInfo` in `codex/src/tab.tsx` and `version` in `omp/package.json`.
+3. Run `npm --prefix codex run build` and `npm --prefix omp run build`, then `./scripts/check.sh`.
+4. Commit as "Bump to x.y.z", tag it `vx.y.z`, and push both.
+5. Publish the release at once with `gh release create vx.y.z --notes-file <notes file>`.
