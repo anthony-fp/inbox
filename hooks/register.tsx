@@ -2637,7 +2637,7 @@ export const register: Register = on => {
             {counts.length > 0 ? (
               counts.flatMap((p, n) => (n === 0 ? [p] : [<Text dimColor>{DOT}</Text>, p]))
             ) : (
-              <Text dimColor>Nothing needs you</Text>
+              <Text dimColor>Nothing needed</Text>
             )}
           </Text>
         </Box>

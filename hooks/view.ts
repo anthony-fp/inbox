@@ -444,7 +444,7 @@ export const ROW_TABS = TABS.filter((t): t is (typeof TABS)[number] & { id: 'nee
 
 export function emptyText(tab: 'needsYou' | 'findings', agent: string): { title: string; hint: string } {
   return tab === 'needsYou'
-    ? { title: 'Nothing needs you.', hint: `${agent}'s questions and the tasks only you can do show up here.` }
+    ? { title: 'Nothing needed.', hint: `${agent}'s questions and the tasks only you can do show up here.` }
     : { title: 'No findings yet', hint: `${agent} flags issues and opportunities it spots beyond your task.` }
 }
 

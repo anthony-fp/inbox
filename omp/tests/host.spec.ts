@@ -663,7 +663,7 @@ test('the band shows above the editor and redraws with the counts after a change
   expect(widgets[0]).toMatchObject({ key: 'inbox-band', options: { placement: 'aboveEditor' } })
   const band = (widgets[0]!.content as any)({ requestRender: () => renders.count++ }, theme)
   await tick()
-  expect(band.render(80).join('')).toContain('Nothing needs you')
+  expect(band.render(80).join('')).toContain('Nothing needed')
   const before = renders.count
   await record({ kind: 'task', ask: 'Try the CLI by hand' }, ctx)
   await tick()
