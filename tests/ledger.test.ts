@@ -1,6 +1,15 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { CLAUDE_CODE, answerNote, buildPrompt, carryText, latestBatch, questionNumbers } from '../hooks/model-text'
+import {
+  CLAUDE_CODE,
+  MAX_TOOL_DESCRIPTION,
+  answerNote,
+  buildPrompt,
+  carryText,
+  guidedCloseDescription,
+  latestBatch,
+  questionNumbers,
+} from '../hooks/model-text'
 import {
   EMPTY,
   addAgentItem,
@@ -19,7 +28,7 @@ import {
 import { readCommandRow, resetTime, statusLine, stopKindOf } from '../hooks/claude'
 import { parseInline } from '../hooks/inline'
 import { applyPress } from '../hooks/presses'
-import { recordClose, recordItem } from '../hooks/tools'
+import { agentTools, recordClose, recordItem } from '../hooks/tools'
 import type { Item } from '../types'
 
 const REPLY = `GOAL: Move annotation queue logic into a tested reducer
@@ -949,6 +958,13 @@ describe('buildPrompt', () => {
     expect(prompt).toContain('Ship it now, or wait for review?')
     expect(prompt).toContain('edited file-399.ts')
     expect(prompt).toContain('…[cut]')
+  })
+})
+
+describe('guidedCloseDescription', () => {
+  test('stays within the length Claude Code sends of a tool description', () => {
+    const close = agentTools(CLAUDE_CODE).find(t => t.name === 'close')!
+    expect(guidedCloseDescription(CLAUDE_CODE, close.description).length).toBeLessThanOrEqual(MAX_TOOL_DESCRIPTION)
   })
 })
 

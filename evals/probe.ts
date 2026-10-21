@@ -3,17 +3,27 @@ import { createInterface } from 'node:readline'
 import { parseArgs } from 'node:util'
 
 import { EMPTY } from '../hooks/ledger'
-import { CLAUDE_CODE } from '../hooks/model-text'
+import { CLAUDE_CODE, guidedCloseDescription } from '../hooks/model-text'
 import { agentTools, recordClose, recordItem } from '../hooks/tools'
 import { CODEX } from '../codex/src/texts'
 import type { Ledger } from '../types'
 
 const { values } = parseArgs({ options: { state: { type: 'string' }, log: { type: 'string' } } })
-const state: { agent: 'claude' | 'codex'; ledger: Partial<Ledger> } = JSON.parse(readFileSync(values.state!, 'utf8'))
+const state: { agent: 'claude' | 'codex'; isGuided: boolean; ledger: Partial<Ledger> } = JSON.parse(
+  readFileSync(values.state!, 'utf8'),
+)
 const host = state.agent === 'codex' ? CODEX : CLAUDE_CODE
 let ledger = { ...EMPTY, ...state.ledger } as Ledger
 
-const TOOLS = agentTools(host)
+/** Claude Code reads the guidance in `close`'s description, as in the mod; the other agents get it another way. */
+const TOOLS = agentTools(host).map(tool =>
+  state.agent === 'claude' && state.isGuided && tool.name === 'close'
+    ? {
+        ...tool,
+        description: guidedCloseDescription(host, tool.description).replaceAll('mcp__inbox__', 'mcp__probe__'),
+      }
+    : tool,
+)
 
 function send(id: unknown, result: unknown) {
   process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id, result })}\n`)

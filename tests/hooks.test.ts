@@ -787,6 +787,19 @@ test('last actions an earlier build saved convert once by the table, and a task 
   expect((await pane.find({ key: 'fold-issue' }))?.props.label).toBe('▾ 1 closed')
 })
 
+test('the guidance reaches Claude in the close tool’s description and nowhere else', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  on('tool.describe', ($, e) => ({ description: e.description }))
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  const provider = { plugin: 'inbox', tier: 'user' } as const
+  const close = await $.tool.describe({ tool: 'mcp__inbox__close', description: 'Close an item.', provider })
+  const record = await $.tool.describe({ tool: 'mcp__inbox__record', description: 'Record an item.', provider })
+  expect(close.description).toContain('Close an item.')
+  expect(close.description).toContain('# Inbox')
+  expect(record.description).toBe('Record an item.')
+})
+
 test('the band is [Open inbox] and the counts, the same while working and after 15 idle minutes', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])

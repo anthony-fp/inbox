@@ -863,12 +863,17 @@ These rows come from the guard's public source, anthropics/claude-code `mods/sec
 - These pass untouched: `prompt.submit`, `turn.*`, `tool.call`, `command.run`, `command.register`, `session.*`, `ui.*`, `fs.*`, `http.fetch`, `process.run`, `store.*`, `clock.*`, `model.*`, `mcp.call`, `audio.*`, `agent.list`, `engine.create`. [G README]
 - Under `allowManagedModsOnly`, a module is refused "whenever it loads or reloads (one already running when the option is set keeps running until then)". [G README "Options an administrator sets"]
 
-Inference, not verified live. In any session where the guard loads (every Team or Enterprise sign-in):
-- GUIDANCE never reaches Claude. The inbox adds it as system-prompt section `inbox:guidance` through `prompt.compose` (`hooks/register.tsx:on('prompt.compose')`).
+Live, 2026-10-21, Claude Code 2.1.307, on a Team sign-in with `--setting-sources ''` and a disposable mod that logged its events:
+- The guard loads in a `claude -p` run. The debug log lists `hooks module cc-plugin-sec-default@builtin loaded (native, environment 1, tier prepend)`, with `tool.describe` among its events. It also says `inbox: classic.SessionStart bypassed by cc-plugin-sec-default (tier user); beneath runs`. A session on this sign-in reproduces the guard.
+- `tool.describe` hooks run, and the model reads their text. Claude Code sends only the first 4096 characters of a mod tool's description when the tool is pinned (`isDeferred: false`), and the first 16384 once the model loads the tool through tool search. A 3652-character description arrived whole and a 4110-character one was cut. `$.tool.register` warns at register time: "the description of longdesc (4925 characters) reaches the model up to its first 4096 characters, or its first 16384 once the model loads the tool through tool search".
+- `/clear`, `/resume <id>` and `/branch` in a running session raise `session.end` (reason `clear`, `resume`, `resume`) and no `session.start` or `session.attach`. The first `prompt.submit` and `turn.start` after each carry the new session id. `/resume` and `/branch` give the same reason, so a hook that sees only these events cannot tell them apart.
+- A start with `--resume <id>` or `--resume <id> --fork-session` raises `session.start` with the conversation's id, a new one for a fork. `classic.SessionStart` is skipped there too.
+
+Inference, from the guard's source. In any session where the guard loads (every Team or Enterprise sign-in):
+- The system-prompt section `inbox:guidance`, which the inbox once added through `prompt.compose`, never reaches Claude. The guidance now rides in the `close` tool's description (`hooks/register.tsx:on('tool.describe')`).
 - The carry block never reaches Claude. The inbox adds it through `prompt.context` (`hooks/register.tsx:on('prompt.context')`).
 - The reload after `/clear`, `/resume` and `/branch` doesn't fire. It runs on `classic.SessionStart` (`hooks/register.tsx:on('classic.SessionStart')`).
 - The band, pane, per-turn model call and tools still run, unless `allowedMcpServers` is set. Then `record` and `close` don't register.
-- Options to weigh: move guidance into tool descriptions (`tool.describe` passes user subjects), move carry text into `prompt.submit` additive context, and reload on a `session.*` event.
 
 ### Policies that stop or limit user mods
 
@@ -1211,7 +1216,7 @@ MCP (Model Context Protocol) is how Claude Code connects to tool servers. An **M
 
 ### Limits and behavior
 
-- Tool search is on by default; only names and server instructions load up front. "Claude Code truncates each tool description and each server's instructions at 2,048 characters by default" (`CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH`). [MCP#scale-with-mcp-tool-search] Changelog 2.1.295: deferred tool descriptions are now cut at 16,384. [CL#2-1-295] The inbox pins its tools upfront (`isDeferred: false` through `hooks/register.tsx:on('tool.describe')`). Whether any cut applies to mod tool descriptions is unknown.
+- Tool search is on by default; only names and server instructions load up front. "Claude Code truncates each tool description and each server's instructions at 2,048 characters by default" (`CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH`). [MCP#scale-with-mcp-tool-search] Changelog 2.1.295: deferred tool descriptions are now cut at 16,384. [CL#2-1-295] The inbox pins its tools upfront (`isDeferred: false` through `hooks/register.tsx:on('tool.describe')`). A mod's pinned tool has its description cut at 4096 characters, and at 16384 behind tool search (live, 2026-10-21; see "When the guard loads").
 - "Each connected server takes some space in Claude's context window because its tool names and server instructions load into every session." [MCP-quickstart#add-and-verify-a-server]
 - Output: warns over 10,000 tokens; cap 25,000 tokens (`MAX_MCP_OUTPUT_TOKENS`); a result with no image over 50,000 characters is saved to a file. HTTP, SSE and (2.1.295) WebSocket messages over 16 MiB fail. [MCP#mcp-output-limits-and-warnings; CL#2-1-295]
 - Stdio servers: "Claude Code doesn't reconnect them automatically." A tool call silent for 30 minutes (stdio) or 5 minutes (remote) aborts with an error; that is per call, not the server. [MCP#automatic-reconnection; MCP#push-messages-with-channels]

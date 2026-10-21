@@ -15,7 +15,14 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 
 import { EMPTY } from '../hooks/ledger'
-import { CLAUDE_CODE, closedText, guidanceText, inboxText } from '../hooks/model-text'
+import {
+  CLAUDE_CODE,
+  closedText,
+  guidanceText,
+  guidedCloseDescription,
+  inboxText,
+  MAX_TOOL_DESCRIPTION,
+} from '../hooks/model-text'
 import type { Host } from '../hooks/model-text'
 import type { Ledger } from '../types'
 import { CODEX } from '../codex/src/texts'
@@ -182,7 +189,10 @@ function sandbox(c: Case, agent: Agent) {
   }
   const state = join(dir, 'state.json')
   const log = join(dir, 'calls.jsonl')
-  writeFileSync(state, JSON.stringify({ agent, shown: c.ledger ?? {}, ledger: c.toolLedger ?? c.ledger ?? {} }))
+  writeFileSync(
+    state,
+    JSON.stringify({ agent, isGuided, shown: c.ledger ?? {}, ledger: c.toolLedger ?? c.ledger ?? {} }),
+  )
   writeFileSync(log, '')
   const serverArgs = [probeServer, '--state', state, '--log', log]
   const calls = (): Call[] =>
@@ -227,7 +237,6 @@ async function claudeIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome
       '',
       '--mcp-config',
       config,
-      ...(isGuided ? ['--append-system-prompt', guidance(CLAUDE_CODE)] : []),
       '--tools',
       '',
       '--allowedTools',
@@ -236,7 +245,11 @@ async function claudeIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome
       'stream-json',
       '--verbose',
     ],
-    { cwd: s.work, input: message(c, CLAUDE_CODE) },
+    {
+      cwd: s.work,
+      env: { ...process.env, CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH: String(MAX_TOOL_DESCRIPTION) },
+      input: message(c, CLAUDE_CODE),
+    },
   )
   const events = lines(r.stdout)
   const init = events.find(e => e.type === 'system' && e.subtype === 'init')
@@ -567,6 +580,18 @@ async function assertOnlyOmpProbeSession() {
   if (o.error) throw new IsolationError(`omp preflight failed: ${o.error}`)
 }
 
+if (isGuided && agents.includes('claude')) {
+  guidance(CLAUDE_CODE)
+  const closeDescription = guidedCloseDescription(
+    CLAUDE_CODE,
+    agentTools(CLAUDE_CODE).find(t => t.name === 'close')!.description,
+  )
+  if (closeDescription.length > MAX_TOOL_DESCRIPTION)
+    throw new Error(
+      `close's description is ${closeDescription.length} characters, and Claude Code sends ${MAX_TOOL_DESCRIPTION}`,
+    )
+}
+
 const about = provenance(
   isGuided ? 'agent' : 'agent-no-guidance',
   { claude: 'claude', codex: codexCli, omp: 'omp' },
@@ -577,6 +602,7 @@ const about = provenance(
         [`tools ${host.agent}`, JSON.stringify(agentTools(host))],
       ]),
     ),
+    'close description Claude': guidedCloseDescription(CLAUDE_CODE, ''),
     cases: readFileSync(values.cases, 'utf8'),
     models: JSON.stringify(REQUESTED),
     runner: readFileSync(process.argv[1]!, 'utf8'),

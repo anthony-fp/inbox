@@ -123,7 +123,7 @@ import {
   CLAUDE_CODE,
   dialogActivity,
   dialogQuestions,
-  guidanceText,
+  guidedCloseDescription,
   promptNotes,
   screenText,
   START_TITLE,
@@ -2383,21 +2383,15 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('prompt.compose', async ($, e, next) => {
-    const r = await next(e)
-    if (!isOn) return r
-
-    return {
-      ...r,
-      sections: [...r.sections, { id: 'inbox:guidance', text: guidanceText(CLAUDE_CODE), scope: 'session' as const }],
-    }
-  })
-
   on('tool.describe', { tool: RECORD_TOOL }, async ($, e, next) => ({ ...(await next(e)), isDeferred: false }))
   on('tool.call', { tool: RECORD_TOOL }, async ($, e) => ({
     result: await runTool($, 'record', e as unknown as Record<string, unknown>),
   }))
-  on('tool.describe', { tool: CLOSE_TOOL }, async ($, e, next) => ({ ...(await next(e)), isDeferred: false }))
+  on('tool.describe', { tool: CLOSE_TOOL }, async ($, e, next) => {
+    const r = await next(e)
+
+    return { ...r, description: guidedCloseDescription(CLAUDE_CODE, r.description), isDeferred: false }
+  })
   on('tool.call', { tool: CLOSE_TOOL }, async ($, e) => ({
     result: await runTool($, 'close', e as unknown as Record<string, unknown>),
   }))

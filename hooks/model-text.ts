@@ -87,6 +87,14 @@ Close with ${host.closeTool}:
 The answer to a question is the user's to give. Close a question with their answer, or once it no longer applies, and never with an answer of your own.`
 }
 
+/** Claude Code sends only this many characters of a tool's description when the tool is not behind tool search. */
+export const MAX_TOOL_DESCRIPTION = 4096
+
+/** `record`'s own description leaves too little room under `MAX_TOOL_DESCRIPTION` for the guidance, so `close` carries it. */
+export function guidedCloseDescription(host: Host, description: string): string {
+  return `${description}\n\n${guidanceText(host)}`
+}
+
 export const START_TITLE =
   'inbox: where this session stands, as of the last reply. An "inbox:" text beside a later prompt replaces this.'
 
