@@ -38,7 +38,7 @@ Add one case per row of the table above to `evals/cases.json`, and to `evals/age
 
 ## Decisions for the owner
 
-- **Stale questions.** An item open for more than 12 turns expires (`STALE_AFTER` in `hooks/ledger.ts`). A coordinator session can keep a real decision open longer than that. Should agent-recorded questions be exempt, or expire by time instead of turns?
+- **Stale questions (decided).** An item open for more than 12 turns expires (`STALE_AFTER` in `hooks/ledger.ts`), and a long session can keep a real decision open longer than that. Agent-recorded items (`label: null`) are exempt from `STALE_AFTER`. Items from `NEW:` lines still expire after 12 turns. The `MAX_OPEN` cap of 20 still applies to every item.
 - **Missed closes.** With change 1, a question the work has made moot stays open until the agent or the person closes it. That trades a wrongly closed decision for an extra open row.
 
 ## Checks
