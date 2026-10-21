@@ -24,6 +24,17 @@ Any design has to catch both. Today's checks would miss both on a rerun.
 - **The desktop reply field's Discard button ran off the pane at the narrowest width.** It is the Claude app's own layout engine, so only the real app shows it. No check narrows the pane, and "Reply while closing" expects only that the row stays. An accessibility press on the clipped button still works, so pressing it proves nothing.
 - **A question dismissed in omp's dialog showed only after the next message.** omp cancels a dialog with this event order: `tool_result` (an error) → `turn_end` → `turn_start` → `message_end` (aborted) → `turn_end` → `agent_end`. The turn ends with no reply text, which the shared `endTurn` drops unless told otherwise. omp's list of checks in release.md leaves out Dialog. A check that reads the saved state after the next step would pass with the bug in place.
 
+## What running the pass by hand showed
+
+The 0.2.10 passes were driven by hand-written scripts: window captures, a text finder that clicks a word it reads, tmux keys, and install scripts. Each item below is a requirement for the Tier 2 drivers.
+
+- **The scripts live outside the repo** and hard-code the VM window's id, which changes each time the VM boots. A driver finds the window by its name at each run.
+- **A press's ✓ and its Undo last 5.12 s,** set by `SETTLED_MS` in `hooks/view.ts`. Capturing, finding the word and clicking took longer, and Undo was missed four times across the desktop and Codex looks. A driver presses Undo by its accessibility label or key, right after Dismiss.
+- **The terminal's inline pane gives Undo no key,** and Tab passes over it, so no keyboard driver can press it there. Closing the last open row on a tab also moves the keyboard focus to the prompt, so the next keys go to the agent.
+- **The VM's clock jumped about an hour mid-pass,** so row ages read wrong. A clone syncs its clock before a run.
+- **Restoring a release's saved state by hand brought back transcripts that held later answers,** so the first turn closed the restored question. The base image's fixed saved sessions avoid this.
+- **Codex asked once to approve the read-only `gh pr view` call** that the PRs check needs. The check expects that prompt and approves only read-only calls.
+
 ## Tier 1: process
 
 1. **Push the candidate.** Commit the bump, the rebuilt bundles and a passing `check.sh` on a branch, push the branch, and leave `main` and the tag alone.

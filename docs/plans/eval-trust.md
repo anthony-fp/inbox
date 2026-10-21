@@ -89,8 +89,15 @@ A red case is not rerun until it is green. It gets one rerun at three times its 
 
 ## Not in these steps
 
-- Agent cases that fail without the guidance, one for each of its rules, so a change to `guidanceText` is tested.
+Each item names what it would catch. Remove an item when the change that does it lands.
 
-- The agent suite on Haiku and Sonnet. A past id leak (30e03f0) showed only on Haiku.
-- omp's inbox model, and its fallback to omp's `@smol` model.
-- Agent cases showing the closed, carried-over and answer notes, and Codex's guidance delivered as the plugin delivers it, at session start.
+- **Agent cases that fail without the guidance,** one for each of its rules, so a change to `guidanceText` is tested.
+- **The direct-question rule under realistic replies.** `no-finding-user-only` passes 5 of 5, but in 0.2.10's live pass the agent missed the rule three times. Opus ended replies with "let me know which you prefer" and "I recommend no". Haiku ended one with "my recommendation: accept both". Cases where the reply ends with a recommendation or a list of options would catch it.
+- **The agent suite on Haiku and Sonnet.** A past id leak (30e03f0) showed only on Haiku, and the desktop app in the release VM runs Haiku.
+- **No-guidance controls on Codex and omp,** as step 2 ran on Claude, before M4 is run there.
+- **M2, restoring the old rule for unrelated items.** Step 4 settled its cases, so it can run now.
+- **A harder positional-answer case.** `close-answered-says-answer` passes, but in a live pass Codex saved "the second one" as the answer. A case with more options, or the answer in a longer message, would catch it.
+- **A false "done:" close.** In 0.2.10's live pass, the inbox model closed a question the agent had just asked. Its reason was "done: sleep ran in foreground, so the question is moot", but the command had been blocked. The guard in `applyUpdate` catches only "no longer applies" reasons with no grounds. A model case would measure how often it happens.
+- **`task-about-finding-replaces-it` back to its 0.2.9 rate.** It passes 16 of 20 on Sonnet, against 46 of 48 on 0.2.9's NEW rule. The live pass saw the miss: the inbox model added the question but wrote no ASKED line, so the finding stayed open.
+- **omp's inbox model,** and its fallback to omp's `@smol` model.
+- **Agent cases showing the closed, carried-over and answer notes,** and Codex's guidance delivered as the plugin delivers it, at session start.
