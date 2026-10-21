@@ -21,7 +21,14 @@
 # --claude-model sets the model of the Claude agent in the agent suite. It defaults to opus.
 # --omp-model sets the model of the omp agent. It defaults to Claude Opus 5.5, which omp lists from 18.12.3. A run
 # fails when omp runs another model, as it does for a model its catalog lacks.
+# --no-guidance runs the agent suite without the guidance, as a control: a case that still passes tests the tool
+# descriptions and the case's own prompt, not the guidance.
 # Runs default to 8 for the model suite and 5 for the agent suite.
+#
+# Every run writes its results, by default to evals/results/, which Git ignores: the commit, whether the tree had
+# changes, the date, the CLI versions, and for each run the model that answered, its answer and its verdict. The
+# agent suite also keeps each agent's raw output. A call that fails is tried twice more; a case whose calls keep
+# failing is reported as not run. Neither suite reads your own CLAUDE.md or ~/.codex/AGENTS.md.
 
 set -eu
 
@@ -38,12 +45,12 @@ case "$suite" in
     model)
         "$esbuild" "$DIR/evals/run.ts" --bundle --platform=node --format=esm \
             --outfile="$bundle/run.mjs" --log-level=warning
-        node "$bundle/run.mjs" --cases "$DIR/evals/cases.json" "$@"
+        INBOX_EVAL_ROOT="$DIR" node "$bundle/run.mjs" --cases "$DIR/evals/cases.json" "$@"
         ;;
     agent)
         "$esbuild" "$DIR/evals/agent.ts" "$DIR/evals/probe.ts" "$DIR/evals/omp-probe.ts" --bundle --platform=node --format=esm \
             --outdir="$bundle" --out-extension:.js=.mjs --log-level=warning
-        node "$bundle/agent.mjs" --cases "$DIR/evals/agent-cases.json" "$@"
+        INBOX_EVAL_ROOT="$DIR" node "$bundle/agent.mjs" --cases "$DIR/evals/agent-cases.json" "$@"
         ;;
     *)
         echo "Unknown suite: $suite. Use model or agent." >&2

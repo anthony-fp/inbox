@@ -15,7 +15,8 @@ import type { Ledger } from '../types'
  *
  * The runner passes the case through the environment. INBOX_EVAL_STATE holds `{ shown, ledger }`: the inbox the agent is
  * shown, and the inbox the tools answer from. INBOX_EVAL_LOG is the file each call is appended to. INBOX_EVAL_TOOLS is
- * the file where the probe writes the tools the session offers, which the runner checks.
+ * the file where the probe writes the tools the session offers, which the runner checks. INBOX_EVAL_NO_GUIDANCE=1
+ * leaves the guidance out, for the control run.
  */
 const MESSAGE_TYPE = 'inbox'
 
@@ -31,6 +32,7 @@ function required(name: string): string {
 const statePath = required('INBOX_EVAL_STATE')
 const logPath = required('INBOX_EVAL_LOG')
 const toolsPath = required('INBOX_EVAL_TOOLS')
+const isGuided = process.env.INBOX_EVAL_NO_GUIDANCE !== '1'
 const state: State = JSON.parse(readFileSync(statePath, 'utf8'))
 const shown = { ...EMPTY, ...state.shown } as Ledger
 let ledger = { ...EMPTY, ...state.ledger } as Ledger
@@ -65,7 +67,8 @@ export default function (pi: Pi): void {
     const all = pi.getAllTools().map(t => ({ name: t.name, origin: t.sourceInfo.origin, source: t.sourceInfo.source }))
     writeFileSync(toolsPath, JSON.stringify({ active: pi.getActiveTools(), all }))
     const text = guidanceText(OMP)
-    const systemPrompt = event.systemPrompt.includes(text) ? event.systemPrompt : [...event.systemPrompt, text]
+    const systemPrompt =
+      !isGuided || event.systemPrompt.includes(text) ? event.systemPrompt : [...event.systemPrompt, text]
     const { notes } = promptNotes(
       OMP,
       { ...shown, turn: shown.turn + 1 },

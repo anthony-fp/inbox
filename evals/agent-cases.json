@@ -159,7 +159,7 @@
         "reply": "\\?"
       },
       {
-        "notReply": "\\b[if]\\d{1,3}\\b"
+        "noIds": true
       }
     ]
   },
@@ -189,7 +189,7 @@
         "reply": "https://vercel\\.com/acme/docs/settings"
       },
       {
-        "notReply": "\\b[if]\\d{1,3}\\b"
+        "noIds": true
       }
     ]
   },
@@ -235,7 +235,7 @@
         "reply": "parseDate|december"
       },
       {
-        "notReply": "\\b[if]\\d{1,3}\\b"
+        "noIds": true
       }
     ]
   },
@@ -284,7 +284,43 @@
         }
       },
       {
-        "notReply": "\\b[if]\\d{1,3}\\b"
+        "noIds": true
+      }
+    ]
+  },
+  {
+    "name": "close-answered-says-answer",
+    "about": "The user answers by position, so the agent closes the question with the option they meant and says in its reply which one it took them to mean.",
+    "ledger": {
+      "nextId": 5,
+      "items": [
+        {
+          "id": "i3",
+          "kind": "question",
+          "label": null,
+          "ask": "Which cache should the product API use?",
+          "options": ["Redis", "In-memory"],
+          "rec": "In-memory",
+          "helps": [],
+          "turn": 1,
+          "at": 1
+        }
+      ]
+    },
+    "prompt": "The second one. Go ahead and add it.",
+    "checks": [
+      {
+        "calls": "close",
+        "count": 1,
+        "match": {
+          "id": "^i3$"
+        }
+      },
+      {
+        "reply": "in-memory|in memory"
+      },
+      {
+        "noIds": true
       }
     ]
   },
@@ -334,7 +370,10 @@
         "reply": "already|settled|postgres it is|(use|using|go with|going with|proceed|set up)[\\s\\S]*postgres"
       },
       {
-        "notReply": "apolog|sorry|\\b[if]\\d{1,3}\\b"
+        "notReply": "apolog|sorry"
+      },
+      {
+        "noIds": true
       }
     ]
   },
@@ -365,7 +404,7 @@
         }
       },
       {
-        "notReply": "\\b[if]\\d{1,3}\\b"
+        "noIds": true
       }
     ]
   },
@@ -395,7 +434,7 @@
         "count": 0
       },
       {
-        "notReply": "\\b[if]\\d{1,3}\\b"
+        "noIds": true
       }
     ]
   }

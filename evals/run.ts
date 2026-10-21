@@ -1,16 +1,18 @@
 import { execFile } from 'node:child_process'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 
-import { applyUpdate, EMPTY, parseReply } from '../hooks/ledger'
+import { applyExchangeUpdate, EMPTY, parseReply } from '../hooks/ledger'
 import { buildPrompt, CLAUDE_CODE, systemText, transcriptCatchUpPrompt } from '../hooks/model-text'
 import type { Exchange } from '../hooks/ledger'
 import type { Ledger } from '../types'
 import { run } from '../codex/src/run'
-import { codexAsk } from '../codex/src/update'
+import { codexAsk, MODEL } from '../codex/src/update'
 import { codexCli } from './codex-cli'
+import { provenance, report, runCount, runJobs, selectCases, writeResults } from './harness'
+import type { Run } from './harness'
 
 type Agent = 'claude' | 'codex'
 
@@ -24,7 +26,8 @@ type Check =
   | { notNew: string }
   | { noHelp: string }
   | { item: string; rec?: string; options?: string }
-  | { waiting: string; options?: string }
+  | { waiting: string; options?: string; rec?: string }
+  | { openItems: number }
 
 type Case = {
   name: string
@@ -49,23 +52,69 @@ const { values } = parseArgs({
     cases: { type: 'string', default: 'evals/cases.json' },
   },
 })
-const agents: Agent[] = values.agent === 'both' ? ['claude', 'codex'] : [values.agent as Agent]
-const runs = Number(values.runs)
-const wanted = values.case ? new Set(values.case.split(',')) : null
-const cases: Case[] = JSON.parse(readFileSync(values.cases, 'utf8')).filter((c: Case) => !wanted || wanted.has(c.name))
+const AGENTS: Record<string, Agent[]> = { both: ['claude', 'codex'], claude: ['claude'], codex: ['codex'] }
+const selected = AGENTS[values.agent]
+if (!selected) throw new Error(`Unknown --agent ${values.agent}. Use claude, codex or both.`)
+const agents: Agent[] = selected
+const runs = runCount(values.runs)
+const cases: Case[] = selectCases(JSON.parse(readFileSync(values.cases, 'utf8')), values.case)
 
-function claude(prompt: string): Promise<string | null> {
+type Answer = { text: string | null; model: string | null }
+
+/**
+ * Sonnet as the mod calls it: at low effort, and with no settings, so the runner's own CLAUDE.md never reaches it.
+ */
+function claude(prompt: string): Promise<Answer> {
   return new Promise(resolve => {
     const child = execFile(
       'claude',
-      ['-p', '--model', 'sonnet', '--tools', '', '--system-prompt', systemText(CLAUDE_CODE)],
+      [
+        '-p',
+        '--model',
+        'sonnet',
+        '--effort',
+        'low',
+        '--setting-sources',
+        '',
+        '--tools',
+        '',
+        '--output-format',
+        'json',
+        '--system-prompt',
+        systemText(CLAUDE_CODE),
+      ],
       { maxBuffer: 1 << 22, timeout: 300_000, cwd: mkdtempSync(join(tmpdir(), 'inbox-eval-claude-')) },
-      (err, out) => resolve(err ? null : out),
+      (err, out) => {
+        if (err) return resolve({ text: null, model: null })
+        try {
+          const parsed: unknown = JSON.parse(out)
+          const events = (Array.isArray(parsed) ? parsed : [parsed]) as Record<string, any>[]
+          const result = events.find(e => e.type === 'result')
+          const model = events.find(e => e.type === 'system' && e.subtype === 'init')?.model ?? null
+          resolve({ text: result && !result.is_error ? String(result.result) : null, model })
+        } catch {
+          resolve({ text: null, model: null })
+        }
+      },
     )
     child.stdin?.end(prompt)
   })
 }
 
+/**
+ * A Codex home that holds only the sign-in, so the runner's own AGENTS.md never reaches the model. Codex reads
+ * `~/.codex/AGENTS.md` even with `--ignore-user-config` and `project_doc_max_bytes=0`.
+ */
+function codexHome(): string {
+  const home = mkdtempSync(join(tmpdir(), 'inbox-eval-codex-home-'))
+  const auth = join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'auth.json')
+  if (existsSync(auth)) symlinkSync(auth, join(home, 'auth.json'))
+
+  return home
+}
+
+// The product's codex call inherits this process's environment, so the eval points it at the bare home.
+if (agents.includes('codex')) process.env.CODEX_HOME = codexHome()
 const askCodex = codexAsk(run, codexCli, mkdtempSync(join(tmpdir(), 'inbox-eval-')))
 
 function failures(before: Ledger, after: Ledger, checks: Check[]): string[] {
@@ -101,10 +150,18 @@ function failures(before: Ledger, after: Ledger, checks: Check[]): string[] {
     else if ('noHelp' in c && added.some(i => i.helps.some(h => h.kind === c.noHelp))) out.push(`a ${c.noHelp} step`)
     else if ('waiting' in c) {
       const match = after.items.find(
-        i => has(c.waiting, i.ask) && (!c.options || has(c.options, i.options.join(' / '))),
+        i =>
+          has(c.waiting, i.ask) &&
+          (!c.options || has(c.options, i.options.join(' / '))) &&
+          (!c.rec || has(c.rec, i.rec)),
       )
-      if (!match) out.push(`no open item like /${c.waiting}/: ${after.items.map(i => `"${i.ask}"`).join(', ')}`)
-    } else if ('item' in c) {
+      if (!match)
+        out.push(
+          `no open item like /${c.waiting}/: ${after.items.map(i => `"${i.ask}" options=${i.options.join(' / ')} rec=${i.rec}`).join(', ')}`,
+        )
+    } else if ('openItems' in c && after.items.length !== c.openItems)
+      out.push(`${after.items.length} open items: ${after.items.map(i => `"${i.ask}"`).join(', ')}`)
+    else if ('item' in c) {
       const item = after.items.find(i => i.id === c.item)
       if (!item) out.push(`${c.item} closed`)
       else if (c.rec && !has(c.rec, item.rec)) out.push(`${c.item} rec=${item.rec}`)
@@ -116,7 +173,16 @@ function failures(before: Ledger, after: Ledger, checks: Check[]): string[] {
   return out
 }
 
-type Result = { agent: Agent; name: string; run: number; answer: string | null; failed: string[] }
+/** `masked`: NEW lines in the answer that the code dropped before the checks, for reading only. */
+type Result = Run & { answer: string | null; masked: number }
+
+/** NEW lines the answer wrote, against the items its update added. */
+function maskedCount(answer: string, before: Ledger, after: Ledger): number {
+  const written = answer.split('\n').filter(l => /^\s*[-*]?\s*NEW\s*:/.test(l)).length
+  const added = after.items.filter(i => !before.items.some(b => b.id === i.id)).length
+
+  return Math.max(0, written - added)
+}
 
 async function once(agent: Agent, c: Case, n: number): Promise<Result> {
   const ledger = { ...EMPTY, ...c.ledger } as Ledger
@@ -131,34 +197,25 @@ async function once(agent: Agent, c: Case, n: number): Promise<Result> {
   }
   const prompt =
     c.catchUp === undefined ? buildPrompt(ledger, ex) : transcriptCatchUpPrompt(ledger, ex.screen, c.catchUp)
-  const answer = agent === 'codex' ? await askCodex(prompt) : await claude(prompt)
-  const update = answer === null ? null : parseReply(answer, c.catchUp ?? `${ex.reply}\n${ex.activity.join('\n')}`)
-  const failed =
-    update === null
-      ? ['no answer the mod can read']
-      : failures(ledger, applyUpdate(ledger, update, NOW, ledger.turn), c.checks)
+  const { text: answer, model } =
+    agent === 'codex' ? { text: await askCodex(prompt), model: MODEL } : await claude(prompt)
+  const base = { agent, name: c.name, run: n, model, answer, attempts: 1 }
+  if (answer === null) return { ...base, error: `${agent} gave no answer`, failed: [], masked: 0 }
+  const update = parseReply(answer, c.catchUp ?? `${ex.reply}\n${ex.activity.join('\n')}`)
+  if (update === null) return { ...base, error: null, failed: ['no answer the mod can read'], masked: 0 }
+  const after = applyExchangeUpdate(ledger, update, ex, NOW, NOW)
 
-  return { agent, name: c.name, run: n, answer, failed }
+  return { ...base, error: null, failed: failures(ledger, after, c.checks), masked: maskedCount(answer, ledger, after) }
 }
 
+const about = provenance('model', { claude: 'claude', codex: codexCli })
 const jobs = agents.flatMap(a => cases.flatMap(c => Array.from({ length: runs }, (_, n) => () => once(a, c, n))))
-const results: Result[] = []
-let next = 0
-await Promise.all(
-  Array.from({ length: 6 }, async () => {
-    while (next < jobs.length) results.push(await jobs[next++]!())
-  }),
-)
-if (values.out) writeFileSync(values.out, JSON.stringify(results, null, 1))
+const results = (await runJobs(jobs)) as Result[]
+const path = writeResults(values.out, about, results)
+const isPassing = report(agents, cases, results, MIN, (_agent, _c, mine) => {
+  const masked = (mine as Result[]).reduce((sum, r) => sum + r.masked, 0)
 
-let isFailing = false
-for (const agent of agents)
-  for (const c of cases) {
-    const mine = results.filter(r => r.agent === agent && r.name === c.name)
-    const passed = mine.filter(r => r.failed.length === 0).length
-    const isPass = passed / mine.length >= (c.min?.[agent] ?? MIN)
-    isFailing ||= !isPass
-    console.log(`${isPass ? '  ok' : '  x '} ${agent} ${c.name}: ${passed} of ${mine.length}`)
-    if (!isPass) for (const r of mine) if (r.failed.length > 0) console.log(`       ${r.failed.join('; ')}`)
-  }
-process.exit(isFailing ? 1 : 0)
+  return masked > 0 ? `, ${masked} NEW lines dropped by the code` : ''
+})
+console.log(`Results: ${path}${about.isDirty ? ' (the tree had uncommitted changes)' : ''}`)
+process.exit(isPassing ? 0 : 1)

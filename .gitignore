@@ -14,6 +14,9 @@ omp/node_modules/
 # The tab page `npm --prefix codex run dev` keeps built
 codex/.dev/
 
+# Eval results, written on every run
+evals/results/
+
 # The launch video's tools, renders and captured stills, which its scripts make again
 launch-video/node_modules/
 launch-video/out/

@@ -75,7 +75,11 @@
     "checks": [
       {
         "waiting": "version",
-        "options": "16"
+        "options": "16",
+        "rec": "16"
+      },
+      {
+        "openItems": 1
       }
     ]
   },
@@ -1580,6 +1584,9 @@
       },
       {
         "new": "background|email|download"
+      },
+      {
+        "added": 5
       }
     ]
   },
