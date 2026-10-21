@@ -13,6 +13,9 @@ const here = dirname(fileURLToPath(import.meta.url))
 const output = join(here, 'dist', 'host.js')
 const isCheck = process.argv[2] === '--check'
 
+// The bundle's source-path comments are relative to the working folder.
+process.chdir(here)
+
 const result = await Bun.build({
   entrypoints: [join(here, 'src', 'host.ts')],
   target: 'bun',
@@ -31,7 +34,7 @@ if (isCheck) {
     .text()
     .catch(() => null)
   if (current !== bundle) {
-    console.error('Out of date: omp/dist/host.js. Run: bun --cwd omp run build')
+    console.error(`Out of date: omp/dist/host.js. Run: npm --prefix ${here} run build`)
     process.exit(1)
   }
 } else {
