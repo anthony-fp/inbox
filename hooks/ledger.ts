@@ -22,6 +22,12 @@ export const EMPTY: Ledger = {
 const NL = '\n'
 const MAX_OPEN = 20
 const STALE_AFTER = 12
+/**
+ * A "no longer applies" close whose reason says nothing made the item moot, as "not related to this exchange". The
+ * rule asks for what made it moot, and Sonnet at low effort writes these for unrelated items it should leave open.
+ */
+const UNFOUNDED_MOOT =
+  /^no longer applies:.*(\b(not|never) (related|relevant|addressed|mentioned|discussed|answered|raised|part of)\b|\bunrelated\b|\b(still|stays) open\b|\boutside (the|this)\b|\bnothing\b.*\b(touch|address|mention|relate))/i
 const MAX_CLOSED = 12
 const EXPIRED = 'expired, unanswered'
 const MAX_HELPS = 3
@@ -612,7 +618,9 @@ export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number
     running: u.card.running,
   }
   const stillAsked = new Set(u.updated.filter(c => c.options || c.rec).map(c => c.id))
-  const closing = new Map(u.closed.filter(c => !stillAsked.has(c.id)).map(c => [c.id, c.outcome]))
+  const closing = new Map(
+    u.closed.filter(c => !stillAsked.has(c.id) && !UNFOUNDED_MOOT.test(c.outcome)).map(c => [c.id, c.outcome]),
+  )
   const closed = [...ledger.closed]
   const items: Item[] = []
   for (const item of ledger.items) {

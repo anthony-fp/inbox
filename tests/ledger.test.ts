@@ -452,6 +452,22 @@ describe('applyUpdate', () => {
     expect(applyUpdate({ ...dismissed, turn: 2 }, reworded, 4, 2, 3).items).toEqual([])
   })
 
+  test('an update that closes an item as no longer applying keeps it open when its reason names nothing that made it moot', () => {
+    const open = applyUpdate(
+      { ...EMPTY, turn: 1 },
+      parseReply('NEW: decide | - | Email failures or post in #ops? | - | -')!,
+      1,
+      1,
+    )
+    for (const reason of [
+      'not related to this exchange',
+      'unrelated, still open',
+      'nothing in this exchange touches it',
+    ])
+      expect(applyUpdate(open, parseReply(`CLOSED: i1 | no longer applies: ${reason}`)!, 2, 2).items.length).toBe(1)
+    expect(applyUpdate(open, parseReply('CLOSED: i1 | no longer applies: #ops was archived')!, 2, 2).items).toEqual([])
+  })
+
   test('a NEW line with the ask of an item that expired before the prompt is added', () => {
     const first = applyUpdate(
       { ...EMPTY, turn: 1 },
