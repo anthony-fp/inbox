@@ -111,9 +111,7 @@ modelRoles:
 
 Only Sonnet is tested. Another model may work, but nobody has checked how well.
 
-The call goes to your provider, so it counts against your usage there. The
-inbox adds no charge of its own. [cost: price per call for the default Sonnet
-model, not yet sourced]
+Your provider bills each call at that model's rate.
 
 If `@inbox` is unset, or names a model omp cannot use, such as an unknown model
 or one you are not signed in to, the inbox uses the next choice. The panel's

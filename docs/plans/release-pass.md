@@ -105,7 +105,7 @@ In the clone, each driver uses the VM user's real config folders, where the prev
 Every check that needs an agent turn uses a real one, on the evals' model. A scripted stand-in model cannot be pointed at all four agents:
 
 - Codex's inbox model runs `codex exec --ignore-user-config` (`codex/src/update.ts`), so a custom provider never reaches it.
-- omp picks a Sonnet from the signed-in `anthropic` provider first (`inboxModel` in `omp/src/host.ts`).
+- omp picks the person's `@inbox` role first, then a Sonnet from the signed-in `anthropic` provider (`inboxModel` in `omp/src/host.ts`).
 - Claude Code reaches a stand-in only by an API key, which changes the sign-in path that mods behave differently under.
 
 A real turn varies. A check that fails is run again at most twice. Every attempt is kept, and a check that passes only on a retry is marked flaky and goes to the release owner. It is never reported as a plain pass.
@@ -155,3 +155,7 @@ This is release tooling, so each piece needs Pete's yes before it is built:
 - **Upkeep.** The Claude app and Claude Code update themselves. An update can break a driver, and a broken driver blocks a release until it is fixed.
 - **Real turns.** Checks that need the agent stay slower and less certain than scripted ones. The evals hold the line on agent behavior, and the pass checks that the wiring works.
 - **Shared VMs.** A run sometimes waits for a free VM.
+
+## Follow-ups
+
+- **An `@inbox` check in omp.** Run omp with a fresh `HOME` and three configs: no `@inbox`, `@inbox` set to a working model, and `@inbox` set to a model omp cannot use. The panel footer must name the Sonnet, the working model, and the Sonnet again. It would catch a change that breaks the fall-through, or a footer that names a model the inbox does not call.
