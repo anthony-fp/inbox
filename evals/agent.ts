@@ -620,26 +620,25 @@ const preflight = await Promise.all([assertNoInboxServer(), assertOnlyOmpProbeSe
   () => null,
   (e: unknown) => `preflight: ${String(e)}`,
 )
+const casesFor = (a: Agent) => cases.filter(c => c.agents?.includes(a) ?? true)
 const jobs: Job<Result>[] = agents.flatMap(a =>
-  cases
-    .filter(c => c.agents?.includes(a) ?? true)
-    .flatMap(c =>
-      Array.from({ length: runs }, (_, n) => ({
-        go: () => once(a, c, n),
-        unrun: (error: string): Result => ({
-          ...job(a, c, n),
-          model: null,
-          reply: '',
-          calls: [],
-          raw: '',
-          error,
-          failed: [],
-          attempts: 1,
-          earlier: [],
-          durationMs: 0,
-        }),
-      })),
-    ),
+  casesFor(a).flatMap(c =>
+    Array.from({ length: runs }, (_, n) => ({
+      go: () => once(a, c, n),
+      unrun: (error: string): Result => ({
+        ...job(a, c, n),
+        model: null,
+        reply: '',
+        calls: [],
+        raw: '',
+        error,
+        failed: [],
+        attempts: 1,
+        earlier: [],
+        durationMs: 0,
+      }),
+    })),
+  ),
 )
 const { results, stopped } =
   preflight === null
@@ -648,16 +647,7 @@ const { results, stopped } =
 writeResults(path, about, results, stopped)
 const judged = [...firstRuns, ...results]
 const baselines = readBaselines(about.suite)
-const verdicts = agents.map(a =>
-  report(
-    [a],
-    cases.filter(c => c.agents?.includes(a) ?? true),
-    judged,
-    runs,
-    MIN,
-    baselines,
-  ),
-)
+const verdicts = agents.map(a => report([a], casesFor(a), judged, runs, MIN, baselines))
 const verdict = verdicts.includes('fail') ? 'fail' : verdicts.includes('not run') ? 'not run' : 'pass'
 finish(
   about,
