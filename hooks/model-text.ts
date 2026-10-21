@@ -2,7 +2,7 @@ import type { Closed, Finding, Item, Ledger, Told } from '../types'
 
 export type { Told } from '../types'
 import type { Exchange } from './ledger'
-import { LIST_CHOICES } from './ledger'
+import { isAskedForChoices, LIST_CHOICES } from './ledger'
 import { clip, clipMiddle, numberBlocks } from './text'
 
 const NL = '\n'
@@ -221,7 +221,7 @@ function ledgerBlocks(ledger: Ledger): string[] {
     .join(NL)
   const findings = ledger.findings.map(f => `${f.id} | ${f.kind}: ${f.title}`).join(NL)
   const closed = ledger.closed
-    .filter(d => d.how !== 'expired')
+    .filter(d => d.how !== 'expired' && !isAskedForChoices(d))
     .map(d => `${d.ask} → ${outcomeText(d)}`)
     .join(NL)
 

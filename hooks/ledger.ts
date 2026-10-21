@@ -430,7 +430,7 @@ function repeatsClosed(closed: Closed[], a: Update['added'][number], since: numb
 /** The answer the inbox model offers when an ask names no choices. It asks for the same question again, with them. */
 export const LIST_CHOICES = 'List the choices'
 
-function isAskedForChoices(c: Closed): boolean {
+export function isAskedForChoices(c: Closed): boolean {
   return c.how === 'answered' && c.outcome.trim().toLowerCase() === LIST_CHOICES.toLowerCase()
 }
 
