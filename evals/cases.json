@@ -2135,5 +2135,84 @@
         "kind": "question"
       }
     ]
+  },
+  {
+    "name": "answered-question-follow-up-added",
+    "about": "A follow-up that shares the words of an answered question is a new question, not a repeat.",
+    "ledger": {
+      "turn": 3,
+      "nextId": 4,
+      "card": {
+        "goal": "Add caching to the product API",
+        "done": ["Picked the cache"],
+        "now": "Wiring in the cache",
+        "running": []
+      },
+      "items": [],
+      "closed": [
+        {
+          "id": "i3",
+          "kind": "question",
+          "ask": "Which cache should the product API use?",
+          "how": "answered",
+          "outcome": "In-memory",
+          "at": 4
+        }
+      ]
+    },
+    "exchange": {
+      "person": "go with in-memory",
+      "turn": 3,
+      "activity": ["edited: src/cache.ts"],
+      "reply": "The in-memory cache is wired into the product API. One more choice before I tune it: which cache size should the product API use, 64 MB or 256 MB? I'd go with 64 MB: the service has 512 MB of memory."
+    },
+    "checks": [
+      {
+        "new": "size",
+        "rec": "64"
+      },
+      {
+        "dropped": 0
+      }
+    ]
+  },
+  {
+    "name": "answered-question-recap-not-new",
+    "about": "A reply that recaps an answered question in its own words adds no item.",
+    "ledger": {
+      "turn": 3,
+      "nextId": 4,
+      "card": {
+        "goal": "Add caching to the product API",
+        "done": ["Picked the cache"],
+        "now": "Wiring in the cache",
+        "running": []
+      },
+      "items": [],
+      "closed": [
+        {
+          "id": "i3",
+          "kind": "question",
+          "ask": "Which cache should the product API use?",
+          "how": "answered",
+          "outcome": "In-memory",
+          "at": 4
+        }
+      ]
+    },
+    "exchange": {
+      "person": "go with in-memory",
+      "turn": 3,
+      "activity": ["edited: src/cache.ts", "ran: npm test"],
+      "reply": "You chose which cache the product API should use: in-memory. It's wired in, and the tests pass."
+    },
+    "checks": [
+      {
+        "added": 0
+      },
+      {
+        "dropped": 0
+      }
+    ]
   }
 ]

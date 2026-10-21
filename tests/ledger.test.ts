@@ -420,6 +420,12 @@ describe('applyUpdate', () => {
       0,
     ],
     ['an unrelated question', 'NEW: decide | 9 | Cut CHANGELOG.md down to this release? | - | -', 5000, 1],
+    [
+      'a follow-up in the words of an item answered before the prompt',
+      'NEW: decide | - | Rename greet.mjs to hello.mjs in the docs too? | - | -',
+      6000,
+      1,
+    ],
   ]
   for (const [name, line, promptAt, added] of repeats)
     test(`a NEW line with ${name} is ${added === 0 ? 'dropped' : 'added'}`, () => {
@@ -433,6 +439,18 @@ describe('applyUpdate', () => {
       const next = applyUpdate({ ...answered, turn: 2 }, parseReply(line)!, 7000, 2, promptAt)
       expect(next.items.length).toBe(added)
     })
+
+  test('a follow-up to an answered question is recorded, and a rewording of a dismissed one is not', () => {
+    const question = (ask: string) => ({ kind: 'question' as const, ask, options: [], rec: null, helps: [] })
+    const asked = addAgentItem({ ...EMPTY, turn: 1 }, question('Which cache should the product API use?'), 1).ledger
+    const followUp = question('Which cache size should the product API use?')
+    const answered = closeItem(asked, 'i1', { how: 'answered', outcome: 'In-memory' }, 2)
+    expect(addAgentItem({ ...answered, turn: 2 }, followUp, 3).is).toBe('added')
+    const dismissed = closeItem(asked, 'i1', { how: 'dismissed', outcome: 'dismissed' }, 2)
+    expect(addAgentItem({ ...dismissed, turn: 2 }, followUp, 3).is).toBe('closed')
+    const reworded = parseReply('NEW: decide | - | Which cache should we use for the product API? | - | -')!
+    expect(applyUpdate({ ...dismissed, turn: 2 }, reworded, 4, 2, 3).items).toEqual([])
+  })
 
   test('a NEW line with the ask of an item that expired before the prompt is added', () => {
     const first = applyUpdate(

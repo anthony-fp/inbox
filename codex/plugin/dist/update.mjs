@@ -316,8 +316,11 @@ function matchOpen(items, a, sameBatch = /* @__PURE__ */ new Set()) {
 }
 function repeatsClosed(closed, a, since) {
   const recent = closed.filter((c) => c.at >= since);
-  const settled = closed.filter((c) => c.how !== "expired");
-  return matchOpen([...recent, ...settled], a) >= 0 || a.label !== null && recent.some((c) => c.label === a.label);
+  const settled = closed.filter((c) => c.at < since && c.how !== "expired");
+  return matchOpen(recent, a) >= 0 || a.label !== null && recent.some((c) => c.label === a.label) || settled.some((c) => repeatsSettled(c, a));
+}
+function repeatsSettled(c, a) {
+  return c.how === "answered" ? c.id === a.label || sameAsk(c.ask, a.ask) : matchOpen([c], a) >= 0;
 }
 function closedRecord(item, closing, now) {
   const { id, kind, ask, label } = item;

@@ -703,8 +703,11 @@ function matchOpen(items, a, sameBatch = new Set) {
 }
 function repeatsClosed(closed, a, since) {
   const recent = closed.filter((c) => c.at >= since);
-  const settled = closed.filter((c) => c.how !== "expired");
-  return matchOpen([...recent, ...settled], a) >= 0 || a.label !== null && recent.some((c) => c.label === a.label);
+  const settled = closed.filter((c) => c.at < since && c.how !== "expired");
+  return matchOpen(recent, a) >= 0 || a.label !== null && recent.some((c) => c.label === a.label) || settled.some((c) => repeatsSettled(c, a));
+}
+function repeatsSettled(c, a) {
+  return c.how === "answered" ? c.id === a.label || sameAsk(c.ask, a.ask) : matchOpen([c], a) >= 0;
 }
 function closedRecord(item, closing, now) {
   const { id, kind, ask, label } = item;
@@ -927,7 +930,7 @@ function addAgentItem(ledger, entry, now) {
   const openItem = ledger.items[open];
   if (openItem)
     return { ledger, is: "open", id: openItem.id };
-  const repeated = ledger.closed.findLast((c) => c.how !== "expired" && matchOpen([c], candidate) >= 0);
+  const repeated = ledger.closed.findLast((c) => c.how !== "expired" && repeatsSettled(c, candidate));
   if (repeated)
     return { ledger, is: "closed", outcome: repeated.outcome };
   const id = `i${ledger.nextId}`;

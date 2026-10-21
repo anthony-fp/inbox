@@ -400,12 +400,28 @@ function matchOpen(
   )
 }
 
-/** An ask closed this turn repeats on its label too. An expired one from before can be asked again, as in addAgentItem. */
+/**
+ * An ask closed this turn repeats on its label too. An expired one from before can be asked again, as in addAgentItem.
+ * An ask closed before the prompt repeats a settled item as `repeatsSettled` says.
+ */
 function repeatsClosed(closed: Closed[], a: Update['added'][number], since: number): boolean {
   const recent = closed.filter(c => c.at >= since)
-  const settled = closed.filter(c => c.how !== 'expired')
+  const settled = closed.filter(c => c.at < since && c.how !== 'expired')
 
-  return matchOpen([...recent, ...settled], a) >= 0 || (a.label !== null && recent.some(c => c.label === a.label))
+  return (
+    matchOpen(recent, a) >= 0 ||
+    (a.label !== null && recent.some(c => c.label === a.label)) ||
+    settled.some(c => repeatsSettled(c, a))
+  )
+}
+
+/**
+ * An answered question repeats only in the same words or label: a follow-up shares its words but asks something new,
+ * as "Which cache size should the product API use?" after "Which cache should the product API use?". A dismissed or
+ * handled item repeats in other words too.
+ */
+function repeatsSettled(c: Closed, a: Update['added'][number]): boolean {
+  return c.how === 'answered' ? c.id === a.label || sameAsk(c.ask, a.ask) : matchOpen([c], a) >= 0
 }
 
 function closedRecord(item: Item, closing: Closing, now: number): Closed {
@@ -741,7 +757,7 @@ export function addAgentItem(
   const open = matchOpen(ledger.items, candidate, recordedThisTurn)
   const openItem = ledger.items[open]
   if (openItem) return { ledger, is: 'open', id: openItem.id }
-  const repeated = ledger.closed.findLast(c => c.how !== 'expired' && matchOpen([c], candidate) >= 0)
+  const repeated = ledger.closed.findLast(c => c.how !== 'expired' && repeatsSettled(c, candidate))
   if (repeated) return { ledger, is: 'closed', outcome: repeated.outcome }
 
   const id = `i${ledger.nextId}`
