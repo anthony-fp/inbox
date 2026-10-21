@@ -307,17 +307,21 @@
         }
       ]
     },
-    "prompt": "The second one. Go ahead and add it.",
+    "prompt": "The second one.",
     "checks": [
       {
         "calls": "close",
         "count": 1,
         "match": {
-          "id": "^i3$"
+          "id": "^i3$",
+          "answer": "second|in.?memory"
         }
       },
       {
-        "reply": "in-memory|in memory"
+        "reply": "in.?memory"
+      },
+      {
+        "notReply": "do you mean|did you mean|which (one|cache)"
       },
       {
         "noIds": true

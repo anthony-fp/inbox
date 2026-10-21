@@ -6,22 +6,25 @@ import { parseArgs } from 'node:util'
 
 import { applyExchangeUpdate, EMPTY, parseReply } from '../hooks/ledger'
 import { buildPrompt, CLAUDE_CODE, systemText, transcriptCatchUpPrompt } from '../hooks/model-text'
-import type { Exchange } from '../hooks/ledger'
+import { CODEX } from '../codex/src/texts'
+import type { Exchange, Update } from '../hooks/ledger'
 import type { Ledger } from '../types'
 import { run } from '../codex/src/run'
 import { codexAsk, MODEL } from '../codex/src/update'
 import { codexCli } from './codex-cli'
 import {
+  earlierRuns,
+  finish,
   provenance,
   readBaselines,
   report,
+  resultsPath,
   runCount,
   runJobs,
   selectCases,
-  writeBaselines,
   writeResults,
 } from './harness'
-import type { Run } from './harness'
+import type { Job, Run } from './harness'
 
 type Agent = 'claude' | 'codex'
 
@@ -51,6 +54,10 @@ type Case = {
 
 const MIN = 0.75
 const NOW = 100
+/** The mod's limits on the inbox model's call, in `askLedgerModel` and its caller in `hooks/claude-host.ts`. */
+const MOD_TIMEOUT_MS = 45_000
+const MOD_MAX_TOKENS = 1600
+const CLAUDE_MODEL = 'sonnet'
 
 const { values } = parseArgs({
   options: {
@@ -59,6 +66,7 @@ const { values } = parseArgs({
     case: { type: 'string' },
     out: { type: 'string' },
     'set-baseline': { type: 'boolean', default: false },
+    with: { type: 'string' },
     cases: { type: 'string', default: 'evals/cases.json' },
   },
 })
@@ -68,8 +76,18 @@ if (!selected) throw new Error(`Unknown --agent ${values.agent}. Use claude, cod
 const agents: Agent[] = selected
 const runs = runCount(values.runs)
 const cases: Case[] = selectCases(JSON.parse(readFileSync(values.cases, 'utf8')), values.case)
+const about = provenance(
+  'model',
+  { claude: 'claude', codex: codexCli },
+  {
+    'systemText claude': systemText(CLAUDE_CODE),
+    'systemText codex': systemText(CODEX),
+    cases: readFileSync(values.cases, 'utf8'),
+  },
+)
+const firstRuns = earlierRuns<Result>(values.with, about)
 
-type Answer = { text: string | null; model: string | null }
+type Answer = { text: string | null; model: string | null; outputTokens: number | null }
 
 /**
  * Sonnet as the mod calls it: at low effort, and with no settings, so the runner's own CLAUDE.md never reaches it.
@@ -81,7 +99,7 @@ function claude(prompt: string): Promise<Answer> {
       [
         '-p',
         '--model',
-        'sonnet',
+        CLAUDE_MODEL,
         '--effort',
         'low',
         '--setting-sources',
@@ -95,15 +113,16 @@ function claude(prompt: string): Promise<Answer> {
       ],
       { maxBuffer: 1 << 22, timeout: 300_000, cwd: mkdtempSync(join(tmpdir(), 'inbox-eval-claude-')) },
       (err, out) => {
-        if (err) return resolve({ text: null, model: null })
+        if (err) return resolve({ text: null, model: null, outputTokens: null })
         try {
           const parsed: unknown = JSON.parse(out)
           const events = (Array.isArray(parsed) ? parsed : [parsed]) as Record<string, any>[]
           const result = events.find(e => e.type === 'result')
           const model = events.find(e => e.type === 'system' && e.subtype === 'init')?.model ?? null
-          resolve({ text: result && !result.is_error ? String(result.result) : null, model })
+          const outputTokens = result?.usage?.output_tokens ?? null
+          resolve({ text: result && !result.is_error ? String(result.result) : null, model, outputTokens })
         } catch {
-          resolve({ text: null, model: null })
+          resolve({ text: null, model: null, outputTokens: null })
         }
       },
     )
@@ -118,6 +137,24 @@ const askCodex = codexAsk(
   process.env.CODEX_HOME || join(homedir(), '.codex'),
 )
 
+/** Pairs each check with its own item, so one item cannot pass two checks, by augmenting paths. */
+function matchEach<C, I>(checks: C[], items: I[], fits: (c: C, i: I) => boolean): Map<C, I> {
+  const owner = new Map<I, C>()
+  const claim = (c: C, seen: Set<I>): boolean =>
+    items.some(i => {
+      if (seen.has(i) || !fits(c, i)) return false
+      seen.add(i)
+      const held = owner.get(i)
+      if (held !== undefined && !claim(held, seen)) return false
+      owner.set(i, c)
+
+      return true
+    })
+  for (const c of checks) claim(c, new Set())
+
+  return new Map([...owner].map(([i, c]) => [c, i]))
+}
+
 function failures(before: Ledger, after: Ledger, checks: Check[]): string[] {
   const has = (pattern: string, text: string | null) => text !== null && new RegExp(pattern, 'i').test(text)
   const added = after.items.filter(i => !before.items.some(b => b.id === i.id))
@@ -125,6 +162,16 @@ function failures(before: Ledger, after: Ledger, checks: Check[]): string[] {
   const closedOutcome = (id: string) =>
     after.closed.find(c => c.id === id)?.outcome ?? after.closedFindings.find(f => f.id === id)?.outcome ?? null
   const finished = (after.card?.done ?? []).filter(line => !(before.card?.done ?? []).includes(line))
+  const newChecks = checks.filter((c): c is Extract<Check, { new: string }> => 'new' in c)
+  const newMatches = matchEach(
+    newChecks,
+    added,
+    (c, i) =>
+      has(c.new, i.ask) &&
+      (!c.kind || i.kind === c.kind) &&
+      (c.rec === undefined || (c.rec === null ? i.rec === null : has(c.rec, i.rec))) &&
+      (!c.help || i.helps.some(h => h.kind === c.help)),
+  )
   const out: string[] = []
   for (const c of checks) {
     if ('open' in c && !isOpen(c.open)) out.push(`${c.open} closed`)
@@ -136,13 +183,7 @@ function failures(before: Ledger, after: Ledger, checks: Check[]): string[] {
     else if ('done' in c && !finished.some(line => has(c.done, line)))
       out.push(`no done line like /${c.done}/: ${finished.map(line => `"${line}"`).join(', ')}`)
     else if ('new' in c) {
-      const match = added.find(
-        i =>
-          has(c.new, i.ask) &&
-          (!c.kind || i.kind === c.kind) &&
-          (c.rec === undefined || (c.rec === null ? i.rec === null : has(c.rec, i.rec))) &&
-          (!c.help || i.helps.some(h => h.kind === c.help)),
-      )
+      const match = newMatches.get(c)
       if (!match)
         out.push(
           `no new item like /${c.new}/: ${added.map(i => `"${i.ask}" kind=${i.kind} rec=${i.rec} helps=${i.helps.map(h => h.kind).join('+') || '-'}`).join(', ')}`,
@@ -174,15 +215,16 @@ function failures(before: Ledger, after: Ledger, checks: Check[]): string[] {
   return out
 }
 
-/** `masked`: NEW lines in the answer that the code dropped before the checks, for reading only. */
-type Result = Run & { answer: string | null; masked: number }
+/**
+ * `masked`: the asks of the update's NEW lines that never became an item, because the code took them for a repeat of a
+ * closed item or an open one. For reading only: the checks see the ledger after the code.
+ */
+type Result = Run & { answer: string | null; masked: string[]; outputTokens: number | null }
 
-/** NEW lines the answer wrote, against the items its update added. */
-function maskedCount(answer: string, before: Ledger, after: Ledger): number {
-  const written = answer.split('\n').filter(l => /^\s*[-*]?\s*NEW\s*:/.test(l)).length
-  const added = after.items.filter(i => !before.items.some(b => b.id === i.id)).length
+function maskedAsks(update: Update, before: Ledger, after: Ledger): string[] {
+  const made = new Set(after.items.filter(i => !before.items.some(b => b.id === i.id)).map(i => i.ask))
 
-  return Math.max(0, written - added)
+  return update.added.map(a => a.ask).filter(ask => !made.has(ask))
 }
 
 async function once(agent: Agent, c: Case, n: number): Promise<Result> {
@@ -198,29 +240,58 @@ async function once(agent: Agent, c: Case, n: number): Promise<Result> {
   }
   const prompt =
     c.catchUp === undefined ? buildPrompt(ledger, ex) : transcriptCatchUpPrompt(ledger, ex.screen, c.catchUp)
-  const { text: answer, model } =
-    agent === 'codex' ? { text: await askCodex(prompt), model: MODEL } : await claude(prompt)
-  const base = { agent, name: c.name, run: n, model, answer, attempts: 1 }
-  if (answer === null) return { ...base, error: `${agent} gave no answer`, failed: [], masked: 0 }
+  const {
+    text: answer,
+    model,
+    outputTokens,
+  } = agent === 'codex' ? { text: await askCodex(prompt), model: null, outputTokens: null } : await claude(prompt)
+  const base = { ...job(agent, c, n), model, answer, outputTokens, attempts: 1, earlier: [], durationMs: 0 }
+  if (answer === null) return { ...base, error: `${agent} gave no answer`, failed: [], masked: [] }
   const update = parseReply(answer, c.catchUp ?? `${ex.reply}\n${ex.activity.join('\n')}`)
-  if (update === null) return { ...base, error: null, failed: ['no answer the mod can read'], masked: 0 }
+  if (update === null) return { ...base, error: null, failed: ['no answer the mod can read'], masked: [] }
   const after = applyExchangeUpdate(ledger, update, ex, NOW, NOW)
 
-  return { ...base, error: null, failed: failures(ledger, after, c.checks), masked: maskedCount(answer, ledger, after) }
+  return { ...base, error: null, failed: failures(ledger, after, c.checks), masked: maskedAsks(update, ledger, after) }
 }
 
-const about = provenance('model', { claude: 'claude', codex: codexCli })
-const jobs = agents.flatMap(a => cases.flatMap(c => Array.from({ length: runs }, (_, n) => () => once(a, c, n))))
-const results = (await runJobs(jobs)) as Result[]
-const path = writeResults(values.out, about, results)
-const isPassing = report(agents, cases, results, MIN, readBaselines(about.suite), (_agent, _c, mine) => {
-  const masked = (mine as Result[]).reduce((sum, r) => sum + r.masked, 0)
+function job(agent: Agent, c: Case, n: number) {
+  return { agent, name: c.name, run: n, requested: agent === 'codex' ? MODEL : CLAUDE_MODEL }
+}
 
-  return masked > 0 ? `, ${masked} NEW lines dropped by the code` : ''
+const jobs: Job<Result>[] = agents.flatMap(a =>
+  cases.flatMap(c =>
+    Array.from({ length: runs }, (_, n) => ({
+      go: () => once(a, c, n),
+      unrun: (error: string): Result => ({
+        ...job(a, c, n),
+        model: null,
+        answer: null,
+        outputTokens: null,
+        masked: [],
+        error,
+        failed: [],
+        attempts: 1,
+        earlier: [],
+        durationMs: 0,
+      }),
+    })),
+  ),
+)
+const path = resultsPath(values.out, about)
+const { results, stopped } = await runJobs(jobs, so => writeResults(path, about, so))
+writeResults(path, about, results, stopped)
+const judged = [...firstRuns, ...results]
+const verdict = report(agents, cases, judged, MIN, readBaselines(about.suite), (_agent, _c, mine) => {
+  const runs = mine as Result[]
+  const masked = runs.reduce((sum, r) => sum + r.masked.length, 0)
+  const slow = runs.filter(r => r.durationMs > MOD_TIMEOUT_MS).length
+  const long = runs.filter(r => (r.outputTokens ?? 0) > MOD_MAX_TOKENS).length
+  const notes = [
+    masked > 0 ? `${masked} NEW lines dropped by the code` : '',
+    slow > 0 ? `${slow} slower than the mod's ${MOD_TIMEOUT_MS / 1000} s limit` : '',
+    long > 0 ? `${long} longer than the mod's ${MOD_MAX_TOKENS} tokens` : '',
+  ].filter(Boolean)
+
+  return notes.length > 0 ? `, ${notes.join(', ')}` : ''
 })
-console.log(`Results: ${path}${about.isDirty ? ' (the tree had uncommitted changes)' : ''}`)
-if (values['set-baseline']) {
-  writeBaselines(about.suite, about, results)
-  console.log('Saved these counts as the baselines for these cases.')
-}
-process.exit(isPassing ? 0 : 1)
+finish(about, path, judged, stopped, verdict, values['set-baseline'])

@@ -21,18 +21,22 @@ import type { Ledger } from '../types'
 import { CODEX } from '../codex/src/texts'
 import { OMP } from '../omp/src/texts'
 import { MODEL } from '../codex/src/update'
+import { agentTools } from '../hooks/tools'
 import { codexCli } from './codex-cli'
 import {
+  earlierRuns,
+  finish,
+  IsolationError,
   provenance,
   readBaselines,
   report,
+  resultsPath,
   runCount,
   runJobs,
   selectCases,
-  writeBaselines,
   writeResults,
 } from './harness'
-import type { Run } from './harness'
+import type { Job, Run } from './harness'
 
 type Agent = 'claude' | 'codex' | 'omp'
 
@@ -53,7 +57,7 @@ type Check =
     }
   | { reply: string }
   | { notReply: string }
-  /** No inbox id, such as i3 or f12, in the reply. Ids are lowercase, so "F1" is not one. */
+  /** No inbox id, such as i3 or f112, in the reply. Ids are lowercase, so "F1" is not one. */
   | { noIds: true }
 
 type Case = {
@@ -85,6 +89,7 @@ const { values } = parseArgs({
     case: { type: 'string' },
     out: { type: 'string' },
     'set-baseline': { type: 'boolean', default: false },
+    with: { type: 'string' },
     cases: { type: 'string', default: 'evals/agent-cases.json' },
     probe: { type: 'string' },
     'omp-probe': { type: 'string' },
@@ -188,13 +193,13 @@ const PROBE_TOOLS = [`mcp__${PROBE}__record`, `mcp__${PROBE}__close`]
 
 /** Throws unless the session has exactly the connected probe server and no tool besides its two. */
 function assertOnlyProbe(init: Record<string, any> | undefined) {
-  if (!init) throw new Error('claude printed no init event')
+  if (!init) throw new IsolationError('claude printed no init event')
   const servers: { name: string; status: string }[] = init.mcp_servers ?? []
   const tools: string[] = init.tools ?? []
   if (servers.length !== 1 || servers[0]!.name !== PROBE || servers[0]!.status !== 'connected')
-    throw new Error(`MCP servers are not just a connected ${PROBE}: ${JSON.stringify(servers)}`)
+    throw new IsolationError(`MCP servers are not just a connected ${PROBE}: ${JSON.stringify(servers)}`)
   const extra = tools.filter(t => !PROBE_TOOLS.includes(t))
-  if (extra.length > 0) throw new Error(`unexpected tools: ${extra.join(', ')}`)
+  if (extra.length > 0) throw new IsolationError(`unexpected tools: ${extra.join(', ')}`)
 }
 
 async function runClaude(c: Case): Promise<Outcome> {
@@ -260,7 +265,7 @@ function codexHome(s: ReturnType<typeof sandbox>): string {
   const home = join(s.dir, 'codex-home')
   mkdirSync(home)
   // Only the sign-in: the runner's own AGENTS.md would reach the agent.
-  const auth = join(homedir(), '.codex', 'auth.json')
+  const auth = join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'auth.json')
   if (existsSync(auth)) symlinkSync(auth, join(home, 'auth.json'))
   writeFileSync(
     join(home, 'config.toml'),
@@ -316,22 +321,22 @@ async function codexIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome>
     reply,
     calls: s.calls(),
     error: r.code === 0 ? null : `codex exited ${r.code}: ${r.stderr.slice(0, 300)}`,
-    model: MODEL,
+    model: null,
     raw: r.stdout,
   }
 }
 
 /** Throws unless the omp session offers exactly its `bash` and the probe's `record` and `close`, and no MCP server's tools. */
 function assertOnlyOmpProbe(toolsFile: string) {
-  if (!existsSync(toolsFile)) throw new Error('the omp probe wrote no tool list')
+  if (!existsSync(toolsFile)) throw new IsolationError('the omp probe wrote no tool list')
   const seen: { active: string[]; all: { name: string; source: string }[] } = JSON.parse(
     readFileSync(toolsFile, 'utf8'),
   )
   const wanted = ['bash', 'close', 'record']
   if (seen.active.toSorted().join() !== wanted.join())
-    throw new Error(`omp's active tools are not just ${wanted.join(' and ')}: ${seen.active.join(', ')}`)
+    throw new IsolationError(`omp's active tools are not just ${wanted.join(' and ')}: ${seen.active.join(', ')}`)
   const mcp = seen.all.filter(t => /mcp/i.test(t.source))
-  if (mcp.length > 0) throw new Error(`omp offers MCP tools: ${mcp.map(t => t.name).join(', ')}`)
+  if (mcp.length > 0) throw new IsolationError(`omp offers MCP tools: ${mcp.map(t => t.name).join(', ')}`)
 }
 
 /**
@@ -468,7 +473,7 @@ function failures(o: Outcome, checks: Check[]): string[] {
       const m = o.reply.match(new RegExp(c.notReply, 'i'))
       if (m) out.push(`reply has "${m[0]}"`)
     } else if ('noIds' in c) {
-      const m = o.reply.match(/\b[if]\d{1,3}\b/)
+      const m = o.reply.match(/\b[if]\d+\b/)
       if (m) out.push(`reply has the id "${m[0]}"`)
     } else {
       const mine = o.calls.filter(
@@ -497,14 +502,25 @@ function failures(o: Outcome, checks: Check[]): string[] {
   return out
 }
 
-type Result = Run & { reply: string; calls: Call[] }
+type Result = Run & { reply: string; calls: Call[]; raw: string }
 
+/** An `IsolationError` is thrown on, so the whole run stops. */
 async function once(agent: Agent, c: Case, n: number): Promise<Result> {
   const run = agent === 'codex' ? runCodex : agent === 'omp' ? runOmp : runClaude
-  const o = await run(c).catch((e): Outcome => ({ reply: '', calls: [], error: String(e), model: null, raw: '' }))
+  const o = await run(c).catch((e): Outcome => {
+    if (e instanceof IsolationError) throw e
+
+    return { reply: '', calls: [], error: String(e), model: null, raw: '' }
+  })
   const failed = o.error ? [] : failures(o, c.checks)
 
-  return { ...o, agent, name: c.name, run: n, failed, attempts: 1 }
+  return { ...o, ...job(agent, c, n), failed, attempts: 1, earlier: [], durationMs: 0 }
+}
+
+const REQUESTED: Record<Agent, string> = { claude: CLAUDE_MODEL, codex: MODEL, omp: OMP_RUN_MODEL }
+
+function job(agent: Agent, c: Case, n: number) {
+  return { agent, name: c.name, run: n, requested: REQUESTED[agent] }
 }
 
 async function assertNoInboxServer() {
@@ -518,7 +534,7 @@ async function assertNoInboxServer() {
     .map(l => l.split(/\s+/)[0])
     .filter(Boolean)
   if (r.code !== 0 || names.join() !== PROBE)
-    throw new Error(`Codex's MCP servers are not just ${PROBE}:\n${r.stdout}${r.stderr}`)
+    throw new IsolationError(`Codex's MCP servers are not just ${PROBE}:\n${r.stdout}${r.stderr}`)
   rmSync(probe.dir, { recursive: true, force: true })
 }
 
@@ -526,19 +542,52 @@ async function assertNoInboxServer() {
 async function assertOnlyOmpProbeSession() {
   if (!agents.includes('omp')) return
   const o = await runOmp({ name: 'preflight', about: '', prompt: 'Reply with the word ok.', checks: [] })
-  if (o.error) throw new Error(`omp preflight failed: ${o.error}`)
+  if (o.error) throw new IsolationError(`omp preflight failed: ${o.error}`)
 }
 
-await assertNoInboxServer()
-await assertOnlyOmpProbeSession()
-const about = provenance(isGuided ? 'agent' : 'agent-no-guidance', { claude: 'claude', codex: codexCli, omp: 'omp' })
-const jobs = agents.flatMap(a => cases.flatMap(c => Array.from({ length: runs }, (_, n) => () => once(a, c, n))))
-const results = (await runJobs(jobs)) as Result[]
-const path = writeResults(values.out, about, results)
-const isPassing = report(agents, cases, results, MIN, readBaselines(about.suite))
-console.log(`Results: ${path}${about.isDirty ? ' (the tree had uncommitted changes)' : ''}`)
-if (values['set-baseline']) {
-  writeBaselines(about.suite, about, results)
-  console.log('Saved these counts as the baselines for these cases.')
-}
-process.exit(isPassing ? 0 : 1)
+const about = provenance(
+  isGuided ? 'agent' : 'agent-no-guidance',
+  { claude: 'claude', codex: codexCli, omp: 'omp' },
+  {
+    ...Object.fromEntries(
+      [CLAUDE_CODE, CODEX, OMP].flatMap(host => [
+        [`guidanceText ${host.agent}`, guidanceText(host)],
+        [`tools ${host.agent}`, JSON.stringify(agentTools(host))],
+      ]),
+    ),
+    cases: readFileSync(values.cases, 'utf8'),
+  },
+)
+const firstRuns = earlierRuns<Result>(values.with, about)
+const path = resultsPath(values.out, about)
+const preflight = await Promise.all([assertNoInboxServer(), assertOnlyOmpProbeSession()]).then(
+  () => null,
+  (e: unknown) => `preflight: ${String(e)}`,
+)
+const jobs: Job<Result>[] = agents.flatMap(a =>
+  cases.flatMap(c =>
+    Array.from({ length: runs }, (_, n) => ({
+      go: () => once(a, c, n),
+      unrun: (error: string): Result => ({
+        ...job(a, c, n),
+        model: null,
+        reply: '',
+        calls: [],
+        raw: '',
+        error,
+        failed: [],
+        attempts: 1,
+        earlier: [],
+        durationMs: 0,
+      }),
+    })),
+  ),
+)
+const { results, stopped } =
+  preflight === null
+    ? await runJobs(jobs, so => writeResults(path, about, so))
+    : { results: [] as Result[], stopped: preflight }
+writeResults(path, about, results, stopped)
+const judged = [...firstRuns, ...results]
+const verdict = report(agents, cases, judged, MIN, readBaselines(about.suite))
+finish(about, path, judged, stopped, verdict, values['set-baseline'])

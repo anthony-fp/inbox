@@ -1,6 +1,6 @@
 # Evals the release can trust
 
-Status: building. Step 1 is in progress.
+Status: building. Step 1 is built. Steps 2 to 4 are next.
 
 Every release relies on the two eval suites in `./scripts/eval.sh` (AGENTS.md, "Text a model reads"). An audit of both, checked by two adversarial reviews, found that a green run shows only that nothing broke badly on these fixtures. It does not show that a wording change is safe. This plan makes a run's result mean what the release takes it to mean.
 
@@ -36,7 +36,11 @@ No model calls, except one targeted run per changed check.
 - Every run writes its results, by default to `evals/results/`, which Git ignores. Each file records the commit, whether the tree had changes, the date, the CLI versions and the model each answer came from.
 - A failed call is retried twice. A case whose calls keep failing is reported as not run, never as passed or failed.
 - The model suite prints, for each case, how many NEW lines the code dropped. This is for reading only: it is not a check.
-- The loose checks get exact counts. A check covers 0.2.10's answer rule. The id check matches only lowercase ids.
+- The loose checks get exact counts. A check covers 0.2.10's answer rule. The id check matches only lowercase ids, of any length.
+- A check pairs each `new` pattern with its own item, so one merged item cannot pass two.
+- A session that can reach more than the stand-in inbox stops the whole run, with no retry. A runner that throws records the run as not graded. Results are written as each run lands, so a run cut short keeps them. A run with a case not graded exits 2, a stopped run 3.
+- Each results file records a hash of every text the models read and of the cases file, and the diff when the tree had changes. `--with` judges a rerun together with the first run and refuses one that tested other text.
+- The model suite records each call's time and output tokens, and notes runs past the mod's 45 s limit and 1600 tokens. It lists the asks of NEW lines the code dropped.
 
 ### 2. Measure the guidance
 
