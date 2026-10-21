@@ -39,7 +39,7 @@ Add one case per row of the table above to `evals/cases.json`, and to `evals/age
 ## Decisions for the owner
 
 - **Stale questions (decided).** An item open for more than 12 turns expires (`STALE_AFTER` in `hooks/ledger.ts`), and a long session can keep a real decision open longer than that. Agent-recorded items (`label: null`) are exempt from `STALE_AFTER`. Items from `NEW:` lines still expire after 12 turns. The `MAX_OPEN` cap of 20 still applies to every item.
-- **Missed closes.** With change 1, a question the work has made moot stays open until the agent or the person closes it. That trades a wrongly closed decision for an extra open row.
+- **Missed closes (decided).** With change 1, a question the work has made moot stays open until the agent or the person closes it. An occasional extra open row is accepted as the cost of never losing an unanswered decision.
 
 ## Checks
 
