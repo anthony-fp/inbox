@@ -131,7 +131,7 @@ The button order still comes from `rowKeyPlan`.
 
 These are settled when step 2 starts:
 
-- **The inbox model in omp.** omp's providers come from each person's own setup. Recommended: use a Sonnet model when the person's providers offer one, since the inbox model evals pass on Sonnet. Otherwise use omp's `@smol` model role, and say which model runs in the panel.
+- **The inbox model in omp.** omp's providers come from each person's own setup. Decided: use the person's `@inbox` role when omp can resolve it. Otherwise use a Sonnet model when the person's providers offer one, since the inbox model evals pass on Sonnet. Otherwise use omp's `@smol` model role. The panel says which model runs.
 - **Where state lives.** Recommended: a JSON file per session under omp's agent folder, written like Codex's. `pi.appendEntry` is the alternative. It follows `/branch`, but it writes into the session file the agent reads back.
 
 ### Check

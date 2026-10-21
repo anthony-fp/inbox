@@ -423,7 +423,7 @@ test('an empty Needs you tab explains itself', () => {
 
 test('the footer names the inbox model, or says there is none', () => {
   expect(text(screenOf(), INITIAL_UI)).toContain('inbox model Claude Sonnet 4.5')
-  expect(text(screenOf({ modelName: null }), INITIAL_UI)).toContain('no inbox model')
+  expect(text(screenOf({ modelName: null }), INITIAL_UI)).toContain('no inbox model: set @inbox')
 })
 
 test('the demo says its presses send nothing', () => {

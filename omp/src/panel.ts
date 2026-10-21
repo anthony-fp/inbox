@@ -890,7 +890,7 @@ function footer(d: Draw): string[] {
     ui.typing !== null
       ? [`↵ ${ROW_COPY.send}`, `esc ${ROW_COPY.cancel}`]
       : ['←→ pick', '↵ press', '↑↓ move', 'tab switch']
-  const model = screen.modelName ? `inbox model ${screen.modelName} ` : 'no inbox model '
+  const model = screen.modelName ? `inbox model ${screen.modelName} ` : 'no inbox model: set @inbox '
   out.push(spread(` ${hints.map(h => s.dim(h)).join(` ${s.tone('sep', '·')} `)}`, s.dim(model), width))
 
   return out

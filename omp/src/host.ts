@@ -189,7 +189,10 @@ function byNewestRevision(a: Model, b: Model): number {
 }
 
 /**
- * The inbox model: the newest Sonnet model the person's providers offer, since the inbox model evals pass on Sonnet.
+ * The inbox model: the person's `@inbox` role when it names a model omp can use. omp's `resolve` returns nothing for
+ * an unset role, an unknown model or one with no sign-in, and the inbox then falls through. A model that resolves
+ * but fails when called fails that update like any other.
+ * Next the newest Sonnet model the person's providers offer, since the inbox model evals pass on Sonnet.
  * omp's model lists also hold retired Sonnets, which no longer answer. The `anthropic` provider is preferred.
  * Otherwise omp's `@smol` role.
  */
@@ -200,7 +203,7 @@ export function inboxModel(ctx: ExtensionContext): Model | null {
     .toSorted(byNewestRevision)
   const sonnet = sonnets.find(m => m.provider === 'anthropic') ?? sonnets[0]
 
-  return sonnet ?? ctx.models.resolve('@smol') ?? null
+  return ctx.models.resolve('@inbox') ?? sonnet ?? ctx.models.resolve('@smol') ?? null
 }
 
 /** The text blocks of a message's content, joined. */

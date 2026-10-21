@@ -46,6 +46,7 @@ let completions: { model: Model; system: string[]; prompt: string }[]
 let background: Promise<unknown>[]
 let models: Model[]
 let smolModel: Model | undefined
+let inboxRoleModel: Model | undefined
 let reply: string | Error
 let isIdle: boolean
 let execResults: Map<string, { code: number; stdout?: string; stderr?: string; killed?: boolean } | Error>
@@ -87,7 +88,10 @@ const makeCtx = (id = 's1') =>
     hasUI,
     isIdle: () => isIdle,
     setTimeout: (fn: () => void, ms: number) => timers.push({ fn, ms }),
-    models: { list: () => models, resolve: (spec: string) => (spec === '@smol' ? smolModel : undefined) },
+    models: {
+      list: () => models,
+      resolve: (spec: string) => (spec === '@smol' ? smolModel : spec === '@inbox' ? inboxRoleModel : undefined),
+    },
     modelRegistry: { getApiKey: async () => 'key' },
     ui: { notify: (message: string) => notices.push(message) },
     ...(agentKind ? { agent: { kind: agentKind } } : {}),
@@ -157,6 +161,7 @@ beforeEach(() => {
   background = []
   models = [smol, sonnet]
   smolModel = smol
+  inboxRoleModel = undefined
   reply = MODEL_ANSWER
   isIdle = false
   execResults = new Map()
@@ -344,6 +349,28 @@ test('the inbox model is the newest Sonnet model the providers offer, with the i
   await settle()
   expect(completions[0]!.model).toBe(sonnet)
   expect(completions[0]!.system).toEqual([systemText(OMP)])
+})
+
+test('the @inbox role wins over a Sonnet model, and the panel names it', async () => {
+  models = [smol, sonnet]
+  inboxRoleModel = smol
+  const inbox = createInbox(pi(), deps())
+  await prompt('hello')
+  await endAgent('Done.')
+  await settle()
+  expect(completions[0]!.model).toBe(smol)
+  expect((await inbox.screen(makeCtx())).modelName).toBe('GPT Mini')
+})
+
+test('an @inbox role that names no usable model falls through to the newest Sonnet, and the panel names that one', async () => {
+  models = [smol, sonnet]
+  inboxRoleModel = undefined
+  const inbox = createInbox(pi(), deps())
+  await prompt('hello')
+  await endAgent('Done.')
+  await settle()
+  expect(completions[0]!.model).toBe(sonnet)
+  expect((await inbox.screen(makeCtx())).modelName).toBe(sonnet.name ?? sonnet.id)
 })
 
 test('the inbox model falls back to the smol role and the panel names it', async () => {

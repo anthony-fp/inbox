@@ -4087,7 +4087,7 @@ function footer(d) {
   if (ui.notice && now - ui.notice.at < SETTLED_MS)
     out.push(...indented(ui.notice.text, 1, width, 2, (t) => s.tone("error", t)));
   const hints = ui.typing !== null ? [`\u21B5 ${ROW_COPY.send}`, `esc ${ROW_COPY.cancel}`] : ["\u2190\u2192 pick", "\u21B5 press", "\u2191\u2193 move", "tab switch"];
-  const model = screen.modelName ? `inbox model ${screen.modelName} ` : "no inbox model ";
+  const model = screen.modelName ? `inbox model ${screen.modelName} ` : "no inbox model: set @inbox ";
   out.push(spread(` ${hints.map((h) => s.dim(h)).join(` ${s.tone("sep", "\xB7")} `)}`, s.dim(model), width));
   return out;
 }
@@ -4826,7 +4826,7 @@ function byNewestRevision(a, b) {
 function inboxModel(ctx) {
   const sonnets = ctx.models.list().filter((m) => m.identity.family === "sonnet").toSorted(byNewestRevision);
   const sonnet = sonnets.find((m) => m.provider === "anthropic") ?? sonnets[0];
-  return sonnet ?? ctx.models.resolve("@smol") ?? null;
+  return ctx.models.resolve("@inbox") ?? sonnet ?? ctx.models.resolve("@smol") ?? null;
 }
 function textOfBlocks(content) {
   if (!Array.isArray(content))

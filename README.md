@@ -94,10 +94,33 @@ omp plugin marketplace update inbox-omp
 omp plugin upgrade inbox@inbox-omp
 ```
 
-The inbox runs the update after each reply on a Sonnet model from your omp
-providers, and falls back to omp's `@smol` model role. The panel's footer says
-which model it uses. Without a provider that offers a model, the panel says "no
-inbox model" and the inbox cannot update.
+After each reply, the inbox makes one model call to update the list. It uses
+the first of these that your omp can run:
+
+1. The model your `@inbox` role names.
+2. The newest Sonnet from your providers, `anthropic` first.
+3. Your `@smol` role.
+
+To set `@inbox`, add it under `modelRoles` in omp's `config.yml`, then restart
+omp:
+
+```yaml
+modelRoles:
+  inbox: anthropic/claude-sonnet-5-5
+```
+
+Only Sonnet is tested. Another model may work, but nobody has checked how well.
+
+The call goes to your provider, so it counts against your usage there. The
+inbox adds no charge of its own. [cost: price per call for the default Sonnet
+model, not yet sourced]
+
+If `@inbox` is unset, or names a model omp cannot use, such as an unknown model
+or one you are not signed in to, the inbox uses the next choice. The panel's
+footer shows the model it uses. A model that omp can use but that fails when
+called does not fall through: that update fails, and the next reply retries it.
+Without a usable model, the footer says "no inbox model: set @inbox" and the
+inbox cannot update.
 
 ### For all
 
