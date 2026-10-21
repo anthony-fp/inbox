@@ -100,6 +100,7 @@ function pruneClosed(ledger, keep) {
   return { ...ledger, closed: pruned(ledger.closed), closedFindings: pruned(ledger.closedFindings) };
 }
 var OVERTAKEN_OUTCOMES = "no longer applies|replaced|superseded|moot";
+var OVERTAKEN = new RegExp(`^(?:closed by \\w+: )?(?:${OVERTAKEN_OUTCOMES})`, "i");
 var NOT_AN_ANSWER = new RegExp(`^\\s*(?:done\\s*:|(?:${OVERTAKEN_OUTCOMES}|no longer relevant|dealt with)\\b)`, "i");
 
 // ../hooks/model-text.ts

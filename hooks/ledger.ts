@@ -621,6 +621,7 @@ export function applyExchangeUpdate(
 }
 
 const OVERTAKEN_OUTCOMES = 'no longer applies|replaced|superseded|moot'
+const OVERTAKEN = new RegExp(`^(?:closed by \\w+: )?(?:${OVERTAKEN_OUTCOMES})`, 'i')
 
 /** The CLOSED outcome forms that are not the person's answer: systemText's "done:" and "no longer applies:", and the words closedState reads as overtaken. */
 const NOT_AN_ANSWER = new RegExp(`^\\s*(?:done\\s*:|(?:${OVERTAKEN_OUTCOMES}|no longer relevant|dealt with)\\b)`, 'i')
@@ -839,7 +840,7 @@ export function closedState(d: Pick<Closed, 'how' | 'outcome'>): ClosedState {
   if (d.how === 'expired') return 'lapsed'
   // The agent's close and the per-reply update write their own outcome, so only its wording says the work
   // overtook the item. An agent's close reads "closed by <agent>: <reason>".
-  const isOvertaken = new RegExp(`^(?:closed by \\w+: )?(?:${OVERTAKEN_OUTCOMES})`, 'i').test(d.outcome)
+  const isOvertaken = OVERTAKEN.test(d.outcome)
 
   return (d.how === 'claude' || d.how === 'update') && isOvertaken ? 'lapsed' : 'handled'
 }

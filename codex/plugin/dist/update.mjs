@@ -415,6 +415,7 @@ function applyExchangeUpdate(ledger, update, exchange, now, promptAt) {
   );
 }
 var OVERTAKEN_OUTCOMES = "no longer applies|replaced|superseded|moot";
+var OVERTAKEN = new RegExp(`^(?:closed by \\w+: )?(?:${OVERTAKEN_OUTCOMES})`, "i");
 var NOT_AN_ANSWER = new RegExp(`^\\s*(?:done\\s*:|(?:${OVERTAKEN_OUTCOMES}|no longer relevant|dealt with)\\b)`, "i");
 function isPersonsAnswer(outcome) {
   return outcome.trim() !== "" && !NOT_AN_ANSWER.test(outcome);
@@ -523,7 +524,7 @@ function withUpdate(item, updated) {
 function closedState(d) {
   if (d.how === "dismissed") return "dismissed";
   if (d.how === "expired") return "lapsed";
-  const isOvertaken = new RegExp(`^(?:closed by \\w+: )?(?:${OVERTAKEN_OUTCOMES})`, "i").test(d.outcome);
+  const isOvertaken = OVERTAKEN.test(d.outcome);
   return (d.how === "claude" || d.how === "update") && isOvertaken ? "lapsed" : "handled";
 }
 function isLapsed(d) {
