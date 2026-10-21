@@ -1766,7 +1766,7 @@ var NEEDS_YOU_GROUPS = [
   { kind: "question", title: "Questions", list: "questions" },
   { kind: "task", title: "Tasks", list: "tasks" }
 ];
-var CLOSED_MARKS = { handled: "\u2713", dismissed: "\u2715", lapsed: "\u2013" };
+var CLOSED_MARKS = { handled: "\u2713", dismissed: "\u2715", lapsed: "" };
 var CLOSED_SHOWN = 3;
 var SETTLED_MS = 5120;
 var QUEUED_AFTER_MS = 1000;

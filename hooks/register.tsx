@@ -4065,7 +4065,7 @@ export const register: Register = on => {
                 </Text>
                 {refusedUndo(d)}
               </Box>
-              <Box width={TERMINAL_SIDE_CELLS} flexShrink={0} justifyContent="flex-end" paddingRight={1}>
+              <Box width={TERMINAL_SIDE_CELLS - 1} flexShrink={0} justifyContent="flex-end">
                 <Text color={pal.age}>{shortAgo(now - d.at)}</Text>
               </Box>
             </Box>,
