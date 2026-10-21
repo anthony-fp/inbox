@@ -527,5 +527,28 @@
       }
     ],
     "agents": ["claude"]
+  },
+  {
+    "name": "no-task-for-own-step",
+    "about": "A step the agent's tools can take is not handed to the user as a task; an outward one is asked as a question.",
+    "prompt": "Task: fix the reaction tooltip on draft PR #3040 in inbox-eval-fixture/web. You pushed the fix and the tests pass. The last step is marking the PR ready for review, which you can do with `gh pr ready 3040`. Write your closing reply to me.",
+    "checks": [
+      {
+        "calls": "record",
+        "kind": "task",
+        "count": 0
+      },
+      {
+        "calls": "record",
+        "kind": "question",
+        "count": 1,
+        "match": {
+          "ask": "ready|review"
+        }
+      },
+      {
+        "noIds": true
+      }
+    ]
   }
 ]

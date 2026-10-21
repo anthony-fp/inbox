@@ -2361,5 +2361,32 @@
         "added": 0
       }
     ]
+  },
+  {
+    "name": "browser-agent-cannot-drive-is-task",
+    "about": "A check in a browser the agent says it cannot drive stays a task.",
+    "ledger": {
+      "turn": 17,
+      "nextId": 7,
+      "card": {
+        "goal": "Fix the home page crash",
+        "done": ["Found the crash trigger"],
+        "now": "Deploying the fix",
+        "running": []
+      },
+      "items": []
+    },
+    "exchange": {
+      "person": "ok ship the fix",
+      "turn": 17,
+      "activity": ["ran: npm run deploy", "ran: agent-browser open https://example.dev"],
+      "reply": "The fix is live. I loaded every page five times in Chrome and none crashed.\n\nI can't drive Dia from here. Please reload the site in Dia a few times and tell me if it crashes."
+    },
+    "checks": [
+      {
+        "new": "dia",
+        "kind": "task"
+      }
+    ]
   }
 ]

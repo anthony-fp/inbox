@@ -298,6 +298,24 @@
       "models": [
         "gpt-6.1-sol (requested)"
       ]
+    },
+    "claude browser-agent-cannot-drive-is-task": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "db1d169bd8766f67d31119caa653b65e21a341db",
+      "date": "2026-10-21T22:55:26.392Z",
+      "models": [
+        "claude-sonnet-5-5"
+      ]
+    },
+    "codex browser-agent-cannot-drive-is-task": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "db1d169bd8766f67d31119caa653b65e21a341db",
+      "date": "2026-10-21T22:55:26.392Z",
+      "models": [
+        "gpt-6.1-sol (requested)"
+      ]
     }
   }
 }

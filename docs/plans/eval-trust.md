@@ -92,6 +92,7 @@ A red case is not rerun until it is green. It gets one rerun at three times its 
 Each item names what it would catch. Remove an item when the change that does it lands.
 
 - **Agent cases that fail without the guidance,** one for each of its rules, so a change to `guidanceText` is tested.
+- **`no-task-for-own-step` separates weakly on Claude.** Without the guidance it passed 3 of 5 on one run and 1 of 5 on another, so a run of 5 does not reliably tell guided from unguided. A case where the unguided agent fails every run would catch the loss of the "take the step yourself" rule.
 - **A second agent case that separates guided from unguided runs on Claude.** With the guidance in `close`'s description, the control (`--no-guidance`, 5 runs) failed one case of 16, `no-finding-user-only` at 3 of 5. If the guidance's other rules were cut, garbled or truncated past the 4096-character cap, the other 15 cases would still pass. A case for each rule that fails without it would catch that.
 - **The direct-question rule under realistic replies.** `no-finding-user-only` passes 5 of 5, but in 0.2.10's live pass the agent missed the rule three times. Opus ended replies with "let me know which you prefer" and "I recommend no". Haiku ended one with "my recommendation: accept both". Cases where the reply ends with a recommendation or a list of options would catch it.
 - **The agent suite on Haiku and Sonnet.** A past id leak (30e03f0) showed only on Haiku, and the desktop app in the release VM runs Haiku.
