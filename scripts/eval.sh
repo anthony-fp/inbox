@@ -1,6 +1,7 @@
 #!/bin/sh
-# Runs model eval cases and exits 1 when a case passes in fewer runs than its bar. Each run calls a model, so
-# check.sh leaves this out.
+# Runs model eval cases. Exits 0 when every case passed, 1 when a case passed in fewer runs than its bar or fell below
+# its baseline, 2 when a case had too few runs that could be graded, and 3 when the run stopped because a session
+# could reach more than the stand-in inbox. Each run calls a model, so check.sh leaves this out.
 #
 # The default suite is the inbox model: the cases in evals/cases.json on Sonnet, the Codex model, or both. Run it
 # after a change to systemText or buildPrompt, and when a model alias moves.
@@ -17,6 +18,7 @@
 # Usage: ./scripts/eval.sh [--suite model|agent] [--agent claude|codex|omp|both|all]
 #                          [--claude-model opus|haiku|...] [--omp-model provider/model]
 #                          [--runs N] [--case name,name] [--out results.json]
+#                          [--with first-results.json] [--set-baseline]
 # --agent both runs claude and codex. --agent all runs claude, codex and omp.
 # --claude-model sets the model of the Claude agent in the agent suite. It defaults to opus.
 # --omp-model sets the model of the omp agent. It defaults to Claude Opus 5.5, which omp lists from 18.12.3. A run
@@ -24,11 +26,15 @@
 # --no-guidance runs the agent suite without the guidance, as a control: a case that still passes tests the tool
 # descriptions and the case's own prompt, not the guidance.
 # Runs default to 8 for the model suite and 5 for the agent suite.
+# --with judges this run together with an earlier results file, for the rerun rule. It refuses a file that ran other
+# code, text, cases, models or CLI versions.
+# --set-baseline saves each selected case's count to evals/baselines.json, on a clean tree, from 20 or more runs
+# that could all be graded.
 #
 # Every run writes its results, by default to evals/results/, which Git ignores: the commit, whether the tree had
-# changes, the date, the CLI versions, and for each run the model that answered, its answer and its verdict. The
-# agent suite also keeps each agent's raw output. A call that fails is tried twice more; a case whose calls keep
-# failing is reported as not run. Neither suite reads your own CLAUDE.md or ~/.codex/AGENTS.md.
+# changes and their diff, the date, the CLI versions, a hash of what the run tested, and for each run the model that
+# answered, its answer and its verdict. The agent suite also keeps each agent's raw output. A call that fails is tried
+# twice more; a case whose calls keep failing is reported as not run. Neither suite reads your own CLAUDE.md or ~/.codex/AGENTS.md.
 
 set -eu
 

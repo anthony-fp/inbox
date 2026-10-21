@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 /** The repo: `scripts/eval.sh` names it, since the runners run as bundles in a temporary folder. */
 const ROOT = process.env.INBOX_EVAL_ROOT ?? process.cwd()
@@ -22,8 +22,8 @@ export type Run = {
   error: string | null
   failed: string[]
   attempts: number
-  /** Why each earlier attempt could not be graded. */
-  earlier: string[]
+  /** Each earlier attempt that could not be graded, as its full record. */
+  earlier: object[]
   durationMs: number
 }
 
@@ -143,11 +143,11 @@ export async function runJobs<R extends Run>(
         const job = jobs[next++]!
         try {
           let r = await attempt(job)
-          const earlier: string[] = []
+          const earlier: object[] = []
           for (let tries = 1; r.error && tries <= RETRIES && stopped === null; tries++) {
             await wait(RETRY_WAIT_MS * tries)
             if (stopped !== null) break
-            earlier.push(r.error)
+            earlier.push(r)
             r = await attempt(job)
           }
           results.push({ ...r, attempts: earlier.length + 1, earlier })
@@ -167,12 +167,19 @@ export async function runJobs<R extends Run>(
  * The runs of earlier results files, for the rerun rule: a red case's rerun is judged on both runs together. Throws when
  * a file's model-read texts or cases differ from this run's, since its runs would then test something else.
  */
-export function earlierRuns<R extends Run>(paths: string | undefined, about: Provenance): R[] {
+export function earlierRuns<R extends Run>(paths: string | undefined, about: Provenance, out: string): R[] {
   if (!paths) return []
 
   return paths.split(',').flatMap(path => {
+    if (resolve(path) === resolve(out))
+      throw new Error(`--with ${path} is also this run's --out, which would replace it`)
     const earlier: Provenance & { results: R[] } = JSON.parse(readFileSync(path, 'utf8'))
-    const changed = Object.keys(about.texts).filter(k => earlier.texts?.[k] !== about.texts[k])
+    const changed = [
+      ...Object.keys(about.texts).filter(k => earlier.texts?.[k] !== about.texts[k]),
+      ...Object.keys(about.clis)
+        .filter(k => earlier.clis?.[k] !== about.clis[k])
+        .map(k => `the ${k} CLI`),
+    ]
     if (earlier.suite !== about.suite || changed.length > 0)
       throw new Error(
         `--with ${path} tested other text: ${earlier.suite === about.suite ? changed.join(', ') : 'another suite'}`,
@@ -197,8 +204,11 @@ export type Baseline = { passed: number; runs: number; commit: string; date: str
 export type Baselines = Record<string, Baseline>
 
 const BASELINES = join(ROOT, 'evals', 'baselines.json')
-/** A later run is below a baseline when a pass count that low would happen less often than this by chance. */
-const BELOW = 0.05
+/**
+ * A later run is below a baseline when a pass count that low would happen less often than this by chance. At 0.05, a
+ * 20 of 20 baseline flagged 6 of 8, which a case passing 95% of the time scores in 6% of runs.
+ */
+const BELOW = 0.01
 
 export function readBaselines(suite: string): Baselines {
   if (!existsSync(BASELINES)) return {}
@@ -207,22 +217,42 @@ export function readBaselines(suite: string): Baselines {
   return all[suite] ?? {}
 }
 
-/** Saves each case's counts from these results as its baseline, replacing the case's earlier one. */
-export function writeBaselines(suite: string, about: Provenance, results: Run[]) {
+/** The fewest graded runs a baseline is set from. */
+const BASELINE_RUNS = 20
+
+/**
+ * Saves the counts of the selected cases as their baselines, replacing each one's earlier baseline. A case with fewer
+ * than `BASELINE_RUNS` runs, or with a run that could not be graded, keeps its earlier baseline. Returns why each such
+ * case was skipped.
+ */
+export function writeBaselines(suite: string, about: Provenance, results: Run[], names: string[]): string[] {
   const all: Record<string, Baselines> = existsSync(BASELINES) ? JSON.parse(readFileSync(BASELINES, 'utf8')) : {}
   const mine = { ...all[suite] }
-  for (const key of new Set(results.map(r => `${r.agent} ${r.name}`))) {
+  const skipped: string[] = []
+  for (const key of new Set(results.filter(r => names.includes(r.name)).map(r => `${r.agent} ${r.name}`))) {
     const runs = results.filter(r => `${r.agent} ${r.name}` === key)
+    if (runs.some(r => r.error !== null)) {
+      skipped.push(`${key}: a run could not be graded`)
+      continue
+    }
+    if (runs.length < BASELINE_RUNS) {
+      skipped.push(`${key}: ${runs.length} runs, fewer than ${BASELINE_RUNS}`)
+      continue
+    }
     mine[key] = {
       passed: runs.filter(r => !r.error && r.failed.length === 0).length,
       runs: runs.length,
       commit: about.commit,
       date: about.date,
-      models: [...new Set(runs.map(r => r.model ?? `${r.requested} (requested)`))],
+      models: [...new Set(runs.map(modelOf))],
     }
   }
   writeFileSync(BASELINES, `${JSON.stringify({ ...all, [suite]: mine }, null, 2)}\n`)
+
+  return skipped
 }
+
+const modelOf = (r: Run) => r.model ?? `${r.requested} (requested)`
 
 /** P(X <= passed) for X ~ Binomial(runs, rate), summed in logs so a long run does not underflow to 0. */
 function chanceOfAtMost(passed: number, runs: number, rate: number): number {
@@ -257,6 +287,8 @@ export function report<C extends { name: string; min?: Partial<Record<string, nu
   agents: string[],
   cases: C[],
   results: Run[],
+  /** The runs each case needs graded. Runs from `--with` count, so a rerun can make up an earlier failed call. */
+  runs: number,
   min: number,
   baselines: Baselines,
   extra: (agent: string, c: C, mine: Run[]) => string = () => '',
@@ -272,25 +304,32 @@ export function report<C extends { name: string; min?: Partial<Record<string, nu
       const reported = [...new Set(mine.map(r => r.model).filter(Boolean))]
       const models = reported.length > 0 ? reported.join(', ') : `requested ${mine[0]?.requested ?? 'unknown model'}`
       const note = extra(agent, c, mine)
-      if (mine.length === 0 || unrun.length > 0) {
+      if (graded.length < runs) {
         isUnrun = true
         const why =
           mine.length === 0
             ? 'no run finished'
-            : `${unrun.length} of ${mine.length} runs could not be graded; of the ${graded.length} graded, ${passed} passed (${models})${note}`
+            : `${unrun.length} of ${mine.length} runs could not be graded, so ${graded.length} of the ${runs} needed were; of those, ${passed} passed (${models})${note}`
         console.log(`  ? ${agent} ${c.name}: not run, ${why}`)
         for (const r of unrun) console.log(`       ${r.error}`)
         continue
       }
-      const baseline = baselines[`${agent} ${c.name}`]
-      const isBelow = baseline !== undefined && isBelowBaseline(passed, mine.length, baseline)
-      const isPass = passed / mine.length >= (c.min?.[agent] ?? min) && !isBelow
+      const stored = baselines[`${agent} ${c.name}`]
+      const isSameModel = stored !== undefined && graded.every(r => stored.models.includes(modelOf(r)))
+      const baseline = isSameModel ? stored : undefined
+      const isBelow = baseline !== undefined && isBelowBaseline(passed, graded.length, baseline)
+      const isPass = passed / graded.length >= (c.min?.[agent] ?? min) && !isBelow
       if (!isPass) isFailing = true
-      const against = baseline ? `, baseline ${baseline.passed} of ${baseline.runs}${isBelow ? ': below it' : ''}` : ''
+      const against = baseline
+        ? `, baseline ${baseline.passed} of ${baseline.runs}${isBelow ? ': below it' : ''}`
+        : stored
+          ? `, baseline from ${stored.models.join(', ')} not compared`
+          : ''
+      const ungraded = unrun.length > 0 ? `, ${unrun.length} more could not be graded` : ''
       console.log(
-        `${isPass ? '  ok' : '  x '} ${agent} ${c.name}: ${passed} of ${mine.length} (${models})${against}${note}`,
+        `${isPass ? '  ok' : '  x '} ${agent} ${c.name}: ${passed} of ${graded.length}${ungraded} (${models})${against}${note}`,
       )
-      if (!isPass) for (const r of mine) if (r.failed.length > 0) console.log(`       ${r.failed.join('; ')}`)
+      if (!isPass) for (const r of graded) if (r.failed.length > 0) console.log(`       ${r.failed.join('; ')}`)
     }
 
   return isFailing ? 'fail' : isUnrun ? 'not run' : 'pass'
@@ -307,23 +346,17 @@ export function finish(
   stopped: string | null,
   verdict: Verdict,
   isSettingBaseline: boolean,
+  names: string[],
 ): never {
   if (stopped !== null) console.log(`Stopped: ${stopped}`)
   console.log(`Results: ${path}${about.isDirty ? ' (the tree had uncommitted changes)' : ''}`)
   if (isSettingBaseline) {
-    const isUngraded = results.some(r => r.error !== null)
-    const unfit =
-      stopped !== null
-        ? 'the run stopped'
-        : isUngraded
-          ? 'a case could not be graded'
-          : about.isDirty
-            ? 'the tree had uncommitted changes'
-            : null
+    const unfit = stopped !== null ? 'the run stopped' : about.isDirty ? 'the tree had uncommitted changes' : null
     if (unfit) console.log(`Saved no baselines: ${unfit}.`)
     else {
-      writeBaselines(about.suite, about, results)
-      console.log('Saved these counts as the baselines for these cases.')
+      const skipped = writeBaselines(about.suite, about, results, names)
+      console.log('Saved the baselines of the cases selected.')
+      for (const why of skipped) console.log(`  No baseline for ${why}.`)
     }
   }
   process.exit(stopped !== null ? 3 : verdict === 'pass' ? 0 : verdict === 'fail' ? 1 : 2)

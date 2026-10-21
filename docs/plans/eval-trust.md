@@ -40,13 +40,14 @@ No model calls, except one targeted run per changed check.
 - A check pairs each `new` pattern with its own item, so one merged item cannot pass two.
 - A session that can reach more than the stand-in inbox stops the whole run, with no retry. A runner that throws records the run as not graded. Results are written as each run lands, so a run cut short keeps them. A run with a case not graded exits 2, a stopped run 3.
 - Each results file records a hash of every text the models read and of the cases file, and the diff when the tree had changes. `--with` judges a rerun together with the first run and refuses one that tested other text.
-- The model suite records each call's time and output tokens, and notes runs past the mod's 45 s limit and 1600 tokens. It lists the asks of NEW lines the code dropped.
+- The model suite records each call's time and output tokens, and notes runs past the mod's 45 s limit and 1600 tokens. Times are measured with six calls in parallel, so they run longer than the mod's one call. It lists the asks of NEW lines the code dropped.
+- A baseline is set only from 20 or more runs that could all be graded, for the cases selected, and is compared only with runs on the same model. A run falls below it when its count would happen less than 1% of the time by chance.
 
 ### 2. Measure the guidance
 
 The agent suite gets `--no-guidance`. One run of Claude on all 15 cases, at 5 runs each, is 75 sessions. A case that passes without the guidance tests the tool descriptions and the prompt, not the guidance.
 
-Result, on 0195b98 with a clean tree (`evals/results/agent-no-guidance-2026-10-21T06-35-46.075Z.json`): 14 of the 15 cases pass without the guidance. Only `no-finding-user-only` fails, 2 of 5: Claude listed the options without asking a question. `record-question` passed 4 of 5 and missed the same way once. Every other case passed 5 of 5.
+Result, on 0195b98 with a clean tree (`evals/results/agent-no-guidance-2026-10-21T06-35-46.075Z.json`): 14 of the 15 cases pass without the guidance. Only `no-finding-user-only` fails, 2 of 5: Claude listed the options without asking a question. `record-question` passed 4 of 5 and missed the same way once. Every other case passed 5 of 5. With the guidance, `no-finding-user-only` passed 5 of 5 in the last two full agent runs before this one.
 
 So on Claude, the agent suite shows it needs the guidance for one rule: that the agent asks in its reply as a direct question. The tool descriptions in `hooks/tools.ts` and the inbox text are enough for the other 14 cases. This is a control of 5 runs on one agent, with the whole guidance removed. It does not show how Codex or omp behave without the guidance, or what removing one rule would do. It does show that these cases cannot catch the loss of the whole guidance on Claude, so they cannot be counted on to catch the loss of one rule. Cases that fail without the guidance are follow-up work: see "Not in these steps".
 

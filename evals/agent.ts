@@ -246,6 +246,16 @@ async function claudeIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome
       model: null,
       raw: r.stdout,
     }
+  const servers: { name: string; status: string }[] = init.mcp_servers ?? []
+  const isProbeDown = servers.length === 1 && servers[0]!.name === PROBE && servers[0]!.status !== 'connected'
+  if (isProbeDown)
+    return {
+      reply: '',
+      calls: s.calls(),
+      error: `the ${PROBE} server did not connect: ${servers[0]!.status}`,
+      model: init.model ?? null,
+      raw: r.stdout,
+    }
   assertOnlyProbe(init)
   const reply = events
     .filter(e => e.type === 'assistant')
@@ -571,8 +581,8 @@ const about = provenance(
     'omp probe': readFileSync(ompProbe, 'utf8'),
   },
 )
-const firstRuns = earlierRuns<Result>(values.with, about)
 const path = resultsPath(values.out, about)
+const firstRuns = earlierRuns<Result>(values.with, about, path)
 const preflight = await Promise.all([assertNoInboxServer(), assertOnlyOmpProbeSession()]).then(
   () => null,
   (e: unknown) => `preflight: ${String(e)}`,
@@ -602,5 +612,13 @@ const { results, stopped } =
     : { results: [] as Result[], stopped: preflight }
 writeResults(path, about, results, stopped)
 const judged = [...firstRuns, ...results]
-const verdict = report(agents, cases, judged, MIN, readBaselines(about.suite))
-finish(about, path, judged, stopped, verdict, values['set-baseline'])
+const verdict = report(agents, cases, judged, runs, MIN, readBaselines(about.suite))
+finish(
+  about,
+  path,
+  judged,
+  stopped,
+  verdict,
+  values['set-baseline'],
+  cases.map(c => c.name),
+)

@@ -89,7 +89,8 @@ const about = provenance(
     runner: readFileSync(process.argv[1]!, 'utf8'),
   },
 )
-const firstRuns = earlierRuns<Result>(values.with, about)
+const path = resultsPath(values.out, about)
+const firstRuns = earlierRuns<Result>(values.with, about, path)
 
 type Answer = { text: string | null; model: string | null; outputTokens: number | null }
 
@@ -140,7 +141,8 @@ const codexHome = process.env.CODEX_HOME || join(homedir(), '.codex')
 // Without auth.json, codexAsk runs the model in the person's own Codex home, where it reads their AGENTS.md.
 if (agents.includes('codex') && !existsSync(join(codexHome, 'auth.json')))
   throw new Error(`The Codex runs need a Codex sign-in in ${join(codexHome, 'auth.json')}, not the keyring`)
-const askCodex = codexAsk(run, codexCli, mkdtempSync(join(tmpdir(), 'inbox-eval-')), codexHome)
+const codexData = mkdtempSync(join(tmpdir(), 'inbox-eval-'))
+const askCodex = codexAsk(run, codexCli, codexData, codexHome)
 
 /** Pairs each check with its own item, so one item cannot pass two checks, by augmenting paths. */
 function matchEach<C, I>(checks: C[], items: I[], fits: (c: C, i: I) => boolean): Map<C, I> {
@@ -286,11 +288,10 @@ const jobs: Job<Result>[] = agents.flatMap(a =>
     })),
   ),
 )
-const path = resultsPath(values.out, about)
 const { results, stopped } = await runJobs(jobs, so => writeResults(path, about, so))
 writeResults(path, about, results, stopped)
 const judged = [...firstRuns, ...results]
-const verdict = report(agents, cases, judged, MIN, readBaselines(about.suite), (_agent, _c, mine) => {
+const verdict = report(agents, cases, judged, runs, MIN, readBaselines(about.suite), (_agent, _c, mine) => {
   const runs = mine as Result[]
   const masked = runs.reduce((sum, r) => sum + r.masked.length, 0)
   const slow = runs.filter(r => r.durationMs > MOD_TIMEOUT_MS).length
@@ -303,4 +304,13 @@ const verdict = report(agents, cases, judged, MIN, readBaselines(about.suite), (
 
   return notes.length > 0 ? `, ${notes.join(', ')}` : ''
 })
-finish(about, path, judged, stopped, verdict, values['set-baseline'])
+rmSync(codexData, { recursive: true, force: true })
+finish(
+  about,
+  path,
+  judged,
+  stopped,
+  verdict,
+  values['set-baseline'],
+  cases.map(c => c.name),
+)
