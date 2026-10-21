@@ -1414,6 +1414,7 @@ function codexAsk(exec, cli, dir, personHome) {
           `model_instructions_file=${JSON.stringify(system)}`,
           "-c",
           "project_doc_max_bytes=0",
+          ...home ? ["-c", 'cli_auth_credentials_store="file"'] : [],
           ...off.flatMap((f) => ["--disable", f]),
           "-o",
           out,

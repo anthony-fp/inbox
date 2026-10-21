@@ -43,8 +43,10 @@ const OFF = [
 /**
  * A Codex home for the inbox model that holds only a link to the person's `auth.json`. Codex reads the home's
  * `AGENTS.md` even with `--ignore-user-config` and `project_doc_max_bytes=0`, so the person's own instructions would
- * reach the inbox model. Codex saves a refreshed sign-in by writing `auth.json` in place, which goes through the link.
- * Null when the person has no `auth.json`, as with a keyring sign-in: the model then runs in their own home.
+ * reach the inbox model. Codex's file store saves a refreshed sign-in by writing `auth.json` in place, which goes
+ * through the link, so the call names that store: a keyring store keys by the home's path, and would save the refresh
+ * where the person's own Codex never reads it. Null when the person has no `auth.json`, as with a keyring sign-in: the
+ * model then runs in their own home.
  */
 async function modelHome(dir: string, personHome: string): Promise<string | null> {
   const auth = join(personHome, 'auth.json')
@@ -99,6 +101,7 @@ export function codexAsk(exec: Run, cli: string, dir: string, personHome: string
           `model_instructions_file=${JSON.stringify(system)}`,
           '-c',
           'project_doc_max_bytes=0',
+          ...(home ? ['-c', 'cli_auth_credentials_store="file"'] : []),
           ...off.flatMap(f => ['--disable', f]),
           '-o',
           out,
