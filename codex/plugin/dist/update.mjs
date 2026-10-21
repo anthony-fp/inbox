@@ -1074,7 +1074,19 @@ var run = (args, { cwd, timeoutMs, env }) => new Promise((resolve3) => {
 
 // src/update.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
-import { access, mkdir as mkdir2, readFile as readFile2, readlink as readlink2, rename as rename2, rm, symlink as symlink2, writeFile as writeFile2 } from "node:fs/promises";
+import {
+  access,
+  copyFile,
+  lstat as lstat2,
+  mkdir as mkdir2,
+  readFile as readFile2,
+  readlink as readlink2,
+  rename as rename2,
+  rm,
+  stat as stat2,
+  symlink as symlink2,
+  writeFile as writeFile2
+} from "node:fs/promises";
 import { join as join3 } from "node:path";
 
 // ../hooks/session-host.ts
@@ -1373,14 +1385,24 @@ async function modelHome(dir, personHome) {
   if (!hasSignInFile) return null;
   const home = join3(dir, "model-home");
   const link = join3(home, "auth.json");
-  await mkdir2(home, { recursive: true });
-  const isLinked = await readlink2(link).catch(() => null) === auth;
-  if (!isLinked) {
+  try {
+    await mkdir2(home, { recursive: true });
+    const isLinked = await readlink2(link).catch(() => null) === auth;
+    if (isLinked) return home;
+    await keepNewerSignIn(link, auth);
     const made = `${link}.${randomUUID2()}`;
     await symlink2(auth, made);
     await rename2(made, link);
+    return home;
+  } catch {
+    return null;
   }
-  return home;
+}
+async function keepNewerSignIn(link, auth) {
+  const saved = await lstat2(link).catch(() => null);
+  if (!saved?.isFile()) return;
+  const theirs = await stat2(auth);
+  if (saved.mtimeMs > theirs.mtimeMs) await copyFile(link, auth);
 }
 function codexAsk(exec, cli, dir, personHome) {
   return async (prompt) => {

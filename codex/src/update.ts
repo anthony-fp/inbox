@@ -1,5 +1,17 @@
 import { randomUUID } from 'node:crypto'
-import { access, mkdir, readFile, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import {
+  access,
+  copyFile,
+  lstat,
+  mkdir,
+  readFile,
+  readlink,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { screenText, systemText } from '../../hooks/model-text'
@@ -45,8 +57,8 @@ const OFF = [
  * `AGENTS.md` even with `--ignore-user-config` and `project_doc_max_bytes=0`, so the person's own instructions would
  * reach the inbox model. Codex's file store saves a refreshed sign-in by writing `auth.json` in place, which goes
  * through the link, so the call names that store: a keyring store keys by the home's path, and would save the refresh
- * where the person's own Codex never reads it. Null when the person has no `auth.json`, as with a keyring sign-in: the
- * model then runs in their own home.
+ * where the person's own Codex never reads it. Null when the person has no `auth.json`, as with a keyring sign-in, or
+ * when the link cannot be made: the model then runs in their own home.
  */
 async function modelHome(dir: string, personHome: string): Promise<string | null> {
   const auth = join(personHome, 'auth.json')
@@ -57,15 +69,30 @@ async function modelHome(dir: string, personHome: string): Promise<string | null
   if (!hasSignInFile) return null
   const home = join(dir, 'model-home')
   const link = join(home, 'auth.json')
-  await mkdir(home, { recursive: true })
-  const isLinked = (await readlink(link).catch(() => null)) === auth
-  if (!isLinked) {
+  try {
+    await mkdir(home, { recursive: true })
+    const isLinked = (await readlink(link).catch(() => null)) === auth
+    if (isLinked) return home
+    await keepNewerSignIn(link, auth)
     const made = `${link}.${randomUUID()}`
     await symlink(auth, made)
     await rename(made, link)
-  }
 
-  return home
+    return home
+  } catch {
+    return null
+  }
+}
+
+/**
+ * A Codex that saved a refresh by replacing the link with a file left the only fresh tokens there. Copies that file
+ * over the person's `auth.json` when it is the newer, so relinking does not discard them.
+ */
+async function keepNewerSignIn(link: string, auth: string): Promise<void> {
+  const saved = await lstat(link).catch(() => null)
+  if (!saved?.isFile()) return
+  const theirs = await stat(auth)
+  if (saved.mtimeMs > theirs.mtimeMs) await copyFile(link, auth)
 }
 
 /** Null when it fails. `personHome` is the person's Codex home, which holds their sign-in. */
