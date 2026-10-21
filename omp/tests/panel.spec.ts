@@ -381,7 +381,7 @@ test('the PRs tab says when gh is missing and when there are no PRs', () => {
 
 test('an empty Needs you tab explains itself', () => {
   const empty = { ...screenOf(), view: sessionView(emptyState('s'), NOW, SETTLED_MS) }
-  expect(text(empty, INITIAL_UI)).toContain('Nothing needs you.')
+  expect(text(empty, INITIAL_UI)).toContain('Nothing needed.')
 })
 
 test('the footer names the inbox model, or says there is none', () => {

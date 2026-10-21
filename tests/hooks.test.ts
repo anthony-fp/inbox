@@ -977,7 +977,7 @@ test('a finding Claude records while the pane shows an empty tab brings the pane
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   await $.command.run({ command: 'inbox', args: '' } as never)
   const pane = await $.ui.mount(PANE)
-  expect(await pane.find({ text: /^Nothing needs you\.$/ })).toBeDefined()
+  expect(await pane.find({ text: /^Nothing needed\.$/ })).toBeDefined()
   const r = await $.tool.call({
     tool: 'mcp__inbox__record',
     kind: 'finding',
@@ -2201,7 +2201,7 @@ test('a stop and an open permission prompt lead the sidebar line until they clea
   const band = await $.ui.mount({ plugin: 'inbox', surface: 'terminal', ...BAND })
   expect(await band.find({ text: /Run \/login, then send a message to resume\./ })).toBeDefined()
   expect(await band.find({ key: 'open-inbox' })).toBeDefined()
-  expect(await band.find({ text: 'Nothing needs you' })).toBeDefined()
+  expect(await band.find({ text: 'Nothing needed' })).toBeDefined()
   const pane = await $.ui.mount(PANE)
   expect(await pane.find({ key: 'resume' })).toBeUndefined()
   expect(await band.find({ key: 'resume' })).toBeUndefined()
@@ -2816,13 +2816,13 @@ test('a saved session the store cannot read shows as unreadable, not empty, unti
   await $.session.end({ reason: 'clear', sessionId: 'session-1', resume: { id: 'session-1' } })
   await $.classic.SessionStart({ source: 'clear', session_id: 'session-2' })
   await clock.settle()
-  expect(await pane.find({ text: /Nothing needs you/ })).toBeDefined()
+  expect(await pane.find({ text: /Nothing needed/ })).toBeDefined()
   storeRefusal = 'the store is busy'
   await $.session.end({ reason: 'resume', sessionId: 'session-2', resume: { id: 'session-2' } })
   await $.classic.SessionStart({ source: 'resume', session_id: 'session-1' })
   await clock.settle()
   expect(await pane.find({ text: 'Could not read the inbox.' })).toBeDefined()
-  expect(await pane.find({ text: /Nothing needs you/ })).toBeUndefined()
+  expect(await pane.find({ text: /Nothing needed/ })).toBeUndefined()
 
   let readDone = () => {}
   storeHold = () => new Promise<void>(r => (readDone = r))

@@ -926,7 +926,7 @@ export function bandLines(screen: PanelScreen, width: number, now: number, style
     .map(t => ({ t, count: t.id === 'needsYou' ? needsYou.count : findings.count }))
     .filter(x => x.count > 0)
     .map(x => `${style.dim(x.t.label)} ${style.tone(x.t.id, String(x.count))}`)
-  const left = ` ${counts.length > 0 ? counts.join(` ${style.tone('sep', '·')} `) : style.dim('Nothing needs you')}`
+  const left = ` ${counts.length > 0 ? counts.join(` ${style.tone('sep', '·')} `) : style.dim('Nothing needed')}`
   const countLine = spread(left, style.dim('/inbox to open '), width)
   const { stop } = screen
   if (!stop) return [countLine]

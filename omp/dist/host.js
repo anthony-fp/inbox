@@ -1873,7 +1873,7 @@ var TABS = [
 ];
 var ROW_TABS = TABS.filter((t) => t.id !== "prs");
 function emptyText(tab, agent) {
-  return tab === "needsYou" ? { title: "Nothing needs you.", hint: `${agent}'s questions and the tasks only you can do show up here.` } : { title: "No findings yet", hint: `${agent} flags issues and opportunities it spots beyond your task.` };
+  return tab === "needsYou" ? { title: "Nothing needed.", hint: `${agent}'s questions and the tasks only you can do show up here.` } : { title: "No findings yet", hint: `${agent} flags issues and opportunities it spots beyond your task.` };
 }
 var FOLLOW_UPS = new Set(["type", "explain", "discuss", "dismiss", "discard"]);
 var ACTION_KEYS = {
@@ -3880,7 +3880,7 @@ function scrolled(body, selectedAt, room, s) {
 function bandLines(screen, width, now, style) {
   const { needsYou, findings } = screen.view;
   const counts = TABS.filter((t) => t.id !== "prs").map((t) => ({ t, count: t.id === "needsYou" ? needsYou.count : findings.count })).filter((x) => x.count > 0).map((x) => `${style.dim(x.t.label)} ${style.tone(x.t.id, String(x.count))}`);
-  const left = ` ${counts.length > 0 ? counts.join(` ${style.tone("sep", "\xB7")} `) : style.dim("Nothing needs you")}`;
+  const left = ` ${counts.length > 0 ? counts.join(` ${style.tone("sep", "\xB7")} `) : style.dim("Nothing needed")}`;
   const countLine = spread(left, style.dim("/inbox to open "), width);
   const { stop } = screen;
   if (!stop)
