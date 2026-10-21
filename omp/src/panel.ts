@@ -1,4 +1,5 @@
 import type { Closed, Draft, FoldKind, Stop, Tab } from '../../types'
+import { version } from '../package.json'
 import {
   closedGroups,
   followTo,
@@ -890,7 +891,7 @@ function footer(d: Draw): string[] {
     ui.typing !== null
       ? [`↵ ${ROW_COPY.send}`, `esc ${ROW_COPY.cancel}`]
       : ['←→ pick', '↵ press', '↑↓ move', 'tab switch']
-  const model = screen.modelName ? `inbox model ${screen.modelName} ` : 'no inbox model: set @inbox '
+  const model = `${screen.modelName ? `inbox model ${screen.modelName}` : 'no inbox model: set @inbox'}  v${version} `
   const hintLine = ` ${hints.map(h => s.dim(h)).join(` ${s.tone('sep', '·')} `)}`
   const fitsBesideHints = width - visibleLength(hintLine) - visibleLength(model) >= 2
   if (fitsBesideHints) out.push(spread(hintLine, s.dim(model), width))

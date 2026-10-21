@@ -595,6 +595,7 @@ let publishing: Promise<void> = Promise.resolve()
 let shellCommand: string | null = null
 let toolsRefused = false
 let isReadingAgain = false
+let version: string | null = null
 /**
  * The desktop app takes the focus off the pane when the Button holding it leaves the drawing, and
  * the next click there only brings it back (anthropics/claude-code#100874).
@@ -2068,6 +2069,16 @@ function turnOn($: EngineInterface): Promise<void> {
   }))
 }
 
+async function readVersion($: EngineInterface) {
+  try {
+    const manifest: unknown = JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`))
+    const stated = (manifest as { version?: unknown } | null)?.version
+    version = typeof stated === 'string' ? stated : null
+  } catch {
+    version = null
+  }
+}
+
 async function initializeInbox($: EngineInterface) {
   // A hot reload keeps state an older build wrote. Draws start once isOn is set, and they read the current shape.
   await upgradeState($)
@@ -2078,6 +2089,7 @@ async function initializeInbox($: EngineInterface) {
   }
   await Promise.all([
     registerInboxCommand($),
+    readVersion($),
     ...agentTools(CLAUDE_CODE).map(tool => $.tool.register(tool).catch(refused)),
   ])
   // A pane kept across a hot reload is already drawn.
@@ -3877,6 +3889,13 @@ export const register: Register = on => {
       </Box>
     )
     const statusText = look === 'desktop' ? <Text color={pal.age}>{status}</Text> : <Text dimColor>{status}</Text>
+    const versionText = version ? (
+      look === 'desktop' ? (
+        <Text color={pal.age}>v{version}</Text>
+      ) : (
+        <Text dimColor>v{version}</Text>
+      )
+    ) : null
     const rail = (
       <Box flexDirection="column" flexShrink={0} paddingLeft={1} marginRight={RAIL_GUTTER}>
         {TABS.map(({ id, label }) => {
@@ -3934,7 +3953,10 @@ export const register: Register = on => {
               onPress={() => void update($, IS_KEY_LIST_SHOWN, shown => !shown)}
             />
           )}
-          {statusText}
+          <Box flexDirection="row" columnGap={2}>
+            {statusText}
+            {versionText}
+          </Box>
           {look !== 'desktop' && isKeyListShown ? (
             <Box
               position="absolute"

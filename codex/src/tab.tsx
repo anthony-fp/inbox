@@ -1,4 +1,5 @@
 import { render } from 'preact'
+import manifest from '../plugin/.codex-plugin/plugin.json'
 import { ActionButton, RowActions, ledgerActions, Icon } from './row-actions'
 import type { ComponentChildren, JSX } from 'preact'
 import type { IconName } from './row-actions'
@@ -1793,7 +1794,10 @@ function App({ lists }: { lists: Lists | null }): ComponentChildren {
             Show demo
           </button>
         )}
-        <Status v={v} />
+        <div class="footer-end">
+          <Status v={v} />
+          <span class="version">v{manifest.version}</span>
+        </div>
       </footer>
     </>
   )

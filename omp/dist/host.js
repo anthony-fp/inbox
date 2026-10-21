@@ -3430,6 +3430,8 @@ function openTarget2(run, target, root, home) {
     isExecutable: (path) => access(path, constants.X_OK).then(() => true, () => false)
   }, target, root, home);
 }
+// package.json
+var version = "0.2.10";
 
 // ../hooks/arrivals.ts
 function recordRows(seen, listed) {
@@ -4087,7 +4089,7 @@ function footer(d) {
   if (ui.notice && now - ui.notice.at < SETTLED_MS)
     out.push(...indented(ui.notice.text, 1, width, 2, (t) => s.tone("error", t)));
   const hints = ui.typing !== null ? [`\u21B5 ${ROW_COPY.send}`, `esc ${ROW_COPY.cancel}`] : ["\u2190\u2192 pick", "\u21B5 press", "\u2191\u2193 move", "tab switch"];
-  const model = screen.modelName ? `inbox model ${screen.modelName} ` : "no inbox model: set @inbox ";
+  const model = `${screen.modelName ? `inbox model ${screen.modelName}` : "no inbox model: set @inbox"}  v${version} `;
   const hintLine = ` ${hints.map((h) => s.dim(h)).join(` ${s.tone("sep", "\xB7")} `)}`;
   const fitsBesideHints = width - visibleLength(hintLine) - visibleLength(model) >= 2;
   if (fitsBesideHints)
@@ -4154,7 +4156,7 @@ function createPanel(deps) {
   let ui = INITIAL_UI;
   let screen = null;
   let animation = null;
-  let version = 0;
+  let version2 = 0;
   let seen = {};
   let isOpening = true;
   const stops = [];
@@ -4168,9 +4170,9 @@ function createPanel(deps) {
     }
   };
   async function refresh(pressedId) {
-    const mine = ++version;
+    const mine = ++version2;
     const next = await source.screen(holdsOf(ui)).catch(() => null);
-    if (mine !== version || next === null)
+    if (mine !== version2 || next === null)
       return;
     screen = next;
     const followed = followRows(next, ui, seen, isOpening, deps.now());
@@ -4223,7 +4225,7 @@ function createPanel(deps) {
       await refresh();
     },
     dispose() {
-      version++;
+      version2++;
       for (const stop of stops.splice(0))
         stop();
       if (animation !== null)
