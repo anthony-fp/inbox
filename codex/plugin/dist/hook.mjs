@@ -99,6 +99,8 @@ function pruneClosed(ledger, keep) {
   const pruned = (records) => records.filter((r, n) => n >= records.length - MAX_CLOSED || keep.has(r.id));
   return { ...ledger, closed: pruned(ledger.closed), closedFindings: pruned(ledger.closedFindings) };
 }
+var OVERTAKEN_OUTCOMES = "no longer applies|replaced|superseded|moot";
+var NOT_AN_ANSWER = new RegExp(`^\\s*(?:done\\s*:|(?:${OVERTAKEN_OUTCOMES}|no longer relevant|dealt with)\\b)`, "i");
 
 // ../hooks/model-text.ts
 var NL = "\n";
@@ -930,7 +932,9 @@ async function readSessionMeta(path) {
 }
 async function isNonInteractiveRun(path) {
   if (path === null) return true;
-  const meta = await readSessionMeta(path);
+  return isExecMeta(await readSessionMeta(path));
+}
+function isExecMeta(meta) {
   return meta?.payload?.originator === "codex_exec" || meta?.payload?.source === "exec";
 }
 async function forkedFromId(path) {

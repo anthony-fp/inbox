@@ -414,7 +414,8 @@ function applyExchangeUpdate(ledger, update, exchange, now, promptAt) {
     promptAt
   );
 }
-var NOT_AN_ANSWER = /^\s*(?:done\s*:|(?:no longer (?:applies|relevant)|dealt with|replaced|superseded|moot)\b)/i;
+var OVERTAKEN_OUTCOMES = "no longer applies|replaced|superseded|moot";
+var NOT_AN_ANSWER = new RegExp(`^\\s*(?:done\\s*:|(?:${OVERTAKEN_OUTCOMES}|no longer relevant|dealt with)\\b)`, "i");
 function isPersonsAnswer(outcome) {
   return outcome.trim() !== "" && !NOT_AN_ANSWER.test(outcome);
 }
@@ -522,7 +523,7 @@ function withUpdate(item, updated) {
 function closedState(d) {
   if (d.how === "dismissed") return "dismissed";
   if (d.how === "expired") return "lapsed";
-  const isOvertaken = /^(?:closed by \w+: )?(?:no longer applies|replaced|superseded|moot)/i.test(d.outcome);
+  const isOvertaken = new RegExp(`^(?:closed by \\w+: )?(?:${OVERTAKEN_OUTCOMES})`, "i").test(d.outcome);
   return (d.how === "claude" || d.how === "update") && isOvertaken ? "lapsed" : "handled";
 }
 function isLapsed(d) {
