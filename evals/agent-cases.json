@@ -484,5 +484,48 @@
         "noIds": true
       }
     ]
+  },
+  {
+    "name": "carry-card-answers-where-we-are",
+    "about": "The first prompt of a conversation carries the card of the work so far, and the agent answers from it. Only the mod carries the card this way; Codex and omp carry it at session start.",
+    "ledger": {
+      "nextId": 4,
+      "card": {
+        "goal": "Migrate the billing job to the new queue",
+        "done": ["Queue client added"],
+        "now": "Waiting on staging sign-in",
+        "running": []
+      },
+      "items": [
+        {
+          "id": "i3",
+          "kind": "task",
+          "label": null,
+          "ask": "Sign in to the staging dashboard",
+          "options": [],
+          "rec": null,
+          "helps": [],
+          "turn": 1,
+          "at": 1
+        }
+      ]
+    },
+    "prompt": "Where did we get to? Answer in two sentences.",
+    "checks": [
+      {
+        "reply": "queue"
+      },
+      {
+        "reply": "staging"
+      },
+      {
+        "calls": "record",
+        "count": 0
+      },
+      {
+        "noIds": true
+      }
+    ],
+    "agents": ["claude"]
   }
 ]

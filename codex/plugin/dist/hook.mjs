@@ -260,16 +260,20 @@ function itemLine(item) {
 function findingLine(finding) {
   return `- ${finding.kind}: ${finding.title} (close id: ${finding.id})`;
 }
+function cardLines(ledger) {
+  const card = ledger.card;
+  if (!card) return [];
+  const out = [];
+  if (card.goal) out.push(`Goal: ${card.goal}`);
+  if (card.done.length > 0) out.push(`Done: ${card.done.join("; ")}`);
+  if (card.now) out.push(`Now: ${card.now}`);
+  if (card.running.length > 0) out.push(`Running: ${card.running.join("; ")}`);
+  return out;
+}
 function carryText(ledger, title) {
   const findings = ledger.findings;
   if (!ledger.card && ledger.items.length === 0 && findings.length === 0) return null;
-  const out = [title];
-  if (ledger.card) {
-    if (ledger.card.goal) out.push(`Goal: ${ledger.card.goal}`);
-    if (ledger.card.done.length > 0) out.push(`Done: ${ledger.card.done.join("; ")}`);
-    if (ledger.card.now) out.push(`Now: ${ledger.card.now}`);
-    if (ledger.card.running.length > 0) out.push(`Running: ${ledger.card.running.join("; ")}`);
-  }
+  const out = [title, ...cardLines(ledger)];
   if (ledger.items.length > 0) {
     out.push("Waiting on the user:");
     for (const item of ledger.items) out.push(itemLine(item));

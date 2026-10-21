@@ -377,16 +377,32 @@ function findingLine(finding: Finding): string {
   return `- ${finding.kind}: ${finding.title} (close id: ${finding.id})`
 }
 
+function cardLines(ledger: Ledger): string[] {
+  const card = ledger.card
+  if (!card) return []
+  const out: string[] = []
+  if (card.goal) out.push(`Goal: ${card.goal}`)
+  if (card.done.length > 0) out.push(`Done: ${card.done.join('; ')}`)
+  if (card.now) out.push(`Now: ${card.now}`)
+  if (card.running.length > 0) out.push(`Running: ${card.running.join('; ')}`)
+
+  return out
+}
+
+export const CARD_TITLE =
+  'inbox: where the work stood at the last reply. The "inbox:" text beside this prompt lists what waits on the user and what was closed.'
+
+/** The mod's carry at a conversation's first prompt. The `inbox:` text beside that prompt already lists the open items and the closed ones. */
+export function cardCarryText(ledger: Ledger): string | null {
+  const lines = cardLines(ledger)
+
+  return lines.length === 0 ? null : [CARD_TITLE, ...lines].join(NL)
+}
+
 export function carryText(ledger: Ledger, title: string): string | null {
   const findings = ledger.findings
   if (!ledger.card && ledger.items.length === 0 && findings.length === 0) return null
-  const out = [title]
-  if (ledger.card) {
-    if (ledger.card.goal) out.push(`Goal: ${ledger.card.goal}`)
-    if (ledger.card.done.length > 0) out.push(`Done: ${ledger.card.done.join('; ')}`)
-    if (ledger.card.now) out.push(`Now: ${ledger.card.now}`)
-    if (ledger.card.running.length > 0) out.push(`Running: ${ledger.card.running.join('; ')}`)
-  }
+  const out = [title, ...cardLines(ledger)]
   if (ledger.items.length > 0) {
     out.push('Waiting on the user:')
     for (const item of ledger.items) out.push(itemLine(item))

@@ -118,7 +118,7 @@ import {
 import {
   addActivity,
   buildPrompt,
-  carryText,
+  cardCarryText,
   catchUpPrompt,
   CLAUDE_CODE,
   dialogActivity,
@@ -126,7 +126,6 @@ import {
   guidedCloseDescription,
   promptNotes,
   screenText,
-  START_TITLE,
   systemText,
   toolActivity,
   transcriptCatchUpPrompt,
@@ -555,6 +554,10 @@ const FOLD_KINDS: FoldKind[] = [...NEEDS_YOU_GROUPS.map(g => g.kind), 'issue', '
 const AWAY_MS = 15 * 60_000
 
 let isTurnRunning = false
+/** The conversation whose first prompt has had the card carried beside it. */
+let carriedFor: string | null = null
+/** Why the last conversation ended, until the next conversation loads. */
+let endReason: string | null = null
 let isOn = false
 let turningOn: Promise<void> | null = null
 let intervals: Timer[] = []
@@ -2309,6 +2312,7 @@ export const register: Register = on => {
   })
 
   on('session.end', async ($, e, next) => {
+    endReason = e.reason
     loadRevision++
     stopGeneration++
     resuming = null
@@ -2349,6 +2353,14 @@ export const register: Register = on => {
 
   on('prompt.submit', async ($, e, next) => {
     if (!isOn) return next(e)
+    // Where a guard skips classic.SessionStart, the first prompt after /clear, /resume or /branch is what shows the
+    // session has changed conversations. A reload that classic.SessionStart already did leaves the ids equal.
+    const sessionId = await $.session.id()
+    if (sessionId !== conversation.id) {
+      const parent = endReason === 'resume' ? conversation.id : undefined
+      endReason = null
+      await loadConversation($, sessionId, parent || undefined)
+    }
     const origin = e.origin
     // send() already recorded this mod's own prompts.
     if (origin.kind === 'plugin' && origin.name === 'inbox') return next(e)
@@ -2361,6 +2373,11 @@ export const register: Register = on => {
     }
 
     const notes = await notePrompt($, e.text)
+    if (carriedFor !== conversation.id) {
+      carriedFor = conversation.id
+      const carry = cardCarryText((await read($, SESSION)).ledger)
+      if (carry) notes.unshift(carry)
+    }
 
     return notes.length === 0 ? next(e) : next({ ...e, context: [...(e.context ?? []), ...notes] })
   })
@@ -2493,14 +2510,6 @@ export const register: Register = on => {
     if (prRefs(reply).some(ref => !before.ledger.prs.includes(ref))) void fetchPrs($, await isPrsTabShown($))
 
     return r
-  })
-
-  on('prompt.context', async ($, e, next) => {
-    const r = await next(e)
-    if (!isOn) return r
-    const text = carryText((await read($, SESSION)).ledger, START_TITLE)
-
-    return text ? { ...r, blocks: [...r.blocks, { name: 'inbox', text }] } : r
   })
 
   on(

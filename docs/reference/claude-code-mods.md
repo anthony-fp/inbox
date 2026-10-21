@@ -871,8 +871,8 @@ Live, 2026-10-21, Claude Code 2.1.307, on a Team sign-in with `--setting-sources
 
 Inference, from the guard's source. In any session where the guard loads (every Team or Enterprise sign-in):
 - The system-prompt section `inbox:guidance`, which the inbox once added through `prompt.compose`, never reaches Claude. The guidance now rides in the `close` tool's description (`hooks/register.tsx:on('tool.describe')`).
-- The carry block never reaches Claude. The inbox adds it through `prompt.context` (`hooks/register.tsx:on('prompt.context')`).
-- The reload after `/clear`, `/resume` and `/branch` doesn't fire. It runs on `classic.SessionStart` (`hooks/register.tsx:on('classic.SessionStart')`).
+- The carry block, which the inbox once added through `prompt.context`, never reaches Claude. The mod now sends the card with the first prompt of each conversation through `prompt.submit` (`hooks/register.tsx:on('prompt.submit')`).
+- The reload after `/clear`, `/resume` and `/branch` doesn't fire from `classic.SessionStart`. The mod also reloads at the first prompt after the switch, when the session id differs from the conversation it holds (`hooks/register.tsx:on('prompt.submit')`).
 - The band, pane, per-turn model call and tools still run, unless `allowedMcpServers` is set. Then `record` and `close` don't register.
 
 ### Policies that stop or limit user mods

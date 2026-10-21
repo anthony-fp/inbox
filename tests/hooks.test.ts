@@ -30,6 +30,7 @@ const BAND = {
 }
 
 let ledgerReply = LEDGER_REPLY
+let sessionId = 'session-1'
 
 let sent: string[] = []
 
@@ -134,6 +135,7 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   ghAnswers = []
   isGhMissing = false
   ledgerReply = LEDGER_REPLY
+  sessionId = 'session-1'
   surfaces = []
   files = []
   copied = []
@@ -181,7 +183,7 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   }))
   on('session.surfaces', () => ({ value: surfaces }))
   on('session.attach', ($, e) => ({ clientId: e.clientId }))
-  on('session.id', () => ({ value: 'session-1' }))
+  on('session.id', () => ({ value: sessionId }))
   on('session.end', ($, e) => ({ sessionId: e.sessionId }))
   on('session.root', () => ({ value: '/tmp/project' }))
   on('env.get', ($, e) => ({ value: vars[e.name] }))
@@ -247,7 +249,10 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   on('classic.StopFailure', () => ({}))
   on('classic.PermissionRequest', () => ({}))
   on('classic.Stop', () => (stopBlock ? { block: stopBlock } : {}))
-  on('classic.SessionStart', () => ({}))
+  on('classic.SessionStart', ($, e) => {
+    sessionId = e.session_id
+    return {}
+  })
   on('tool.call', (_$, e) => {
     if (e.tool !== 'AskUserQuestion') return { result: 'ok', text: 'ok' } as never
     return dialogAnswer as never
@@ -2526,6 +2531,45 @@ test('/clear and /resume switch the inbox to the other conversation, and each ke
   await clock.settle()
   expect(await pane.find({ text: /Pin the Node version\?/ })).toBeDefined()
   expect(await pane.find({ text: /Use Node or Python\?/ })).toBeUndefined()
+})
+
+test('where classic.SessionStart is skipped, the first prompt after /clear, /resume and /branch loads that conversation and carries its card', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const turn = async (text: string, reply: string) => {
+    ledgerReply = reply
+    await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
+    await $.turn.complete({ answer: 'ok', durationMs: 5, isAborted: false, turnId: text, reason: 'answer' })
+    await clock.settle()
+  }
+  const contextOf = async (id: string, reason: 'clear' | 'resume', text: string) => {
+    await $.session.end({ reason, sessionId, resume: { id: sessionId } })
+    sessionId = id
+    const prompt = await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
+    return (prompt.context ?? []).join('\n')
+  }
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await turn(
+    'add caching',
+    'GOAL: Add caching\nNOW: Waiting\nNEW: decide | 1 | Pick a cache? | Redis / Memory | Memory',
+  )
+
+  const cleared = await contextOf('session-2', 'clear', 'start over')
+  expect(cleared).not.toContain('Pick a cache?')
+  expect(cleared).not.toContain('Add caching')
+
+  await turn('fix the build', 'GOAL: Fix the build\nNOW: Waiting\nNEW: decide | 1 | Pin Node? | Yes / No | Yes')
+  const branched = await contextOf('session-3', 'resume', 'try another way')
+  expect(branched).toContain('Pin Node?')
+  expect(branched).toContain('Goal: Fix the build')
+
+  const resumed = await contextOf('session-1', 'resume', 'where were we?')
+  expect(resumed).toContain('Pick a cache?')
+  expect(resumed).toContain('Goal: Add caching')
+  expect(resumed).not.toContain('Pin Node?')
+  const again = (await $.prompt.submit({ text: 'and now?', wait: false, origin: { kind: 'composer' } })).context ?? []
+  expect(again.join('\n')).not.toContain('Goal: Add caching')
 })
 
 test('a ledger update held during clear cannot write its old question into the new conversation', async ($, on) => {

@@ -17,6 +17,7 @@ import { parseArgs } from 'node:util'
 import { EMPTY } from '../hooks/ledger'
 import {
   CLAUDE_CODE,
+  cardCarryText,
   closedText,
   guidanceText,
   guidedCloseDescription,
@@ -81,6 +82,8 @@ type Case = {
   prompt: string
   checks: Check[]
   min?: Partial<Record<Agent, number>>
+  /** The agents that run the case, when not all of them do. */
+  agents?: Agent[]
 }
 
 type Call = { tool: string; args: Record<string, unknown>; result: string }
@@ -143,7 +146,8 @@ function guidance(host: Host): string {
 function message(c: Case, host: Host): string {
   if (!c.ledger) return c.prompt
   const ledger = { ...EMPTY, ...c.ledger } as Ledger
-  const notes = [inboxText(host, ledger, false), closedText(ledger.closed)].filter(Boolean)
+  const carry = host === CLAUDE_CODE ? cardCarryText(ledger) : null
+  const notes = [carry, inboxText(host, ledger, false), closedText(ledger.closed)].filter(Boolean)
 
   return `${notes.join('\n')}\n\n${c.prompt}`
 }
@@ -617,23 +621,25 @@ const preflight = await Promise.all([assertNoInboxServer(), assertOnlyOmpProbeSe
   (e: unknown) => `preflight: ${String(e)}`,
 )
 const jobs: Job<Result>[] = agents.flatMap(a =>
-  cases.flatMap(c =>
-    Array.from({ length: runs }, (_, n) => ({
-      go: () => once(a, c, n),
-      unrun: (error: string): Result => ({
-        ...job(a, c, n),
-        model: null,
-        reply: '',
-        calls: [],
-        raw: '',
-        error,
-        failed: [],
-        attempts: 1,
-        earlier: [],
-        durationMs: 0,
-      }),
-    })),
-  ),
+  cases
+    .filter(c => c.agents?.includes(a) ?? true)
+    .flatMap(c =>
+      Array.from({ length: runs }, (_, n) => ({
+        go: () => once(a, c, n),
+        unrun: (error: string): Result => ({
+          ...job(a, c, n),
+          model: null,
+          reply: '',
+          calls: [],
+          raw: '',
+          error,
+          failed: [],
+          attempts: 1,
+          earlier: [],
+          durationMs: 0,
+        }),
+      })),
+    ),
 )
 const { results, stopped } =
   preflight === null
@@ -641,7 +647,18 @@ const { results, stopped } =
     : { results: [] as Result[], stopped: preflight }
 writeResults(path, about, results, stopped)
 const judged = [...firstRuns, ...results]
-const verdict = report(agents, cases, judged, runs, MIN, readBaselines(about.suite))
+const baselines = readBaselines(about.suite)
+const verdicts = agents.map(a =>
+  report(
+    [a],
+    cases.filter(c => c.agents?.includes(a) ?? true),
+    judged,
+    runs,
+    MIN,
+    baselines,
+  ),
+)
+const verdict = verdicts.includes('fail') ? 'fail' : verdicts.includes('not run') ? 'not run' : 'pass'
 finish(
   about,
   path,
