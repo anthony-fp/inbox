@@ -441,5 +441,48 @@
         "noIds": true
       }
     ]
+  },
+  {
+    "name": "record-after-own-close",
+    "about": "The agent can record again a question it closed itself, and the record goes through.",
+    "ledger": {
+      "nextId": 8,
+      "turn": 3,
+      "closed": [
+        {
+          "id": "i7",
+          "kind": "question",
+          "ask": "Which cache should the product API use?",
+          "outcome": "closed by Claude: no longer applies: cache dropped",
+          "how": "claude",
+          "at": 2,
+          "item": {
+            "id": "i7",
+            "kind": "question",
+            "label": null,
+            "from": "record",
+            "ask": "Which cache should the product API use?",
+            "options": ["Redis", "In-memory"],
+            "rec": null,
+            "helps": [],
+            "turn": 1,
+            "at": 1
+          }
+        }
+      ]
+    },
+    "prompt": "Change of plan: we're keeping the cache after all, so the cache question is back. The product API runs on four instances, and prices change during the day. Ask me again which cache it should use, with your recommendation.",
+    "checks": [
+      {
+        "calls": "record",
+        "kind": "question",
+        "min": 1,
+        "has": ["rec"],
+        "result": "^Recorded"
+      },
+      {
+        "noIds": true
+      }
+    ]
   }
 ]

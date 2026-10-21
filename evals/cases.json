@@ -2217,5 +2217,109 @@
         "dropped": 0
       }
     ]
+  },
+  {
+    "name": "reminder-leaves-agent-question-open",
+    "about": "A reply that only reminds the person an agent-recorded question is open leaves it open.",
+    "ledger": {
+      "turn": 6,
+      "nextId": 5,
+      "card": {
+        "goal": "Ship the upload retry fix",
+        "done": ["Retry fix merged"],
+        "now": "Waiting on deploy timing",
+        "running": []
+      },
+      "items": [
+        {
+          "id": "i4",
+          "kind": "question",
+          "label": null,
+          "from": "record",
+          "ask": "Deploy the retry fix tonight or tomorrow morning?",
+          "options": ["Tonight", "Tomorrow morning"],
+          "rec": "Tomorrow morning",
+          "helps": [],
+          "turn": 3,
+          "at": 3
+        }
+      ]
+    },
+    "exchange": {
+      "person": "how are the tests looking?",
+      "turn": 6,
+      "reply": "All 214 tests pass with the retry fix, and the flaky upload test passed 20 runs in a row. The deploy timing is still yours to call: say tonight or tomorrow morning when you're ready, and I'll start it."
+    },
+    "checks": [
+      {
+        "open": "i4"
+      },
+      {
+        "added": 0
+      }
+    ]
+  },
+  {
+    "name": "question-without-recommendation-has-no-rec",
+    "about": "A question whose reply weighs both answers but recommends neither gets no recommendation.",
+    "ledger": {
+      "turn": 2,
+      "nextId": 1,
+      "card": null,
+      "items": []
+    },
+    "exchange": {
+      "person": "the upload page is slow to draw, can you look into it",
+      "turn": 2,
+      "reply": "The upload page waits on a 4 MB thumbnail library before it draws anything. There are two ways to fix it.\n\n- **Lazy-load the library** when the person picks a file. Thumbnails stay as they are, but the first preview shows about 300 ms later.\n- **Switch to the browser's createImageBitmap** and drop the library. The page gets 4 MB lighter, but older Safari loses HEIC previews.\n\nWhich way do you want to go?"
+    },
+    "checks": [
+      {
+        "new": "lazy|library|thumbnail|createImageBitmap|upload",
+        "rec": null
+      }
+    ]
+  },
+  {
+    "name": "agent-recorded-question-no-second-copy",
+    "about": "In a turn where the agent recorded a question, a reworded copy of it from the reply is not added.",
+    "ledger": {
+      "turn": 5,
+      "nextId": 7,
+      "card": {
+        "goal": "Add a storage bucket for exports",
+        "done": [],
+        "now": "Writing the bucket config",
+        "running": []
+      },
+      "items": [
+        {
+          "id": "i6",
+          "kind": "question",
+          "label": null,
+          "from": "record",
+          "ask": "Which region should the exports bucket live in?",
+          "options": ["us-east-1", "eu-west-1"],
+          "rec": "eu-west-1",
+          "helps": [],
+          "turn": 5,
+          "at": 5
+        }
+      ]
+    },
+    "exchange": {
+      "person": "set up the storage bucket for the exports",
+      "turn": 5,
+      "activity": ["edited infra/exports.tf"],
+      "reply": "I wrote the Terraform for the exports bucket in infra/exports.tf. Before I apply it I need one call from you: host it in US East, next to the API, or in Ireland, next to most of the customers who download exports? I'd go with Ireland: about 70% of export downloads come from Europe."
+    },
+    "checks": [
+      {
+        "open": "i6"
+      },
+      {
+        "added": 0
+      }
+    ]
   }
 ]

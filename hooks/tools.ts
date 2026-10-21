@@ -128,10 +128,7 @@ export function recordItem(
   const r = addAgentItem(ledger, { kind: input.kind, ask, options, rec, helps }, now)
   if (r.is === 'open') return { ledger, result: 'Already open.' }
   if (r.is === 'closed')
-    return {
-      ledger,
-      result: `Not recorded: the user already closed this (${r.outcome}). Ask it again only if they bring it up.`,
-    }
+    return { ledger, result: `Not recorded: ${closedHow(r.record)}. Ask it again only if they bring it up.` }
 
   return {
     ledger: r.ledger,

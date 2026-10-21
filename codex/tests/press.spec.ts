@@ -55,6 +55,7 @@ function withItems(): SessionState {
           id: 'i1',
           kind: 'question',
           label: '1',
+          from: 'update',
           ask: 'Fix add.js or the test?',
           options: ['Fix add.js', 'Change test'],
           rec: 'Fix add.js',
@@ -66,6 +67,7 @@ function withItems(): SessionState {
           id: 'i2',
           kind: 'task',
           label: null,
+          from: 'record',
           ask: 'Sign in to npm',
           options: [],
           rec: null,
@@ -374,7 +376,7 @@ test('an open or copy on a handed-off task keeps it folded and out of the count,
 })
 
 function asked(id: string, kind: Item['kind'], turn: number): Item {
-  return { id, kind, label: null, ask: `Ask ${id}`, options: [], rec: null, helps: [], turn, at: turn }
+  return { id, kind, label: null, from: 'record', ask: `Ask ${id}`, options: [], rec: null, helps: [], turn, at: turn }
 }
 
 test('Needs you lists the newest reply first and keeps each older reply in the order it asked', () => {

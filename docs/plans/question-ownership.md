@@ -1,6 +1,6 @@
 # One owner per question
 
-Status: proposed.
+Status: built.
 
 The agent and the inbox model both write to the same open items. The agent records and closes with `record` and `close`. After each reply, the inbox model reads the reply and adds, closes and updates items with its `NEW:`, `CLOSED:` and `UPDATE:` lines. When the two disagree, the model's reading of the reply wins. In one long session that produced four kinds of mistake.
 
@@ -11,14 +11,14 @@ The agent and the inbox model both write to the same open items. The agent recor
 | A recommendation the agent never gave, on a question the model added from the reply. | The `rec` of a `NEW:` line, despite the rule that `rec` copies only a stated recommendation. |
 | The agent closed a question to record it again with its own recommendation, and `record` refused: "the user already closed this". | `addAgentItem` blocks on any matching closed item except an expired one (`hooks/ledger.ts`), and `tools.ts` words every refusal as the user's close. |
 
-The data already says who made each item. An item the agent recorded has `label: null`. An item from a `NEW:` line has a label. A close by the agent has `how: 'claude'`, and a close by the model has `how: 'update'`.
+Each item saves what added it in `from`: `'record'` for the agent's `record` call, and `'update'` for a `NEW:` or `TODO:` line. `label` cannot tell them apart, because a `NEW:` line with the label "-" saves `label: null`, as the agent's records do. An item saved before `from` existed reads as `'update'` and keeps the model's rules. A close by the agent has `how: 'claude'`, and a close by the model has `how: 'update'`.
 
 ## Changes
 
 ### 1. The agent owns what it records
 
-- For an item with `label: null`, apply a model `CLOSED:` line only when its outcome is the person's answer. Drop "done:" and "no longer applies:" closes of agent-recorded items. The agent closes those itself with `close`, which its guidance already asks for.
-- Skip a `NEW:` line in a turn where the agent recorded an item of the same kind, so the model fills only gaps the agent left.
+- For an item with `from: 'record'`, apply a model `CLOSED:` line only when its outcome is the person's answer. Drop "done:" and "no longer applies:" closes of agent-recorded items. The agent closes those itself with `close`, which its guidance already asks for.
+- Skip a `NEW:` line in a turn where the agent recorded an item of the same kind, so the model fills only gaps the agent left. A turn here is the person-prompt count, which the item saves as `turn`. A `NEW:` line that restates an open item still adds its `HELP:` steps to that item.
 - Keep `UPDATE:` for agent-recorded items. It is how a recommendation the agent states in a later reply reaches the item, and it works today.
 - Items from `NEW:` lines keep today's rules.
 
@@ -38,7 +38,7 @@ Add one case per row of the table above to `evals/cases.json`, and to `evals/age
 
 ## Decisions for the owner
 
-- **Stale questions (decided).** An item open for more than 12 turns expires (`STALE_AFTER` in `hooks/ledger.ts`), and a long session can keep a real decision open longer than that. Agent-recorded items (`label: null`) are exempt from `STALE_AFTER`. Items from `NEW:` lines still expire after 12 turns. The `MAX_OPEN` cap of 20 still applies to every item.
+- **Stale questions (decided).** An item open for more than 12 turns expires (`STALE_AFTER` in `hooks/ledger.ts`), and a long session can keep a real decision open longer than that. Agent-recorded items (`from: 'record'`) are exempt from `STALE_AFTER`. Items from `NEW:` lines still expire after 12 turns. The `MAX_OPEN` cap of 20 still applies to every item.
 - **Missed closes (decided).** With change 1, a question the work has made moot stays open until the agent or the person closes it. An occasional extra open row is accepted as the cost of never losing an unanswered decision.
 
 ## Checks

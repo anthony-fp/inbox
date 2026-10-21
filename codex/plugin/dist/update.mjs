@@ -98,7 +98,13 @@ function upgradeClosedFinding(f) {
   return asker && f.askedAs === void 0 ? { ...f, askedAs: asker } : f;
 }
 function upgradeItem(item) {
-  return { ...item, kind: readKind(item.kind), at: item.at ?? null, rec: recommendedOption(item.options, item.rec) };
+  return {
+    ...item,
+    kind: readKind(item.kind),
+    at: item.at ?? null,
+    rec: recommendedOption(item.options, item.rec),
+    from: item.from ?? "update"
+  };
 }
 function words(text) {
   return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
@@ -403,6 +409,10 @@ function applyExchangeUpdate(ledger, update, exchange, now, promptAt) {
     promptAt
   );
 }
+var NOT_AN_ANSWER = /^\s*(?:done\s*:|(?:no longer (?:applies|relevant)|dealt with|replaced|superseded|moot)\b)/i;
+function isPersonsAnswer(outcome) {
+  return outcome.trim() !== "" && !NOT_AN_ANSWER.test(outcome);
+}
 function applyUpdate(ledger, u, now, turn, promptAt = now) {
   const prev = ledger.card;
   const card = {
@@ -420,9 +430,13 @@ function applyUpdate(ledger, u, now, turn, promptAt = now) {
   for (const item of ledger.items) {
     const outcome = closing.get(item.id);
     const helps = u.helped.filter((h) => h.id === item.id).reduce((all, h) => withHelp(all, h.help), item.helps);
-    if (outcome === void 0) items.push(withUpdate({ ...item, helps }, u.updated));
-    else closed.push(closedRecord(item, { outcome, how: "update" }, now));
+    const isClosing = outcome !== void 0 && (item.from !== "record" || isPersonsAnswer(outcome));
+    if (isClosing) closed.push(closedRecord(item, { outcome, how: "update" }, now));
+    else items.push(withUpdate({ ...item, helps }, u.updated));
   }
+  const recordedThisTurn = new Set(
+    [...ledger.items, ...ledger.closed.flatMap((c) => c.item ?? [])].filter((i) => i.from === "record" && i.turn === turn).map((i) => i.kind)
+  );
   let nextId = ledger.nextId;
   let added = 0;
   const addedIds = [];
@@ -439,7 +453,11 @@ function applyUpdate(ledger, u, now, turn, promptAt = now) {
       addedIds.push(restated.id);
       continue;
     }
-    items.push({ ...a, id: `i${nextId}`, turn, at: now });
+    if (recordedThisTurn.has(a.kind)) {
+      addedIds.push(null);
+      continue;
+    }
+    items.push({ ...a, id: `i${nextId}`, turn, at: now, from: "update" });
     addedIds.push(`i${nextId}`);
     created.add(`i${nextId}`);
     nextId += 1;
@@ -455,11 +473,11 @@ function applyUpdate(ledger, u, now, turn, promptAt = now) {
     };
     const isKnown = items.some((i) => restates(i.ask, work)) || ledger.findings.some((f) => restates(f.title, work)) || repeatsClosed(ledger.closed, { ...todo, helps: [] }, promptAt);
     if (isKnown) continue;
-    items.push({ ...todo, helps: [], id: `i${nextId}`, turn, at: now });
+    items.push({ ...todo, helps: [], id: `i${nextId}`, turn, at: now, from: "update" });
     nextId += 1;
     added += 1;
   }
-  const kept = items.filter((i) => turn - i.turn <= STALE_AFTER).slice(-MAX_OPEN);
+  const kept = items.filter((i) => i.from === "record" || turn - i.turn <= STALE_AFTER).slice(-MAX_OPEN);
   for (const i of items) if (!kept.includes(i)) closed.push(closedRecord(i, { outcome: EXPIRED, how: "expired" }, now));
   const askedBy = /* @__PURE__ */ new Map();
   for (const a of u.asked) {

@@ -1060,7 +1060,7 @@ test('a question Claude records waits in the pane with its recommendation, a rep
 
   await $.tool.call({ tool: 'mcp__inbox__close', id: 'i1', answer: 'Redis' })
   expect((await $.tool.call(question)).result).toBe(
-    'Not recorded: the user already closed this (Redis). Ask it again only if they bring it up.',
+    'Not recorded: the user answered it (Redis). Ask it again only if they bring it up.',
   )
 })
 

@@ -33,6 +33,7 @@ function task() {
         id: 'i1',
         kind: 'task' as const,
         label: null,
+        from: 'record',
         ask: 'Check the build',
         options: [],
         rec: null,

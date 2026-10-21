@@ -281,7 +281,13 @@ function upgradeClosedFinding(f) {
   return asker && f.askedAs === void 0 ? { ...f, askedAs: asker } : f;
 }
 function upgradeItem(item) {
-  return { ...item, kind: readKind(item.kind), at: item.at ?? null, rec: recommendedOption(item.options, item.rec) };
+  return {
+    ...item,
+    kind: readKind(item.kind),
+    at: item.at ?? null,
+    rec: recommendedOption(item.options, item.rec),
+    from: item.from ?? "update"
+  };
 }
 function words(text) {
   return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];

@@ -74,7 +74,13 @@ function upgradeClosedFinding(f: ClosedFinding): ClosedFinding {
 
 /** Also run on the copy a close record keeps, which reopenItem puts back. */
 function upgradeItem(item: Item): Item {
-  return { ...item, kind: readKind(item.kind), at: item.at ?? null, rec: recommendedOption(item.options, item.rec) }
+  return {
+    ...item,
+    kind: readKind(item.kind),
+    at: item.at ?? null,
+    rec: recommendedOption(item.options, item.rec),
+    from: item.from ?? 'update',
+  }
 }
 
 function words(text: string): string[] {
@@ -130,7 +136,7 @@ const PERSON_ONLY_REASON =
 export type Update = {
   card: Card
   closed: { id: string; outcome: string }[]
-  added: (Omit<Item, 'id' | 'turn' | 'at' | 'helps'> & { helps: Help[] })[]
+  added: (Omit<Item, 'id' | 'turn' | 'at' | 'helps' | 'from'> & { helps: Help[] })[]
   helped: { id: string; help: Help }[]
   /** New options or a new recommendation for open questions. Null keeps what the question has. */
   updated: { id: string; options: string[] | null; rec: string | null }[]
@@ -605,9 +611,18 @@ export function applyExchangeUpdate(
   )
 }
 
+/** The CLOSED outcome forms that are not the person's answer: systemText's "done:" and "no longer applies:", and the words closedState reads as overtaken. */
+const NOT_AN_ANSWER = /^\s*(?:done\s*:|(?:no longer (?:applies|relevant)|dealt with|replaced|superseded|moot)\b)/i
+
+function isPersonsAnswer(outcome: string): boolean {
+  return outcome.trim() !== '' && !NOT_AN_ANSWER.test(outcome)
+}
+
 /**
  * `promptAt` is when the update's prompt was built. A NEW line that repeats an
  * item closed since then is dropped: the person answered it while the model ran.
+ * The agent closes the items it recorded with its close tool, so a CLOSED line
+ * closes one of those only with the person's answer.
  */
 export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number, promptAt = now): Ledger {
   const prev = ledger.card
@@ -626,9 +641,15 @@ export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number
   for (const item of ledger.items) {
     const outcome = closing.get(item.id)
     const helps = u.helped.filter(h => h.id === item.id).reduce((all, h) => withHelp(all, h.help), item.helps)
-    if (outcome === undefined) items.push(withUpdate({ ...item, helps }, u.updated))
-    else closed.push(closedRecord(item, { outcome, how: 'update' }, now))
+    const isClosing = outcome !== undefined && (item.from !== 'record' || isPersonsAnswer(outcome))
+    if (isClosing) closed.push(closedRecord(item, { outcome, how: 'update' }, now))
+    else items.push(withUpdate({ ...item, helps }, u.updated))
   }
+  const recordedThisTurn = new Set(
+    [...ledger.items, ...ledger.closed.flatMap(c => c.item ?? [])]
+      .filter(i => i.from === 'record' && i.turn === turn)
+      .map(i => i.kind),
+  )
 
   let nextId = ledger.nextId
   let added = 0
@@ -646,7 +667,11 @@ export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number
       addedIds.push(restated.id)
       continue
     }
-    items.push({ ...a, id: `i${nextId}`, turn, at: now })
+    if (recordedThisTurn.has(a.kind)) {
+      addedIds.push(null)
+      continue
+    }
+    items.push({ ...a, id: `i${nextId}`, turn, at: now, from: 'update' })
     addedIds.push(`i${nextId}`)
     created.add(`i${nextId}`)
     nextId += 1
@@ -665,12 +690,12 @@ export function applyUpdate(ledger: Ledger, u: Update, now: number, turn: number
       ledger.findings.some(f => restates(f.title, work)) ||
       repeatsClosed(ledger.closed, { ...todo, helps: [] }, promptAt)
     if (isKnown) continue
-    items.push({ ...todo, helps: [], id: `i${nextId}`, turn, at: now })
+    items.push({ ...todo, helps: [], id: `i${nextId}`, turn, at: now, from: 'update' })
     nextId += 1
     added += 1
   }
 
-  const kept = items.filter(i => turn - i.turn <= STALE_AFTER).slice(-MAX_OPEN)
+  const kept = items.filter(i => i.from === 'record' || turn - i.turn <= STALE_AFTER).slice(-MAX_OPEN)
   for (const i of items) if (!kept.includes(i)) closed.push(closedRecord(i, { outcome: EXPIRED, how: 'expired' }, now))
 
   const askedBy = new Map<string, string>()
@@ -748,12 +773,12 @@ export function addFinding(
 export type AgentItemResult =
   | { ledger: Ledger; is: 'added'; id: string; expired: Item | null }
   | { ledger: Ledger; is: 'open'; id: string }
-  | { ledger: Ledger; is: 'closed'; outcome: string }
+  | { ledger: Ledger; is: 'closed'; record: Closed }
 
 /**
- * Adds a question or task Claude recorded. One that an open item restates is skipped, and so is one that
- * repeats an item the person answered or dismissed (an expired item can be asked again). The list keeps its
- * newest MAX_OPEN items. A finding the new ask restates closes, so one thing shows in one list.
+ * Adds a question or task the agent recorded. One that an open item restates is skipped, and so is one that
+ * repeats a closed item, unless that item expired or the agent closed it. The list keeps its newest MAX_OPEN
+ * items. A finding the new ask restates closes, so one thing shows in one list.
  */
 export function addAgentItem(
   ledger: Ledger,
@@ -765,11 +790,12 @@ export function addAgentItem(
   const open = matchOpen(ledger.items, candidate, recordedThisTurn)
   const openItem = ledger.items[open]
   if (openItem) return { ledger, is: 'open', id: openItem.id }
-  const repeated = ledger.closed.findLast(c => c.how !== 'expired' && repeatsSettled(c, candidate))
-  if (repeated) return { ledger, is: 'closed', outcome: repeated.outcome }
+  const isAskable = (c: Closed) => c.how === 'expired' || c.how === 'claude'
+  const repeated = ledger.closed.findLast(c => !isAskable(c) && repeatsSettled(c, candidate))
+  if (repeated) return { ledger, is: 'closed', record: repeated }
 
   const id = `i${ledger.nextId}`
-  const items = [...ledger.items, { ...entry, label: null, id, turn: ledger.turn, at: now }]
+  const items = [...ledger.items, { ...entry, label: null, id, turn: ledger.turn, at: now, from: 'record' as const }]
   const kept = items.slice(-MAX_OPEN)
   const dropped = items.filter(i => !kept.includes(i))
   const closed = [...ledger.closed, ...dropped.map(i => closedRecord(i, { outcome: EXPIRED, how: 'expired' }, now))]

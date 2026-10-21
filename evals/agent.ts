@@ -50,6 +50,8 @@ type Check =
       match?: Record<string, string>
       /** Arguments that must be non-empty. */
       has?: string[]
+      /** Matches the tool's answer. */
+      result?: string
       /** Exactly this many matching calls. Without `count` and `max`, at least `min` (default 1). */
       count?: number
       min?: number
@@ -500,19 +502,20 @@ function failures(o: Outcome, checks: Check[]): string[] {
           call.tool === c.calls &&
           (!c.kind || has(`^(?:${c.kind})$`, String(call.args.kind ?? ''))) &&
           Object.entries(c.match ?? {}).every(([k, p]) => has(p, String(call.args[k] ?? ''))) &&
+          (!c.result || has(c.result, call.result)) &&
           (c.has ?? []).every(k => {
             const v = call.args[k]
             return Array.isArray(v) ? v.length > 0 : typeof v === 'string' && v.trim() !== ''
           }),
       )
-      const label = `${c.calls}${c.kind ? ` ${c.kind}` : ''}${c.match ? ` ${JSON.stringify(c.match)}` : ''}${c.has ? ` with ${c.has.join(', ')}` : ''}`
+      const label = `${c.calls}${c.kind ? ` ${c.kind}` : ''}${c.match ? ` ${JSON.stringify(c.match)}` : ''}${c.has ? ` with ${c.has.join(', ')}` : ''}${c.result ? ` answered /${c.result}/` : ''}`
       const exact = c.count
       const min = exact ?? c.min ?? (c.max === undefined ? 1 : 0)
       const max = exact ?? c.max ?? Infinity
       if (mine.length < min || mine.length > max)
         out.push(
           `${mine.length} ${label} calls, want ${exact ?? `${min}${max === Infinity ? '+' : `-${max}`}`}; calls: ${
-            o.calls.map(x => `${x.tool}(${JSON.stringify(x.args)})`).join(' ') || 'none'
+            o.calls.map(x => `${x.tool}(${JSON.stringify(x.args)}) → ${x.result}`).join(' ') || 'none'
           }`,
         )
     }

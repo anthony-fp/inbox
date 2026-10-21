@@ -19,7 +19,7 @@ import {
 import { readCommandRow, resetTime, statusLine, stopKindOf } from '../hooks/claude'
 import { parseInline } from '../hooks/inline'
 import { applyPress } from '../hooks/presses'
-import { recordClose } from '../hooks/tools'
+import { recordClose, recordItem } from '../hooks/tools'
 import type { Item } from '../types'
 
 const REPLY = `GOAL: Move annotation queue logic into a tested reducer
@@ -487,11 +487,68 @@ describe('applyUpdate', () => {
   })
 })
 
+describe('items the agent recorded', () => {
+  const ask = {
+    kind: 'question' as const,
+    ask: 'Which cache should the API use?',
+    options: ['Redis', 'Memcached'],
+    rec: null,
+    helps: [],
+  }
+  const recorded = (turn = 1) => addAgentItem({ ...EMPTY, turn }, ask, 1000).ledger
+
+  test("a CLOSED line closes one only with the person's answer", () => {
+    for (const outcome of ['done: picked Redis', 'no longer applies: cache dropped', 'no longer applies', 'moot', ''])
+      expect(applyUpdate(recorded(), parseReply(`CLOSED: i1 | ${outcome}`)!, 2000, 1).items.map(i => i.id)).toEqual([
+        'i1',
+      ])
+    const answered = applyUpdate(recorded(), parseReply('CLOSED: i1 | Redis')!, 2000, 1)
+    expect(answered.closed.map(c => [c.id, c.outcome, c.how])).toEqual([['i1', 'Redis', 'update']])
+  })
+
+  test("one stays open after 12 prompts, when the update's items expire", () => {
+    const both = applyUpdate(recorded(), parseReply('NEW: do | - | Sign in to npm | - | -')!, 1500, 1)
+    const later = applyUpdate({ ...both, turn: 14 }, parseReply('NOW: still going')!, 2000, 14)
+    expect([later.items.map(i => i.id), later.closed.map(c => [c.id, c.how])]).toEqual([['i1'], [['i2', 'expired']]])
+  })
+
+  test('a NEW line of its kind in the turn it was recorded adds nothing, and one that restates it adds its steps', () => {
+    const other = parseReply('NEW: decide | - | Ship the release today? | Yes / No | -')!
+    expect(applyUpdate(recorded(3), other, 2000, 3).items.map(i => i.id)).toEqual(['i1'])
+    expect(applyUpdate(recorded(3), other, 2000, 4).items.map(i => i.id)).toEqual(['i1', 'i2'])
+    const restated = parseReply(
+      'NEW: decide | - | Which cache should the API use? | Redis / Memcached | -\nHELP: new 1 | link | https://redis.io | docs',
+    )!
+    expect(applyUpdate(recorded(3), restated, 2000, 3).items.map(i => [i.id, i.helps])).toEqual([
+      ['i1', [{ kind: 'link', url: 'https://redis.io/', name: 'docs' }]],
+    ])
+  })
+
+  test('the agent can record again what it closed, but not what the person or the update closed', () => {
+    const closedByAgent = closeByAgent(
+      CLAUDE_CODE,
+      recorded(),
+      'i1',
+      { reason: 'no longer applies: cache dropped' },
+      1500,
+    )
+    expect(addAgentItem(closedByAgent.ledger, { ...ask, rec: 'Redis' }, 2000)).toMatchObject({ is: 'added', id: 'i2' })
+    const refusals = [
+      [{ how: 'answered', outcome: 'Redis' }, 'Not recorded: the user answered it (Redis).'],
+      [{ how: 'dismissed', outcome: 'dismissed' }, 'Not recorded: the user dismissed it.'],
+      [{ how: 'update', outcome: 'Redis' }, 'Not recorded: the inbox closed it (Redis).'],
+    ] as const
+    for (const [closing, result] of refusals)
+      expect(recordItem(CLAUDE_CODE, closeItem(recorded(), 'i1', closing, 1500), ask, 2000).result).toStartWith(result)
+  })
+})
+
 describe('reopening', () => {
   const item = (id: string, options: string[] = []): Item => ({
     id,
     kind: 'question',
     label: null,
+    from: 'record',
     ask: `Ask ${id}?`,
     options,
     rec: null,
@@ -789,7 +846,10 @@ describe('upgradeLedger', () => {
     }
     const upgraded = upgradeLedger(saved as never)
 
-    expect(upgraded.items.map(i => i.kind)).toEqual(['question', 'task'])
+    expect(upgraded.items.map(i => [i.kind, i.from])).toEqual([
+      ['question', 'update'],
+      ['task', 'update'],
+    ])
     expect(upgraded.closed.map(d => [d.id, d.kind])).toEqual([
       ['i3', 'task'],
       ['i4', 'question'],

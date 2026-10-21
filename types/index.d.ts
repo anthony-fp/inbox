@@ -19,6 +19,11 @@ export type Item = {
   turn: number
   /** When the agent asked it; null for an item saved before the mod kept the time. */
   at: number | null
+  /**
+   * What added it: the agent's record tool, or a NEW or TODO line of the per-reply update. An item saved before the
+   * mod kept this reads as 'update'.
+   */
+  from: 'record' | 'update'
 }
 
 /**

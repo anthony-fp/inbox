@@ -465,7 +465,13 @@ function upgradeClosedFinding(f) {
   return asker && f.askedAs === undefined ? { ...f, askedAs: asker } : f;
 }
 function upgradeItem(item) {
-  return { ...item, kind: readKind(item.kind), at: item.at ?? null, rec: recommendedOption(item.options, item.rec) };
+  return {
+    ...item,
+    kind: readKind(item.kind),
+    at: item.at ?? null,
+    rec: recommendedOption(item.options, item.rec),
+    from: item.from ?? "update"
+  };
 }
 function words(text) {
   return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
@@ -808,6 +814,10 @@ function applyExchangeUpdate(ledger, update, exchange, now, promptAt) {
   const explainedId = exchange.press?.action === "explain" ? exchange.press.id : null;
   return applyUpdate(ledger, { ...update, closed: update.closed.filter((c) => c.id !== explainedId) }, now, exchange.turn, promptAt);
 }
+var NOT_AN_ANSWER = /^\s*(?:done\s*:|(?:no longer (?:applies|relevant)|dealt with|replaced|superseded|moot)\b)/i;
+function isPersonsAnswer(outcome) {
+  return outcome.trim() !== "" && !NOT_AN_ANSWER.test(outcome);
+}
 function applyUpdate(ledger, u, now, turn, promptAt = now) {
   const prev = ledger.card;
   const card = {
@@ -823,11 +833,13 @@ function applyUpdate(ledger, u, now, turn, promptAt = now) {
   for (const item of ledger.items) {
     const outcome = closing.get(item.id);
     const helps = u.helped.filter((h) => h.id === item.id).reduce((all, h) => withHelp(all, h.help), item.helps);
-    if (outcome === undefined)
-      items.push(withUpdate({ ...item, helps }, u.updated));
-    else
+    const isClosing = outcome !== undefined && (item.from !== "record" || isPersonsAnswer(outcome));
+    if (isClosing)
       closed.push(closedRecord(item, { outcome, how: "update" }, now));
+    else
+      items.push(withUpdate({ ...item, helps }, u.updated));
   }
+  const recordedThisTurn = new Set([...ledger.items, ...ledger.closed.flatMap((c) => c.item ?? [])].filter((i) => i.from === "record" && i.turn === turn).map((i) => i.kind));
   let nextId = ledger.nextId;
   let added = 0;
   const addedIds = [];
@@ -844,7 +856,11 @@ function applyUpdate(ledger, u, now, turn, promptAt = now) {
       addedIds.push(restated.id);
       continue;
     }
-    items.push({ ...a, id: `i${nextId}`, turn, at: now });
+    if (recordedThisTurn.has(a.kind)) {
+      addedIds.push(null);
+      continue;
+    }
+    items.push({ ...a, id: `i${nextId}`, turn, at: now, from: "update" });
     addedIds.push(`i${nextId}`);
     created.add(`i${nextId}`);
     nextId += 1;
@@ -861,11 +877,11 @@ function applyUpdate(ledger, u, now, turn, promptAt = now) {
     const isKnown = items.some((i) => restates(i.ask, work)) || ledger.findings.some((f) => restates(f.title, work)) || repeatsClosed(ledger.closed, { ...todo, helps: [] }, promptAt);
     if (isKnown)
       continue;
-    items.push({ ...todo, helps: [], id: `i${nextId}`, turn, at: now });
+    items.push({ ...todo, helps: [], id: `i${nextId}`, turn, at: now, from: "update" });
     nextId += 1;
     added += 1;
   }
-  const kept = items.filter((i) => turn - i.turn <= STALE_AFTER).slice(-MAX_OPEN);
+  const kept = items.filter((i) => i.from === "record" || turn - i.turn <= STALE_AFTER).slice(-MAX_OPEN);
   for (const i of items)
     if (!kept.includes(i))
       closed.push(closedRecord(i, { outcome: EXPIRED, how: "expired" }, now));
@@ -931,11 +947,12 @@ function addAgentItem(ledger, entry, now) {
   const openItem = ledger.items[open];
   if (openItem)
     return { ledger, is: "open", id: openItem.id };
-  const repeated = ledger.closed.findLast((c) => c.how !== "expired" && repeatsSettled(c, candidate));
+  const isAskable = (c) => c.how === "expired" || c.how === "claude";
+  const repeated = ledger.closed.findLast((c) => !isAskable(c) && repeatsSettled(c, candidate));
   if (repeated)
-    return { ledger, is: "closed", outcome: repeated.outcome };
+    return { ledger, is: "closed", record: repeated };
   const id = `i${ledger.nextId}`;
-  const items = [...ledger.items, { ...entry, label: null, id, turn: ledger.turn, at: now }];
+  const items = [...ledger.items, { ...entry, label: null, id, turn: ledger.turn, at: now, from: "record" }];
   const kept = items.slice(-MAX_OPEN);
   const dropped = items.filter((i) => !kept.includes(i));
   const closed = [...ledger.closed, ...dropped.map((i) => closedRecord(i, { outcome: EXPIRED, how: "expired" }, now))];
@@ -2707,10 +2724,7 @@ function recordItem(host, ledger, input, now) {
   if (r.is === "open")
     return { ledger, result: "Already open." };
   if (r.is === "closed")
-    return {
-      ledger,
-      result: `Not recorded: the user already closed this (${r.outcome}). Ask it again only if they bring it up.`
-    };
+    return { ledger, result: `Not recorded: ${closedHow(r.record)}. Ask it again only if they bring it up.` };
   return {
     ledger: r.ledger,
     result: `Recorded. The user sees it in ${host.surface}.` + (helps.length < steps2.length ? " Some steps were not a command, a file path or a link, so they are left out." : "") + (r.expired ? ` The list was full, so the oldest item closed: ${r.expired.ask}.` : "")
@@ -4226,6 +4240,7 @@ function demoView(now) {
           id: "d11",
           kind: "question",
           label: "1",
+          from: "update",
           ask: "Dismiss a glance with a pinch, or a flick of the wrist?",
           options: ["Pinch", "Flick"],
           rec: "Pinch",
@@ -4237,6 +4252,7 @@ function demoView(now) {
           id: "d12",
           kind: "question",
           label: "2",
+          from: "update",
           ask: "Bring a dismissed glance back when you look at it?",
           options: ["Leave it gone", "Bring it back"],
           rec: "Leave it gone",
@@ -4248,6 +4264,7 @@ function demoView(now) {
           id: "d13",
           kind: "question",
           label: "3",
+          from: "update",
           ask: "Show glances while you are walking or driving?",
           options: ["Yes", "No"],
           rec: "No",
@@ -4259,6 +4276,7 @@ function demoView(now) {
           id: "d14",
           kind: "task",
           label: null,
+          from: "record",
           ask: "Put on the glasses and pair them with this Mac",
           options: [],
           rec: null,
@@ -4270,6 +4288,7 @@ function demoView(now) {
           id: "d15",
           kind: "question",
           label: null,
+          from: "record",
           ask: "What should the wake word be for the agent?",
           options: [],
           rec: null,
@@ -4281,6 +4300,7 @@ function demoView(now) {
           id: "d16",
           kind: "task",
           label: null,
+          from: "record",
           ask: "Check the glances outdoors in bright sun",
           options: [],
           rec: null,
@@ -4292,6 +4312,7 @@ function demoView(now) {
           id: "d18",
           kind: "task",
           label: null,
+          from: "record",
           ask: "Run the gesture tests and send back the failures",
           options: [],
           rec: null,
@@ -4303,6 +4324,7 @@ function demoView(now) {
           id: "d17",
           kind: "task",
           label: null,
+          from: "record",
           ask: "Calibrate eye tracking for the new lenses",
           options: [],
           rec: null,
@@ -4363,6 +4385,7 @@ function demoView(now) {
             id: "d10",
             kind: "question",
             label: null,
+            from: "record",
             ask: "Fade a glance when you look away?",
             options: ["Yes, fade it", "No, keep it solid"],
             rec: "Yes, fade it",
