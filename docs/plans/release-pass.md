@@ -34,6 +34,9 @@ The 0.2.10 passes were driven by hand-written scripts: window captures, a text f
 - **The VM's clock jumped about an hour mid-pass,** so row ages read wrong. A clone syncs its clock before a run.
 - **Restoring a release's saved state by hand brought back transcripts that held later answers,** so the first turn closed the restored question. The base image's fixed saved sessions avoid this.
 - **Codex asked once to approve the read-only `gh pr view` call** that the PRs check needs. The check expects that prompt and approves only read-only calls.
+- **The Dialog check expects Skip to add no row,** but when the agent asks the same question again in its reply, the inbox model rightly adds it. The expectation reads the dialog's own effect, not the reply's.
+- **omp's test `HOME` has no `gh` sign-in,** so its PRs tab read "No PRs" until the VM's sign-in was linked in. The base image sets up `gh` for each agent's home.
+- **The ChatGPT app's Fork menu ignored synthetic clicks and keys,** so the fork was made with `codex fork`, and an app-made fork was not seen. The ChatGPT app driver needs a way to fork.
 
 ## Tier 1: process
 
