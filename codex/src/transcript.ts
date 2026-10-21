@@ -49,8 +49,11 @@ async function readSessionMeta(path: string): Promise<SessionMeta | null> {
  */
 export async function isNonInteractiveRun(path: string | null): Promise<boolean> {
   if (path === null) return true
-  const meta = await readSessionMeta(path)
 
+  return isExecMeta(await readSessionMeta(path))
+}
+
+function isExecMeta(meta: SessionMeta | null): boolean {
   return meta?.payload?.originator === 'codex_exec' || meta?.payload?.source === 'exec'
 }
 
@@ -91,7 +94,7 @@ export async function rolloutFor(codexHome: string, threadId: string): Promise<{
         if (name === undefined) continue
         const path = join(folder, name)
         const meta = await readSessionMeta(path)
-        const isOwnChat = meta !== null && !meta.payload?.parent_thread_id && !(await isNonInteractiveRun(path))
+        const isOwnChat = meta !== null && !meta.payload?.parent_thread_id && !isExecMeta(meta)
 
         return isOwnChat ? { path, cwd: typeof meta.payload?.cwd === 'string' ? meta.payload.cwd : '' } : null
       }
