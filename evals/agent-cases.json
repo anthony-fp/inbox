@@ -321,7 +321,7 @@
         "reply": "in.?memory"
       },
       {
-        "notReply": "do you mean|did you mean|which (one|cache)"
+        "notReply": "(do|did) you mean|which (one|cache)[^.\\n]*\\?"
       },
       {
         "noIds": true
