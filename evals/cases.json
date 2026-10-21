@@ -2180,6 +2180,46 @@
     ]
   },
   {
+    "name": "list-choices-answer-asked-again",
+    "about": "A question the person answered with \"List the choices\" is added again when the reply lists the choices.",
+    "ledger": {
+      "turn": 3,
+      "nextId": 4,
+      "card": {
+        "goal": "Schedule the cleanup job",
+        "done": [],
+        "now": "Waiting on where it runs",
+        "running": []
+      },
+      "items": [],
+      "closed": [
+        {
+          "id": "i3",
+          "kind": "question",
+          "ask": "Where should the job run?",
+          "how": "answered",
+          "outcome": "List the choices",
+          "at": 4
+        }
+      ]
+    },
+    "exchange": {
+      "person": "List the choices",
+      "turn": 3,
+      "activity": [],
+      "reply": "The job can run in one of two places: nightly in the batch cluster, or hourly on the API hosts. Which should it use? I'd go with nightly: the cleanup is heavy and the API hosts are busy by day."
+    },
+    "checks": [
+      {
+        "new": "job|run|nightly",
+        "rec": "nightly"
+      },
+      {
+        "dropped": 0
+      }
+    ]
+  },
+  {
     "name": "answered-question-recap-not-new",
     "about": "A reply that recaps an answered question in its own words adds no item.",
     "ledger": {

@@ -71,354 +71,6 @@ function flattenConversation(turns) {
   return kept.reverse().join(NL2);
 }
 
-// ../hooks/model-text.ts
-var NL3 = `
-`;
-var MODEL_KIND = { question: "decide", task: "do" };
-function systemText(host) {
-  const band = host.band ? ` They always see how many items are in <open> and <findings> in ${host.band}.` : "";
-  return `You keep a short ledger for a person who works with a coding agent across many parallel sessions. They glance at your ledger between tasks, or after time away, to see where this session stands. You read one exchange and update the ledger.
-
-Input:
-- <card>: the ledger before this exchange (may be empty)
-- <open>: items still waiting on the person, as id | kind | label | ask | options | rec
-- <findings>: findings the agent recorded for the person to review later, outside the current task, each with an id
-- <decided>: items the person already settled, and how. Never add one of these again as NEW, even when the reply asks it again.
-- <person>: what the person just sent, and the commands they ran themselves: "$ cmd" for a shell command, with its output, and "/name" for a slash command
-- <activity>: what the agent did this turn (files edited, commands, URLs)
-- <reply>: the agent's final reply
-- <screen>: what the person has on screen besides the conversation.${band}
-
-Answer with lines only, each starting with one of these keys. No other text.
-
-GOAL: what this session is for, at most 12 words. Keep the previous goal unless the person clearly changed direction. "-" until the person has asked for something.
-DONE: one finished outcome, at most 8 words. Up to 4 DONE lines, oldest first, keeping the most recent. Outcomes, not activity: "PR #12 opened", not "ran gh".
-NOW: where the work stands at the end of this reply, at most 12 words. Name what it waits on, if anything. "-" when no work has started.
-RUNNING: something still running that the person may open, as "name: URL or port". Dev servers, simulators, background jobs. Omit anything the agent stopped. Zero or more lines.
-CLOSED: <id> | the outcome, at most 8 words, in one of three forms. When the person answered in <person>, write their answer. Otherwise write "done: <what the agent did>" when the work is done, or "no longer applies: <what in the reply or <activity> made it moot>". An option the agent picked on its own, or an option the work made moot, is not the person's answer: write it in the "done:" or "no longer applies:" form. One line for each item in <open> the person answered in <person> (including "all recommended", "go", "yes to all", numbered answers), or that the reply or <activity> shows is done or no longer applies. A person asking what an item means has not answered it, and a reply explaining it does not close it. When <person> asks to run an item's command and the reply says it ran, that item is done. So is an item whose command the person ran themselves, per <person>, when its output shows it worked. An item that has nothing to do with this exchange stays open: being outside the current work, or not being mentioned, does not make it no longer apply.
-FIXED: <id> | the change that fixed it, at most 8 words. One line for each finding in <findings> whose problem the reply, <activity> or <person> shows was fixed by a change to the work. Only a change fixes a finding. When the person puts a finding off, sets it aside or says it does not matter, write no FIXED line: it stays open until they dismiss it.
-ASKED: <id> | <item>
-  For a finding in <findings> that a NEW line or an item in <open> asks the person about. item: "new N" for the Nth NEW line in your answer, or an id from <open>. The item takes the finding's place, so the person sees it once.
-NEW: <kind> | <label> | <ask> | <options> | <rec>
-  One line per thing in <reply> that waits on the person and is not already in <open> or <findings>. A finding the agent recorded is not NEW unless the reply asks the person to decide or do something about it now; then also write an ASKED line for it. Also one line per dialog in <activity> that the person dismissed or left unanswered, with an ASKED line when the dialog asks about a finding. When the reply restates, rewords or narrows an item in <open>, it is not new: add HELP lines to that item's id instead.
-  kind: "decide" (a choice, approval, or information only the person has, explicitly put to them, without which the agent cannot go on with its task) or "do" (an action only the person can take, without which the agent cannot continue or finish: sign in, run a command needing their password, test on their device, reply to a teammate).
-  label: the reply's own number or id for it ("1", "D3"), or "-".
-  ask: plain words, readable without the reply, at most 12 words, or up to 16 when 12 would lose meaning. Keep the question's meaning and every alternative it names. Replace any term the reply coined with what it means. Name an item or finding by what it says, never by its id: the person does not see ids.
-  options: the answers the person can pick, separated by " / ", at most 5 words each; "-" for kind "do". For kind "decide", always at least one, so one press can answer. Use the choices the reply offers, plus the answer it recommends when that is not one of them. When the reply offers none, predict the answers the person would most likely give: the yes and the no for an approval or a yes-or-no question ("Approve / Not yet"); the 1 to 3 likeliest answers to an open question, from the conversation; or, when the conversation suggests no answer, what the person would most likely ask the agent to do instead ("List the choices", "Pick one for me").
-  rec: the option the reply states it recommends for this question ("I'd go with X", "I recommend X"), copied from options, or "-" when it states none for this question. A reason the reply gives for one answer is not a recommendation: it must say it recommends or prefers that answer.
-  Skip: rhetorical questions; offers to go on with the next step of the task the person already asked for ("Want me to start on the next file?"); FYIs; generic "let me know", though the agent holding an act that changes or publishes something (commit, push, edit a shared page) until the person agrees is a "decide" item ("Say when you want those committed"); invitations to look at, try or check finished work ("Open X to see it", "reload to check") unless the agent waits on the person's verdict before going on; optional suggestions; anything the person already has on screen, per <screen>; questions asking the person to describe what they saw, did or meant, even when the answer would help diagnose a problem ("What happens when you click it?", "Which file did you mean?"). The person answers those by replying.
-UPDATE: <id> | <options> | <rec>
-  For a "decide" item in <open> when the reply now offers it different answers, or states a recommendation for it that <open> does not show. options: the answers the person can now pick, as in NEW, or "-" to keep them. rec: as in NEW, or "-" to keep it. Rewording the question is not a change.
-HELP: <item> | <kind> | <value> | <name>
-  A step that does part of an item's work in one press, when the reply or activity already spells it out: the file to edit, the text to paste, the command to run, the page to visit. Not background reading. Up to 3 per item, most useful first.
-  item: "new N" for the Nth NEW line in your answer, or an id from <open>.
-  kind and value:
-    open | a file or folder the person needs to open or edit, the path as written
-    copy | text for the person to paste into a file or form, never a command: "block N" for the code block marked [block N] in <reply>, or one line of text
-    run | a shell command the reply asks the person to run or approve: "block N" or the command
-    terminal | a shell command the reply says only the person can run, because it needs their credentials, password, device or account. The command a "do" item asks the person to run is always terminal: "block N" or the command
-    link | an https URL the person needs to visit
-  name: what a copy, command or link is, at most 3 words ("settings snippet", "removal command", "token page"), or "-".
-  Use only paths, commands, text and URLs that appear in <reply> or <activity>. Never invent one.
-TODO: <work>
-  For a todo in <person>: work the person sets aside for later, as in "todo: X", and the reply leaves undone. work: at most 12 words, worded to follow "Ready to start on".
-
-Write plainly. No jargon, no filler, no markdown.`;
-}
-function guidanceText(host) {
-  return `# Inbox
-${host.intro}
-
-When you ask the user to decide something, say which option you recommend and why, in one clause ("I'd go with B: it keeps the old API"). If you cannot recommend one, say what would decide it.
-
-When you ask the user to do something, such as review a page, sign in or run a command, give them what they need in the same reply: the link, file path or command, what to do there, and how the result gets back to you. If the result would stay where you cannot read it, such as in their browser, give them a way to send it to you.
-
-Ask in your reply as a direct question, and record the same ask in that turn with ${host.recordTool}, so it stays in the inbox after the conversation moves on. Record a decision, an approval or information you need as a question, with its options and the one you recommend. Record an act you hold until the user says so the same way. Record a step only the user can take as a task, with its steps. Record each one once. Do not record rhetorical questions, offers to continue when continuing is the default, FYIs, or invitations to look at finished work.
-
-A finding is something you noticed that deserves the user's attention but is outside the current task: a bug, a risk, missing tests, tech debt, or a chance to improve something. Check it once before you record it, by reading the code or running a quick command, so the finding says what is true. Record it with ${host.recordTool} as a finding, then go on with the task; fixing it waits until the user asks. Record one too when you work around a problem instead of fixing it, such as copying files by hand because a tool does not reach them, and when part of your change cannot be checked from where you are. State those in your reply as well. Mention any other finding only when it bears on what the user asked.
-
-These are not findings. Handle them in the task and your reply instead:
-- A problem in your own change or inside the task: fix it.
-- A check you could run yourself: run it, or say in your reply that you have not.
-- Progress, status, or an approach you tried and dropped: say it.
-- Something only the user can do or decide, such as an approval, a sign-in or a choice: ask it, and record it as a question or task.
-
-The latest "inbox:" text beside the user's prompt is the current state. It lists every open item and finding with its id, such as (close id: i35), and anything it does not list is closed. Check it before telling the user that something is open or waits on them. The ids are for the inbox tools only. The user never sees them, so never write one to the user, not even in parentheses: name an item or finding by what it says, as "the deploy task" or "the migration finding".
-
-Close with ${host.closeTool}:
-- When the user's message answers an open item, close it first, before other work, with their answer, and say in your reply what you took their answer to be.
-- When an item or finding is done or no longer applies, close it with a short reason, without waiting to be asked.
-The answer to a question is the user's to give. Close a question with their answer, or once it no longer applies, and never with an answer of your own.`;
-}
-var CATCH_UP = "The ledger below may have missed turns. Write a CLOSED line for every item in <open> that the conversation shows answered, done, dealt with, or no longer relevant, and a FIXED line for every finding in <findings> that it shows was fixed. Add as NEW only what still waits on the user and is not already in <open> or <findings>.";
-function transcriptCatchUpPrompt(ledger, screen, transcript) {
-  return [
-    `Treat the conversation in <conversation> as the exchange. Its start may be cut. ${CATCH_UP}`,
-    ...ledgerBlocks(ledger),
-    `<conversation>${NL3}${numberBlocks(transcript)}${NL3}</conversation>`,
-    `<screen>${NL3}${screen}${NL3}</screen>`
-  ].join(NL3);
-}
-var MAX_ACTIVITY = 40;
-function addActivity(activity, line) {
-  return !line || activity.length >= MAX_ACTIVITY || activity.includes(line) ? activity : [...activity, line];
-}
-function toolActivity(tool, input) {
-  const text = (key) => typeof input[key] === "string" ? input[key] : "";
-  switch (tool) {
-    case "Bash":
-      return `${input.run_in_background ? "started in background" : "ran"}: ${text("command").slice(0, 140)}`;
-    case "Edit":
-    case "Write":
-      return `edited ${text("file_path")}`;
-    case "Skill":
-      return `used skill ${text("skill")}`;
-    case "Agent":
-      return `started agent: ${text("description")}`;
-  }
-  return tool.startsWith("mcp__") ? `called ${tool.slice(5)}` : null;
-}
-var DIALOG_QUESTIONS_SHOWN = 3;
-var DIALOG_QUESTION_MAX = 200;
-var DIALOG_OPTIONS_SHOWN = 6;
-var DIALOG_OPTION_MAX = 60;
-var DIALOG_ANSWER_MAX = 400;
-var RECOMMENDED_SUFFIX = /\s*\(recommended\)\s*$/i;
-function dialogQuestions(raw) {
-  if (!Array.isArray(raw))
-    return [];
-  return raw.flatMap((q) => {
-    const fields = q ?? {};
-    const text = [fields.question, fields.title].find((v) => typeof v === "string" && v.trim() !== "");
-    if (!text)
-      return [];
-    const options = (Array.isArray(fields.options) ? fields.options : []).flatMap((o) => {
-      const label = typeof o === "string" ? o : o?.label;
-      return typeof label === "string" && label.trim() !== "" ? [label.trim()] : [];
-    });
-    return [{ question: text.trim(), options }];
-  });
-}
-function dialogQuestionText(q) {
-  const shown = q.options.slice(0, DIALOG_OPTIONS_SHOWN).map((label) => {
-    const plain = label.replace(RECOMMENDED_SUFFIX, "");
-    const text = clip(plain, DIALOG_OPTION_MAX);
-    return plain === label ? text : `${text} (recommended)`;
-  });
-  const more = q.options.length > shown.length ? ` / and ${q.options.length - shown.length} more` : "";
-  const options = shown.length > 0 ? ` (options: ${shown.join(" / ")}${more})` : "";
-  return `"${clip(q.question.replaceAll('"', "'"), DIALOG_QUESTION_MAX)}"${options}`;
-}
-function dialogActivity(questions, outcome) {
-  const shown = questions.slice(0, DIALOG_QUESTIONS_SHOWN).map(dialogQuestionText);
-  const more = questions.length - shown.length;
-  const asked = shown.length > 0 ? `: ${shown.join("; ")}${more > 0 ? `; and ${more} more` : ""}` : "";
-  const head = `asked the user in a dialog${asked}`;
-  switch (outcome.kind) {
-    case "answered":
-      return `${head}; answer: ${outcome.answer.slice(0, DIALOG_ANSWER_MAX)}`;
-    case "timed-out":
-      return `${head}; it timed out while the user was away, so the user did not answer; it went on with: ${outcome.answer.slice(0, DIALOG_ANSWER_MAX)}`;
-    case "dismissed":
-      return `${head}; the user dismissed it without answering`;
-    case "open":
-      return `${head}; still open, waiting on the user's answer`;
-  }
-}
-function ledgerBlocks(ledger) {
-  const card = ledger.card ? [
-    `GOAL: ${ledger.card.goal}`,
-    ...ledger.card.done.map((d) => `DONE: ${d}`),
-    `NOW: ${ledger.card.now}`,
-    ...ledger.card.running.map((r) => `RUNNING: ${r}`)
-  ].join(NL3) : "";
-  const open = ledger.items.map((i) => `${i.id} | ${MODEL_KIND[i.kind]} | ${i.label ?? "-"} | ${i.ask} | ${i.options.join(" / ") || "-"} | ${i.rec ?? "-"}`).join(NL3);
-  const findings = ledger.findings.map((f) => `${f.id} | ${f.kind}: ${f.title}`).join(NL3);
-  const closed = ledger.closed.filter((d) => d.how !== "expired").map((d) => `${d.ask} \u2192 ${outcomeText(d)}`).join(NL3);
-  return [
-    `<card>${NL3}${card}${NL3}</card>`,
-    `<open>${NL3}${open}${NL3}</open>`,
-    `<findings>${NL3}${findings}${NL3}</findings>`,
-    `<decided>${NL3}${closed}${NL3}</decided>`
-  ];
-}
-function buildPrompt(ledger, ex) {
-  const person = ex.person ?? `(The person sent nothing. The turn was started by: ${ex.trigger ?? "unknown"}.)`;
-  return [
-    ...ledgerBlocks(ledger),
-    `<person>${NL3}${clipMiddle(person, 4000, 1500)}${NL3}</person>`,
-    `<activity>${NL3}${clipMiddle(ex.activity.join(NL3), 2500, 500)}${NL3}</activity>`,
-    `<reply>${NL3}${clipMiddle(numberBlocks(ex.reply), 12000, 4000)}${NL3}</reply>`,
-    `<screen>${NL3}${ex.screen}${NL3}</screen>`
-  ].join(NL3);
-}
-function surfaceAtStart(host) {
-  return host.surface.charAt(0).toUpperCase() + host.surface.slice(1);
-}
-function screenText(host, isOpen, tab) {
-  return isOpen ? `${surfaceAtStart(host)} is open beside the conversation, ${tab ? `on its ${tab} tab, ` : ""}listing every open item.` : `${surfaceAtStart(host)} is closed.`;
-}
-function latestBatch(ledger) {
-  return ledger.batchTurn === 0 ? [] : ledger.items.filter((i) => i.turn === ledger.batchTurn);
-}
-function describe(item) {
-  const parts = [`"${item.ask}"`];
-  if (item.options.length > 0)
-    parts.push(`options: ${item.options.join(" / ")}`);
-  if (item.rec)
-    parts.push(`recommended: ${item.rec}`);
-  if (item.kind === "task")
-    parts.push("an action for the user");
-  return parts.join("; ");
-}
-function numberOf(label) {
-  const m = label?.match(/(?:^|[^A-Za-z\d])(?:[QqDd#]\s?)?(\d{1,2})(?!\d)/);
-  return m ? Number(m[1]) : null;
-}
-function answerableBatch(ledger, promptTurn) {
-  return ledger.batchTurn === promptTurn - 1 ? latestBatch(ledger) : [];
-}
-function batchNumbers(batch) {
-  const hasLabels = batch.some((i) => numberOf(i.label) !== null);
-  const byNumber = new Map;
-  batch.forEach((item, at) => {
-    const n = hasLabels ? numberOf(item.label) : at + 1;
-    if (n !== null && !byNumber.has(n))
-      byNumber.set(n, item);
-  });
-  return byNumber;
-}
-function questionNumbers(ledger, promptTurn) {
-  const numbers = new Map;
-  for (const [n, item] of batchNumbers(answerableBatch(ledger, promptTurn)))
-    if (item.kind === "question")
-      numbers.set(item.id, n);
-  return numbers;
-}
-var LINE_ANSWER = /(?:^|\n)\s*(?:[QqDd#]\s?)?(\d{1,2})\s*[.):\-\u2013]\s*\S/g;
-var INLINE_ANSWER = /\s(?:[QqDd#]\s?)?(\d{1,2})\s*[.)]\s+\S/g;
-var ACCEPT_ALL = /^\s*(go|go ahead|yes|yep|yeah|sure|ok|okay|sgtm|lgtm|sounds good|do it|proceed|all good|ship it)\s*[.!]*\s*$/i;
-var ACCEPT_RECS = /\b(all|both|everything|your)\b[^.\n]{0,40}\b(recommend\w*|recs?|suggest\w*|picks?|calls?)\b/i;
-function answerNote(ledger, text) {
-  const lines = [];
-  const batch = answerableBatch(ledger, ledger.turn);
-  if (batch.length > 0) {
-    const numbers = new Set;
-    for (const m of text.matchAll(LINE_ANSWER))
-      numbers.add(Number(m[1]));
-    if (/^\s*(?:[QqDd#]\s?)?\d{1,2}\s*[.):\-\u2013]\s/.test(text)) {
-      for (const m of text.matchAll(INLINE_ANSWER))
-        numbers.add(Number(m[1]));
-    }
-    const byNumber = batchNumbers(batch);
-    for (const n of [...numbers].sort((a, b) => a - b)) {
-      const item = byNumber.get(n);
-      if (item)
-        lines.push(`- ${n} \u2192 ${describe(item)}`);
-    }
-    if (lines.length === 0 && (ACCEPT_ALL.test(text) || ACCEPT_RECS.test(text))) {
-      const withRecs = batch.filter((i) => i.rec);
-      if (withRecs.length > 0) {
-        return [
-          "inbox: if the user is accepting your recommendations, these are the open ones:",
-          ...withRecs.map((i) => `- ${i.label ?? "\u2022"} \u2192 ${describe(i)}`)
-        ].join(NL3);
-      }
-    }
-  }
-  return lines.length === 0 ? null : ["inbox: the user's message answers these open items from your earlier replies:", ...lines].join(NL3);
-}
-function itemLine(item) {
-  return `- ${item.label ? `(${item.label}) ` : ""}${describe(item)} (close id: ${item.id})`;
-}
-function findingLine(finding) {
-  return `- ${finding.kind}: ${finding.title} (close id: ${finding.id})`;
-}
-var CLOSE_ID_RULE = "A close id is only for the close tool. Never write one in a reply.";
-function inboxText(host, ledger, isOpen) {
-  const out = [
-    `inbox: what waits on the user, as of your last reply. Anything not listed here is closed. ${CLOSE_ID_RULE}`
-  ];
-  if (ledger.items.length > 0) {
-    out.push("Waiting on the user:");
-    for (const item of ledger.items)
-      out.push(itemLine(item));
-  } else {
-    out.push("Nothing is waiting on the user.");
-  }
-  if (ledger.findings.length > 0) {
-    out.push("Findings you recorded, still open:");
-    for (const f of ledger.findings)
-      out.push(findingLine(f));
-  }
-  out.push(isOpen ? `The user has ${host.surface} open beside the conversation.` : `${surfaceAtStart(host)} is closed.`);
-  return out.join(NL3);
-}
-function outcomeText(d) {
-  if (d.how === "dismissed")
-    return "dismissed by the user";
-  if (d.how === "expired")
-    return "expired before the user answered";
-  return d.outcome;
-}
-function closedText(closed) {
-  if (closed.length === 0)
-    return null;
-  const advice = (d) => d.how === "dismissed" ? ". Ask it again only if the user brings it up." : d.how === "expired" ? ". Ask it again if it still matters." : "";
-  return [
-    "Closed since you last read the inbox:",
-    ...closed.map((d) => `- "${d.ask}" \u2192 ${outcomeText(d)}${advice(d)}`)
-  ].join(NL3);
-}
-var TOLD_NOTHING = { inbox: null, closed: [] };
-function promptNotes(host, ledger, prompt, told) {
-  const notes = [];
-  const answer = prompt.isPress ? null : answerNote(ledger, prompt.text);
-  if (answer)
-    notes.push(answer);
-  const inbox = inboxText(host, ledger, prompt.isOpen);
-  const toldClosed = new Set(told.closed);
-  const closed = closedText(ledger.closed.filter((d) => !toldClosed.has(d.id)));
-  const isEmpty = ledger.items.length === 0 && ledger.findings.length === 0;
-  if (!closed && (inbox === told.inbox || isEmpty && told.inbox === null))
-    return { notes, told };
-  notes.push(closed ? `${inbox}${NL3}${closed}` : inbox);
-  return { notes, told: { inbox, closed: ledger.closed.map((d) => d.id) } };
-}
-
-// ../hooks/gh.ts
-var CANDIDATES = ["gh", "/opt/homebrew/bin/gh", "/usr/local/bin/gh"];
-var GH_TIMEOUT_MS = 20000;
-var UNSTARTABLE_CODE = -1;
-function ghFinder(exec) {
-  let found = null;
-  return {
-    find: async () => {
-      if (found)
-        return found;
-      for (const candidate of CANDIDATES) {
-        const r = await exec([candidate, "--version"], { cwd: "/", timeoutMs: 5000 });
-        if (r.code !== UNSTARTABLE_CODE) {
-          found = candidate;
-          return found;
-        }
-      }
-      return null;
-    },
-    forget: () => {
-      found = null;
-    }
-  };
-}
-function ghIn(exec, bin, cwd, onUnstartable) {
-  return async (args) => {
-    const r = await exec([bin, ...args], { cwd: cwd || "/", timeoutMs: GH_TIMEOUT_MS });
-    if (r.code === UNSTARTABLE_CODE)
-      onUnstartable();
-    return { exitCode: r.code, stdout: r.stdout, stderr: r.stderr };
-  };
-}
-
 // ../hooks/ledger.ts
 var KEPT_SESSIONS = 40;
 var EMPTY = {
@@ -432,7 +84,7 @@ var EMPTY = {
   turn: 0,
   batchTurn: 0
 };
-var NL4 = `
+var NL3 = `
 `;
 var MAX_OPEN = 20;
 var STALE_AFTER = 12;
@@ -584,7 +236,7 @@ function parseReply(text, source = null) {
   const asks = [];
   const todos = [];
   let seen = 0;
-  const lines = text.split(NL4);
+  const lines = text.split(NL3);
   const lastGoal = lines.findLastIndex((line) => KEY_LINE.exec(line)?.[1] === "GOAL");
   const newLines = [];
   for (const raw of lines.slice(Math.max(lastGoal, 0))) {
@@ -709,11 +361,17 @@ function matchOpen(items, a, sameBatch = new Set) {
   return items.findIndex((i) => i.id === a.label || sameAsk(i.ask, a.ask) || !sameBatch.has(i.id) && i.kind === a.kind && restates(i.ask, a.ask));
 }
 function repeatsClosed(closed, a, since) {
-  const recent = closed.filter((c) => c.at >= since);
+  const recent = closed.filter((c) => c.at >= since && !isAskedForChoices(c));
   const settled = closed.filter((c) => c.at < since && c.how !== "expired");
   return matchOpen(recent, a) >= 0 || a.label !== null && recent.some((c) => c.label === a.label) || settled.some((c) => repeatsSettled(c, a));
 }
+var LIST_CHOICES = "List the choices";
+function isAskedForChoices(c) {
+  return c.how === "answered" && c.outcome.trim().toLowerCase() === LIST_CHOICES.toLowerCase();
+}
 function repeatsSettled(c, a) {
+  if (isAskedForChoices(c))
+    return false;
   return c.how === "answered" ? c.id === a.label || sameAsk(c.ask, a.ask) : matchOpen([c], a) >= 0;
 }
 function closedRecord(item, closing, now) {
@@ -981,6 +639,354 @@ function closedState(d) {
 }
 function isLapsed(d) {
   return closedState(d) !== "handled";
+}
+
+// ../hooks/model-text.ts
+var NL4 = `
+`;
+var MODEL_KIND = { question: "decide", task: "do" };
+function systemText(host) {
+  const band = host.band ? ` They always see how many items are in <open> and <findings> in ${host.band}.` : "";
+  return `You keep a short ledger for a person who works with a coding agent across many parallel sessions. They glance at your ledger between tasks, or after time away, to see where this session stands. You read one exchange and update the ledger.
+
+Input:
+- <card>: the ledger before this exchange (may be empty)
+- <open>: items still waiting on the person, as id | kind | label | ask | options | rec
+- <findings>: findings the agent recorded for the person to review later, outside the current task, each with an id
+- <decided>: items the person already settled, and how. Never add one of these again as NEW, even when the reply asks it again.
+- <person>: what the person just sent, and the commands they ran themselves: "$ cmd" for a shell command, with its output, and "/name" for a slash command
+- <activity>: what the agent did this turn (files edited, commands, URLs)
+- <reply>: the agent's final reply
+- <screen>: what the person has on screen besides the conversation.${band}
+
+Answer with lines only, each starting with one of these keys. No other text.
+
+GOAL: what this session is for, at most 12 words. Keep the previous goal unless the person clearly changed direction. "-" until the person has asked for something.
+DONE: one finished outcome, at most 8 words. Up to 4 DONE lines, oldest first, keeping the most recent. Outcomes, not activity: "PR #12 opened", not "ran gh".
+NOW: where the work stands at the end of this reply, at most 12 words. Name what it waits on, if anything. "-" when no work has started.
+RUNNING: something still running that the person may open, as "name: URL or port". Dev servers, simulators, background jobs. Omit anything the agent stopped. Zero or more lines.
+CLOSED: <id> | the outcome, at most 8 words, in one of three forms. When the person answered in <person>, write their answer. Otherwise write "done: <what the agent did>" when the work is done, or "no longer applies: <what in the reply or <activity> made it moot>". An option the agent picked on its own, or an option the work made moot, is not the person's answer: write it in the "done:" or "no longer applies:" form. One line for each item in <open> the person answered in <person> (including "all recommended", "go", "yes to all", numbered answers), or that the reply or <activity> shows is done or no longer applies. A person asking what an item means has not answered it, and a reply explaining it does not close it. When <person> asks to run an item's command and the reply says it ran, that item is done. So is an item whose command the person ran themselves, per <person>, when its output shows it worked. An item that has nothing to do with this exchange stays open: being outside the current work, or not being mentioned, does not make it no longer apply.
+FIXED: <id> | the change that fixed it, at most 8 words. One line for each finding in <findings> whose problem the reply, <activity> or <person> shows was fixed by a change to the work. Only a change fixes a finding. When the person puts a finding off, sets it aside or says it does not matter, write no FIXED line: it stays open until they dismiss it.
+ASKED: <id> | <item>
+  For a finding in <findings> that a NEW line or an item in <open> asks the person about. item: "new N" for the Nth NEW line in your answer, or an id from <open>. The item takes the finding's place, so the person sees it once.
+NEW: <kind> | <label> | <ask> | <options> | <rec>
+  One line per thing in <reply> that waits on the person and is not already in <open> or <findings>. A finding the agent recorded is not NEW unless the reply asks the person to decide or do something about it now; then also write an ASKED line for it. Also one line per dialog in <activity> that the person dismissed or left unanswered, with an ASKED line when the dialog asks about a finding. When the reply restates, rewords or narrows an item in <open>, it is not new: add HELP lines to that item's id instead.
+  kind: "decide" (a choice, approval, or information only the person has, explicitly put to them, without which the agent cannot go on with its task) or "do" (an action only the person can take, without which the agent cannot continue or finish: sign in, run a command needing their password, test on their device, reply to a teammate).
+  label: the reply's own number or id for it ("1", "D3"), or "-".
+  ask: plain words, readable without the reply, at most 12 words, or up to 16 when 12 would lose meaning. Keep the question's meaning and every alternative it names. Replace any term the reply coined with what it means. Name an item or finding by what it says, never by its id: the person does not see ids.
+  options: the answers the person can pick, separated by " / ", at most 5 words each; "-" for kind "do". For kind "decide", always at least one, so one press can answer. Use the choices the reply offers, plus the answer it recommends when that is not one of them. When the reply offers none, predict the answers the person would most likely give: the yes and the no for an approval or a yes-or-no question ("Approve / Not yet"); the 1 to 3 likeliest answers to an open question, from the conversation; or, when the conversation suggests no answer, what the person would most likely ask the agent to do instead ("${LIST_CHOICES}", "Pick one for me").
+  rec: the option the reply states it recommends for this question ("I'd go with X", "I recommend X"), copied from options, or "-" when it states none for this question. A reason the reply gives for one answer is not a recommendation: it must say it recommends or prefers that answer.
+  Skip: rhetorical questions; offers to go on with the next step of the task the person already asked for ("Want me to start on the next file?"); FYIs; generic "let me know", though the agent holding an act that changes or publishes something (commit, push, edit a shared page) until the person agrees is a "decide" item ("Say when you want those committed"); invitations to look at, try or check finished work ("Open X to see it", "reload to check") unless the agent waits on the person's verdict before going on; optional suggestions; anything the person already has on screen, per <screen>; questions asking the person to describe what they saw, did or meant, even when the answer would help diagnose a problem ("What happens when you click it?", "Which file did you mean?"). The person answers those by replying.
+UPDATE: <id> | <options> | <rec>
+  For a "decide" item in <open> when the reply now offers it different answers, or states a recommendation for it that <open> does not show. options: the answers the person can now pick, as in NEW, or "-" to keep them. rec: as in NEW, or "-" to keep it. Rewording the question is not a change.
+HELP: <item> | <kind> | <value> | <name>
+  A step that does part of an item's work in one press, when the reply or activity already spells it out: the file to edit, the text to paste, the command to run, the page to visit. Not background reading. Up to 3 per item, most useful first.
+  item: "new N" for the Nth NEW line in your answer, or an id from <open>.
+  kind and value:
+    open | a file or folder the person needs to open or edit, the path as written
+    copy | text for the person to paste into a file or form, never a command: "block N" for the code block marked [block N] in <reply>, or one line of text
+    run | a shell command the reply asks the person to run or approve: "block N" or the command
+    terminal | a shell command the reply says only the person can run, because it needs their credentials, password, device or account. The command a "do" item asks the person to run is always terminal: "block N" or the command
+    link | an https URL the person needs to visit
+  name: what a copy, command or link is, at most 3 words ("settings snippet", "removal command", "token page"), or "-".
+  Use only paths, commands, text and URLs that appear in <reply> or <activity>. Never invent one.
+TODO: <work>
+  For a todo in <person>: work the person sets aside for later, as in "todo: X", and the reply leaves undone. work: at most 12 words, worded to follow "Ready to start on".
+
+Write plainly. No jargon, no filler, no markdown.`;
+}
+function guidanceText(host) {
+  return `# Inbox
+${host.intro}
+
+When you ask the user to decide something, say which option you recommend and why, in one clause ("I'd go with B: it keeps the old API"). If you cannot recommend one, say what would decide it.
+
+When you ask the user to do something, such as review a page, sign in or run a command, give them what they need in the same reply: the link, file path or command, what to do there, and how the result gets back to you. If the result would stay where you cannot read it, such as in their browser, give them a way to send it to you.
+
+Ask in your reply as a direct question, and record the same ask in that turn with ${host.recordTool}, so it stays in the inbox after the conversation moves on. Record a decision, an approval or information you need as a question, with its options and the one you recommend. Record an act you hold until the user says so the same way. Record a step only the user can take as a task, with its steps. Record each one once. Do not record rhetorical questions, offers to continue when continuing is the default, FYIs, or invitations to look at finished work.
+
+A finding is something you noticed that deserves the user's attention but is outside the current task: a bug, a risk, missing tests, tech debt, or a chance to improve something. Check it once before you record it, by reading the code or running a quick command, so the finding says what is true. Record it with ${host.recordTool} as a finding, then go on with the task; fixing it waits until the user asks. Record one too when you work around a problem instead of fixing it, such as copying files by hand because a tool does not reach them, and when part of your change cannot be checked from where you are. State those in your reply as well. Mention any other finding only when it bears on what the user asked.
+
+These are not findings. Handle them in the task and your reply instead:
+- A problem in your own change or inside the task: fix it.
+- A check you could run yourself: run it, or say in your reply that you have not.
+- Progress, status, or an approach you tried and dropped: say it.
+- Something only the user can do or decide, such as an approval, a sign-in or a choice: ask it, and record it as a question or task.
+
+The latest "inbox:" text beside the user's prompt is the current state. It lists every open item and finding with its id, such as (close id: i35), and anything it does not list is closed. Check it before telling the user that something is open or waits on them. The ids are for the inbox tools only. The user never sees them, so never write one to the user, not even in parentheses: name an item or finding by what it says, as "the deploy task" or "the migration finding".
+
+Close with ${host.closeTool}:
+- When the user's message answers an open item, close it first, before other work, with their answer, and say in your reply what you took their answer to be.
+- When an item or finding is done or no longer applies, close it with a short reason, without waiting to be asked.
+The answer to a question is the user's to give. Close a question with their answer, or once it no longer applies, and never with an answer of your own.`;
+}
+var CATCH_UP = "The ledger below may have missed turns. Write a CLOSED line for every item in <open> that the conversation shows answered, done, dealt with, or no longer relevant, and a FIXED line for every finding in <findings> that it shows was fixed. Add as NEW only what still waits on the user and is not already in <open> or <findings>.";
+function transcriptCatchUpPrompt(ledger, screen, transcript) {
+  return [
+    `Treat the conversation in <conversation> as the exchange. Its start may be cut. ${CATCH_UP}`,
+    ...ledgerBlocks(ledger),
+    `<conversation>${NL4}${numberBlocks(transcript)}${NL4}</conversation>`,
+    `<screen>${NL4}${screen}${NL4}</screen>`
+  ].join(NL4);
+}
+var MAX_ACTIVITY = 40;
+function addActivity(activity, line) {
+  return !line || activity.length >= MAX_ACTIVITY || activity.includes(line) ? activity : [...activity, line];
+}
+function toolActivity(tool, input) {
+  const text = (key) => typeof input[key] === "string" ? input[key] : "";
+  switch (tool) {
+    case "Bash":
+      return `${input.run_in_background ? "started in background" : "ran"}: ${text("command").slice(0, 140)}`;
+    case "Edit":
+    case "Write":
+      return `edited ${text("file_path")}`;
+    case "Skill":
+      return `used skill ${text("skill")}`;
+    case "Agent":
+      return `started agent: ${text("description")}`;
+  }
+  return tool.startsWith("mcp__") ? `called ${tool.slice(5)}` : null;
+}
+var DIALOG_QUESTIONS_SHOWN = 3;
+var DIALOG_QUESTION_MAX = 200;
+var DIALOG_OPTIONS_SHOWN = 6;
+var DIALOG_OPTION_MAX = 60;
+var DIALOG_ANSWER_MAX = 400;
+var RECOMMENDED_SUFFIX = /\s*\(recommended\)\s*$/i;
+function dialogQuestions(raw) {
+  if (!Array.isArray(raw))
+    return [];
+  return raw.flatMap((q) => {
+    const fields = q ?? {};
+    const text = [fields.question, fields.title].find((v) => typeof v === "string" && v.trim() !== "");
+    if (!text)
+      return [];
+    const options = (Array.isArray(fields.options) ? fields.options : []).flatMap((o) => {
+      const label = typeof o === "string" ? o : o?.label;
+      return typeof label === "string" && label.trim() !== "" ? [label.trim()] : [];
+    });
+    return [{ question: text.trim(), options }];
+  });
+}
+function dialogQuestionText(q) {
+  const shown = q.options.slice(0, DIALOG_OPTIONS_SHOWN).map((label) => {
+    const plain = label.replace(RECOMMENDED_SUFFIX, "");
+    const text = clip(plain, DIALOG_OPTION_MAX);
+    return plain === label ? text : `${text} (recommended)`;
+  });
+  const more = q.options.length > shown.length ? ` / and ${q.options.length - shown.length} more` : "";
+  const options = shown.length > 0 ? ` (options: ${shown.join(" / ")}${more})` : "";
+  return `"${clip(q.question.replaceAll('"', "'"), DIALOG_QUESTION_MAX)}"${options}`;
+}
+function dialogActivity(questions, outcome) {
+  const shown = questions.slice(0, DIALOG_QUESTIONS_SHOWN).map(dialogQuestionText);
+  const more = questions.length - shown.length;
+  const asked = shown.length > 0 ? `: ${shown.join("; ")}${more > 0 ? `; and ${more} more` : ""}` : "";
+  const head = `asked the user in a dialog${asked}`;
+  switch (outcome.kind) {
+    case "answered":
+      return `${head}; answer: ${outcome.answer.slice(0, DIALOG_ANSWER_MAX)}`;
+    case "timed-out":
+      return `${head}; it timed out while the user was away, so the user did not answer; it went on with: ${outcome.answer.slice(0, DIALOG_ANSWER_MAX)}`;
+    case "dismissed":
+      return `${head}; the user dismissed it without answering`;
+    case "open":
+      return `${head}; still open, waiting on the user's answer`;
+  }
+}
+function ledgerBlocks(ledger) {
+  const card = ledger.card ? [
+    `GOAL: ${ledger.card.goal}`,
+    ...ledger.card.done.map((d) => `DONE: ${d}`),
+    `NOW: ${ledger.card.now}`,
+    ...ledger.card.running.map((r) => `RUNNING: ${r}`)
+  ].join(NL4) : "";
+  const open = ledger.items.map((i) => `${i.id} | ${MODEL_KIND[i.kind]} | ${i.label ?? "-"} | ${i.ask} | ${i.options.join(" / ") || "-"} | ${i.rec ?? "-"}`).join(NL4);
+  const findings = ledger.findings.map((f) => `${f.id} | ${f.kind}: ${f.title}`).join(NL4);
+  const closed = ledger.closed.filter((d) => d.how !== "expired").map((d) => `${d.ask} \u2192 ${outcomeText(d)}`).join(NL4);
+  return [
+    `<card>${NL4}${card}${NL4}</card>`,
+    `<open>${NL4}${open}${NL4}</open>`,
+    `<findings>${NL4}${findings}${NL4}</findings>`,
+    `<decided>${NL4}${closed}${NL4}</decided>`
+  ];
+}
+function buildPrompt(ledger, ex) {
+  const person = ex.person ?? `(The person sent nothing. The turn was started by: ${ex.trigger ?? "unknown"}.)`;
+  return [
+    ...ledgerBlocks(ledger),
+    `<person>${NL4}${clipMiddle(person, 4000, 1500)}${NL4}</person>`,
+    `<activity>${NL4}${clipMiddle(ex.activity.join(NL4), 2500, 500)}${NL4}</activity>`,
+    `<reply>${NL4}${clipMiddle(numberBlocks(ex.reply), 12000, 4000)}${NL4}</reply>`,
+    `<screen>${NL4}${ex.screen}${NL4}</screen>`
+  ].join(NL4);
+}
+function surfaceAtStart(host) {
+  return host.surface.charAt(0).toUpperCase() + host.surface.slice(1);
+}
+function screenText(host, isOpen, tab) {
+  return isOpen ? `${surfaceAtStart(host)} is open beside the conversation, ${tab ? `on its ${tab} tab, ` : ""}listing every open item.` : `${surfaceAtStart(host)} is closed.`;
+}
+function latestBatch(ledger) {
+  return ledger.batchTurn === 0 ? [] : ledger.items.filter((i) => i.turn === ledger.batchTurn);
+}
+function describe(item) {
+  const parts = [`"${item.ask}"`];
+  if (item.options.length > 0)
+    parts.push(`options: ${item.options.join(" / ")}`);
+  if (item.rec)
+    parts.push(`recommended: ${item.rec}`);
+  if (item.kind === "task")
+    parts.push("an action for the user");
+  return parts.join("; ");
+}
+function numberOf(label) {
+  const m = label?.match(/(?:^|[^A-Za-z\d])(?:[QqDd#]\s?)?(\d{1,2})(?!\d)/);
+  return m ? Number(m[1]) : null;
+}
+function answerableBatch(ledger, promptTurn) {
+  return ledger.batchTurn === promptTurn - 1 ? latestBatch(ledger) : [];
+}
+function batchNumbers(batch) {
+  const hasLabels = batch.some((i) => numberOf(i.label) !== null);
+  const byNumber = new Map;
+  batch.forEach((item, at) => {
+    const n = hasLabels ? numberOf(item.label) : at + 1;
+    if (n !== null && !byNumber.has(n))
+      byNumber.set(n, item);
+  });
+  return byNumber;
+}
+function questionNumbers(ledger, promptTurn) {
+  const numbers = new Map;
+  for (const [n, item] of batchNumbers(answerableBatch(ledger, promptTurn)))
+    if (item.kind === "question")
+      numbers.set(item.id, n);
+  return numbers;
+}
+var LINE_ANSWER = /(?:^|\n)\s*(?:[QqDd#]\s?)?(\d{1,2})\s*[.):\-\u2013]\s*\S/g;
+var INLINE_ANSWER = /\s(?:[QqDd#]\s?)?(\d{1,2})\s*[.)]\s+\S/g;
+var ACCEPT_ALL = /^\s*(go|go ahead|yes|yep|yeah|sure|ok|okay|sgtm|lgtm|sounds good|do it|proceed|all good|ship it)\s*[.!]*\s*$/i;
+var ACCEPT_RECS = /\b(all|both|everything|your)\b[^.\n]{0,40}\b(recommend\w*|recs?|suggest\w*|picks?|calls?)\b/i;
+function answerNote(ledger, text) {
+  const lines = [];
+  const batch = answerableBatch(ledger, ledger.turn);
+  if (batch.length > 0) {
+    const numbers = new Set;
+    for (const m of text.matchAll(LINE_ANSWER))
+      numbers.add(Number(m[1]));
+    if (/^\s*(?:[QqDd#]\s?)?\d{1,2}\s*[.):\-\u2013]\s/.test(text)) {
+      for (const m of text.matchAll(INLINE_ANSWER))
+        numbers.add(Number(m[1]));
+    }
+    const byNumber = batchNumbers(batch);
+    for (const n of [...numbers].sort((a, b) => a - b)) {
+      const item = byNumber.get(n);
+      if (item)
+        lines.push(`- ${n} \u2192 ${describe(item)}`);
+    }
+    if (lines.length === 0 && (ACCEPT_ALL.test(text) || ACCEPT_RECS.test(text))) {
+      const withRecs = batch.filter((i) => i.rec);
+      if (withRecs.length > 0) {
+        return [
+          "inbox: if the user is accepting your recommendations, these are the open ones:",
+          ...withRecs.map((i) => `- ${i.label ?? "\u2022"} \u2192 ${describe(i)}`)
+        ].join(NL4);
+      }
+    }
+  }
+  return lines.length === 0 ? null : ["inbox: the user's message answers these open items from your earlier replies:", ...lines].join(NL4);
+}
+function itemLine(item) {
+  return `- ${item.label ? `(${item.label}) ` : ""}${describe(item)} (close id: ${item.id})`;
+}
+function findingLine(finding) {
+  return `- ${finding.kind}: ${finding.title} (close id: ${finding.id})`;
+}
+var CLOSE_ID_RULE = "A close id is only for the close tool. Never write one in a reply.";
+function inboxText(host, ledger, isOpen) {
+  const out = [
+    `inbox: what waits on the user, as of your last reply. Anything not listed here is closed. ${CLOSE_ID_RULE}`
+  ];
+  if (ledger.items.length > 0) {
+    out.push("Waiting on the user:");
+    for (const item of ledger.items)
+      out.push(itemLine(item));
+  } else {
+    out.push("Nothing is waiting on the user.");
+  }
+  if (ledger.findings.length > 0) {
+    out.push("Findings you recorded, still open:");
+    for (const f of ledger.findings)
+      out.push(findingLine(f));
+  }
+  out.push(isOpen ? `The user has ${host.surface} open beside the conversation.` : `${surfaceAtStart(host)} is closed.`);
+  return out.join(NL4);
+}
+function outcomeText(d) {
+  if (d.how === "dismissed")
+    return "dismissed by the user";
+  if (d.how === "expired")
+    return "expired before the user answered";
+  return d.outcome;
+}
+function closedText(closed) {
+  if (closed.length === 0)
+    return null;
+  const advice = (d) => d.how === "dismissed" ? ". Ask it again only if the user brings it up." : d.how === "expired" ? ". Ask it again if it still matters." : "";
+  return [
+    "Closed since you last read the inbox:",
+    ...closed.map((d) => `- "${d.ask}" \u2192 ${outcomeText(d)}${advice(d)}`)
+  ].join(NL4);
+}
+var TOLD_NOTHING = { inbox: null, closed: [] };
+function promptNotes(host, ledger, prompt, told) {
+  const notes = [];
+  const answer = prompt.isPress ? null : answerNote(ledger, prompt.text);
+  if (answer)
+    notes.push(answer);
+  const inbox = inboxText(host, ledger, prompt.isOpen);
+  const toldClosed = new Set(told.closed);
+  const closed = closedText(ledger.closed.filter((d) => !toldClosed.has(d.id)));
+  const isEmpty = ledger.items.length === 0 && ledger.findings.length === 0;
+  if (!closed && (inbox === told.inbox || isEmpty && told.inbox === null))
+    return { notes, told };
+  notes.push(closed ? `${inbox}${NL4}${closed}` : inbox);
+  return { notes, told: { inbox, closed: ledger.closed.map((d) => d.id) } };
+}
+
+// ../hooks/gh.ts
+var CANDIDATES = ["gh", "/opt/homebrew/bin/gh", "/usr/local/bin/gh"];
+var GH_TIMEOUT_MS = 20000;
+var UNSTARTABLE_CODE = -1;
+function ghFinder(exec) {
+  let found = null;
+  return {
+    find: async () => {
+      if (found)
+        return found;
+      for (const candidate of CANDIDATES) {
+        const r = await exec([candidate, "--version"], { cwd: "/", timeoutMs: 5000 });
+        if (r.code !== UNSTARTABLE_CODE) {
+          found = candidate;
+          return found;
+        }
+      }
+      return null;
+    },
+    forget: () => {
+      found = null;
+    }
+  };
+}
+function ghIn(exec, bin, cwd, onUnstartable) {
+  return async (args) => {
+    const r = await exec([bin, ...args], { cwd: cwd || "/", timeoutMs: GH_TIMEOUT_MS });
+    if (r.code === UNSTARTABLE_CODE)
+      onUnstartable();
+    return { exitCode: r.code, stdout: r.stdout, stderr: r.stderr };
+  };
 }
 
 // ../hooks/prs.ts

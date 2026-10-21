@@ -452,6 +452,18 @@ describe('applyUpdate', () => {
     expect(applyUpdate({ ...dismissed, turn: 2 }, reworded, 4, 2, 3).items).toEqual([])
   })
 
+  test('the inbox model can add a question again with choices after the person answered it with List the choices', () => {
+    const question = { kind: 'question' as const, ask: 'Where should the job run?', options: [], rec: null, helps: [] }
+    const asked = addAgentItem({ ...EMPTY, turn: 1 }, question, 1).ledger
+    const reply = parseReply('NEW: decide | - | Where should the job run? | Nightly / Hourly | Nightly')!
+    const listed = closeItem(asked, 'i1', { how: 'answered', outcome: 'List the choices' }, 2)
+    expect(applyUpdate({ ...listed, turn: 2 }, reply, 4, 2, 3).items.map(i => i.options)).toEqual([
+      ['Nightly', 'Hourly'],
+    ])
+    const other = closeItem(asked, 'i1', { how: 'answered', outcome: 'Nightly' }, 2)
+    expect(applyUpdate({ ...other, turn: 2 }, reply, 4, 2, 3).items).toEqual([])
+  })
+
   test('an update that closes an item as no longer applying keeps it open when its reason names nothing that made it moot', () => {
     const open = applyUpdate(
       { ...EMPTY, turn: 1 },

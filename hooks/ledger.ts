@@ -417,7 +417,7 @@ function matchOpen(
  * An ask closed before the prompt repeats a settled item as `repeatsSettled` says.
  */
 function repeatsClosed(closed: Closed[], a: Update['added'][number], since: number): boolean {
-  const recent = closed.filter(c => c.at >= since)
+  const recent = closed.filter(c => c.at >= since && !isAskedForChoices(c))
   const settled = closed.filter(c => c.at < since && c.how !== 'expired')
 
   return (
@@ -427,12 +427,21 @@ function repeatsClosed(closed: Closed[], a: Update['added'][number], since: numb
   )
 }
 
+/** The answer the inbox model offers when an ask names no choices. It asks for the same question again, with them. */
+export const LIST_CHOICES = 'List the choices'
+
+function isAskedForChoices(c: Closed): boolean {
+  return c.how === 'answered' && c.outcome.trim().toLowerCase() === LIST_CHOICES.toLowerCase()
+}
+
 /**
  * An answered question repeats only in the same words or label: a follow-up shares its words but asks something new,
  * as "Which cache size should the product API use?" after "Which cache should the product API use?". A dismissed or
- * handled item repeats in other words too.
+ * handled item repeats in other words too. A question answered with LIST_CHOICES repeats nothing.
  */
 function repeatsSettled(c: Closed, a: Update['added'][number]): boolean {
+  if (isAskedForChoices(c)) return false
+
   return c.how === 'answered' ? c.id === a.label || sameAsk(c.ask, a.ask) : matchOpen([c], a) >= 0
 }
 

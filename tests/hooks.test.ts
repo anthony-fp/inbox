@@ -1039,7 +1039,7 @@ test('a finding Claude records while the pane shows an empty tab brings the pane
   expect(await pane.find({ text: /Cache the API token/ })).toBeDefined()
 })
 
-test('a question Claude records waits in the pane with its recommendation, a repeat is not added, and one the person dismissed is not recorded again', async ($, on) => {
+test('a question Claude records waits in the pane with its recommendation, a repeat is not added, one the person dismissed is not recorded again, and one they answered with List the choices can be asked again with choices', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])
   on('ui.panes', () => ({ value: [{ id: 'inbox', title: 'Inbox', isShown: true, isFocused: true, isPlaced: true }] }))
@@ -1076,6 +1076,13 @@ test('a question Claude records waits in the pane with its recommendation, a rep
   await $.tool.call({ tool: 'mcp__inbox__close', id: 'i1', answer: 'Redis' })
   expect((await $.tool.call(question)).result).toBe(
     'Not recorded: the user answered it (Redis). Ask it again only if they bring it up.',
+  )
+
+  const placement = { tool: 'mcp__inbox__record', kind: 'question', ask: 'Where should the job run?' } as const
+  await $.tool.call({ ...placement, options: ['List the choices'] })
+  await $.tool.call({ tool: 'mcp__inbox__close', id: 'i3', answer: 'List the choices' })
+  expect((await $.tool.call({ ...placement, options: ['Nightly', 'Hourly'], rec: 'Nightly' })).result).toBe(
+    'Recorded. The user sees it in the /inbox pane.',
   )
 })
 

@@ -25,6 +25,81 @@ function clip(text, max) {
   return text.length <= max ? text : text.slice(0, max) + " \u2026[cut]";
 }
 
+// ../hooks/ledger.ts
+var EMPTY = {
+  card: null,
+  items: [],
+  closed: [],
+  findings: [],
+  closedFindings: [],
+  prs: [],
+  nextId: 1,
+  turn: 0,
+  batchTurn: 0
+};
+var MAX_CLOSED = 12;
+var EXPIRED = "expired, unanswered";
+function readKind(kind) {
+  return kind === "task" || kind === "do" ? "task" : "question";
+}
+function upgradeLedger(ledger) {
+  const { notes, decided, ...rest } = ledger;
+  return {
+    ...rest,
+    findings: [...rest.findings ?? [], ...notes ?? []],
+    // reopenFinding puts these back, so a conversion added for findings must run on them too.
+    closedFindings: (rest.closedFindings ?? []).map(upgradeClosedFinding),
+    items: rest.items.map(upgradeItem),
+    closed: (rest.closed ?? decided ?? []).map((d) => ({
+      ...d,
+      kind: readKind(d.kind),
+      how: d.how ?? howFromOutcome(d.outcome),
+      ...d.item ? { item: upgradeItem(d.item) } : {}
+    }))
+  };
+}
+var ASKED_AS = /^asked as (i\d+)$/;
+function upgradeClosedFinding(f) {
+  const asker = f.how === "update" ? ASKED_AS.exec(f.outcome)?.[1] : void 0;
+  return asker && f.askedAs === void 0 ? { ...f, askedAs: asker } : f;
+}
+function upgradeItem(item) {
+  return {
+    ...item,
+    kind: readKind(item.kind),
+    at: item.at ?? null,
+    rec: recommendedOption(item.options, item.rec),
+    from: item.from ?? "update"
+  };
+}
+function words(text) {
+  return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+function recommendedOption(options, rec) {
+  if (!rec) return null;
+  const named = new Set(words(rec));
+  let best = null;
+  for (const option of options) {
+    const w = words(option);
+    if (w.length > words(best ?? "").length && w.every((x) => named.has(x))) best = option;
+  }
+  const label = (text) => text.match(/^\s*\(?([a-z]|\d{1,2})\s*[:.)]/i)?.[1]?.toLowerCase();
+  const byLabel = /^\s*(?:option\s+)?([a-z]|\d{1,2})\s*[.!]?\s*$/i.exec(rec)?.[1]?.toLowerCase();
+  return best ?? (byLabel ? options.find((o) => label(o) === byLabel) ?? null : null);
+}
+function howFromOutcome(outcome) {
+  if (outcome === "dismissed") return "dismissed";
+  if (outcome === EXPIRED) return "expired";
+  if (outcome === "done" || outcome === "you ran it") return "done";
+  if (outcome.startsWith(CLOSED_BY_CLAUDE)) return "claude";
+  return "update";
+}
+var CLOSED_BY_CLAUDE = "closed by Claude";
+function pruneClosed(ledger, keep) {
+  const pruned = (records) => records.filter((r, n) => n >= records.length - MAX_CLOSED || keep.has(r.id));
+  return { ...ledger, closed: pruned(ledger.closed), closedFindings: pruned(ledger.closedFindings) };
+}
+
 // ../hooks/model-text.ts
 var NL = "\n";
 function guidanceText(host) {
@@ -252,81 +327,6 @@ function promptNotes(host, ledger, prompt, told) {
   if (!closed && (inbox === told.inbox || isEmpty && told.inbox === null)) return { notes, told };
   notes.push(closed ? `${inbox}${NL}${closed}` : inbox);
   return { notes, told: { inbox, closed: ledger.closed.map((d) => d.id) } };
-}
-
-// ../hooks/ledger.ts
-var EMPTY = {
-  card: null,
-  items: [],
-  closed: [],
-  findings: [],
-  closedFindings: [],
-  prs: [],
-  nextId: 1,
-  turn: 0,
-  batchTurn: 0
-};
-var MAX_CLOSED = 12;
-var EXPIRED = "expired, unanswered";
-function readKind(kind) {
-  return kind === "task" || kind === "do" ? "task" : "question";
-}
-function upgradeLedger(ledger) {
-  const { notes, decided, ...rest } = ledger;
-  return {
-    ...rest,
-    findings: [...rest.findings ?? [], ...notes ?? []],
-    // reopenFinding puts these back, so a conversion added for findings must run on them too.
-    closedFindings: (rest.closedFindings ?? []).map(upgradeClosedFinding),
-    items: rest.items.map(upgradeItem),
-    closed: (rest.closed ?? decided ?? []).map((d) => ({
-      ...d,
-      kind: readKind(d.kind),
-      how: d.how ?? howFromOutcome(d.outcome),
-      ...d.item ? { item: upgradeItem(d.item) } : {}
-    }))
-  };
-}
-var ASKED_AS = /^asked as (i\d+)$/;
-function upgradeClosedFinding(f) {
-  const asker = f.how === "update" ? ASKED_AS.exec(f.outcome)?.[1] : void 0;
-  return asker && f.askedAs === void 0 ? { ...f, askedAs: asker } : f;
-}
-function upgradeItem(item) {
-  return {
-    ...item,
-    kind: readKind(item.kind),
-    at: item.at ?? null,
-    rec: recommendedOption(item.options, item.rec),
-    from: item.from ?? "update"
-  };
-}
-function words(text) {
-  return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-}
-function recommendedOption(options, rec) {
-  if (!rec) return null;
-  const named = new Set(words(rec));
-  let best = null;
-  for (const option of options) {
-    const w = words(option);
-    if (w.length > words(best ?? "").length && w.every((x) => named.has(x))) best = option;
-  }
-  const label = (text) => text.match(/^\s*\(?([a-z]|\d{1,2})\s*[:.)]/i)?.[1]?.toLowerCase();
-  const byLabel = /^\s*(?:option\s+)?([a-z]|\d{1,2})\s*[.!]?\s*$/i.exec(rec)?.[1]?.toLowerCase();
-  return best ?? (byLabel ? options.find((o) => label(o) === byLabel) ?? null : null);
-}
-function howFromOutcome(outcome) {
-  if (outcome === "dismissed") return "dismissed";
-  if (outcome === EXPIRED) return "expired";
-  if (outcome === "done" || outcome === "you ran it") return "done";
-  if (outcome.startsWith(CLOSED_BY_CLAUDE)) return "claude";
-  return "update";
-}
-var CLOSED_BY_CLAUDE = "closed by Claude";
-function pruneClosed(ledger, keep) {
-  const pruned = (records) => records.filter((r, n) => n >= records.length - MAX_CLOSED || keep.has(r.id));
-  return { ...ledger, closed: pruned(ledger.closed), closedFindings: pruned(ledger.closedFindings) };
 }
 
 // ../hooks/prs.ts
