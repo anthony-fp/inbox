@@ -891,7 +891,10 @@ function footer(d: Draw): string[] {
       ? [`↵ ${ROW_COPY.send}`, `esc ${ROW_COPY.cancel}`]
       : ['←→ pick', '↵ press', '↑↓ move', 'tab switch']
   const model = screen.modelName ? `inbox model ${screen.modelName} ` : 'no inbox model: set @inbox '
-  out.push(spread(` ${hints.map(h => s.dim(h)).join(` ${s.tone('sep', '·')} `)}`, s.dim(model), width))
+  const hintLine = ` ${hints.map(h => s.dim(h)).join(` ${s.tone('sep', '·')} `)}`
+  const fitsBesideHints = width - visibleLength(hintLine) - visibleLength(model) >= 2
+  if (fitsBesideHints) out.push(spread(hintLine, s.dim(model), width))
+  else out.push(fit(hintLine, width), fit(` ${s.dim(model.trimEnd())}`, width))
 
   return out
 }

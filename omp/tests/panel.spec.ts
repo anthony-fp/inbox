@@ -426,6 +426,15 @@ test('the footer names the inbox model, or says there is none', () => {
   expect(text(screenOf({ modelName: null }), INITIAL_UI)).toContain('no inbox model: set @inbox')
 })
 
+test('the footer puts the inbox model on its own line when it does not fit beside the hints', () => {
+  const lastLines = (screen: PanelScreen, width: number) => drawn(screen, INITIAL_UI, width).map(strip).slice(-2)
+  const [hints, named] = lastLines(screenOf(), 60)
+  expect(hints).toContain('tab switch')
+  expect(named).toContain('inbox model Claude Sonnet 4.5')
+  const [, none] = lastLines(screenOf({ modelName: null }), 48)
+  expect(none).toContain('no inbox model: set @inbox')
+})
+
 test('the demo says its presses send nothing', () => {
   expect(text(screenOf({ isDemo: true }), INITIAL_UI)).toContain('Presses send nothing.')
 })

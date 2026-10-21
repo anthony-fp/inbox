@@ -4088,7 +4088,12 @@ function footer(d) {
     out.push(...indented(ui.notice.text, 1, width, 2, (t) => s.tone("error", t)));
   const hints = ui.typing !== null ? [`\u21B5 ${ROW_COPY.send}`, `esc ${ROW_COPY.cancel}`] : ["\u2190\u2192 pick", "\u21B5 press", "\u2191\u2193 move", "tab switch"];
   const model = screen.modelName ? `inbox model ${screen.modelName} ` : "no inbox model: set @inbox ";
-  out.push(spread(` ${hints.map((h) => s.dim(h)).join(` ${s.tone("sep", "\xB7")} `)}`, s.dim(model), width));
+  const hintLine = ` ${hints.map((h) => s.dim(h)).join(` ${s.tone("sep", "\xB7")} `)}`;
+  const fitsBesideHints = width - visibleLength(hintLine) - visibleLength(model) >= 2;
+  if (fitsBesideHints)
+    out.push(spread(hintLine, s.dim(model), width));
+  else
+    out.push(fit(hintLine, width), fit(` ${s.dim(model.trimEnd())}`, width));
   return out;
 }
 function render(screen, ui, width, now, style, height) {
