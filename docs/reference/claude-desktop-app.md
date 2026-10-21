@@ -1,6 +1,6 @@
 # The Claude desktop app
 
-Startup and Reply focus were rechecked on 2026-10-15 in Claude desktop 2.42304.0 with its bundled Claude Code engine 2.1.299. Other results below retain their original dates and versions. The initial reference used desktop 2.31226.0 and 2.31226.1, with engine copies from 2.1.289 through 2.1.295.
+Clicks, typed answers, layout, queued presses, subagents and nested sessions were checked on 2026-10-21 in Claude desktop 3.1623.0 with engine 2.1.304 (see "Live checks on desktop 3.1623.0"). Startup and Reply focus were rechecked on 2026-10-15 in Claude desktop 2.42304.0 with its bundled Claude Code engine 2.1.299. Other results below retain their original dates and versions. The initial reference used desktop 2.31226.0 and 2.31226.1, with engine copies from 2.1.289 through 2.1.295.
 
 The desktop app is the inbox's third client, beside the terminal and Codex. Its Code mode runs Claude Code sessions, so the inbox mod (the plugin code in `hooks/`) can run there. Its Claude mode is the chat side of the app; whether it can host any part of the inbox is unknown.
 
@@ -53,6 +53,19 @@ What follows from it:
 - **Button presses** carry `surface: 'desktop'`. Native buttons drew and clicks worked.
 - **Hotkeys do nothing.** With the pane focused, pressing a `Button`'s `hotkey` (`g`, `j`, `k`) logged no press. Only clicks reached the mod.
 - **Not covered:** `keybindings.json`, `/clear` and `/resume` in the app, `Link` targets and `session.detach`.
+
+## Live checks on desktop 3.1623.0
+
+On 2026-10-21, inbox 0.2.10 ran in local Code-mode sessions of Claude desktop 3.1623.0, in a test VM. The app held engine copies 2.1.299 and 2.1.304, and the sessions ran 2.1.304. Claude ran on Haiku 5.5.
+
+- **Clicks.** A tab, a question's option, Dismiss, a finding's Explain and Undo each took the first click. One click at the lower edge of Undo did nothing. It was not repeated, so whether the hit area is short there is open.
+- **Typed answers.** An answer typed in the message box closed the open question with the typed words as its answer. So the inbox still counts a typed prompt as the person's words. The transcript row of that prompt has `origin` `{"kind":"human"}`, and a press's row has `{"kind":"plugin","name":"inbox","asUser":true}`.
+- **Layout.** The docked inbox pane takes the right-hand column, where the app's session cards (Environment, Context, Connectors) sit. The cards can open at the same time, as a floating panel beside the pane. A Plan pane stacks under the inbox pane.
+- **Band.** It draws while a permission request shows in the conversation. It draws nothing while the "Claude proposed a plan" card is at the end of the conversation, and comes back once the plan is rejected.
+- **A press during a running turn.** The row read "Delivery unconfirmed" at once, and the transcript got a `queue-operation` enqueue row that was never dequeued. Quitting the app before the turn ended lost the message: on reopening, the app sent its own "The app was quit while you were working" message, and did not bring the press's message back as a held message. Pressing again while Claude was idle delivered the message once, but the row then kept reading "Queued" ([#22](https://github.com/petekp/inbox/issues/22)).
+- **Subagents.** The app ran a background subagent and a fork subagent in the background. The saved `turnsStarted` rose once per main reply, and each main reply ran one inbox update. An item a subagent recorded landed in the session's inbox. Stop while a subagent still ran left nothing reading "working" in the pane or the band.
+- **Nested sessions.** A task Claude started in a nested session turned the inbox on there, with its own band and its own saved session. Its question stayed out of the parent session's inbox. Each nested session takes one of the 40 sessions the store keeps (`KEPT_SESSIONS`).
+- **Not seen:** a Copy action, and the sidebar.
 
 ## Modes and tabs
 
@@ -214,7 +227,7 @@ Read this before designing any desktop UI for the inbox. It lists what a mod can
 
 | Element | What desktop does | Status | Source |
 |---|---|---|---|
-| Pane placement | Opens docked (`placement: 'dock'`) and focused. `bodyColumns` went from 36 to 69 as the person widened it, and `bodyRows` was 42. The types describe placement only in terminal terms. Where the pane sits among the app's own panes is unknown. | verified live | desktop.md:51; types:10241 (`Pane`), 10267 (`Pane.placement`); mods.md:231. mods.md:623 says docking is unknown, which the live probe supersedes. |
+| Pane placement | Opens docked (`placement: 'dock'`) and focused. `bodyColumns` went from 36 to 69 as the person widened it, and `bodyRows` was 42. The types describe placement only in terminal terms. In desktop 3.1623.0 the pane takes the right-hand column, with the session cards floating beside it and a Plan pane under it (live, 2026-10-21). | verified live | desktop.md:51; types:10241 (`Pane`), 10267 (`Pane.placement`); mods.md:231. mods.md:623 says docking is unknown, which the live probe supersedes. |
 | Pane size request | `rows` and `columns` on `$.ui.open` are requests. A size the person dragged wins. The dock ignores `rows`, and an inline pane ignores `columns`. | stated | types:7383-7402 (`PaneOpenArgs.rows`, `.columns`) |
 | Older desktop | Places no pane. `$.ui.open` answers `isPlaced: false` until a surface that places panes attaches. | stated | types:13994 (`UiOpenResult`) |
 | Engine pane tabs | The label is the pane's `title`, or its id, and nothing else. A title may hold emoji. Control characters are refused. Tabs exist only while 2 or more panes are open. A click on a tab switches panes, and the engine does that. Re-opening the same id changes the title. No prop styles, sizes, colors or replaces a tab. Whether desktop draws these tabs at all is unknown. | stated. No customization: inferred. Desktop drawing: unknown. | types:7342-7346 (`PaneOpenArgs.title`), 10249-10253 (`Pane.title`), 7333-7403 (`PaneOpenArgs`); mods.md:586 |
@@ -302,7 +315,7 @@ Read this before designing any desktop UI for the inbox. It lists what a mod can
 - **How a Client maps a click to what it drew.** Pointer positions are whole cells, but desktop text is proportional. Check whether a Box with a set width in cells lines up with the cells the pointer reports.
 - **Whether a Client keeps the pane's focus, takes keys after a click, and draws its own hover.** Draw tabs in a Client, then click, type and hover.
 - **Whether desktop draws engine pane tabs, and whether they switch on click.** Open two mod panes in a desktop session, then screenshot and click.
-- **Where a mod pane docks among the app's panes, whether Cmd+\ closes it, and whether it pops out.** Try each in a desktop session.
+- **Whether Cmd+\ closes a mod pane, and whether it pops out.** Try each in a desktop session. Where it docks is in "Live checks on desktop 3.1623.0".
 - **Which `borderStyle` names other than `single` desktop honors.** Draw one Box per name and screenshot.
 - **Text and Button hover, and scope groups, on desktop.** Draw each inside a keyed Box and hover.
 - **Whether Buttons inside a `display: 'none'` Box stay hidden.** Draw one and screenshot.
