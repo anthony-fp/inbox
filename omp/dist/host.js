@@ -2652,7 +2652,7 @@ var CLOSE_SCHEMA = {
     id: { type: "string", description: "The id of the open item or finding, such as i35 or f32." },
     answer: {
       type: "string",
-      description: "The user's answer, in their words and at most 8, when their own message answered it."
+      description: `The user's answer, at most 8 words, when their own message answered it. Use their words, but when they picked by position or pointing, as "the second one", give the option they picked.`
     },
     reason: {
       type: "string",

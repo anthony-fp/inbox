@@ -290,7 +290,7 @@
   },
   {
     "name": "close-answered-says-answer",
-    "about": "The user answers by position, so the agent closes the question with the option they meant and says in its reply which one it took them to mean.",
+    "about": "The user answers by position, so the agent closes the question with the option they picked, by name, and says in its reply which one it took them to mean.",
     "ledger": {
       "nextId": 5,
       "items": [
@@ -314,7 +314,7 @@
         "count": 1,
         "match": {
           "id": "^i3$",
-          "answer": "second|in.?memory"
+          "answer": "in.?memory"
         }
       },
       {
