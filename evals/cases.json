@@ -337,7 +337,10 @@
       {
         "dropped": 0
       }
-    ]
+    ],
+    "min": {
+      "claude": 0.6
+    }
   },
   {
     "name": "stated-recommendation-kept",

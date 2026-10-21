@@ -81,5 +81,223 @@
         "claude-opus-5-5"
       ]
     }
+  },
+  "model": {
+    "claude unrelated-progress-keeps-questions": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "44f3e56410bbd1e7003ee39807981f0a6a5892a1",
+      "date": "2026-10-21T15:09:47.710Z",
+      "models": [
+        "claude-sonnet-5-5"
+      ]
+    },
+    "claude dismissed-question-stays-closed": {
+      "passed": 17,
+      "runs": 20,
+      "commit": "44f3e56410bbd1e7003ee39807981f0a6a5892a1",
+      "date": "2026-10-21T15:09:47.710Z",
+      "models": [
+        "claude-sonnet-5-5"
+      ]
+    },
+    "claude old-dismissed-question-stays-closed": {
+      "passed": 14,
+      "runs": 20,
+      "commit": "44f3e56410bbd1e7003ee39807981f0a6a5892a1",
+      "date": "2026-10-21T15:09:47.710Z",
+      "models": [
+        "claude-sonnet-5-5"
+      ]
+    },
+    "claude device-command-is-terminal": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "44f3e56410bbd1e7003ee39807981f0a6a5892a1",
+      "date": "2026-10-21T15:09:47.710Z",
+      "models": [
+        "claude-sonnet-5-5"
+      ]
+    },
+    "claude task-about-finding-replaces-it": {
+      "passed": 16,
+      "runs": 20,
+      "commit": "44f3e56410bbd1e7003ee39807981f0a6a5892a1",
+      "date": "2026-10-21T15:09:47.710Z",
+      "models": [
+        "claude-sonnet-5-5"
+      ]
+    },
+    "claude done-message-blocked-task": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "44f3e56410bbd1e7003ee39807981f0a6a5892a1",
+      "date": "2026-10-21T15:09:47.710Z",
+      "models": [
+        "claude-sonnet-5-5"
+      ]
+    },
+    "claude done-message-independent-task": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "44f3e56410bbd1e7003ee39807981f0a6a5892a1",
+      "date": "2026-10-21T15:09:47.710Z",
+      "models": [
+        "claude-sonnet-5-5"
+      ]
+    },
+    "claude dialog-dismissed-question-waits": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "44f3e56410bbd1e7003ee39807981f0a6a5892a1",
+      "date": "2026-10-21T15:09:47.710Z",
+      "models": [
+        "claude-sonnet-5-5"
+      ]
+    },
+    "claude dialog-escaped-no-reply": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "44f3e56410bbd1e7003ee39807981f0a6a5892a1",
+      "date": "2026-10-21T15:09:47.710Z",
+      "models": [
+        "claude-sonnet-5-5"
+      ]
+    },
+    "claude dialog-about-finding-escaped": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "44f3e56410bbd1e7003ee39807981f0a6a5892a1",
+      "date": "2026-10-21T15:09:47.710Z",
+      "models": [
+        "claude-sonnet-5-5"
+      ]
+    },
+    "claude codex-open-dialog-is-question": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "44f3e56410bbd1e7003ee39807981f0a6a5892a1",
+      "date": "2026-10-21T15:09:47.710Z",
+      "models": [
+        "claude-sonnet-5-5"
+      ]
+    },
+    "claude answered-question-follow-up-added": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "44f3e56410bbd1e7003ee39807981f0a6a5892a1",
+      "date": "2026-10-21T15:09:47.710Z",
+      "models": [
+        "claude-sonnet-5-5"
+      ]
+    },
+    "codex unrelated-progress-keeps-questions": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "44f3e56410bbd1e7003ee39807981f0a6a5892a1",
+      "date": "2026-10-21T15:09:47.710Z",
+      "models": [
+        "gpt-6.1-sol (requested)"
+      ]
+    },
+    "codex dismissed-question-stays-closed": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "44f3e56410bbd1e7003ee39807981f0a6a5892a1",
+      "date": "2026-10-21T15:09:47.710Z",
+      "models": [
+        "gpt-6.1-sol (requested)"
+      ]
+    },
+    "codex old-dismissed-question-stays-closed": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "44f3e56410bbd1e7003ee39807981f0a6a5892a1",
+      "date": "2026-10-21T15:09:47.710Z",
+      "models": [
+        "gpt-6.1-sol (requested)"
+      ]
+    },
+    "codex device-command-is-terminal": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "44f3e56410bbd1e7003ee39807981f0a6a5892a1",
+      "date": "2026-10-21T15:09:47.710Z",
+      "models": [
+        "gpt-6.1-sol (requested)"
+      ]
+    },
+    "codex task-about-finding-replaces-it": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "44f3e56410bbd1e7003ee39807981f0a6a5892a1",
+      "date": "2026-10-21T15:09:47.710Z",
+      "models": [
+        "gpt-6.1-sol (requested)"
+      ]
+    },
+    "codex done-message-blocked-task": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "44f3e56410bbd1e7003ee39807981f0a6a5892a1",
+      "date": "2026-10-21T15:09:47.710Z",
+      "models": [
+        "gpt-6.1-sol (requested)"
+      ]
+    },
+    "codex done-message-independent-task": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "44f3e56410bbd1e7003ee39807981f0a6a5892a1",
+      "date": "2026-10-21T15:09:47.710Z",
+      "models": [
+        "gpt-6.1-sol (requested)"
+      ]
+    },
+    "codex dialog-dismissed-question-waits": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "44f3e56410bbd1e7003ee39807981f0a6a5892a1",
+      "date": "2026-10-21T15:09:47.710Z",
+      "models": [
+        "gpt-6.1-sol (requested)"
+      ]
+    },
+    "codex dialog-escaped-no-reply": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "44f3e56410bbd1e7003ee39807981f0a6a5892a1",
+      "date": "2026-10-21T15:09:47.710Z",
+      "models": [
+        "gpt-6.1-sol (requested)"
+      ]
+    },
+    "codex dialog-about-finding-escaped": {
+      "passed": 19,
+      "runs": 20,
+      "commit": "44f3e56410bbd1e7003ee39807981f0a6a5892a1",
+      "date": "2026-10-21T15:09:47.710Z",
+      "models": [
+        "gpt-6.1-sol (requested)"
+      ]
+    },
+    "codex codex-open-dialog-is-question": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "44f3e56410bbd1e7003ee39807981f0a6a5892a1",
+      "date": "2026-10-21T15:09:47.710Z",
+      "models": [
+        "gpt-6.1-sol (requested)"
+      ]
+    },
+    "codex answered-question-follow-up-added": {
+      "passed": 20,
+      "runs": 20,
+      "commit": "44f3e56410bbd1e7003ee39807981f0a6a5892a1",
+      "date": "2026-10-21T15:09:47.710Z",
+      "models": [
+        "gpt-6.1-sol (requested)"
+      ]
+    }
   }
 }

@@ -1,6 +1,6 @@
 # Evals the release can trust
 
-Status: building. Steps 1 to 3 are done. Step 4 runs on the 0.2.10 candidate.
+Status: built. The follow-ups are under "Not in these steps".
 
 Every release relies on the two eval suites in `./scripts/eval.sh` (AGENTS.md, "Text a model reads"). An audit of both, checked by two adversarial reviews, found that a green run shows only that nothing broke badly on these fixtures. It does not show that a wording change is safe. This plan makes a run's result mean what the release takes it to mean.
 
@@ -76,6 +76,12 @@ M2, restoring the old rule for unrelated items, waits for step 4, since its case
 - Read the failure lines of the four flipping cases, and fix the fixtures where they are ambiguous. A case that needs a rule change in model-read text is a separate change, with its own full rerun and approval.
 - Drop the stale Codex override.
 - Run the key cases 20 times to set a baseline. These are the dismissed cases, the four flipping cases, and the cases for 0.2.10's changed rules. The baseline is stored with its commit, date and model ids. The runner then reports a case as below its baseline when a one-sided binomial test says so, beside the fixed bar.
+
+Results, on the 0.2.10 candidate:
+
+- The full suites under the fixed harness found two red cases on Sonnet that earlier runs, at default effort and with the runner's own rules loaded, had hidden. `task-about-finding-replaces-it` went from 46 of 48 on 0.2.9's NEW rule to 16 of 32 after the dialog clause was added to it. Moving the clause after the finding sentences brought it to 16 of 20, with every dialog case still passing. `done-message-independent-task` passed 13 of 32: Sonnet closed an unrelated question with reasons such as "not related to this exchange". The update now ignores such a close, and the case passes 20 of 20.
+- The model suite's baselines cover the dismissed cases, the four flipping cases, the cases for 0.2.10's changed rules, and the answered-question follow-up: 20 runs each on Sonnet and Codex (`model-2026-10-21T15-09-47.710Z.json`). The agent suite's cover `record-question`, `no-finding-user-only` and `close-answered-says-answer` on Claude, Codex and omp (`agent-2026-10-21T07-16-18.231Z.json`).
+- `old-dismissed-question-stays-closed` passes 14 of 20 on Sonnet: in 6 runs the inbox model re-added the dismissed question, and the code dropped it, so the person never saw it. Its bar on Sonnet is 0.6, its measured rate, and its baseline catches a decline.
 
 ## The rerun rule
 
