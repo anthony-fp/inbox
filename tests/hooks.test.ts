@@ -2295,94 +2295,161 @@ test('tool calls during a turn leave the saved session alone, and the turn’s u
   expect(JSON.parse(stored.get('s:session-1')!).presence.turnsApplied).toBe(1)
 })
 
+const PUSH = { command: 'git push', description: 'Push main to origin' }
+const PUSH_ROW = 'Allow push main to origin?'
+
+function permissionCalls($: Engine) {
+  let id = 0
+  const fresh = () => `use-${++id}`
+  return {
+    fresh,
+    ask(use: string | null) {
+      toolVerdict = 'ask'
+      return $.tool.check({ tool: 'Bash', input: PUSH, ...(use === null ? {} : { tool_use_id: use }) } as never)
+    },
+    run(use: string) {
+      toolVerdict = 'allow'
+      return $.tool.call({ tool: 'Bash', ...PUSH, tool_use_id: use } as never)
+    },
+    toolRow(use: string, isRunning: boolean) {
+      return $.ui.mount({
+        plugin: 'inbox',
+        surface: 'terminal',
+        component: 'ToolUse',
+        props: { tool_use_id: use, tool: 'Bash', input: PUSH, isRunning, isErrored: false, isInterrupted: false },
+      } as never)
+    },
+    groupRow(calls: { use: string; isRunning: boolean }[]) {
+      return $.ui.mount({
+        plugin: 'inbox',
+        surface: 'terminal',
+        component: 'ToolGroup',
+        props: {
+          isActive: true,
+          isExpanded: false,
+          calls: calls.map(c => ({
+            tool_use_id: c.use,
+            tool: 'Bash',
+            input: PUSH,
+            isRunning: c.isRunning,
+            isErrored: false,
+            isInterrupted: false,
+          })),
+        },
+      } as never)
+    },
+  }
+}
+
 test('where classic.PermissionRequest is skipped, an ask shows its row only if the call is still waiting after the delay', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [], { HERDR_PANE_ID: 'p1' })
-  const push = { command: 'git push', description: 'Push main to origin' }
-  const ask = () => {
-    toolVerdict = 'ask'
-    return $.tool.check({ tool: 'Bash', input: push } as never)
-  }
-  const run = () => {
-    toolVerdict = 'allow'
-    return $.tool.call({ tool: 'Bash', ...push } as never)
-  }
+  const calls = permissionCalls($)
 
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
-  await ask()
+  await calls.ask('u1')
   await clock.advance(PERMISSION_FALLBACK_DELAY_MS - 1)
   expect(sidebarLines().at(-1)).toBe('')
   await clock.advance(1)
   await clock.settle()
-  expect(sidebarLines().at(-1)).toBe('Allow push main to origin?')
-  await run()
+  expect(sidebarLines().at(-1)).toBe(PUSH_ROW)
+  await calls.run('u1')
   await clock.settle()
   expect(sidebarLines().at(-1)).toBe('')
 
   const lines = sidebarLines().length
-  await ask()
+  await calls.ask('u2')
   await clock.advance(500)
-  await run()
+  await calls.run('u2')
   await clock.advance(PERMISSION_FALLBACK_DELAY_MS)
-  await clock.settle()
-  expect(
-    sidebarLines()
-      .slice(lines)
-      .every(line => line === ''),
-  ).toBe(true)
-
-  await ask()
-  await clock.advance(2000)
-  await clock.settle()
-  expect(sidebarLines().at(-1)).toBe('Allow push main to origin?')
-  await run()
-  await clock.settle()
-  expect(sidebarLines().at(-1)).toBe('')
-})
-
-test('a tool row that starts running ends the wait for a permission row, and clears one already shown', async ($, on) => {
-  const clock = mock.clock(on, { now: 1_000_000 })
-  world($, on, [], { HERDR_PANE_ID: 'p1' })
-  const push = { command: 'git push', description: 'Push main to origin' }
-  const running = () =>
-    $.ui.mount({
-      plugin: 'inbox',
-      surface: 'terminal',
-      component: 'ToolUse',
-      props: { tool_use_id: 'u1', tool: 'Bash', input: push, isRunning: true, isErrored: false, isInterrupted: false },
-    } as never)
-
-  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
-  toolVerdict = 'ask'
-  await $.tool.check({ tool: 'Bash', input: push } as never)
-  await clock.advance(500)
-  await running()
-  const lines = sidebarLines().length
-  await clock.advance(PERMISSION_FALLBACK_DELAY_MS * 8)
   await clock.settle()
   expect(sidebarLines().slice(lines)).toEqual([])
 
-  await $.tool.check({ tool: 'Bash', input: push } as never)
-  await clock.advance(PERMISSION_FALLBACK_DELAY_MS + 1)
+  await calls.ask('u3')
+  await clock.advance(2000)
   await clock.settle()
-  expect(sidebarLines().at(-1)).toBe('Allow push main to origin?')
-  await running()
+  expect(sidebarLines().at(-1)).toBe(PUSH_ROW)
+  await calls.run('u3')
   await clock.settle()
   expect(sidebarLines().at(-1)).toBe('')
 })
 
-test('where classic.PermissionRequest runs, it is the only source of the permission row', async ($, on) => {
+test('a query without a tool_use_id never arms the permission row', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [], { HERDR_PANE_ID: 'p1' })
-  const push = { command: 'git push', description: 'Push main to origin' }
+  const calls = permissionCalls($)
 
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
-  await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: push } as never)
-  toolVerdict = 'ask'
-  await $.tool.check({ tool: 'Bash', input: push } as never)
-  toolVerdict = 'allow'
-  await $.tool.call({ tool: 'Bash', ...push } as never)
+  const lines = sidebarLines().length
+  await calls.ask(null)
   await clock.advance(PERMISSION_FALLBACK_DELAY_MS * 2)
+  await clock.settle()
+  expect(sidebarLines().slice(lines)).toEqual([])
+})
+
+test('once classic.PermissionRequest has run, an ask draws no row of its own', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [], { HERDR_PANE_ID: 'p1' })
+  const calls = permissionCalls($)
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: PUSH } as never)
+  await clock.settle()
+  expect(sidebarLines().at(-1)).toBe(PUSH_ROW)
+  await calls.run('u0')
+  await clock.settle()
+  expect(sidebarLines().at(-1)).toBe('')
+
+  const lines = sidebarLines().length
+  await calls.ask('u1')
+  await clock.advance(PERMISSION_FALLBACK_DELAY_MS * 2)
+  await clock.settle()
+  expect(sidebarLines().slice(lines)).toEqual([])
+})
+
+test('a tool row or group that reports the call running ends the wait and clears the row; one that does not leaves it alone', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [], { HERDR_PANE_ID: 'p1' })
+  const calls = permissionCalls($)
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await calls.ask('u1')
+  await calls.toolRow('u1', false)
+  await calls.groupRow([{ use: 'u1', isRunning: false }])
+  await calls.toolRow('other', true)
+  await clock.advance(PERMISSION_FALLBACK_DELAY_MS + 1)
+  await clock.settle()
+  expect(sidebarLines().at(-1)).toBe(PUSH_ROW)
+  await calls.toolRow('u1', false)
+  await clock.settle()
+  expect(sidebarLines().at(-1)).toBe(PUSH_ROW)
+  await calls.toolRow('u1', true)
+  await clock.settle()
+  expect(sidebarLines().at(-1)).toBe('')
+
+  const lines = sidebarLines().length
+  await calls.ask('u2')
+  await clock.advance(500)
+  await calls.toolRow('u2', true)
+  await clock.advance(PERMISSION_FALLBACK_DELAY_MS * 4)
+  await clock.settle()
+  expect(sidebarLines().slice(lines)).toEqual([])
+
+  await calls.ask('u3')
+  await clock.advance(500)
+  await calls.groupRow([
+    { use: 'x', isRunning: false },
+    { use: 'u3', isRunning: true },
+  ])
+  await clock.advance(PERMISSION_FALLBACK_DELAY_MS * 4)
+  await clock.settle()
+  expect(sidebarLines().slice(lines)).toEqual([])
+
+  await calls.ask('u4')
+  await clock.advance(PERMISSION_FALLBACK_DELAY_MS + 1)
+  await clock.settle()
+  expect(sidebarLines().at(-1)).toBe(PUSH_ROW)
+  await calls.groupRow([{ use: 'u4', isRunning: true }])
   await clock.settle()
   expect(sidebarLines().at(-1)).toBe('')
 })

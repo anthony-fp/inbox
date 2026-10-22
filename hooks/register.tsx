@@ -572,8 +572,8 @@ let turnBox: string | null = null
 let isDialogDismissed = false
 /** True once a classic.PermissionRequest hook has run, which makes the tool.check fallback unnecessary. */
 let hasPermissionRequestHook = false
-/** The calls whose tool.check asked and that have not finished, by `callKey`, as the dialogs are. */
-const askedCalls = new Set<string>()
+/** The calls whose tool.check asked and that have not finished: tool_use_id to `callKey`, the key their dialog has. */
+const askedCalls = new Map<string, string>()
 let fetchingPrs: Promise<void> = Promise.resolve()
 let nextFetchFindsBranchPr: boolean | null = null
 let recordedRows: { isDemo: boolean; ids: RowRecord<Tab> } | null = null
@@ -708,6 +708,18 @@ async function setStopFromLastReply($: EngineInterface) {
   const last = (await $.session.messages().catch(() => [])).at(-1)
   const message = last?.role === 'assistant' ? last.text : ''
   await setStop($, { ...stopOfMessage(message), at: await $.clock.now() })
+}
+
+/** Ends the wait for a permission row, and closes the row, for a call that has started running. */
+function endWaitFor($: EngineInterface, id: string | undefined) {
+  const key = id ? askedCalls.get(id) : undefined
+  if (!id || key === undefined) return
+  askedCalls.delete(id)
+  // Drawing is pure, so the dialog closes after the render returns.
+  void $.clock
+    .sleep(0)
+    .then(() => closeDialogs($, key))
+    .catch(() => undefined)
 }
 
 function redraw($: EngineInterface) {
@@ -2440,7 +2452,7 @@ export const register: Register = on => {
     const key = callKey(String(e.tool), input)
     const run = () =>
       clearingDialog($, key, () => next(e)).finally(() => {
-        askedCalls.delete(key)
+        if (e.tool_use_id) askedCalls.delete(e.tool_use_id)
       })
     if (e.agentId) return run()
     const line = toolActivity(String(e.tool), input)
@@ -2490,13 +2502,14 @@ export const register: Register = on => {
     const r = await next(e)
     const input = (e.input ?? {}) as Record<string, unknown>
     const key = callKey(e.tool, input)
+    const id = e.tool_use_id
     const isDialogAsk = isOn && !hasPermissionRequestHook && !e.agentId && r.decision === 'ask'
-    if (!isDialogAsk || e.tool === 'AskUserQuestion') return r
-    askedCalls.add(key)
+    if (!id || !isDialogAsk || e.tool === 'AskUserQuestion') return r
+    askedCalls.set(id, key)
     void $.clock
       .sleep(PERMISSION_FALLBACK_DELAY_MS)
       .then(async () => {
-        if (!askedCalls.has(key) || hasPermissionRequestHook) return
+        if (!askedCalls.has(id) || hasPermissionRequestHook) return
         await openDialog($, { kind: 'permission', text: permissionText(e.tool, input), key })
       })
       .catch(() => undefined)
@@ -2681,15 +2694,14 @@ export const register: Register = on => {
   // auto-mode classifier approved the call. Live, 2026-10-22: isRunning stayed false while a
   // dialog was open and turned true when the tool started.
   on('ui.render', { component: 'ToolUse' }, ($, e, next) => {
-    if (isOn && e.props.isRunning) {
-      const key = callKey(e.props.tool, (e.props.input ?? {}) as Record<string, unknown>)
-      askedCalls.delete(key)
-      // Drawing is pure, so the dialog closes after the render returns.
-      void $.clock
-        .sleep(0)
-        .then(() => closeDialogs($, key))
-        .catch(() => undefined)
-    }
+    if (isOn && e.props.isRunning) endWaitFor($, e.props.tool_use_id)
+
+    return next(e)
+  })
+
+  // A call folded into a collapsed group draws no ToolUse row; the group carries its state.
+  on('ui.render', { component: 'ToolGroup' }, ($, e, next) => {
+    if (isOn) for (const call of e.props.calls) if (call.isRunning) endWaitFor($, call.tool_use_id)
 
     return next(e)
   })
