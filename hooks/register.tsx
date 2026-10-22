@@ -25,6 +25,8 @@ import type {
   PrView,
   PrViews,
   LastAction,
+  ModTab,
+  PlanState,
   PressKind,
   RowNote,
   Stop,
@@ -32,7 +34,8 @@ import type {
 } from '../types'
 import { addFile, fileKind, isDocument, isUrl, mergeFiles, SHOW, whereLabel } from './files'
 import type { FileKind } from './files'
-import { parsePlan, planNote, planPath } from './plan'
+import { parsePlan, planLines, planNote, planPath } from './plan'
+import type { PlanView } from './plan'
 import {
   NO_SESSION,
   PRESENT,
@@ -180,7 +183,6 @@ import {
   drawnLists,
   emptyText,
   ROW_TABS,
-  TABS,
   CLOSED_MARKS,
   DEMO_NOTICE,
   groupEmptyText,
@@ -217,7 +219,17 @@ import {
   rowAfterClose,
   shortAgo,
 } from './view'
-import type { ActionEmphasis, ActionIcon, DrawnEntry, InboxView, ModLook, PlannedKey, RowView, RowWait } from './view'
+import type {
+  ActionEmphasis,
+  ActionIcon,
+  DrawnEntry,
+  DrawnLists,
+  InboxView,
+  ModLook,
+  PlannedKey,
+  RowView,
+  RowWait,
+} from './view'
 import { agentTools, recordClose, recordItem } from './tools'
 import type { UndoProps } from './undo-client'
 import {
@@ -241,9 +253,35 @@ import type { LinksProps } from './links-client'
 import type { RowProps } from './row-client'
 import { TAB_COUNT_GAP, TAB_HEIGHT, type TabsProps } from './tabs-client'
 
-const TAB = atom({ plugin: 'inbox', key: 'tab' } as const, 'needsYou' as Tab)
+export type { ModTab }
+
+/** The Claude Code pane's tabs, in order. Codex and omp keep the shared `TABS`. */
+export const MOD_TABS: readonly { id: ModTab; label: string; hotkey: string }[] = [
+  { id: 'now', label: 'Now', hotkey: '1' },
+  { id: 'files', label: 'Files', hotkey: '2' },
+  { id: 'prs', label: 'PRs', hotkey: '3' },
+]
+
+/** The Now tab's rows, in the order it draws them: Needs you, then Findings. The plan between them takes no row. */
+export function nowRows<R>(lists: DrawnLists<R>): R[] {
+  return [...lists.byTab.needsYou, ...lists.byTab.findings]
+}
+
+function nowWaits(view: InboxView): RowWait[] {
+  const waits = listWaits(view)
+
+  return [...waits.needsYou, ...waits.findings]
+}
+
+function modTabLabel(tab: ModTab): string {
+  return MOD_TABS.find(t => t.id === tab)?.label ?? tab
+}
+
+const TAB = atom({ plugin: 'inbox', key: 'tab' } as const, 'now' as ModTab)
 const NO_CURSOR: Cursor = { id: null, index: 0, openedAt: 0 }
-const NO_SELECTION: Record<Tab, Cursor> = { needsYou: NO_CURSOR, findings: NO_CURSOR, prs: NO_CURSOR }
+const NO_SELECTION: Record<ModTab, Cursor> = { now: NO_CURSOR, files: NO_CURSOR, prs: NO_CURSOR }
+const NO_PLAN: PlanState = { sessionId: '', view: null, error: null }
+const PLAN = atom({ plugin: 'inbox', key: 'plan' } as const, NO_PLAN)
 const SELECTION = atom({ plugin: 'inbox', key: 'selection' } as const, NO_SELECTION)
 const THEME = atom({ plugin: 'inbox', key: 'theme' } as const, '')
 const DIALOGS = atom({ plugin: 'inbox', key: 'dialogs' } as const, [] as Dialog[])
@@ -582,14 +620,14 @@ let hasPermissionRequestHook = false
 const askedCalls = new Map<string, string>()
 let fetchingPrs: Promise<void> = Promise.resolve()
 let nextFetchFindsBranchPr: boolean | null = null
-let recordedRows: { isDemo: boolean; ids: RowRecord<Tab> } | null = null
+let recordedRows: { isDemo: boolean; ids: RowRecord<ModTab> } | null = null
 let isInlinePane = false
 let isInlineTerminalPane = false
 let terminalInlineSize: string | null = null
 let inlineSize: string | null = null
 type PendingUndoScroll = {
   key: string
-  tab: Tab
+  tab: ModTab
   cursor: Cursor
   block: UiScrollBlock
   expiresAt: number
@@ -1014,19 +1052,27 @@ async function notePrompt(
 
 /**
  * A reload keeps $.state, so a running session can still hold its parts in the separate fields of an older build,
- * `notes` as its tab, and the Needs you tab as `waiting`, and drafts saved as bare text.
+ * one of the old Needs you and Findings tabs (or their older names `waiting` and `notes`) where Now is, and drafts
+ * saved as bare text.
  */
 async function upgradeState($: EngineInterface): Promise<Ledger> {
   const now = await $.clock.now()
   const [session] = await Promise.all([
     upgradeDrawn($),
-    update($, TAB, t => ((t as string) === 'notes' ? 'findings' : (t as string) === 'waiting' ? 'needsYou' : t)),
-    update($, SELECTION, ({ waiting, ...s }: Record<Tab, Cursor> & { waiting?: Cursor }) => {
-      const cursors: Record<Tab, Cursor> = { ...NO_SELECTION, ...(waiting ? { needsYou: waiting } : {}), ...s }
+    update($, TAB, t => (MOD_TABS.some(m => m.id === t) ? t : 'now')),
+    update($, SELECTION, (saved: Partial<Record<ModTab | Tab | 'waiting', Cursor>>) => {
+      const { now, files, prs, needsYou, findings, waiting } = saved
+      // The old Needs you and Findings cursors become Now's: the one with an open row, Needs you's first.
+      const old = [needsYou, waiting, findings].find(c => c && c.id !== null)
+      const cursors: Record<ModTab, Cursor> = {
+        now: now ?? old ?? NO_CURSOR,
+        files: files ?? NO_CURSOR,
+        prs: prs ?? NO_CURSOR,
+      }
       // A cursor saved before `openedAt` existed: no click opened its row in a way that still guards it.
       return Object.fromEntries(
         Object.entries(cursors).map(([t, c]) => [t, { ...c, openedAt: c.openedAt ?? 0 }]),
-      ) as Record<Tab, Cursor>
+      ) as Record<ModTab, Cursor>
     }),
     // Old builds saved the group kinds as `decide` and `do`, and Findings' one fold as `finding`, now one per kind.
     update($, UNFOLDED, u =>
@@ -1089,7 +1135,7 @@ async function openInbox($: EngineInterface) {
   // asking for the pane, and below 144 columns, once the person has closed it, leaves it unplaced.
   await openPane($)
   const { view } = await drawnState($)
-  if (view.needsYou.count > 0) await update($, TAB, () => 'needsYou' as const)
+  if (view.needsYou.count > 0) await update($, TAB, () => 'now' as const)
   else if ((await read($, TAB)) === 'prs') await findPrs($)
   await followNewRows($, true)
   await openTopRow($)
@@ -1133,7 +1179,7 @@ async function focusField($: EngineInterface, id: string) {
   await $.ui.focus({ requestId: PANE, key: `type-${id}` }).catch(() => undefined)
 }
 
-async function showTab($: EngineInterface, tab: Tab) {
+async function showTab($: EngineInterface, tab: ModTab) {
   cancelUndoScroll()
   if (tab === 'prs') await findPrs($)
   await update($, TAB, () => tab)
@@ -1252,7 +1298,7 @@ function wrapped(text: string, width: number): string[] {
   return lines
 }
 
-async function select($: EngineInterface, tab: Tab, id: string, index: number, scroll = true) {
+async function select($: EngineInterface, tab: ModTab, id: string, index: number, scroll = true) {
   if (scroll) {
     if (pendingUndoScroll && pendingUndoScroll.tab === tab) suspendUndoReveal()
     else cancelUndoScroll()
@@ -1291,7 +1337,7 @@ function sameCursor(a: Cursor, b: Cursor): boolean {
 }
 
 function settledLayoutId(
-  tab: Tab,
+  tab: ModTab,
   view: InboxView,
   prs: { pr: PrView; isSettled: boolean }[],
   lastActions: Record<string, LastAction>,
@@ -1299,12 +1345,7 @@ function settledLayoutId(
   now: number,
   size: string | null,
 ): string {
-  const rows =
-    tab === 'needsYou'
-      ? [...view.needsYou.questions, ...view.needsYou.tasks]
-      : tab === 'findings'
-        ? view.findings.rows
-        : []
+  const rows = tab === 'now' ? [...view.needsYou.questions, ...view.needsYou.tasks, ...view.findings.rows] : []
   return JSON.stringify([
     size,
     ...rows.map(r => r.id),
@@ -1388,7 +1429,7 @@ async function finishPendingUndoScroll($: EngineInterface) {
     pendingUndoScroll = null
 }
 
-async function scrollToOpenRow($: EngineInterface, tab: Tab, surface?: RenderSurface) {
+async function scrollToOpenRow($: EngineInterface, tab: ModTab, surface?: RenderSurface) {
   const revision = undoScrollRevision
   if (surface !== 'desktop' && (await revealPendingUndo($))) return
   if (revision !== undoScrollRevision) return
@@ -1467,7 +1508,7 @@ async function openLeftRows($: EngineInterface) {
   let isMoved = false
   await update($, SELECTION, s => {
     const moved = Object.fromEntries(
-      (Object.keys(s) as Tab[]).map(t => {
+      (Object.keys(s) as ModTab[]).map(t => {
         const c = s[t]
         const list = ids[t]
         if (c.id === null || list.includes(c.id) || settled.has(c.id)) return [t, c]
@@ -1475,15 +1516,15 @@ async function openLeftRows($: EngineInterface) {
         const index = Math.min(c.index, list.length - 1)
         return [t, index < 0 ? NO_CURSOR : { id: list[index]!, index, openedAt: now }]
       }),
-    ) as Record<Tab, Cursor>
+    ) as Record<ModTab, Cursor>
     return isMoved ? moved : s
   })
   // The opened row's buttons draw dim while guarded; a fresh value redraws them once the guard ends.
   if (isMoved) later($, PRESS_GUARD_MS, () => update($, SELECTION, s => ({ ...s })))
 }
 
-function tabWaits(tab: Tab, view: InboxView, prViews: PrView[], lastActions: Record<string, LastAction>): RowWait[] {
-  return tab === 'prs' ? prRowWaits(prViews, lastActions) : listWaits(view)[tab]
+function tabWaits(tab: ModTab, view: InboxView, prViews: PrView[], lastActions: Record<string, LastAction>): RowWait[] {
+  return tab === 'prs' ? prRowWaits(prViews, lastActions) : tab === 'now' ? nowWaits(view) : []
 }
 
 async function unlessGuarded($: EngineInterface, rowId: string, press: UiPressArgument, onPress: Action['onPress']) {
@@ -1499,28 +1540,30 @@ async function keepPressedOpen($: EngineInterface, id: string) {
   )
 }
 
-function newRows(isDemo: boolean, current: Record<Tab, string[] | null>): Record<Tab, string[]> {
+function newRows(isDemo: boolean, current: Record<ModTab, string[] | null>): Record<ModTab, string[]> {
   const { seen, added } = recordRows(recordedRows?.isDemo === isDemo ? recordedRows.ids : {}, current)
   recordedRows = { isDemo, ids: seen }
 
   return added
 }
 
-async function jumpTo($: EngineInterface, tab: Tab) {
+async function jumpTo($: EngineInterface, tab: ModTab) {
   cancelUndoScroll()
   await update($, TAB, () => tab)
   await update($, SELECTION, s => ({ ...s, [tab]: NO_CURSOR }))
   await scrollToOpenRow($, tab)
 }
 
-function tabRowIds(view: InboxView, prViews: PrView[]): Record<Tab, string[]> {
-  const listed = drawnLists(
-    view,
-    () => false,
-    r => r.id,
-  ).byTab
+function tabRowIds(view: InboxView, prViews: PrView[]): Record<ModTab, string[]> {
+  const now = nowRows(
+    drawnLists(
+      view,
+      () => false,
+      r => r.id,
+    ),
+  )
 
-  return { ...listed, prs: prRowWaits(prViews, {}).map(r => r.id) }
+  return { now, files: [], prs: prRowWaits(prViews, {}).map(r => r.id) }
 }
 
 /**
@@ -1528,23 +1571,26 @@ function tabRowIds(view: InboxView, prViews: PrView[]): Record<Tab, string[]> {
  * that can add a row calls this.
  */
 async function followNewRows($: EngineInterface, isOpening = false) {
-  const [drawn, tab, unfolded, isShown] = await Promise.all([
+  const [drawn, tab, unfolded, isShown, plan] = await Promise.all([
     drawnState($),
     read($, TAB),
     read($, UNFOLDED),
     isPaneShown($),
+    read($, PLAN),
   ])
   const { ledger, prViews: prState, lastActions, stop, isDemo, isUnread, view, now } = drawn
   const prs = drawnPrs(prState, ledger.prs, lastActions, now)
   const prViews = prs.filter(x => !x.isSettled).map(x => x.pr)
   const ids = tabRowIds(view, prViews)
   if (isOpening) recordedRows = null
+  const listed = listedRowIds(view)
   const added = newRows(isDemo, {
-    ...listedRowIds(view),
+    now: [...listed.needsYou, ...listed.findings],
+    files: [],
     prs: prState.isFetching ? null : prRowIds(prs),
   })
   if (!isShown) return
-  const keeps = (['needsYou', 'findings'] as const).flatMap(t => {
+  const keeps = (['now'] as const).flatMap(t => {
     const id = added[t].length > 0 ? keptOpen(tabWaits(t, view, prViews, lastActions), added[t]) : null
     return id === null ? [] : [{ t, cursor: { id, index: ids[t].indexOf(id), openedAt: 0 } }]
   })
@@ -1557,20 +1603,26 @@ async function followNewRows($: EngineInterface, isOpening = false) {
     if (isInlinePane && keeps.some(k => k.t === tab)) void scrollToOpenRow($, tab)
   }
   const settled = new Set(settledRowIds(allRows(view)))
+  const isListEmpty = (list: 'needsYou' | 'findings') =>
+    isTabEmpty({
+      rows: list === 'needsYou' ? [...view.needsYou.questions, ...view.needsYou.tasks] : view.findings.rows,
+      settled,
+      closed: closedGroups(view, list, kind => unfolded.includes(kind)),
+      hasBlocker: list === 'needsYou' && (!!stop || isUnread),
+    })
+  // Now shows a plan as content, so a tab with only the plan is not empty.
   const isEmpty =
     tab === 'prs'
       ? isPrsTabEmpty(prs.length, prState.isFetching)
-      : isTabEmpty({
-          rows: tab === 'needsYou' ? [...view.needsYou.questions, ...view.needsYou.tasks] : view.findings.rows,
-          settled,
-          closed: closedGroups(view, tab, kind => unfolded.includes(kind)),
-          hasBlocker: tab === 'needsYou' && (!!stop || isUnread),
-        })
+      : tab === 'files'
+        ? true
+        : isListEmpty('needsYou') && isListEmpty('findings') && drawnPlanLines(plan, isDemo).length === 0
+  const open = openRowIds(view)
   const to = followTo(
-    TABS.map(t => t.id),
+    MOD_TABS.map(t => t.id),
     tab,
     isEmpty,
-    isOpening ? { ...openRowIds(view), prs: [] } : added,
+    isOpening ? { now: [...open.needsYou, ...open.findings], files: [], prs: [] } : added,
   )
   if (to) await jumpTo($, to)
 }
@@ -1586,7 +1638,7 @@ async function isPrsTabShown($: EngineInterface) {
 async function screen($: EngineInterface) {
   const tab = await read($, TAB)
 
-  return screenText(CLAUDE_CODE, await isPaneShown($), TABS.find(t => t.id === tab)?.label ?? tab)
+  return screenText(CLAUDE_CODE, await isPaneShown($), modTabLabel(tab))
 }
 
 async function closeTasksRunBy($: EngineInterface, command: string) {
@@ -1827,9 +1879,8 @@ async function reopenPressed($: EngineInterface, id: string) {
 
 async function selectRestored($: EngineInterface, id: string) {
   const ids = tabRowIds((await drawnState($)).view, [])
-  const tab: Tab = ids.findings.includes(id) ? 'findings' : 'needsYou'
-  const index = ids[tab].indexOf(id)
-  if (index >= 0) await select($, tab, id, index)
+  const index = ids.now.indexOf(id)
+  if (index >= 0) await select($, 'now', id, index)
 }
 
 async function runDemoPress(
@@ -2416,12 +2467,40 @@ async function showFile($: EngineInterface, input: Record<string, unknown>): Pro
   }
 }
 
+/** Reads the conversation's plan file. A file that is missing is no plan; one that is there but unreadable is an error. */
+async function readPlan($: EngineInterface, path: string): Promise<{ view: PlanView | null; error: string | null }> {
+  const text = await $.fs.read(path).catch(() => null)
+  if (text !== null) return { view: parsePlan(text), error: null }
+
+  return { view: null, error: (await $.fs.exists(path).catch(() => false)) ? path : null }
+}
+
+/** Reads the plan file again and keeps the result for the Now tab, which cannot read files while it draws. */
+async function refreshPlan($: EngineInterface): Promise<PlanView | null> {
+  const sessionId = conversation.id
+  const read = await readPlan($, planPath(conversation.root, sessionId))
+  if (sessionId === conversation.id) await update($, PLAN, () => ({ sessionId, ...read }))
+
+  return read.view
+}
+
+/** The plan lines the Now tab draws: none in the demo, or for a plan kept from another conversation. */
+function drawnPlanLines(plan: PlanState, isDemo: boolean) {
+  return isDemo || plan.sessionId !== conversation.id ? [] : planLines(plan.view, plan.error)
+}
+
+function isPlanCall(tool: string, input: Record<string, unknown>): boolean {
+  return (
+    (tool === 'Write' || tool === 'Edit') &&
+    typeof input.file_path === 'string' &&
+    input.file_path !== '' &&
+    absolutePath(input.file_path) === planPath(conversation.root, conversation.id)
+  )
+}
+
 /** What Claude reads about the current conversation's plan: its path, the rule and the steps in progress. */
 async function currentPlanNote($: EngineInterface): Promise<string> {
-  const path = planPath(conversation.root, conversation.id)
-  const text = await $.fs.read(path).catch(() => null)
-
-  return planNote(path, text === null ? null : parsePlan(text))
+  return planNote(planPath(conversation.root, conversation.id), await refreshPlan($))
 }
 
 /**
@@ -2597,10 +2676,17 @@ export const register: Register = on => {
     if (!isOn) return next(e)
     const { tool: _tool, tool_use_id: _id, agentId: _agent, ...input } = e as unknown as Record<string, unknown>
     const key = callKey(String(e.tool), input)
+    const isPlan = isPlanCall(String(e.tool), input)
     const run = () =>
-      clearingDialog($, key, () => next(e)).finally(() => {
-        if (e.tool_use_id) askedCalls.delete(e.tool_use_id)
-      })
+      clearingDialog($, key, () => next(e))
+        .finally(() => {
+          if (e.tool_use_id) askedCalls.delete(e.tool_use_id)
+        })
+        .then(async ran => {
+          // The Now tab draws the plan as the file stands, so a write to it reads the file again.
+          if (isPlan) await refreshPlan($).catch(() => undefined)
+          return ran
+        })
     const noteCall = async () => {
       const line = toolActivity(String(e.tool), input)
       if (line) await noteActivity($, line)
@@ -2708,7 +2794,10 @@ export const register: Register = on => {
     if (!isOn) return r
     if (e.reason === 'error' && !hasStopFromError) await setStopFromLastReply($)
     void wakeForDone($).catch(() => undefined)
-    void followNewRows($).catch(() => undefined)
+    // A turn's end reads the plan again, for a change the tool calls did not show, such as one made by hand.
+    void refreshPlan($)
+      .then(() => followNewRows($))
+      .catch(() => undefined)
     const hasReply = e.answer.trim() !== '' || turnBox !== null
     const isAnswered = e.reason === 'answer' && hasReply
     if (!isAnswered && !isDialogDismissed) return r
@@ -2724,7 +2813,7 @@ export const register: Register = on => {
     resetTurn()
     await update($, AWAY, a => ({ ...a, lastActiveAt: now }))
     await commit($, currentOwner(), s =>
-      endTurn(CLAUDE_CODE, s, reply, isShown, { tab: TABS.find(t => t.id === tab)?.label ?? tab, queuesEmptyReply }),
+      endTurn(CLAUDE_CODE, s, reply, isShown, { tab: modTabLabel(tab), queuesEmptyReply }),
     )
     updateLedger($)
     if (prRefs(reply).some(ref => !before.ledger.prs.includes(ref))) void fetchPrs($, await isPrsTabShown($))
@@ -2807,7 +2896,7 @@ export const register: Register = on => {
     const r = await next(e)
     if (e.requestId !== PANE) return r
     const data = e.data as { tab?: unknown; isUnfolded?: unknown; hover?: unknown; key?: unknown } | null
-    const shown = TABS.find(t => t.id === data?.tab)
+    const shown = MOD_TABS.find(t => t.id === data?.tab)
     const followUp = typeof data?.key === 'string' ? followUpPresses.get(data.key) : undefined
     if (e.element === 'tabs' && shown) await showTab($, shown.id)
     else if (e.element.startsWith('undo-') && followUp && typeof data?.key === 'string')
@@ -2980,7 +3069,7 @@ export const register: Register = on => {
         ? { rowPad: 2 * DESKTOP_ROW_PAD, settledPad: 2 * DESKTOP_ROW_PAD, buttonGap: 1, isFoldGapped: false }
         : { rowPad: blankLine, settledPad: 0, buttonGap: 2, isFoldGapped: true }
     const [
-      { ledger, prViews: prState, lastActions, notes, turns, stop, view, showsDemoNotices, isUnread, now },
+      { ledger, prViews: prState, lastActions, notes, turns, stop, view, showsDemoNotices, isDemo, isUnread, now },
       tab,
       selection,
       theme,
@@ -2990,6 +3079,7 @@ export const register: Register = on => {
       isKeyListShown,
       optionsShown,
       termProgram,
+      plan,
     ] = await Promise.all([
       drawnState($),
       read($, TAB),
@@ -3001,6 +3091,7 @@ export const register: Register = on => {
       read($, IS_KEY_LIST_SHOWN),
       read($, OPTIONS_SHOWN),
       $.env.get('TERM_PROGRAM'),
+      read($, PLAN),
     ])
     // A hot reload keeps TYPING but empties fieldSeeds, so an open field takes its seed again here.
     if (typing !== null && !fieldSeeds.has(typing)) fieldSeeds.set(typing, (await read($, DRAFTS))[typing]?.text ?? '')
@@ -3238,19 +3329,29 @@ export const register: Register = on => {
         threads: isSettled ? [] : waitingThreads(pr).map(t => threadRow(pr, t)),
       }))
       .map(g => ({ ...g, rows: [...g.threads, ...g.checks] }))
-    const rows: Record<Tab, Row[]> = {
-      needsYou: lists.byTab.needsYou,
-      findings: lists.byTab.findings,
+    const rows: Record<ModTab, Row[]> = {
+      now: nowRows(lists),
+      files: [],
       prs: prGroups.flatMap(g => g.rows),
     }
-    const tabCounts: Record<Tab, number> = {
-      needsYou: view.needsYou.count,
-      findings: view.findings.count,
+    const tabCounts: Record<ModTab, number> = {
+      now: view.needsYou.count + view.findings.count,
+      files: 0,
       prs: prGroups.filter(g => !g.isSettled && prNeedsYou(g.pr, isThreadSent)).length,
     }
-    const tabText = (id: Tab, label: string) => `${label}${tabCounts[id] > 0 ? ` ${tabCounts[id]}` : ''}`
+    // Now's count takes the Needs you color. Files has no tone of its own, so its count is dim.
+    const TAB_TONES: Record<ModTab, Tone | null> = { now: 'needsYou', files: null, prs: 'prs' }
+    const countTone = (id: ModTab) => {
+      const tone = TAB_TONES[id]
+      return tone ? pal.tone[tone] : pal.muted
+    }
+    const countMark = (id: ModTab) => {
+      const tone = TAB_TONES[id]
+      return tone ? (pal.tone[tone] ?? pal.mark[tone]) : pal.muted
+    }
+    const tabText = (id: ModTab, label: string) => `${label}${tabCounts[id] > 0 ? ` ${tabCounts[id]}` : ''}`
     const hasRail = isInline && look === 'terminal' && e.props.bodyColumns >= INLINE_RAIL_AT
-    const railWidth = Math.max(...TABS.map(t => tabText(t.id, t.label).length)) + 2 * TAB_PAD.length
+    const railWidth = Math.max(...MOD_TABS.map(t => tabText(t.id, t.label).length)) + 2 * TAB_PAD.length
     const listColumns = e.props.bodyColumns - 2 - (hasRail ? railWidth + RAIL_GUTTER : 0)
     const ids = rows[tab].map(r => r.id)
     const indexOf = new Map(ids.map((id, n) => [id, n]))
@@ -3949,23 +4050,23 @@ export const register: Register = on => {
       .sort((a, b) => b.at - a.at)[0]
 
     const keyList = [
-      { keys: TABS.map(t => t.hotkey).join(' '), does: 'Switch tabs' },
+      { keys: MOD_TABS.map(t => t.hotkey).join(' '), does: 'Switch tabs' },
       { keys: 'j k', does: 'Select the next or previous row' },
       { keys: 'ctrl+x tab', does: 'Move focus to the line above the prompt, then the pane, then the prompt' },
     ]
     const keyColumn = Math.max(...keyList.map(k => k.keys.length)) + 2
 
     const tabSizes = desktopTabSizes(
-      TABS.map(({ id, label }) => ({ label, count: tabCounts[id] })),
+      MOD_TABS.map(({ id, label }) => ({ label, count: tabCounts[id] })),
       e.props.bodyColumns - 2,
     )
     const tabProps: TabsProps | null = hasClient
       ? {
-          tabs: TABS.map(({ id, label }, n) => ({
+          tabs: MOD_TABS.map(({ id, label }, n) => ({
             id,
             label,
             count: tabSizes.hasCounts ? tabCounts[id] : 0,
-            countColor: pal.tone[id] ?? pal.mark[id],
+            countColor: countMark(id),
             width: tabSizes.widths[n]!,
           })),
           shown: tab,
@@ -3995,7 +4096,10 @@ export const register: Register = on => {
         </Text>
       ) : null,
     ]
-    const terminalTabsWidth = TABS.reduce((sum, t) => sum + tabText(t.id, t.label).length + 2 * TAB_PAD.length + 1, 1)
+    const terminalTabsWidth = MOD_TABS.reduce(
+      (sum, t) => sum + tabText(t.id, t.label).length + 2 * TAB_PAD.length + 1,
+      1,
+    )
     const pad = terminalTabsWidth <= e.props.bodyColumns ? TAB_PAD : ' '
     const hasTabLine = !isInline && look !== 'desktop'
     const tabLine = pal.tab ?? pal.divider
@@ -4022,7 +4126,7 @@ export const register: Register = on => {
           ) : null}
           {tabProps
             ? null
-            : TABS.map(({ id, label }) => {
+            : MOD_TABS.map(({ id, label }) => {
                 const count = tabCounts[id]
 
                 if (isInline)
@@ -4036,7 +4140,7 @@ export const register: Register = on => {
                         <Button plain key={`tab-${id}`} label={label} onPress={() => void showTab($, id)} />
                       )}
                       {count > 0 ? (
-                        <Text bold={tab === id} color={pal.tone[id]}>
+                        <Text bold={tab === id} color={countTone(id)}>
                           {' '}
                           {count}
                         </Text>
@@ -4071,7 +4175,7 @@ export const register: Register = on => {
                           {label}
                         </Text>
                         {count > 0 ? (
-                          <Text bold color={pal.tone[id] ?? pal.raisedText} backgroundColor={pal.raised}>
+                          <Text bold color={countTone(id) ?? pal.raisedText} backgroundColor={pal.raised}>
                             {' '}
                             {count}
                           </Text>
@@ -4105,7 +4209,7 @@ export const register: Register = on => {
                       <Button plain key={`tab-${id}-before`} label={pad} hover={raise} onPress={show} />
                       <Button plain key={`tab-${id}`} label={label} hover={raise} onPress={show} />
                       {count > 0 ? (
-                        <Text color={pal.tone[id]} hover={raise}>
+                        <Text color={countTone(id)} hover={raise}>
                           {' '}
                           {count}
                         </Text>
@@ -4133,7 +4237,7 @@ export const register: Register = on => {
     const versionText = version ? faint(`v${version}`) : null
     const rail = (
       <Box flexDirection="column" flexShrink={0} paddingLeft={1} marginRight={RAIL_GUTTER}>
-        {TABS.map(({ id, label }) => {
+        {MOD_TABS.map(({ id, label }) => {
           const count = tabCounts[id]
           const fill = ' '.repeat(railWidth - tabText(id, label).length - TAB_PAD.length)
           if (tab === id)
@@ -4144,7 +4248,7 @@ export const register: Register = on => {
                   {label}
                 </Text>
                 {count > 0 ? (
-                  <Text bold color={pal.tone[id] ?? pal.raisedText} backgroundColor={pal.raised}>
+                  <Text bold color={countTone(id) ?? pal.raisedText} backgroundColor={pal.raised}>
                     {' '}
                     {count}
                   </Text>
@@ -4160,7 +4264,7 @@ export const register: Register = on => {
               <Button plain key={`tab-${id}`} label={label} hover={raise} onPress={show} />
               {count > 0 ? (
                 <Button plain key={`tab-${id}-count`} hover={raise} onPress={show}>
-                  <Text color={pal.tone[id]}> {count}</Text>
+                  <Text color={countTone(id)}> {count}</Text>
                 </Button>
               ) : null}
               <Button plain key={`tab-${id}-after`} label={fill} hover={raise} onPress={show} />
@@ -4539,7 +4643,7 @@ export const register: Register = on => {
         </Box>
       )
     }
-    const needsYouView = () => {
+    const needsYouSections = (): JSX.Element[] => {
       const groups = needsYouGroups.flatMap(g => {
         const { entries } = g
         const closed = closedShown(view.needsYou.closed[g.list], settledIn(entries))
@@ -4586,7 +4690,7 @@ export const register: Register = on => {
             ),
           ]
         : []
-      if (isNothing && !stop && unread.length === 0) return emptyState(emptyText('needsYou', 'Claude'))
+      if (isNothing && !stop && unread.length === 0) return []
       const outside = stop
         ? [
             section(
@@ -4626,13 +4730,12 @@ export const register: Register = on => {
           ]
         : []
 
-      return sections([...outside, ...unread, ...groups])
+      return [...outside, ...unread, ...groups]
     }
 
-    const findingsView = () => {
+    const findingSections = (): JSX.Element[] => {
       const settled = settledIn(findingEntries)
-      if (findingEntries.length === 0 && closedTotal(view.findings.closed, settled) === 0)
-        return emptyState(emptyText('findings', 'Claude'))
+      if (findingEntries.length === 0 && closedTotal(view.findings.closed, settled) === 0) return []
       const groups = lists.findingGroups.map(g => {
         const closedOf = view.findings.closed.filter(f => f.kind === g.kind)
         const closed = closedShown(closedOf, settled).map(f => ({
@@ -4659,8 +4762,51 @@ export const register: Register = on => {
         ])
       })
 
-      return sections(groups)
+      return groups
     }
+
+    // The plan draws as plain lines, so it takes no selection and j and k pass over it. Its colors come from the
+    // look's tones; on desktop, where dimColor's paint is not documented, dim text takes the age color.
+    const planSection = (): JSX.Element[] => {
+      const lines = drawnPlanLines(plan, isDemo)
+      if (lines.length === 0) return []
+      const drawnLines = lines.map((line, n) => (
+        <Box key={`plan-${n}`} paddingLeft={line.indent}>
+          <Text
+            wrap="wrap"
+            bold={line.isBold}
+            {...(line.tone === 'dim'
+              ? look === 'desktop'
+                ? { color: pal.age }
+                : { dimColor: true }
+              : line.tone
+                ? { color: pal.tone[line.tone] ?? pal.mark[line.tone] }
+                : {})}
+          >
+            {line.text}
+          </Text>
+        </Box>
+      ))
+
+      return [
+        section(
+          look === 'desktop' ? (
+            desktopFrame({ key: 'plan', padY: 0, children: drawnLines })
+          ) : (
+            <Box flexDirection="column" paddingLeft={TREE_LINE_AT}>
+              {drawnLines}
+            </Box>
+          ),
+        ),
+      ]
+    }
+    const nowView = () => {
+      const list = [...needsYouSections(), ...planSection(), ...findingSections()]
+
+      return list.length === 0 ? emptyState(emptyText('needsYou', 'Claude')) : sections(list)
+    }
+    // The Files rows are not drawn yet, so the tab holds its empty text.
+    const filesView = () => emptyState({ title: 'Nothing yet.', hint: 'Files this session makes show here.' })
 
     const settledPrBlock = (pr: PrView) =>
       section([
@@ -4841,7 +4987,7 @@ export const register: Register = on => {
         onPress: () => (canMove ? move(-1) : undefined),
       },
     ]
-    const tabKeys: KeyAction[] = TABS.map(({ id, label, hotkey }) => ({
+    const tabKeys: KeyAction[] = MOD_TABS.map(({ id, label, hotkey }) => ({
       key: `tab-key-${id}`,
       label,
       hotkey,
@@ -4863,7 +5009,7 @@ export const register: Register = on => {
     // A pane takes a key
     // only as a Button's hotkey, so the tab keys, j, k and the selected row's keys
     // are Buttons in a hidden Box.
-    const tabView = tab === 'findings' ? findingsView() : tab === 'prs' ? prsView() : needsYouView()
+    const tabView = tab === 'files' ? filesView() : tab === 'prs' ? prsView() : nowView()
     const drawn = (
       <Box flexDirection="column" minHeight={e.props.scroll.bodyRows} backgroundColor={pal.body}>
         {showsDemoNotices ? (

@@ -1,13 +1,10 @@
 /** A session's plan: the outline Claude writes for multi-step work, and what the Now tab reads from it. */
 
-export type StepMark = 'waiting' | 'current' | 'done'
+import type { PlanStep, PlanTask, PlanView, StepMark } from '../types'
+import type { ToneName } from './tones'
 
-export type PlanStep = { text: string; mark: StepMark }
-
-/** A heading and its steps. A task is open while one of its steps is current. */
-export type PlanTask = { title: string; steps: PlanStep[]; isOpen: boolean }
-
-export type PlanView = { tasks: PlanTask[]; done: number; total: number; current: PlanStep[] }
+// The types live with the saved state, which keeps the last plan read; they are exported here for the hosts.
+export type { PlanStep, PlanTask, PlanView, StepMark }
 
 const HEADING = /^#{1,6}\s+(.*)$/
 const STEP = /^\s*[-*]\s\[( |~|x|X)\]\s+(.*)$/
@@ -65,4 +62,44 @@ export function planNote(path: string, plan: PlanView | null): string {
   if (!plan || plan.current.length === 0) return rule
 
   return `${rule} In progress now:\n${plan.current.map(s => `- [~] ${s.text}`).join('\n')}`
+}
+
+/** One line of the plan section: its text, its look's tone or dim, and how far it sits in. */
+export type PlanLine = { text: string; tone: ToneName | 'dim' | null; isBold: boolean; indent: number }
+
+const BAR_CELLS = 20
+const STEP_MARKS: Record<StepMark, string> = { done: '✓', current: '◐', waiting: '○' }
+const STEP_TONES: Record<StepMark, PlanLine['tone']> = { done: 'done', current: 'needsYou', waiting: null }
+
+/**
+ * The Now tab's plan section: the done count and a bar, then each task. A task with a current step lists its steps;
+ * every other task takes one line with its count. `error` is the path of a plan file that is there but cannot be read.
+ */
+export function planLines(view: PlanView | null, error: string | null): PlanLine[] {
+  if (error !== null) return [{ text: `Could not read the plan: ${error}`, tone: 'error', isBold: false, indent: 0 }]
+  if (!view) return []
+  const filled = view.total === 0 ? 0 : Math.round((view.done / view.total) * BAR_CELLS)
+  const lines: PlanLine[] = [
+    { text: `PLAN  ${view.done} of ${view.total} steps`, tone: null, isBold: true, indent: 0 },
+    { text: `${'█'.repeat(filled)}${'░'.repeat(BAR_CELLS - filled)}`, tone: 'done', isBold: false, indent: 0 },
+  ]
+  for (const task of view.tasks) {
+    const done = task.steps.filter(s => s.mark === 'done').length
+    const count = `${task.title || 'Steps'}  ${done}/${task.steps.length}`
+    if (!task.isOpen) {
+      const isDone = done === task.steps.length
+      lines.push({ text: `${isDone ? '✓' : '▸'} ${count}`, tone: isDone ? 'done' : 'dim', isBold: false, indent: 0 })
+      continue
+    }
+    lines.push({ text: `▾ ${count}`, tone: null, isBold: true, indent: 0 })
+    for (const step of task.steps)
+      lines.push({
+        text: `${STEP_MARKS[step.mark]} ${step.text}`,
+        tone: STEP_TONES[step.mark],
+        isBold: step.mark === 'current',
+        indent: 2,
+      })
+  }
+
+  return lines
 }

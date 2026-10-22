@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { parsePlan, planNote, planPath } from '../hooks/plan'
+import { parsePlan, planLines, planNote, planPath } from '../hooks/plan'
 
 describe('parsePlan', () => {
   test('reads tasks, marks and counts', () => {
@@ -66,5 +66,68 @@ describe('planNote', () => {
     expect(note).toContain('two')
     expect(note).toContain('three')
     expect(note).not.toContain('four')
+  })
+})
+
+describe('planLines', () => {
+  const plan = parsePlan(
+    [
+      '## Store',
+      '- [x] one',
+      '- [x] two',
+      '- [x] three',
+      '## Reads',
+      '- [x] four',
+      '- [x] five',
+      '- [~] six',
+      '- [ ] seven',
+      '## Tests',
+      '- [ ] eight',
+      '- [ ] nine',
+      '- [ ] ten',
+      '## Docs',
+      '- [ ] eleven',
+      '- [ ] twelve',
+    ].join('\n'),
+  )
+
+  test('starts with the done count and a bar', () => {
+    const lines = planLines(plan, null)
+    expect(lines[0]).toEqual({ text: 'PLAN  5 of 12 steps', tone: null, isBold: true, indent: 0 })
+    expect(lines[1]?.text).toMatch(/^█+░+$/)
+    expect([...lines[1]!.text].filter(c => c === '█').length).toBe(Math.round((5 / 12) * [...lines[1]!.text].length))
+  })
+
+  test('lists the steps of an open task, and gives each other task one line with its count', () => {
+    const texts = planLines(plan, null).map(l => l.text)
+    expect(texts.slice(2)).toEqual([
+      '✓ Store  3/3',
+      '▾ Reads  2/4',
+      '✓ four',
+      '✓ five',
+      '◐ six',
+      '○ seven',
+      '▸ Tests  0/3',
+      '▸ Docs  0/2',
+    ])
+  })
+
+  test('colors done steps done, current steps needsYou and bold, waiting steps plain and counts dim', () => {
+    const line = (text: string) => planLines(plan, null).find(l => l.text === text)
+    expect(line('✓ four')).toEqual({ text: '✓ four', tone: 'done', isBold: false, indent: 2 })
+    expect(line('◐ six')).toEqual({ text: '◐ six', tone: 'needsYou', isBold: true, indent: 2 })
+    expect(line('○ seven')).toEqual({ text: '○ seven', tone: null, isBold: false, indent: 2 })
+    expect(line('▸ Tests  0/3')?.tone).toBe('dim')
+    expect(line('✓ Store  3/3')?.tone).toBe('done')
+  })
+
+  test('draws nothing without a plan', () => {
+    expect(planLines(null, null)).toEqual([])
+  })
+
+  test('says which file it could not read', () => {
+    expect(planLines(null, '/w/.inbox/plans/abc.md')).toEqual([
+      { text: 'Could not read the plan: /w/.inbox/plans/abc.md', tone: 'error', isBold: false, indent: 0 },
+    ])
   })
 })

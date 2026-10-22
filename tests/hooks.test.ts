@@ -818,8 +818,8 @@ test('last actions an earlier build saved convert once by the table, and a task 
   savingOpen = null
   const openConverted = {
     selection: {
-      needsYou: { ...oldCursor, openedAt: 0 },
-      findings: { id: null, index: 0, openedAt: 0 },
+      now: { ...oldCursor, openedAt: 0 },
+      files: { id: null, index: 0, openedAt: 0 },
       prs: { id: null, index: 0, openedAt: 0 },
     },
   }
@@ -841,7 +841,7 @@ test('last actions an earlier build saved convert once by the table, and a task 
   expect(await pane.find({ text: /Run load script/ })).toBeDefined()
   expect(await band.find({ text: /Needs you/ })).toBeUndefined()
   await clock.advance(SETTLED_MS)
-  await pane.press({ key: 'tab-findings' })
+  await showNow(pane)
   expect((await pane.find({ key: 'fold-issue' }))?.props.label).toBe('▾ 1 closed')
 })
 
@@ -891,7 +891,7 @@ test('the band is [Open inbox] and the counts, the same while working and after 
 
   const pane = await $.ui.mount(PANE)
   await pane.press({ key: 'select-i2' })
-  await pane.press({ key: 'tab-findings' })
+  await showNow(pane)
   panesOpened = []
   await standing.press({ key: 'open-inbox' })
   expect(panesOpened).toEqual(['inbox'])
@@ -1002,7 +1002,7 @@ test('after a failed update, the next reply catches up over the whole conversati
   expect(await pane.find({ text: /Name the command greet\?/ })).toBeDefined()
   expect(await pane.find({ text: /Review the welcome copy/ })).toBeDefined()
   expect(await pane.find({ text: /update failed/ })).toBeUndefined()
-  await pane.press({ key: 'tab-findings' })
+  await showNow(pane)
   expect(await pane.find({ key: 'row-f3' })).toBeUndefined()
   expect(await pane.find({ key: 'settled-f3' })).toBeDefined()
   expect(await pane.find({ key: 'undo-f3' })).toBeUndefined()
@@ -1092,7 +1092,7 @@ test('a finding Claude records while the pane shows an empty tab brings the pane
   await $.turn.complete({ answer: 'Added a backoff.', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
   await clock.settle()
   expect(await band.find({ text: /Findings 1/ })).toBeUndefined()
-  await pane.press({ key: 'tab-findings' })
+  await showNow(pane)
   await clock.settle()
   expect(await pane.find({ key: 'address-f1-key' })).toBeUndefined()
   expect(await pane.find({ text: /1 closed/ })).toBeDefined()
@@ -1246,7 +1246,8 @@ test('t opens a field for the person’s own words: a question’s words go to C
   await clock.settle()
   expect(await pane.find({ key: 'row-i1' })).toBeUndefined()
 
-  await pane.press({ key: 'tab-findings' })
+  await pane.press({ key: 'title-f3' })
+  await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'typekey-f3' })
   await pane.input({ key: 'type-f3', text: 'Fix it after the CLI ships.' })
   expect(sent.at(-1)).toBe(
@@ -1744,14 +1745,16 @@ test('Claude closes an item or finding that no longer applies, by the id it read
   const pane = await $.ui.mount(PANE)
   const band = await $.ui.mount({ plugin: 'inbox', surface: 'terminal', ...BAND })
 
-  await pane.press({ key: 'tab-findings' })
+  await pane.press({ key: 'title-f3' })
+  await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'discuss-f3' })
   await clock.settle()
   expect(sent.at(-1)).toContain("Let's talk through this finding you recorded")
   expect(await pane.find({ text: /Discussing…/ })).toBeDefined()
   expect((await pane.find({ key: 'discuss-f3-key' }))?.props.label).toBe('Discuss again')
   expect(await band.find({ text: /Findings 1/ })).toBeDefined()
-  await pane.press({ key: 'tab-needsYou' })
+  await pane.press({ key: 'select-i1' })
+  await clock.advance(PRESS_GUARD_MS)
   submitAnswer = 'hold'
   await pane.press({ key: 'explain-i1-key' })
   await clock.settle()
@@ -1783,7 +1786,7 @@ test('Claude closes an item or finding that no longer applies, by the id it read
   expect(await pane.find({ text: /^Deno$/ })).toBeDefined()
   expect(await pane.find({ text: /^Closed by Claude: no longer applies$/ })).toBeDefined()
 
-  await pane.press({ key: 'tab-findings' })
+  await showNow(pane)
   expect(await pane.find({ key: 'row-f3' })).toBeUndefined()
   expect(await pane.find({ text: 'No open issues' })).toBeDefined()
   expect(await pane.find({ text: 'No open opportunities' })).toBeDefined()
@@ -2072,7 +2075,7 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   expect(await pane.find({ text: '✓ Opened the comment' })).toBeDefined()
   expect(await pane.find({ text: /^ 1$/ })).toBeDefined()
   hasReply = true
-  await pane.press({ key: 'tab-findings' })
+  await showNow(pane)
   await pane.press({ key: 'tab-prs' })
   await clock.settle()
   expect(await pane.find({ text: /Still unquoted/ })).toBeDefined()
@@ -2154,7 +2157,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await pane.find({ text: notice })).toBeDefined()
 
     isGhMissing = false
-    await show(0, 'needsYou')
+    await show(0, 'now')
     await clock.settle()
     await show(2, 'prs')
     await clock.settle()
@@ -2259,7 +2262,7 @@ test('a PR’s Dismiss settles its block with Undo, which brings it back, a read
 
   branchFails = 'HTTP 502'
   isSlow = true
-  await pane.press({ key: 'tab-needsYou' })
+  await showNow(pane)
   await pane.press({ key: 'tab-prs' })
   await pane.press({ key: 'dismiss-pr-acme/greet#12' })
   isSlow = false
@@ -2747,7 +2750,7 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   expect(await pane.find({ text: doneTask })).toBeUndefined()
   expect(sent).toEqual([])
 
-  await pane.press({ key: 'tab-findings' })
+  await showNow(pane)
   expect(await pane.find({ text: literal(demo.ledger.findings[0]!.title) })).toBeDefined()
   await pane.press({ key: 'tab-prs' })
   expect(await pane.find({ text: literal(demo.prViews.views[branchRef]!.title) })).toBeDefined()
@@ -2765,7 +2768,7 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   expect(await pane.find({ text: /Real linked work/ })).toBeDefined()
   expect(await pane.find({ text: /Real branch work/ })).toBeDefined()
 
-  await pane.press({ key: 'tab-needsYou' })
+  await showNow(pane)
   expect(await pane.find({ text: /Use Node or Python/ })).toBeDefined()
   expect(await pane.find({ key: 'explain-i1-key' })).toBeDefined()
   expect(await pane.find({ text: /Sample entries\./ })).toBeUndefined()
@@ -2989,7 +2992,7 @@ test('resuming a session waits for its in-flight save before loading it', async 
   await Promise.all([loading, adding])
   await clock.settle()
   const pane = await $.ui.mount(PANE)
-  await pane.press({ key: 'tab-findings' })
+  await showNow(pane)
   expect(await pane.find({ text: /New finding/ })).toBeDefined()
 })
 
@@ -3178,7 +3181,7 @@ test('tools the engine refuses turn the status line red on every tab, and the mo
   const red = (await pane.find({ type: 'Text', text: refused }))?.props.color
   expect(red).toBeDefined()
   expect(await pane.find({ text: /Use Node or Python\?/ })).toBeDefined()
-  await pane.press({ key: 'tab-findings' })
+  await showNow(pane)
   expect((await pane.find({ type: 'Text', text: refused }))?.props.color).toBe(red)
 })
 
@@ -3258,6 +3261,14 @@ function watchFiles(on: On): () => FileRow[] {
     return next(e)
   })
   return () => latest
+}
+
+/** Shows the Now tab. Its button is drawn only while another tab shows. */
+async function showNow(pane: {
+  find(q: { key: string }): Promise<unknown>
+  press(q: { key: string }): Promise<unknown>
+}) {
+  if (await pane.find({ key: 'tab-now' })) await pane.press({ key: 'tab-now' })
 }
 
 function write($: Engine, path: string) {
@@ -3621,13 +3632,16 @@ test('the desktop pane draws each action as one button and the tabs as one click
 
   const tabBar = async () => (await pane.find({ key: 'tabs' }))?.props.props as TabsProps
   const { tabs, gap } = await tabBar()
-  expect(tabs.map(t => t.id)).toEqual(['needsYou', 'findings', 'prs'])
+  expect(tabs.map(t => t.id)).toEqual(['now', 'files', 'prs'])
   await pane.pointer({ type: 'down', x: tabs[0]!.width + gap + tabs[1]!.width - 1, y: 1.1, button: 'left', in: 'tabs' })
   await clock.settle()
-  expect((await tabBar()).shown).toBe('findings')
+  expect((await tabBar()).shown).toBe('files')
   await pane.pointer({ type: 'down', x: tabs[0]!.width, y: 1, button: 'left', in: 'tabs' })
   await clock.settle()
-  expect((await tabBar()).shown).toBe('findings')
+  expect((await tabBar()).shown).toBe('files')
+  await pane.pointer({ type: 'down', x: 0, y: 1, button: 'left', in: 'tabs' })
+  await clock.settle()
+  expect((await tabBar()).shown).toBe('now')
 
   await $.tool.call({
     tool: 'mcp__inbox__record',
@@ -3658,6 +3672,11 @@ test('the desktop pane draws each action as one button and the tabs as one click
     title: 'Retry loop never backs off',
     detail: 'Hot.',
   })
+  await clock.settle()
+  // On Now, a finding that arrives leaves the open question open; a click opens the finding.
+  expect(await pane.find({ text: 'Hot.' })).toBeUndefined()
+  await clock.advance(PRESS_GUARD_MS)
+  await pane.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: 'select-f4' })
   await clock.settle()
   expect(await pane.find({ text: 'Hot.' })).toBeDefined()
 
@@ -3769,14 +3788,16 @@ test('every row in the demo, on every tab, draws its plan’s buttons in the pla
       return [k.action.label]
     })
   }
+  // Now holds Needs you and then Findings.
   const tabs = [
     {
-      id: 'needsYou',
-      rows: [...view.needsYou.questions, ...view.needsYou.tasks].filter(r => r.state.is !== 'settled'),
+      id: 'now',
+      rows: [...view.needsYou.questions, ...view.needsYou.tasks, ...view.findings.rows].filter(
+        r => r.state.is !== 'settled',
+      ),
     },
-    { id: 'findings', rows: view.findings.rows.filter(r => r.state.is !== 'settled') },
   ] as const
-  expect(tabs.map(t => t.rows.length > 0)).toEqual([true, true])
+  expect(tabs.map(t => t.rows.some(r => r.finding) && t.rows.some(r => r.item))).toEqual([true])
 
   for (const look of ['terminal', 'desktop'] as const) {
     const pane =
@@ -3889,9 +3910,9 @@ test('a forked conversation keeps the parent’s findings and closed records, an
   await clock.settle()
   const pane = await $.ui.mount(PANE)
   expect(await pane.find({ text: /Add a backoff to the retry loop\?/ })).toBeDefined()
-  await pane.press({ key: 'tab-findings' })
+  await showNow(pane)
   expect((await pane.find({ key: 'settled-f1' }))?.text).toContain('Now a question in Needs you')
-  await pane.press({ key: 'tab-needsYou' })
+  await showNow(pane)
   const contextOf = async () =>
     ((await $.prompt.submit({ text: 'where are we?', wait: false, origin: { kind: 'composer' } })).context ?? []).join(
       '\n',
@@ -3971,4 +3992,160 @@ test('outside a Git repo the first prompt still goes through and writes no exclu
     (await $.prompt.submit({ text: 'add caching', wait: false, origin: { kind: 'composer' } })).context ?? []
   expect(context.at(-1)).toContain('.inbox/plans/session-1.md')
   expect(writes.filter(w => w.path.endsWith('/info/exclude'))).toEqual([])
+})
+
+test("an old build's Needs you or Findings tab opens as Now, with its open row", async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  let savingTab: string | null = null
+  let savedTab: unknown = null
+  let savingSelection: unknown = null
+  let savedSelection: unknown = null
+  on('state.set', { plugin: 'inbox', key: 'tab' } as const, ($, e, next) => {
+    const write = savingTab ? { ...e, value: savingTab as never } : e
+    savedTab = write.value
+    return next(write)
+  })
+  on('state.set', { plugin: 'inbox', key: 'selection' } as const, ($, e, next) => {
+    const write = savingSelection ? { ...e, value: savingSelection as never } : e
+    savedSelection = write.value
+    return next(write)
+  })
+  for (const old of ['needsYou', 'findings', 'waiting', 'notes']) {
+    savingTab = old
+    savingSelection = {
+      needsYou: { id: null, index: 0, openedAt: 0 },
+      findings: { id: 'f1', index: 0, openedAt: 5 },
+      prs: { id: null, index: 0, openedAt: 0 },
+    }
+    await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+    savingTab = null
+    savingSelection = null
+    await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    expect(savedTab, old).toBe('now')
+    expect(savedSelection, old).toEqual({
+      now: { id: 'f1', index: 0, openedAt: 5 },
+      files: { id: null, index: 0, openedAt: 0 },
+      prs: { id: null, index: 0, openedAt: 0 },
+    })
+  }
+})
+
+async function startNowSession($: Engine, clock: { settle(): Promise<void> }) {
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'add a greeting cli', wait: false, origin: { kind: 'composer' } })
+  await $.turn.start({ text: 'add a greeting cli', turnId: 't1' })
+  await $.turn.complete({ answer: 'Plan ready.', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.settle()
+  await $.tool.call({
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
+    title: 'README is stale',
+    detail: 'It names the old command.',
+  })
+  await clock.settle()
+}
+
+test('Now lists Needs you, then the plan, then Findings, and its label counts both lists', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  await startNowSession($, clock)
+  const plan = '/tmp/project/.inbox/plans/session-1.md'
+  fileTexts.set(plan, '## Cache\n- [x] Add the store\n- [~] Wire the reads\n## Docs\n- [ ] Write it up')
+  await $.tool.call({ tool: 'Write', file_path: plan, content: 'x' } as never)
+  await clock.settle()
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const pane = await $.ui.mount({ ...PANE, surface, props: { ...PANE.props, bodyColumns: 120 } })
+    const texts = (await pane.findAll({ type: 'Text' })).map(t => t.text ?? '')
+    const at = (pattern: RegExp) => texts.findIndex(t => pattern.test(t))
+    // Group titles mark where each list draws: Needs you's last group is Tasks, and Findings' first is Issues.
+    expect(at(/^Tasks/), surface).toBeGreaterThan(at(/^Questions/))
+    expect(at(/^PLAN {2}1 of 3 steps$/), surface).toBeGreaterThan(at(/^Tasks/))
+    expect(at(/^Issues/), surface).toBeGreaterThan(at(/^PLAN {2}1 of 3 steps$/))
+    expect(at(/^◐ Wire the reads$/), surface).toBeGreaterThan(0)
+    expect(at(/^▸ Docs {2}0\/1$/), surface).toBeGreaterThan(0)
+    if (surface === 'terminal') {
+      // The shown tab draws as text, raised, with its count.
+      expect(texts.slice(0, 6)).toEqual(expect.arrayContaining(['Now', ' 3']))
+    } else {
+      const bar = (await pane.find({ key: 'tabs' }))?.props.props as TabsProps
+      expect(bar.tabs.map(t => [t.id, t.label, t.count])).toEqual([
+        ['now', 'Now', 3],
+        ['files', 'Files', 0],
+        ['prs', 'PRs', 0],
+      ])
+    }
+    await pane.unmount()
+  }
+})
+
+test('Down from the last Needs you row opens the first finding, past the plan', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  await startNowSession($, clock)
+  fileTexts.set('/tmp/project/.inbox/plans/session-1.md', '## Cache\n- [~] Wire the reads')
+  await $.turn.complete({ answer: 'Still on it.', durationMs: 5, isAborted: false, turnId: 't2', reason: 'answer' })
+  await clock.settle()
+
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: /^◐ Wire the reads$/ })).toBeDefined()
+  expect(await pane.find({ key: 'explain-i1-key' })).toBeDefined()
+  await pane.press({ key: 'next' })
+  await clock.advance(PRESS_GUARD_MS)
+  expect(await pane.find({ key: 'explain-i2-key' })).toBeDefined()
+  await pane.press({ key: 'next' })
+  await clock.advance(PRESS_GUARD_MS)
+  expect(await pane.find({ key: 'address-f3-key' })).toBeDefined()
+  await pane.press({ key: 'next' })
+  await clock.advance(PRESS_GUARD_MS)
+  expect(await pane.find({ key: 'address-f3-key' })).toBeDefined()
+})
+
+test('an Edit to the plan file redraws the plan, and a missing plan draws nothing', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  await startNowSession($, clock)
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: /^PLAN/ })).toBeUndefined()
+
+  const plan = '/tmp/project/.inbox/plans/session-1.md'
+  fileTexts.set(plan, '## Cache\n- [x] Add the store\n- [x] Wire the reads')
+  await $.tool.call({ tool: 'Edit', file_path: plan, old_string: '~', new_string: 'x' } as never)
+  await clock.settle()
+  expect(await pane.find({ text: /^PLAN {2}2 of 2 steps$/ })).toBeDefined()
+  expect(await pane.find({ text: /^✓ Cache {2}2\/2$/ })).toBeDefined()
+})
+
+test('the plan says so when its file is there but cannot be read', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  await startNowSession($, clock)
+  files = ['/tmp/project/.inbox/plans/session-1.md']
+  await $.turn.complete({ answer: 'Done.', durationMs: 5, isAborted: false, turnId: 't2', reason: 'answer' })
+  await clock.settle()
+
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: 'Could not read the plan: /tmp/project/.inbox/plans/session-1.md' })).toBeDefined()
+})
+
+test('hotkey 2 opens the Files tab, empty for now, and 1 goes back to Now', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  await startNowSession($, clock)
+  const pane = await $.ui.mount(PANE)
+
+  expect((await pane.find({ key: 'tab-key-files' }))?.props.hotkey).toBe('2')
+  await pane.press({ key: 'tab-key-files' })
+  await clock.settle()
+  expect(await pane.find({ text: /^Nothing yet\.$/ })).toBeDefined()
+  expect(await pane.find({ text: /Files this session makes show here\./ })).toBeDefined()
+  expect(await pane.find({ text: /README is stale/ })).toBeUndefined()
+
+  expect((await pane.find({ key: 'tab-key-now' }))?.props.hotkey).toBe('1')
+  await pane.press({ key: 'tab-key-now' })
+  await clock.settle()
+  expect(await pane.find({ text: /README is stale/ })).toBeDefined()
 })
