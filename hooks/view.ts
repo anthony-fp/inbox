@@ -60,6 +60,9 @@ export const CLOSED_MARKS: Record<ClosedState, string> = { handled: '✓', dismi
 
 export const CLOSED_SHOWN = 3
 export const SETTLED_MS = 5120
+
+/** How long an ask waits before its permission row shows, where no classic.PermissionRequest hook runs. */
+export const PERMISSION_FALLBACK_DELAY_MS = 1500
 export const PRESS_GUARD_MS = 400
 export const QUEUED_AFTER_MS = 1000
 

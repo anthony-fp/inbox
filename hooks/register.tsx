@@ -193,6 +193,7 @@ import {
   isFailure,
   isWaitingRow,
   isGuarded,
+  PERMISSION_FALLBACK_DELAY_MS,
   PRESS_GUARD_MS,
   QUEUED_AFTER_MS,
   rowKeyPlan,
@@ -569,6 +570,10 @@ let finalReply: string | null = null
 let hasStopFromError = false
 let turnBox: string | null = null
 let isDialogDismissed = false
+/** True once a classic.PermissionRequest hook has run, which makes the tool.check fallback unnecessary. */
+let hasPermissionRequestHook = false
+/** The calls whose tool.check asked and that have not finished, by `callKey`, as the dialogs are. */
+const askedCalls = new Set<string>()
 let fetchingPrs: Promise<void> = Promise.resolve()
 let nextFetchFindsBranchPr: boolean | null = null
 let recordedRows: { isDemo: boolean; ids: RowRecord<Tab> } | null = null
@@ -2433,7 +2438,10 @@ export const register: Register = on => {
     if (!isOn) return next(e)
     const { tool: _tool, tool_use_id: _id, agentId: _agent, ...input } = e as unknown as Record<string, unknown>
     const key = callKey(String(e.tool), input)
-    const run = () => clearingDialog($, key, () => next(e))
+    const run = () =>
+      clearingDialog($, key, () => next(e)).finally(() => {
+        askedCalls.delete(key)
+      })
     if (e.agentId) return run()
     const line = toolActivity(String(e.tool), input)
     if (line) await noteActivity($, line)
@@ -2462,6 +2470,7 @@ export const register: Register = on => {
 
   // A question dialog opens from its own tool call, which also raises a permission request.
   on('classic.PermissionRequest', async ($, e, next) => {
+    hasPermissionRequestHook = true
     if (isOn && e.tool_name !== 'AskUserQuestion') {
       const input = (e.tool_input ?? {}) as Record<string, unknown>
       await openDialog($, {
@@ -2472,6 +2481,27 @@ export const register: Register = on => {
     }
 
     return next(e)
+  })
+
+  // Where the guard skips classic.PermissionRequest, an ask shows its row only if the
+  // call is still waiting after the delay: the auto-mode classifier can settle an ask in
+  // well under that, and tool.check carries nothing that tells the two apart.
+  on('tool.check', async ($, e, next) => {
+    const r = await next(e)
+    const input = (e.input ?? {}) as Record<string, unknown>
+    const key = callKey(e.tool, input)
+    const isDialogAsk = isOn && !hasPermissionRequestHook && !e.agentId && r.decision === 'ask'
+    if (!isDialogAsk || e.tool === 'AskUserQuestion') return r
+    askedCalls.add(key)
+    void $.clock
+      .sleep(PERMISSION_FALLBACK_DELAY_MS)
+      .then(async () => {
+        if (!askedCalls.has(key) || hasPermissionRequestHook) return
+        await openDialog($, { kind: 'permission', text: permissionText(e.tool, input), key })
+      })
+      .catch(() => undefined)
+
+    return r
   })
 
   on('classic.StopFailure', async ($, e, next) => {
@@ -2504,6 +2534,7 @@ export const register: Register = on => {
     const r = await next(e)
     if (e.agentId) return r
     isTurnRunning = false
+    askedCalls.clear()
     await closeDialogs($, null)
     if (!isOn) return r
     if (e.reason === 'error' && !hasStopFromError) await setStopFromLastReply($)

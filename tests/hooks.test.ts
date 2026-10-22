@@ -9,7 +9,15 @@ import type { TabsProps } from '../hooks/tabs-client'
 import { demoView } from '../hooks/demo'
 import { checkActions, prBlockActions, prCheckId, prThreadId, threadActions, threadSentIn } from '../hooks/pr-tab'
 import { failingChecks, waitingThreads } from '../hooks/prs'
-import { PRESS_GUARD_MS, QUEUED_AFTER_MS, SETTLED_MS, inboxView, perTurnStatus, rowKeyPlan } from '../hooks/view'
+import {
+  PERMISSION_FALLBACK_DELAY_MS,
+  PRESS_GUARD_MS,
+  QUEUED_AFTER_MS,
+  SETTLED_MS,
+  inboxView,
+  perTurnStatus,
+  rowKeyPlan,
+} from '../hooks/view'
 
 const LEDGER_REPLY = `GOAL: Add a greeting CLI
 DONE: Plan written
@@ -41,6 +49,7 @@ let submitAnswer:
 let held: { text: string; origin: PromptOrigin }[] = []
 let promptRows = 0
 
+let toolVerdict: 'allow' | 'ask' = 'allow'
 let stepAnswers: { answer: string; callsTool?: true }[] = []
 let transcriptRows: { role: 'user' | 'assistant'; text: string; toolUses: never[] }[] = []
 
@@ -137,6 +146,7 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   submitAnswer = 'enter'
   held = []
   ran = []
+  toolVerdict = 'allow'
   stepAnswers = []
   transcriptRows = []
   dialogAnswer = { result: 'ok', text: 'ok' }
@@ -256,6 +266,7 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('classic.StopFailure', () => ({}))
   on('classic.PermissionRequest', () => ({}))
+  on('tool.check', () => ({ decision: toolVerdict }))
   on('turn.step', async function* (_$, e) {
     const { answer, callsTool } = stepAnswers[e.index] ?? { answer: '' }
     const isLast = !callsTool
@@ -2282,6 +2293,67 @@ test('tool calls during a turn leave the saved session alone, and the turn’s u
   await clock.settle()
   expect(saves).toBeGreaterThan(savesAtStart)
   expect(JSON.parse(stored.get('s:session-1')!).presence.turnsApplied).toBe(1)
+})
+
+test('where classic.PermissionRequest is skipped, an ask shows its row only if the call is still waiting after the delay', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [], { HERDR_PANE_ID: 'p1' })
+  const push = { command: 'git push', description: 'Push main to origin' }
+  const ask = () => {
+    toolVerdict = 'ask'
+    return $.tool.check({ tool: 'Bash', input: push } as never)
+  }
+  const run = () => {
+    toolVerdict = 'allow'
+    return $.tool.call({ tool: 'Bash', ...push } as never)
+  }
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await ask()
+  await clock.advance(PERMISSION_FALLBACK_DELAY_MS - 1)
+  expect(sidebarLines().at(-1)).toBe('')
+  await clock.advance(1)
+  await clock.settle()
+  expect(sidebarLines().at(-1)).toBe('Allow push main to origin?')
+  await run()
+  await clock.settle()
+  expect(sidebarLines().at(-1)).toBe('')
+
+  const lines = sidebarLines().length
+  await ask()
+  await clock.advance(500)
+  await run()
+  await clock.advance(PERMISSION_FALLBACK_DELAY_MS)
+  await clock.settle()
+  expect(
+    sidebarLines()
+      .slice(lines)
+      .every(line => line === ''),
+  ).toBe(true)
+
+  await ask()
+  await clock.advance(2000)
+  await clock.settle()
+  expect(sidebarLines().at(-1)).toBe('Allow push main to origin?')
+  await run()
+  await clock.settle()
+  expect(sidebarLines().at(-1)).toBe('')
+})
+
+test('where classic.PermissionRequest runs, it is the only source of the permission row', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [], { HERDR_PANE_ID: 'p1' })
+  const push = { command: 'git push', description: 'Push main to origin' }
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: push } as never)
+  toolVerdict = 'ask'
+  await $.tool.check({ tool: 'Bash', input: push } as never)
+  toolVerdict = 'allow'
+  await $.tool.call({ tool: 'Bash', ...push } as never)
+  await clock.advance(PERMISSION_FALLBACK_DELAY_MS * 2)
+  await clock.settle()
+  expect(sidebarLines().at(-1)).toBe('')
 })
 
 test('a stop and an open permission prompt lead the sidebar line until they clear', async ($, on) => {
