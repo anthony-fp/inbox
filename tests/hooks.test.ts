@@ -2447,6 +2447,12 @@ test('a turn an API error ended shows its stop from the error text in the transc
   await clock.settle()
   expect(await band.find({ key: 'resume' })).toBeDefined()
 
+  transcriptRows = said('API Error: Server is temporarily limiting requests (not your usage limit)')
+  await $.turn.start({ text: 'go', turnId: 't3b' })
+  await fail('t3b')
+  await clock.settle()
+  expect(await band.find({ text: /the API is limiting requests/ })).toBeDefined()
+
   transcriptRows = said('Please run /login · API Error: 401 Invalid API key')
   await $.turn.start({ text: 'go', turnId: 't4' })
   await $.classic.StopFailure({ error: 'server_error' } as never)

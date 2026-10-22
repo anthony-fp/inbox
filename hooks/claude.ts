@@ -138,7 +138,8 @@ export function stopOfMessage(message: string): Pick<Stop, 'kind' | 'detail' | '
   if (BILLING_MESSAGE.test(message)) return { kind: 'billing', detail: 'billing_error', resets: null }
   if (SIGN_IN_MESSAGE.test(message)) return { kind: 'sign-in', detail: 'authentication_failed', resets: null }
   if (/overloaded/i.test(message)) return { kind: 'api-error', detail: 'overloaded', resets: null }
-  if (/rate.?limit/i.test(message)) return { kind: 'api-error', detail: 'rate_limit', resets: null }
+  if (/rate.?limit|temporarily limiting requests|request rejected \(429\)/i.test(message))
+    return { kind: 'api-error', detail: 'rate_limit', resets: null }
 
   return { kind: 'api-error', detail: 'unknown', resets: null }
 }
