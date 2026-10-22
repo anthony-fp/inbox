@@ -550,5 +550,179 @@
         "noIds": true
       }
     ]
+  },
+  {
+    "name": "pivot-moots-recorded-question",
+    "about": "The user drops the work an agent-recorded question was about, so the agent closes it with a reason.",
+    "ledger": {
+      "nextId": 4,
+      "turn": 2,
+      "items": [
+        {
+          "id": "i3",
+          "kind": "question",
+          "label": null,
+          "from": "record",
+          "ask": "Which cache should the product API use?",
+          "options": ["Redis", "In-memory"],
+          "rec": "In-memory",
+          "helps": [],
+          "turn": 1,
+          "at": 1
+        }
+      ]
+    },
+    "prompt": "Change of plan: we're dropping caching from this work entirely. Let's spend the time on the pagination bug in the orders list instead. Where would you start?",
+    "checks": [
+      {
+        "calls": "close",
+        "count": 1,
+        "match": {
+          "id": "^i3$"
+        },
+        "has": ["reason"]
+      },
+      {
+        "noIds": true
+      }
+    ]
+  },
+  {
+    "name": "pivot-moots-recorded-task",
+    "about": "The user's new direction removes the need for a task the agent recorded, so the agent closes it.",
+    "ledger": {
+      "nextId": 5,
+      "turn": 2,
+      "items": [
+        {
+          "id": "i4",
+          "kind": "task",
+          "label": null,
+          "from": "record",
+          "ask": "Sign in to the staging dashboard",
+          "options": [],
+          "rec": null,
+          "helps": [],
+          "turn": 1,
+          "at": 1
+        }
+      ]
+    },
+    "prompt": "We're not going to test this on staging at all. Local only from here on. Run the checkout tests locally and tell me what fails.",
+    "checks": [
+      {
+        "calls": "close",
+        "count": 1,
+        "match": {
+          "id": "^i4$"
+        }
+      },
+      {
+        "noIds": true
+      }
+    ]
+  },
+  {
+    "name": "user-did-it-closes-question",
+    "about": "The user says they already did what an agent-recorded question asked about, so the agent closes it.",
+    "ledger": {
+      "nextId": 6,
+      "turn": 3,
+      "items": [
+        {
+          "id": "i5",
+          "kind": "question",
+          "label": null,
+          "from": "record",
+          "ask": "Add a retry to the image upload job?",
+          "options": ["Add the retry", "Leave it"],
+          "rec": "Add the retry",
+          "helps": [],
+          "turn": 2,
+          "at": 2
+        }
+      ]
+    },
+    "prompt": "I added the retry to the upload job myself in my last commit. Now can you look at why the thumbnail step is slow?",
+    "checks": [
+      {
+        "calls": "close",
+        "count": 1,
+        "match": {
+          "id": "^i5$"
+        }
+      },
+      {
+        "noIds": true
+      }
+    ]
+  },
+  {
+    "name": "implied-answer-closes-question",
+    "about": "The user's instruction settles an agent-recorded question without quoting an option, so the agent closes it with their answer.",
+    "ledger": {
+      "nextId": 8,
+      "turn": 3,
+      "items": [
+        {
+          "id": "i7",
+          "kind": "question",
+          "label": null,
+          "from": "record",
+          "ask": "Release v0.3 now, or after the login fix?",
+          "options": ["Release now", "After the login fix"],
+          "rec": "After the login fix",
+          "helps": [],
+          "turn": 2,
+          "at": 2
+        }
+      ]
+    },
+    "prompt": "Let's get the login fix merged first. Start on it now; we'll cut the release once it's in.",
+    "checks": [
+      {
+        "calls": "close",
+        "count": 1,
+        "match": {
+          "id": "^i7$"
+        },
+        "has": ["answer"]
+      },
+      {
+        "noIds": true
+      }
+    ]
+  },
+  {
+    "name": "side-request-leaves-question-open",
+    "about": "The user asks for something unrelated without settling or dropping the open question, so the agent leaves it open.",
+    "ledger": {
+      "nextId": 4,
+      "turn": 2,
+      "items": [
+        {
+          "id": "i3",
+          "kind": "question",
+          "label": null,
+          "from": "record",
+          "ask": "Which cache should the product API use?",
+          "options": ["Redis", "In-memory"],
+          "rec": "In-memory",
+          "helps": [],
+          "turn": 1,
+          "at": 1
+        }
+      ]
+    },
+    "prompt": "Before the cache, quick one: what does the pagination bug in the orders list look like to you?",
+    "checks": [
+      {
+        "calls": "close",
+        "count": 0
+      },
+      {
+        "noIds": true
+      }
+    ]
   }
 ]
