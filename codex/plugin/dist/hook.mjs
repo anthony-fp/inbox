@@ -444,7 +444,8 @@ function emptySession() {
     lastActions: {},
     heldRows: [],
     prViews: NO_PRS,
-    stop: null
+    stop: null,
+    files: []
   };
 }
 var SESSION_ID = /^[\w-]{1,100}$/;
@@ -495,7 +496,8 @@ function upgradeSession(saved) {
       ),
       isFetching: false
     },
-    stop: saved.stop ?? null
+    stop: saved.stop ?? null,
+    files: saved.files ?? []
   };
 }
 function startContext(host, s, source) {
@@ -512,7 +514,8 @@ function cleared(s) {
     pending: [],
     presence: { ...s.presence, ledgerState: "current", hasDroppedReply: false, turnsApplied: s.presence.turnsStarted },
     lastActions: {},
-    stop: null
+    stop: null,
+    files: []
   };
 }
 function notePrompt(host, s, text, isOpen) {

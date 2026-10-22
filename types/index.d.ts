@@ -1,3 +1,16 @@
+export type FileKind = 'md' | 'html' | 'pdf' | 'image' | 'csv' | 'link' | 'plan' | 'artifact'
+
+/** One thing in Files. `target` is an absolute path or a URL, and is also the row's id. */
+export type FileRow = {
+  id: string
+  kind: FileKind
+  name: string
+  target: string
+  where: string
+  at: number
+  isDismissed: boolean
+}
+
 export type Card = {
   goal: string
   done: string[]
@@ -345,6 +358,8 @@ export type Session = {
   prViews: PrViews
   /** Why the last turn stopped, until the next turn starts. */
   stop: Stop | null
+  /** The Files tab's rows: what the session made for the person to look at. */
+  files: FileRow[]
 }
 
 declare module 'claude-code' {

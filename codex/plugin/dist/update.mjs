@@ -772,7 +772,8 @@ function emptySession() {
     lastActions: {},
     heldRows: [],
     prViews: NO_PRS,
-    stop: null
+    stop: null,
+    files: []
   };
 }
 var SESSION_ID = /^[\w-]{1,100}$/;
@@ -823,7 +824,8 @@ function upgradeSession(saved) {
       ),
       isFetching: false
     },
-    stop: saved.stop ?? null
+    stop: saved.stop ?? null,
+    files: saved.files ?? []
   };
 }
 function applied(s, reply, now, promptAt) {

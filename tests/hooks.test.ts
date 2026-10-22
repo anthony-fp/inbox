@@ -3229,6 +3229,86 @@ test('a saved session the store cannot read shows as unreadable, not empty, unti
   expect(stored.get('s:session-1')).toContain('Use Node or Python?')
 })
 
+const FILE_ROW = (target: string, isDismissed: boolean) => ({
+  id: target,
+  kind: 'md',
+  name: target.split('/').pop(),
+  target,
+  where: 'repo',
+  at: 1,
+  isDismissed,
+})
+
+test('Files rows saved with the session come back on a late store read, and a saved dismissal stays', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  let latest: { files?: { target: string; isDismissed: boolean }[] } = {}
+  let extra: unknown[] = []
+  on('state.set', { plugin: 'inbox', key: 'session' } as const, ($, e, next) => {
+    const value = extra.length > 0 ? { ...e.value, files: extra } : e.value
+    latest = value
+    return next({ ...e, value })
+  })
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'add a greeting cli', wait: false, origin: { kind: 'composer' } })
+  await $.turn.complete({ answer: 'ok', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.settle()
+
+  await $.session.end({ reason: 'clear', sessionId: 'session-1', resume: { id: 'session-1' } })
+  await $.classic.SessionStart({ source: 'clear', session_id: 'session-2' })
+  await clock.settle()
+  storeRefusal = 'the store is busy'
+  await $.session.end({ reason: 'resume', sessionId: 'session-2', resume: { id: 'session-2' } })
+  await $.classic.SessionStart({ source: 'resume', session_id: 'session-1' })
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  extra = [FILE_ROW('/w/shared.md', false), FILE_ROW('/w/new.md', false)]
+  await $.prompt.submit({ text: 'keep going', wait: false, origin: { kind: 'composer' } })
+  await $.turn.complete({ answer: 'ok', durationMs: 5, isAborted: false, turnId: 't2', reason: 'answer' })
+  await clock.settle()
+  extra = []
+
+  stored.set(
+    's:session-1',
+    JSON.stringify({
+      ...SAVED_SESSION,
+      files: [FILE_ROW('/w/shared.md', true), FILE_ROW('/w/old.md', false)],
+    }),
+  )
+  storeRefusal = undefined
+  await pane.press({ key: 'read-again' })
+  await clock.settle()
+
+  expect(latest.files?.map(f => [f.target, f.isDismissed]).sort()).toEqual([
+    ['/w/new.md', false],
+    ['/w/old.md', false],
+    ['/w/shared.md', true],
+  ])
+})
+
+test('after /clear, a conversation with no saved record shows no Files rows', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  let latest: { files?: unknown[] } = {}
+  let extra: unknown[] = [FILE_ROW('/w/a.md', false)]
+  on('state.set', { plugin: 'inbox', key: 'session' } as const, ($, e, next) => {
+    const value = extra.length > 0 ? { ...e.value, files: extra } : e.value
+    latest = value
+    return next({ ...e, value })
+  })
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'add a greeting cli', wait: false, origin: { kind: 'composer' } })
+  await $.turn.complete({ answer: 'ok', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.settle()
+  expect(latest.files).toHaveLength(1)
+
+  extra = []
+  await $.session.end({ reason: 'clear', sessionId: 'session-1', resume: { id: 'session-1' } })
+  await $.classic.SessionStart({ source: 'clear', session_id: 'session-2' })
+  await clock.settle()
+  expect(latest.files).toEqual([])
+})
+
 for (const origin of [{ kind: 'sdk' }, { kind: 'plugin', name: 'test-plugin' }] satisfies PromptOrigin[]) {
   test(`a headless run stays inactive when ${origin.kind} invokes the inbox command`, async ($, on) => {
     const prompts: string[] = []

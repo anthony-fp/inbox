@@ -30,6 +30,7 @@ import type {
   Stop,
   Tab,
 } from '../types'
+import { mergeFiles } from './files'
 import {
   NO_SESSION,
   PRESENT,
@@ -2255,11 +2256,12 @@ async function bringBack(
 /** Brings back a saved ledger once the store reads it again, under the turns the session ran meanwhile. */
 async function restore($: EngineInterface, saved: SavedRecord) {
   conversation.generation += 1
-  const loaded = upgradeSession(saved).ledger
+  const { ledger: loaded, files } = upgradeSession(saved)
   await Promise.all([
     replaceDrawn($, s => ({
       ...s,
       ledger: { ...loaded, turn: loaded.turn + s.ledger.turn },
+      files: mergeFiles(files, s.files),
       lastActions: withoutRowActions(s.lastActions),
     })),
     forgetRowState($),

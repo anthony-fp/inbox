@@ -1,17 +1,8 @@
 /** The Files tab: what a session made for the person to look at, as documents, artifacts and links. */
 
-export type FileKind = 'md' | 'html' | 'pdf' | 'image' | 'csv' | 'link' | 'plan' | 'artifact'
+import type { FileKind, FileRow } from '../types'
 
-/** One thing in Files. `target` is an absolute path or a URL, and is also the row's id. */
-export type FileRow = {
-  id: string
-  kind: FileKind
-  name: string
-  target: string
-  where: string
-  at: number
-  isDismissed: boolean
-}
+export type { FileKind, FileRow }
 
 const DOCUMENT_KINDS: Record<string, FileKind> = {
   md: 'md',

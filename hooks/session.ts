@@ -39,6 +39,7 @@ export function emptySession(): Session {
     heldRows: [],
     prViews: NO_PRS,
     stop: null,
+    files: [],
   }
 }
 
@@ -128,6 +129,7 @@ export function upgradeSession(saved: SavedSession): Session {
       isFetching: false,
     },
     stop: saved.stop ?? null,
+    files: saved.files ?? [],
   }
 }
 
@@ -152,6 +154,7 @@ export function cleared<S extends Session>(s: S): S {
     presence: { ...s.presence, ledgerState: 'current', hasDroppedReply: false, turnsApplied: s.presence.turnsStarted },
     lastActions: {},
     stop: null,
+    files: [],
   }
 }
 
