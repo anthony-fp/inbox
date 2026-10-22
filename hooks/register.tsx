@@ -2192,7 +2192,8 @@ function withoutRowActions(lastActions: Record<string, LastAction>): Record<stri
 
 /**
  * Brings back a saved session into a conversation that has not run yet. A fork takes only its parent's ledger.
- * A message the saved session still waited on may never arrive now, so it reads unconfirmed.
+ * A message the saved session still waited on may never arrive now, so it reads unconfirmed, and its sent record is
+ * dropped. A kept record would take the arrival of the same message sent again.
  */
 async function bringBack(
   $: EngineInterface,
@@ -2215,7 +2216,7 @@ async function bringBack(
       ]),
     )
     // The stop and the running turn belong to the process that saved them.
-    return cutOffUpdate({ ...loaded, lastActions, stop: null, turn: emptySession().turn })
+    return cutOffUpdate({ ...loaded, lastActions, sent: [], stop: null, turn: emptySession().turn })
   })
   if (isBrought && !isFork)
     await update($, AWAY, a => (isLoading() ? { ...a, lastActiveAt: saved.savedAt, isAway: true } : a))

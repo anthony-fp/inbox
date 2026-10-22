@@ -1501,6 +1501,51 @@ test('an older identical Claude prompt leaves the newer press unconfirmed until 
   expect(await pane.find({ text: /Delivery unconfirmed/ })).toBeUndefined()
 })
 
+test('a press resent after the app quit with its first delivery lost reads as delivered once Claude gets it', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const explain =
+    'Remind me what this question you asked me is about: why it came up, what each choice would mean, and which you would pick. Don\'t act on it yet.\n"Use Node or Python?"\nOptions: Node / Python'
+  stored.set(
+    's:session-1',
+    JSON.stringify({
+      ...SAVED_SESSION,
+      lastActions: {
+        i1: {
+          kind: 'talk',
+          action: 'explain',
+          text: 'Explain',
+          at: 900_000,
+          delivery: { state: 'unconfirmed', message: explain, id: 'lost' },
+        },
+      },
+      sent: [
+        {
+          text: explain,
+          press: { id: 'i1', action: 'explain' },
+          at: 900_000,
+          row: 'i1',
+          pressedAt: 900_000,
+          deliveryId: 'lost',
+          phase: 'attempting',
+        },
+      ],
+    }),
+  )
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: /Delivery\s+unconfirmed:\s+Explain/ })).toBeDefined()
+
+  await pane.press({ key: 'explain-i1-key' })
+  await clock.settle()
+  expect(sent.at(-1)).toBe(explain)
+  await clock.advance(QUEUED_AFTER_MS)
+  expect(await pane.find({ text: /Explaining…/ })).toBeDefined()
+  expect(await pane.find({ text: /Delivery unconfirmed|Queued/ })).toBeUndefined()
+})
+
 test('a refused newer Claude send replaces ambiguity with Not sent after the older prompt enters', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])
