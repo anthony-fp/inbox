@@ -139,6 +139,7 @@ import {
   readCommandRow,
   statusLine,
   stopKindOf,
+  stopOfMessage,
   transcriptText,
   TURN_BOX_TOOL,
   turnBoxText,
@@ -562,6 +563,10 @@ let isOn = false
 let turningOn: Promise<void> | null = null
 let intervals: Timer[] = []
 let sentBack: string[] = []
+/** The reply a step ended on with no tool call, until the turn's next step shows it was sent back. */
+let finalReply: string | null = null
+/** True once an API error has set this turn's stop. */
+let hasStopFromError = false
 let turnBox: string | null = null
 let isDialogDismissed = false
 let fetchingPrs: Promise<void> = Promise.resolve()
@@ -634,6 +639,7 @@ const fieldSeeds = new Map<string, string>()
 
 function resetTurn() {
   sentBack = []
+  finalReply = null
   turnBox = null
   isDialogDismissed = false
 }
@@ -690,6 +696,13 @@ async function setStop($: EngineInterface, stop: Stop | null) {
   resuming = null
   await commit($, currentOwner(), s => ({ ...s, stop }))
   void publishStatus($)
+}
+
+/** Sets the stop from the error text the transcript ends on, where no StopFailure hook ran. */
+async function setStopFromLastReply($: EngineInterface) {
+  const last = (await $.session.messages().catch(() => [])).at(-1)
+  const message = last?.role === 'assistant' ? last.text : ''
+  await setStop($, { ...stopOfMessage(message), at: await $.clock.now() })
 }
 
 function redraw($: EngineInterface) {
@@ -2386,6 +2399,8 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     if (e.agentId) return next(e)
     isTurnRunning = true
+    finalReply = null
+    hasStopFromError = false
     // Counted here, before the
     // turn can end, since a reload can cut off its end-of-turn hook.
     if (isOn) {
@@ -2462,6 +2477,7 @@ export const register: Register = on => {
   on('classic.StopFailure', async ($, e, next) => {
     const r = await next(e)
     if (!isOn || e.agent_id) return r
+    hasStopFromError = true
     const message = e.last_assistant_message ?? ''
     await setStop($, {
       kind: stopKindOf(String(e.error), message),
@@ -2473,13 +2489,15 @@ export const register: Register = on => {
     return r
   })
 
-  on('classic.Stop', async ($, e, next) => {
-    const r = await next(e)
-    if (!isOn || e.agent_id) return r
-    const reply = e.last_assistant_message ?? ''
-    if (reply.trim() && r.block) sentBack.push(reply)
+  on('turn.step', async function* ($, e, next) {
+    if (!isOn || e.agentId) return yield* next(e)
+    if (finalReply !== null) sentBack.push(finalReply)
+    finalReply = null
+    const response = yield* next(e)
+    const isFinalReply = response.toolUses.length === 0 && response.stopReason === 'end_turn'
+    if (isFinalReply && response.answer.trim()) finalReply = response.answer
 
-    return r
+    return response
   })
 
   on('turn.complete', async ($, e, next) => {
@@ -2488,6 +2506,7 @@ export const register: Register = on => {
     isTurnRunning = false
     await closeDialogs($, null)
     if (!isOn) return r
+    if (e.reason === 'error' && !hasStopFromError) await setStopFromLastReply($)
     void wakeForDone($).catch(() => undefined)
     void followNewRows($).catch(() => undefined)
     const hasReply = e.answer.trim() !== '' || turnBox !== null

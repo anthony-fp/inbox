@@ -41,7 +41,8 @@ let submitAnswer:
 let held: { text: string; origin: PromptOrigin }[] = []
 let promptRows = 0
 
-let stopBlock: string | undefined
+let stepAnswers: { answer: string; callsTool?: true }[] = []
+let transcriptRows: { role: 'user' | 'assistant'; text: string; toolUses: never[] }[] = []
 
 let dialogAnswer: Record<string, unknown> = { result: 'ok', text: 'ok' }
 
@@ -125,12 +126,19 @@ async function arrive($: Engine) {
   for (const p of prompts) await storePrompt($, p)
 }
 
+async function runStep($: Engine, index: number) {
+  const stream = $.turn.step({ turnId: 't1', index, model: 'm', messageCount: 3 })
+  for await (const _chunk of stream) void _chunk
+  await stream.result
+}
+
 function world($: Engine, on: On, prompts: string[], vars: Record<string, string> = {}) {
   sent = []
   submitAnswer = 'enter'
   held = []
   ran = []
-  stopBlock = undefined
+  stepAnswers = []
+  transcriptRows = []
   dialogAnswer = { result: 'ok', text: 'ok' }
   ghAnswers = []
   isGhMissing = false
@@ -248,7 +256,20 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('classic.StopFailure', () => ({}))
   on('classic.PermissionRequest', () => ({}))
-  on('classic.Stop', () => (stopBlock ? { block: stopBlock } : {}))
+  on('turn.step', async function* (_$, e) {
+    const { answer, callsTool } = stepAnswers[e.index] ?? { answer: '' }
+    const isLast = !callsTool
+
+    return {
+      turnId: e.turnId,
+      index: e.index,
+      answer,
+      toolUses: isLast ? [] : [{ id: `call-${e.index}`, name: 'Bash', input: {} }],
+      stopReason: isLast ? ('end_turn' as const) : ('tool_use' as const),
+      usage: null,
+    }
+  })
+  on('session.messages', () => ({ value: transcriptRows }))
   on('classic.SessionStart', ($, e) => {
     sessionId = e.session_id
     return {}
@@ -878,14 +899,12 @@ test('resumed into a conversation it cannot fork yet, it catches up from the tra
   world($, on, prompts)
   on('session.turns', () => ({ value: 3 }))
   on('model.fork', () => ({ value: { isAnswered: false as const, reason: 'nothing-to-fork' as const } }))
-  const said = (role: 'user' | 'assistant', text: string) => ({ role, text, toolUses: [] })
-  on('session.messages', () => ({
-    value: [
-      said('user', 'Add a greeting CLI. Node or Python?'),
-      said('user', 'inbox: what waits on the user, as of your last reply. Anything not listed here is closed.'),
-      said('assistant', 'The plan is written. 1. Node or Python? 2. Name the command greet?'),
-    ],
-  }))
+  const said = (role: 'user' | 'assistant', text: string) => ({ role, text, toolUses: [] as never[] })
+  transcriptRows = [
+    said('user', 'Add a greeting CLI. Node or Python?'),
+    said('user', 'inbox: what waits on the user, as of your last reply. Anything not listed here is closed.'),
+    said('assistant', 'The plan is written. 1. Node or Python? 2. Name the command greet?'),
+  ]
 
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   await clock.settle()
@@ -2353,32 +2372,20 @@ test('a delayed Resume refusal belongs only to the stop and conversation that se
   expect(await band.find({ key: 'resume' })).toBeDefined()
 })
 
-test('a reply another Stop hook sends Claude back from reaches the per-turn call, and the inbox sends back none itself', async ($, on) => {
+test('a reply a step ends on before another step starts reaches the per-turn call, and the last answer is not counted twice', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   const prompts: string[] = []
   world($, on, prompts)
+  stepAnswers = [
+    { answer: 'Fixed the parser. Should I also rename the helper?' },
+    { answer: 'Linted. The parser is fixed.' },
+  ]
 
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   await $.prompt.submit({ text: 'fix the parser', wait: false, origin: { kind: 'composer' } })
-  const piped = await $.tool.call({
-    tool: 'Bash',
-    command: 'npm test 2>&1 | tail -5',
-    description: 'Run tests',
-  } as never)
-  expect(piped.deny).toBeUndefined()
-  const claimed = await $.classic.Stop({
-    stop_hook_active: false,
-    last_assistant_message: 'Fixed the parser. All tests pass.',
-  } as never)
-  expect(claimed.block).toBeUndefined()
-
-  stopBlock = 'Run the linter before you stop.'
-  const blocked = await $.classic.Stop({
-    stop_hook_active: false,
-    last_assistant_message: 'Fixed the parser. Should I also rename the helper?',
-  } as never)
-  expect(blocked.block).toBe('Run the linter before you stop.')
-  stopBlock = undefined
+  await $.turn.start({ text: 'fix the parser', turnId: 't1' })
+  await runStep($, 0)
+  await runStep($, 1)
   await $.turn.complete({
     answer: 'Linted. The parser is fixed.',
     durationMs: 5,
@@ -2388,7 +2395,64 @@ test('a reply another Stop hook sends Claude back from reaches the per-turn call
   })
   await clock.settle()
   expect(prompts.at(-1)).toContain('Should I also rename the helper?')
-  expect(prompts.at(-1)).not.toContain('All tests pass.')
+  expect(prompts.at(-1)?.match(/Linted\. The parser is fixed\./g)).toHaveLength(1)
+})
+
+test('narration before a tool call is not a reply sent back', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  const prompts: string[] = []
+  world($, on, prompts)
+  stepAnswers = [{ answer: 'Let me run the tests first.', callsTool: true }, { answer: 'All tests pass.' }]
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'fix the parser', wait: false, origin: { kind: 'composer' } })
+  await $.turn.start({ text: 'fix the parser', turnId: 't1' })
+  await runStep($, 0)
+  await runStep($, 1)
+  await $.turn.complete({
+    answer: 'All tests pass.',
+    durationMs: 5,
+    isAborted: false,
+    turnId: 't1',
+    reason: 'answer',
+  })
+  await clock.settle()
+  expect(prompts.at(-1)).not.toContain('Let me run the tests first.')
+})
+
+test('a turn an API error ended shows its stop from the error text in the transcript, and a StopFailure hook that ran keeps its own', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  const band = await $.ui.mount({ plugin: 'inbox', surface: 'terminal', ...BAND })
+  const said = (text: string) => [{ role: 'assistant' as const, text, toolUses: [] as never[] }]
+  const fail = (turnId: string) =>
+    $.turn.complete({ answer: '', durationMs: 5, isAborted: false, turnId, reason: 'error' })
+
+  transcriptRows = said("You've hit your limit · resets 7:33pm (America/Los_Angeles)")
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await fail('t1')
+  await clock.settle()
+  expect(await band.find({ text: /Resume after 7:33pm\./ })).toBeDefined()
+
+  transcriptRows = said('Please run /login · API Error: 401 Invalid API key')
+  await $.turn.start({ text: 'go', turnId: 't2' })
+  await fail('t2')
+  await clock.settle()
+  expect(await band.find({ text: /Run \/login, then send a message to resume\./ })).toBeDefined()
+
+  transcriptRows = said('There was an issue with the selected model.')
+  await $.turn.start({ text: 'go', turnId: 't3' })
+  await fail('t3')
+  await clock.settle()
+  expect(await band.find({ key: 'resume' })).toBeDefined()
+
+  transcriptRows = said('Please run /login · API Error: 401 Invalid API key')
+  await $.turn.start({ text: 'go', turnId: 't4' })
+  await $.classic.StopFailure({ error: 'server_error' } as never)
+  await fail('t4')
+  await clock.settle()
+  expect(await band.find({ text: /API error \(server_error\)/ })).toBeDefined()
 })
 
 test('/inbox demo shows sample entries in every tab, presses change only its copy, and [Hide demo] goes back', async ($, on) => {

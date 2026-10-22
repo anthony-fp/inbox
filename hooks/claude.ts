@@ -127,6 +127,22 @@ export function stopKindOf(error: string, message: string): Stop['kind'] {
   }
 }
 
+const SIGN_IN_MESSAGE =
+  /\/login\b|invalid api key|invalid auth token|not logged in|authentication (?:required|failed)|login expired|sign in again/i
+const BILLING_MESSAGE = /credit balance (?:is )?too low|account is on hold|out of (?:usage )?credits|billing/i
+
+/** The stop an API error's text describes, for an error Claude Code gave no code for. */
+export function stopOfMessage(message: string): Pick<Stop, 'kind' | 'detail' | 'resets'> {
+  if (/\bhit your\b.*\blimit\b/i.test(message))
+    return { kind: 'usage-limit', detail: 'rate_limit', resets: resetTime(message) }
+  if (BILLING_MESSAGE.test(message)) return { kind: 'billing', detail: 'billing_error', resets: null }
+  if (SIGN_IN_MESSAGE.test(message)) return { kind: 'sign-in', detail: 'authentication_failed', resets: null }
+  if (/overloaded/i.test(message)) return { kind: 'api-error', detail: 'overloaded', resets: null }
+  if (/rate.?limit/i.test(message)) return { kind: 'api-error', detail: 'rate_limit', resets: null }
+
+  return { kind: 'api-error', detail: 'unknown', resets: null }
+}
+
 export function resetTime(message: string): string | null {
   return message.match(/\bresets\s+(?:at\s+)?([^·(\n]+?)\s*(?:\(|·|$)/i)?.[1]?.trim() ?? null
 }
