@@ -283,6 +283,42 @@ const NO_SELECTION: Record<ModTab, Cursor> = { now: NO_CURSOR, files: NO_CURSOR,
 const NO_PLAN: PlanState = { sessionId: '', view: null, error: null }
 const PLAN = atom({ plugin: 'inbox', key: 'plan' } as const, NO_PLAN)
 const SELECTION = atom({ plugin: 'inbox', key: 'selection' } as const, NO_SELECTION)
+
+/**
+ * The saved tab as a `ModTab`. An older build saved `needsYou` or `findings` (or `waiting` or `notes`), and a draw or a
+ * key press can run before `upgradeState` converts it, so every read goes through this.
+ */
+function modTab(saved: string): ModTab {
+  return MOD_TABS.find(m => m.id === saved)?.id ?? 'now'
+}
+
+/**
+ * The saved cursors by `ModTab`. The old Needs you and Findings cursors become Now's: the one with an open row, Needs
+ * you's first. A cursor saved before `openedAt` existed: no click opened its row in a way that still guards it.
+ */
+function modSelection(saved: Partial<Record<ModTab | Tab | 'waiting', Cursor>>): Record<ModTab, Cursor> {
+  const { now, files, prs, needsYou, findings, waiting } = saved
+  const old = [needsYou, waiting, findings].find(c => c && c.id !== null)
+  const guarded = (c: Cursor) => ({ ...c, openedAt: c.openedAt ?? 0 })
+
+  return {
+    now: guarded(now ?? old ?? NO_CURSOR),
+    files: guarded(files ?? NO_CURSOR),
+    prs: guarded(prs ?? NO_CURSOR),
+  }
+}
+
+async function readTab($: EngineInterface): Promise<ModTab> {
+  return modTab(await read($, TAB))
+}
+
+async function readSelection($: EngineInterface): Promise<Record<ModTab, Cursor>> {
+  return modSelection(await read($, SELECTION))
+}
+
+function updateSelection($: EngineInterface, change: (s: Record<ModTab, Cursor>) => Record<ModTab, Cursor>) {
+  return update($, SELECTION, s => change(modSelection(s)))
+}
 const THEME = atom({ plugin: 'inbox', key: 'theme' } as const, '')
 const DIALOGS = atom({ plugin: 'inbox', key: 'dialogs' } as const, [] as Dialog[])
 const TYPING = atom({ plugin: 'inbox', key: 'typing' } as const, null as string | null)
@@ -1059,21 +1095,8 @@ async function upgradeState($: EngineInterface): Promise<Ledger> {
   const now = await $.clock.now()
   const [session] = await Promise.all([
     upgradeDrawn($),
-    update($, TAB, t => (MOD_TABS.some(m => m.id === t) ? t : 'now')),
-    update($, SELECTION, (saved: Partial<Record<ModTab | Tab | 'waiting', Cursor>>) => {
-      const { now, files, prs, needsYou, findings, waiting } = saved
-      // The old Needs you and Findings cursors become Now's: the one with an open row, Needs you's first.
-      const old = [needsYou, waiting, findings].find(c => c && c.id !== null)
-      const cursors: Record<ModTab, Cursor> = {
-        now: now ?? old ?? NO_CURSOR,
-        files: files ?? NO_CURSOR,
-        prs: prs ?? NO_CURSOR,
-      }
-      // A cursor saved before `openedAt` existed: no click opened its row in a way that still guards it.
-      return Object.fromEntries(
-        Object.entries(cursors).map(([t, c]) => [t, { ...c, openedAt: c.openedAt ?? 0 }]),
-      ) as Record<ModTab, Cursor>
-    }),
+    update($, TAB, modTab),
+    update($, SELECTION, modSelection),
     // Old builds saved the group kinds as `decide` and `do`, and Findings' one fold as `finding`, now one per kind.
     update($, UNFOLDED, u =>
       u.flatMap((k: string): FoldKind[] =>
@@ -1114,13 +1137,13 @@ function openPane($: EngineInterface) {
 }
 
 async function openTopRow($: EngineInterface) {
-  const [{ view, ledger, prViews: prState, lastActions, now }, tab] = await Promise.all([drawnState($), read($, TAB)])
+  const [{ view, ledger, prViews: prState, lastActions, now }, tab] = await Promise.all([drawnState($), readTab($)])
   const prViews = drawnPrs(prState, ledger.prs, lastActions, now)
     .filter(x => !x.isSettled)
     .map(x => x.pr)
   const ids = tabRowIds(view, prViews)[tab]
   const top = firstWaiting(tabWaits(tab, view, prViews, lastActions))
-  if (top === null) await update($, SELECTION, s => ({ ...s, [tab]: NO_CURSOR }))
+  if (top === null) await updateSelection($, s => ({ ...s, [tab]: NO_CURSOR }))
   else await select($, tab, top, ids.indexOf(top))
 }
 
@@ -1136,7 +1159,7 @@ async function openInbox($: EngineInterface) {
   await openPane($)
   const { view } = await drawnState($)
   if (view.needsYou.count > 0) await update($, TAB, () => 'now' as const)
-  else if ((await read($, TAB)) === 'prs') await findPrs($)
+  else if ((await readTab($)) === 'prs') await findPrs($)
   await followNewRows($, true)
   await openTopRow($)
 }
@@ -1304,10 +1327,10 @@ async function select($: EngineInterface, tab: ModTab, id: string, index: number
     else cancelUndoScroll()
   }
   const openedAt = await $.clock.now()
-  await update($, SELECTION, s => ({ ...s, [tab]: { id, index, openedAt } }))
+  await updateSelection($, s => ({ ...s, [tab]: { id, index, openedAt } }))
   await update($, TYPING, t => (t === id ? t : null))
   // The row's buttons draw dim while guarded. A render cannot write state, so a fresh value redraws them once the guard ends.
-  later($, PRESS_GUARD_MS, () => update($, SELECTION, s => ({ ...s })))
+  later($, PRESS_GUARD_MS, () => updateSelection($, s => ({ ...s })))
   if (scroll) await scrollToRow($, id)
 }
 
@@ -1365,7 +1388,7 @@ function settledScrollKey(key: string, layout: string): string {
 async function revealPendingUndo($: EngineInterface): Promise<boolean> {
   const pending = pendingUndoScroll
   if (!pending || !pending.revealUndo || !isInlineTerminalPane || pending.sessionId !== conversation.id) return false
-  const [tab, selection, drawn] = await Promise.all([read($, TAB), read($, SELECTION), drawnState($)])
+  const [tab, selection, drawn] = await Promise.all([readTab($), readSelection($), drawnState($)])
   if (pendingUndoScroll !== pending) return false
   if (tab !== pending.tab || !sameCursor(selection[tab], pending.cursor) || drawn.now >= pending.expiresAt) return false
   const prs = drawnPrs(drawn.prViews, drawn.ledger.prs, drawn.lastActions, drawn.now)
@@ -1378,7 +1401,7 @@ async function revealPendingUndo($: EngineInterface): Promise<boolean> {
 
 async function keepUndoVisible($: EngineInterface, key: string, block: UiScrollBlock, at: number, revision: number) {
   if (revision !== undoScrollRevision) return
-  const [tab, selection] = await Promise.all([read($, TAB), read($, SELECTION)])
+  const [tab, selection] = await Promise.all([readTab($), readSelection($)])
   if (revision !== undoScrollRevision) return
   const pending: PendingUndoScroll = {
     key,
@@ -1397,7 +1420,7 @@ async function finishPendingUndoScroll($: EngineInterface) {
   const pending = pendingUndoScroll
   if (!pending) return
   const revision = undoScrollRevision
-  const [tab, selection, drawn] = await Promise.all([read($, TAB), read($, SELECTION), drawnState($)])
+  const [tab, selection, drawn] = await Promise.all([readTab($), readSelection($), drawnState($)])
   if (pendingUndoScroll !== pending || revision !== undoScrollRevision) return
   const cursor = selection[tab]
   if (tab === pending.tab && isInlineTerminalPane && conversation.id === pending.sessionId) {
@@ -1435,7 +1458,7 @@ async function scrollToOpenRow($: EngineInterface, tab: ModTab, surface?: Render
   if (revision !== undoScrollRevision) return
   if (isInlinePane) {
     const [selection, { view, ledger, prViews: prState, lastActions, now }] = await Promise.all([
-      read($, SELECTION),
+      readSelection($),
       drawnState($),
     ])
     const prViews = drawnPrs(prState, ledger.prs, lastActions, now)
@@ -1456,8 +1479,8 @@ async function scrollToOpenRow($: EngineInterface, tab: ModTab, surface?: Render
 async function selectClicked($: EngineInterface, id: string) {
   const [{ ledger, prViews: prState, lastActions, view, now }, tab, selection] = await Promise.all([
     drawnState($),
-    read($, TAB),
-    read($, SELECTION),
+    readTab($),
+    readSelection($),
   ])
   const prViews = drawnPrs(prState, ledger.prs, lastActions, now)
     .filter(x => !x.isSettled)
@@ -1506,7 +1529,7 @@ async function openLeftRows($: EngineInterface) {
   const ids = tabRowIds(view, prViews)
   const settled = new Set(settledRowIds(allRows(view)))
   let isMoved = false
-  await update($, SELECTION, s => {
+  await updateSelection($, s => {
     const moved = Object.fromEntries(
       (Object.keys(s) as ModTab[]).map(t => {
         const c = s[t]
@@ -1520,7 +1543,7 @@ async function openLeftRows($: EngineInterface) {
     return isMoved ? moved : s
   })
   // The opened row's buttons draw dim while guarded; a fresh value redraws them once the guard ends.
-  if (isMoved) later($, PRESS_GUARD_MS, () => update($, SELECTION, s => ({ ...s })))
+  if (isMoved) later($, PRESS_GUARD_MS, () => updateSelection($, s => ({ ...s })))
 }
 
 function tabWaits(tab: ModTab, view: InboxView, prViews: PrView[], lastActions: Record<string, LastAction>): RowWait[] {
@@ -1528,14 +1551,14 @@ function tabWaits(tab: ModTab, view: InboxView, prViews: PrView[], lastActions: 
 }
 
 async function unlessGuarded($: EngineInterface, rowId: string, press: UiPressArgument, onPress: Action['onPress']) {
-  const [selection, tab, now] = await Promise.all([read($, SELECTION), read($, TAB), $.clock.now()])
+  const [selection, tab, now] = await Promise.all([readSelection($), readTab($), $.clock.now()])
   const cursor = selection[tab]
   if (cursor.id !== rowId || !isGuarded(cursor.openedAt, now)) await onPress(press)
 }
 
 async function keepPressedOpen($: EngineInterface, id: string) {
-  const tab = await read($, TAB)
-  await update($, SELECTION, s =>
+  const tab = await readTab($)
+  await updateSelection($, s =>
     s[tab].id === null && s[tab].openedAt === 0 ? { ...s, [tab]: { id, index: 0, openedAt: 0 } } : s,
   )
 }
@@ -1550,7 +1573,7 @@ function newRows(isDemo: boolean, current: Record<ModTab, string[] | null>): Rec
 async function jumpTo($: EngineInterface, tab: ModTab) {
   cancelUndoScroll()
   await update($, TAB, () => tab)
-  await update($, SELECTION, s => ({ ...s, [tab]: NO_CURSOR }))
+  await updateSelection($, s => ({ ...s, [tab]: NO_CURSOR }))
   await scrollToOpenRow($, tab)
 }
 
@@ -1573,7 +1596,7 @@ function tabRowIds(view: InboxView, prViews: PrView[]): Record<ModTab, string[]>
 async function followNewRows($: EngineInterface, isOpening = false) {
   const [drawn, tab, unfolded, isShown, plan] = await Promise.all([
     drawnState($),
-    read($, TAB),
+    readTab($),
     read($, UNFOLDED),
     isPaneShown($),
     read($, PLAN),
@@ -1595,7 +1618,7 @@ async function followNewRows($: EngineInterface, isOpening = false) {
     return id === null ? [] : [{ t, cursor: { id, index: ids[t].indexOf(id), openedAt: 0 } }]
   })
   if (keeps.length > 0) {
-    await update($, SELECTION, s => {
+    await updateSelection($, s => {
       const kept = { ...s }
       for (const { t, cursor } of keeps) if (s[t].id === null && s[t].openedAt === 0) kept[t] = cursor
       return kept
@@ -1632,11 +1655,11 @@ async function isPaneShown($: EngineInterface) {
 }
 
 async function isPrsTabShown($: EngineInterface) {
-  return (await read($, TAB)) === 'prs' && (await isPaneShown($))
+  return (await readTab($)) === 'prs' && (await isPaneShown($))
 }
 
 async function screen($: EngineInterface) {
-  const tab = await read($, TAB)
+  const tab = await readTab($)
 
   return screenText(CLAUDE_CODE, await isPaneShown($), modTabLabel(tab))
 }
@@ -1835,7 +1858,7 @@ async function undoKeyAfterPress(
 }
 
 async function shownWaits($: EngineInterface) {
-  const [{ ledger, prViews: prState, lastActions, view, now }, tab] = await Promise.all([drawnState($), read($, TAB)])
+  const [{ ledger, prViews: prState, lastActions, view, now }, tab] = await Promise.all([drawnState($), readTab($)])
   const prViews = drawnPrs(prState, ledger.prs, lastActions, now)
     .filter(x => !x.isSettled)
     .map(x => x.pr)
@@ -1853,13 +1876,13 @@ async function openAfterClose(
   wasWaiting: boolean,
   skipScroll = false,
 ): Promise<{ isMoved: boolean; undoBlock: UiScrollBlock }> {
-  const [{ tab, rows, ids }, selection] = await Promise.all([shownWaits($), read($, SELECTION)])
+  const [{ tab, rows, ids }, selection] = await Promise.all([shownWaits($), readSelection($)])
   if (!wasWaiting || selection[tab].id !== id || rows.find(r => r.id === id)?.isWaiting)
     return { isMoved: false, undoBlock: 'nearest' }
   const following = rowAfterClose(rows, id)
   const index = following === null ? -1 : ids.indexOf(following)
   if (following !== null && index >= 0) await select($, tab, following, index, !skipScroll)
-  else await update($, SELECTION, s => ({ ...s, [tab]: { ...NO_CURSOR, index: s[tab].index } }))
+  else await updateSelection($, s => ({ ...s, [tab]: { ...NO_CURSOR, index: s[tab].index } }))
 
   return {
     isMoved: true,
@@ -1873,8 +1896,8 @@ async function openAfterClose(
 }
 
 async function reopenPressed($: EngineInterface, id: string) {
-  const tab = await read($, TAB)
-  await update($, SELECTION, s => ({ ...s, [tab]: { id, index: s[tab].index, openedAt: 0 } }))
+  const tab = await readTab($)
+  await updateSelection($, s => ({ ...s, [tab]: { id, index: s[tab].index, openedAt: 0 } }))
 }
 
 async function selectRestored($: EngineInterface, id: string) {
@@ -2133,9 +2156,9 @@ async function setDemo($: EngineInterface, isShown: boolean, isRecording = false
     update($, DEMO, () => (isShown ? demoView(now) : null)),
     update($, DEMO_RECORDING, () => isShown && isRecording),
   ])
-  await Promise.all([update($, SELECTION, () => NO_SELECTION), update($, TYPING, () => null)])
+  await Promise.all([updateSelection($, () => NO_SELECTION), update($, TYPING, () => null)])
   if (isShown) redrawWhileLeaving($, now + SETTLED_MS)
-  if ((await read($, TAB)) === 'prs') await findPrs($)
+  if ((await readTab($)) === 'prs') await findPrs($)
   await followNewRows($, true)
 }
 
@@ -2328,7 +2351,7 @@ async function restore($: EngineInterface, saved: SavedRecord) {
 
 async function forgetRowState($: EngineInterface) {
   await Promise.all([
-    update($, SELECTION, () => NO_SELECTION),
+    updateSelection($, () => NO_SELECTION),
     update($, TYPING, () => null),
     update($, UNFOLDED, () => []),
     update($, OPTIONS_SHOWN, () => []),
@@ -2491,7 +2514,7 @@ function drawnPlanLines(plan: PlanState, isDemo: boolean) {
 
 function isPlanCall(tool: string, input: Record<string, unknown>): boolean {
   return (
-    (tool === 'Write' || tool === 'Edit') &&
+    (tool === 'Write' || tool === 'Edit' || tool === 'MultiEdit') &&
     typeof input.file_path === 'string' &&
     input.file_path !== '' &&
     absolutePath(input.file_path) === planPath(conversation.root, conversation.id)
@@ -2526,7 +2549,7 @@ export async function ensurePlanExcluded($: EngineInterface): Promise<void> {
 }
 
 function redrawPane($: EngineInterface) {
-  return update($, SELECTION, s => ({ ...s }))
+  return updateSelection($, s => ({ ...s }))
 }
 
 export const register: Register = on => {
@@ -2802,12 +2825,7 @@ export const register: Register = on => {
     const isAnswered = e.reason === 'answer' && hasReply
     if (!isAnswered && !isDialogDismissed) return r
 
-    const [tab, isShown, now, before] = await Promise.all([
-      read($, TAB),
-      isPaneShown($),
-      $.clock.now(),
-      read($, SESSION),
-    ])
+    const [tab, isShown, now, before] = await Promise.all([readTab($), isPaneShown($), $.clock.now(), read($, SESSION)])
     const reply = [...sentBack, e.answer, turnBox ?? ''].filter(text => text.trim() !== '').join('\n\n')
     const queuesEmptyReply = isDialogDismissed
     resetTurn()
@@ -2862,7 +2880,7 @@ export const register: Register = on => {
     const isShown = (await read($, DEMO)) !== null
     const args = e.args.trim().split(/\s+/).join(' ')
     if (args === 'demo' || args === 'demo recording') await setDemo($, !isShown, args === 'demo recording')
-    else if ((await read($, TAB)) === 'prs') await findPrs($)
+    else if ((await readTab($)) === 'prs') await findPrs($)
     const [isDemo, isDemoRecording] = await Promise.all([read($, DEMO).then(d => d !== null), read($, DEMO_RECORDING)])
     await showInbox($)
 
@@ -3082,8 +3100,8 @@ export const register: Register = on => {
       plan,
     ] = await Promise.all([
       drawnState($),
-      read($, TAB),
-      read($, SELECTION),
+      readTab($),
+      readSelection($),
       read($, THEME),
       read($, TYPING),
       read($, UNFOLDED),

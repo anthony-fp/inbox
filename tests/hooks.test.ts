@@ -4149,3 +4149,50 @@ test('hotkey 2 opens the Files tab, empty for now, and 1 goes back to Now', asyn
   await clock.settle()
   expect(await pane.find({ text: /README is stale/ })).toBeDefined()
 })
+
+test('a MultiEdit to the plan file redraws the plan', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  await startNowSession($, clock)
+  const pane = await $.ui.mount(PANE)
+  const plan = '/tmp/project/.inbox/plans/session-1.md'
+  fileTexts.set(plan, '## Cache\n- [x] Add the store\n- [~] Wire the reads')
+  await $.tool.call({ tool: 'MultiEdit', file_path: plan, edits: [] } as never)
+  await clock.settle()
+  expect(await pane.find({ text: /^PLAN {2}1 of 2 steps$/ })).toBeDefined()
+})
+
+for (const saved of ['needsYou', 'findings'] as const)
+  for (const surface of ['terminal', 'desktop'] as const)
+    test(`a ${surface} pane drawn while an old build's ${saved} tab is still saved draws Now`, async ($, on) => {
+      const clock = mock.clock(on, { now: 1_000_000 })
+      world($, on, [])
+      // Every write keeps the values an older build saved, so the pane draws them as it does before upgradeState.
+      const oldSelection = {
+        needsYou: { id: 'i2', index: 1, openedAt: 0 },
+        findings: { id: null, index: 0, openedAt: 0 },
+        prs: { id: null, index: 0, openedAt: 0 },
+      }
+      on('state.set', { plugin: 'inbox', key: 'tab' } as const, ($, e, next) => next({ ...e, value: saved as never }))
+      on('state.set', { plugin: 'inbox', key: 'selection' } as const, ($, e, next) =>
+        next({ ...e, value: oldSelection as never }),
+      )
+      await startNowSession($, clock)
+      const pane = await $.ui.mount({ ...PANE, surface, props: { ...PANE.props, bodyColumns: 120 } })
+      const texts = (await pane.findAll({ type: 'Text' })).map(t => t.text ?? '')
+      expect(texts.some(t => /^Questions/.test(t))).toBe(true)
+      expect(texts.some(t => /^Issues/.test(t))).toBe(true)
+      if (surface === 'desktop') {
+        const bar = (await pane.find({ key: 'tabs' }))?.props.props as TabsProps
+        expect(bar.shown).toBe('now')
+      } else {
+        expect(await pane.find({ key: 'tab-now' })).toBeUndefined()
+      }
+      // The old Needs you cursor is Now's, and a key press reads the old tab without a throw.
+      if (surface === 'terminal') {
+        expect(await pane.find({ key: 'explain-i2-key' })).toBeDefined()
+        await pane.press({ key: 'previous' })
+        await clock.settle()
+        expect(await pane.find({ text: /^Questions/ })).toBeDefined()
+      }
+    })
