@@ -51,3 +51,18 @@ export function parsePlan(text: string): PlanView | null {
 export function planPath(worktree: string, sessionId: string): string {
   return `${worktree}/.claude/plans/${sessionId}.md`
 }
+
+/**
+ * What Claude reads about its plan, beside each of the person's prompts and after a compaction. Claude Code only:
+ * Codex and omp draw no Now tab, so the shared guidance and inbox text say nothing of a plan.
+ */
+export function planNote(path: string, plan: PlanView | null): string {
+  const rule =
+    `inbox: your plan file for this session is ${path}. For work of three or more steps, write the plan there before you start:` +
+    ' a `## ` heading per task and one line per step, marked `- [ ]` waiting, `- [~]` in progress or `- [x]` done.' +
+    ' Mark a step `[~]` when you start it and `[x]` when you finish it, and keep the file current as the work changes.' +
+    ' Write no plan for smaller work.'
+  if (!plan || plan.current.length === 0) return rule
+
+  return `${rule} In progress now:\n${plan.current.map(s => `- [~] ${s.text}`).join('\n')}`
+}

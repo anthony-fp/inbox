@@ -31,6 +31,7 @@ import type {
   Tab,
 } from '../types'
 import { mergeFiles } from './files'
+import { parsePlan, planNote, planPath } from './plan'
 import {
   NO_SESSION,
   PRESENT,
@@ -559,6 +560,8 @@ const AWAY_MS = 15 * 60_000
 let isTurnRunning = false
 /** The conversation whose first prompt has had the card carried beside it. */
 let carriedFor: string | null = null
+/** The worktree whose Git exclude has been checked for the plans folder in this process. */
+let excludedRoot: string | null = null
 /** Why the last conversation ended, until the next conversation loads. */
 let endReason: string | null = null
 let isOn = false
@@ -2312,6 +2315,35 @@ async function readAgain($: EngineInterface) {
   await redrawPane($)
 }
 
+/** What Claude reads about the current conversation's plan: its path, the rule and the steps in progress. */
+async function currentPlanNote($: EngineInterface): Promise<string> {
+  const path = planPath(conversation.root, conversation.id)
+  const text = await $.fs.read(path).catch(() => null)
+
+  return planNote(path, text === null ? null : parsePlan(text))
+}
+
+/**
+ * Keeps plan files out of `git status` with a line in the repo's own `info/exclude`, which nobody commits. A
+ * worktree shares the main checkout's, so the common dir is the one to change. Outside a Git repo it does nothing.
+ */
+export async function ensurePlanExcluded($: EngineInterface): Promise<void> {
+  const root = conversation.root
+  if (excludedRoot === root) return
+  excludedRoot = root
+  try {
+    const r = await $.process.run(['git', 'rev-parse', '--git-common-dir'], { cwd: root, timeoutMs: 5_000 })
+    const dir = r.stdout.trim()
+    if (r.exitCode !== 0 || !dir) return
+    const path = `${dir.startsWith('/') ? dir : `${root}/${dir}`}/info/exclude`
+    const text = await $.fs.read(path).catch(() => '')
+    if (text.split('\n').some(line => line.trim() === '.claude/plans/')) return
+    await $.fs.write(path, `${text}${text === '' || text.endsWith('\n') ? '' : '\n'}.claude/plans/\n`)
+  } catch {
+    // A missing git or an unwritable exclude leaves plan files showing in git status, nothing worse.
+  }
+}
+
 function redrawPane($: EngineInterface) {
   return update($, SELECTION, s => ({ ...s }))
 }
@@ -2333,8 +2365,11 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
+  on('classic.SessionStart', { source: ['clear', 'resume', 'fork', 'compact'] }, async ($, e, next) => {
     const r = await next(e)
+    // A compaction drops the prompts that named the plan file, so Claude is told again where it is and what is in progress.
+    if (e.source === 'compact')
+      return isOn ? { ...r, additionalContext: [...(r.additionalContext ?? []), await currentPlanNote($)] } : r
     // $.session.id() still names the previous conversation here, so the new id comes
     // from the event. A start with --resume also raises this, for the conversation
     // session.start already loaded.
@@ -2411,8 +2446,11 @@ export const register: Register = on => {
       const carry = cardCarryText((await read($, SESSION)).ledger)
       if (carry) notes.unshift(carry)
     }
+    await ensurePlanExcluded($)
+    // Claude Code only, and after the shared inbox text, which Codex and omp also read.
+    notes.push(await currentPlanNote($))
 
-    return notes.length === 0 ? next(e) : next({ ...e, context: [...(e.context ?? []), ...notes] })
+    return next({ ...e, context: [...(e.context ?? []), ...notes] })
   })
 
   on('turn.start', async ($, e, next) => {

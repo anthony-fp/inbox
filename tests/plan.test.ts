@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { parsePlan, planPath } from '../hooks/plan'
+import { parsePlan, planNote, planPath } from '../hooks/plan'
 
 describe('parsePlan', () => {
   test('reads tasks, marks and counts', () => {
@@ -44,5 +44,27 @@ describe('parsePlan', () => {
 describe('planPath', () => {
   test('puts the plan under .claude/plans by session id', () => {
     expect(planPath('/w', 'abc')).toBe('/w/.claude/plans/abc.md')
+  })
+})
+
+describe('planNote', () => {
+  const path = '/w/.claude/plans/abc.md'
+
+  test('names the path, the three-step rule, the marks and when to change them', () => {
+    const note = planNote(path, null)
+    expect(note).toContain(path)
+    expect(note).toContain('three or more steps')
+    expect(note).toContain('`- [ ]`')
+    expect(note).toContain('`- [~]`')
+    expect(note).toContain('`- [x]`')
+    expect(note).toMatch(/`\[~\]` when you start/)
+    expect(note).toMatch(/`\[x\]` when you finish/)
+  })
+
+  test("lists each current step's text", () => {
+    const note = planNote(path, parsePlan('## A\n- [x] one\n- [~] two\n## B\n- [~] three\n- [ ] four'))
+    expect(note).toContain('two')
+    expect(note).toContain('three')
+    expect(note).not.toContain('four')
   })
 })

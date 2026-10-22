@@ -724,5 +724,62 @@
         "noIds": true
       }
     ]
+  },
+  {
+    "name": "plan-written-for-steps",
+    "about": "Claude Code, told its plan path, writes a plan there for work of four steps, with the steps not yet done marked [ ].",
+    "agents": ["claude"],
+    "plan": true,
+    "files": {
+      "src/cli.ts": "export const flags = {\n  quick: { name: '--quick', describe: 'Skip the slow checks' },\n}\n",
+      "src/help.ts": "export const usage = 'Usage: tool [--quick] <file>'\n",
+      "README.md": "# tool\n\nRun `tool --quick <file>` to skip the slow checks.\n",
+      "CHANGELOG.md": "# Changelog\n"
+    },
+    "prompt": "Add a --verbose flag to the tool. That is four changes: add it to the flags in src/cli.ts, add it to the usage text in src/help.ts, document it in README.md, and add a line for it to CHANGELOG.md. Do the first change now and stop after it: I want to review it before you go on.",
+    "checks": [
+      {
+        "plan": "(- \\[[ ~x]\\] [^\\n]+[\\s\\S]*){4}"
+      },
+      {
+        "plan": "- \\[ \\] [^\\n]*(help|usage)"
+      },
+      {
+        "plan": "- \\[ \\] [^\\n]*changelog"
+      }
+    ]
+  },
+  {
+    "name": "plan-not-for-question",
+    "about": "Claude Code, told its plan path, writes no plan for a one-line question.",
+    "agents": ["claude"],
+    "plan": true,
+    "prompt": "In TypeScript, what does the ?? operator do? One sentence.",
+    "checks": [
+      {
+        "noPlan": true
+      },
+      {
+        "reply": "null|undefined"
+      }
+    ]
+  },
+  {
+    "name": "plan-continued-after-compaction",
+    "about": "After a compaction, told its plan path and the step in progress, Claude Code finishes that step and marks it [x].",
+    "agents": ["claude"],
+    "plan": true,
+    "files": {
+      ".claude/plans/eval-plan.md": "## Add a --verbose flag\n- [x] Add --verbose to the flags in src/cli.ts\n- [~] Add --verbose to the usage text in src/help.ts\n- [ ] Document --verbose in README.md\n",
+      "src/cli.ts": "export const flags = {\n  quick: { name: '--quick', describe: 'Skip the slow checks' },\n  verbose: { name: '--verbose', describe: 'Print each step' },\n}\n",
+      "src/help.ts": "export const usage = 'Usage: tool [--quick] <file>'\n",
+      "README.md": "# tool\n\nRun `tool --quick <file>` to skip the slow checks.\n"
+    },
+    "prompt": "This conversation was compacted to free up context. Go on with the step you were on, and stop when that step is done.",
+    "checks": [
+      {
+        "plan": "- \\[x\\] Add --verbose to the usage text"
+      }
+    ]
   }
 ]

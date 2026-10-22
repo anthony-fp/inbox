@@ -96,6 +96,8 @@ const PANE = {
 let surfaces: RenderSurface[] = []
 
 let files: string[] = []
+let fileTexts = new Map<string, string>()
+let writes: { path: string; text: string }[] = []
 
 let copied: string[] = []
 let toasts: string[] = []
@@ -156,6 +158,8 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   sessionId = 'session-1'
   surfaces = []
   files = []
+  fileTexts = new Map()
+  writes = []
   copied = []
   toasts = []
   theme = ''
@@ -222,8 +226,15 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   })
   on('fs.exists', ($, e) => ({ value: files.includes(e.path) }))
   on('fs.read', ($, e) => {
+    const text = fileTexts.get(e.path)
+    if (text !== undefined) return { value: text }
     if (!e.path.endsWith('/.claude-plugin/plugin.json')) throw new Error(`ENOENT: ${e.path}`)
     return { value: JSON.stringify({ name: 'inbox', version: '1.2.3' }) }
+  })
+  on('fs.write', ($, e) => {
+    writes.push({ path: e.path, text: e.text })
+    fileTexts.set(e.path, e.text)
+    return { value: undefined }
   })
   on('fs.stat', () => ({ value: { kind: 'file' as const, size: 1, mtimeMs: 1, isLink: false } }))
   on('process.run', async ($, e) => {
@@ -3774,4 +3785,68 @@ test('a forked conversation keeps the parent’s findings and closed records, an
   await clock.settle()
   await clock.advance(SETTLED_MS)
   expect(await contextOf()).toContain('- issue: Retry loop never backs off (close id: f1)')
+})
+
+test("each of the person's prompts tells Claude its plan path, after the inbox text", async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  const context =
+    (await $.prompt.submit({ text: 'add caching', wait: false, origin: { kind: 'composer' } })).context ?? []
+  expect(context.at(-1)).toContain('/tmp/project/.claude/plans/session-1.md')
+  expect(context.at(-1)).toContain('three or more steps')
+})
+
+test('after a compaction, Claude is told its plan path and the steps in progress', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  fileTexts.set(
+    '/tmp/project/.claude/plans/session-1.md',
+    '## Cache\n- [x] Add the store\n- [~] Wire the reads\n- [ ] Test it',
+  )
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  const r = await $.classic.SessionStart({ source: 'compact', session_id: 'session-1' })
+  const context = (r.additionalContext ?? []).join('\n')
+  expect(context).toContain('/tmp/project/.claude/plans/session-1.md')
+  expect(context).toContain('Wire the reads')
+  expect(context).not.toContain('Test it')
+})
+
+test("the first prompt adds .claude/plans/ to the repo's info/exclude once", async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  ghAnswers.push({ match: argv => argv.join(' ') === 'git rev-parse --git-common-dir', stdout: '/repo/.git\n' })
+  fileTexts.set('/repo/.git/info/exclude', '# git ls-files --others --exclude-from=.git/info/exclude\n')
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'add caching', wait: false, origin: { kind: 'composer' } })
+  await $.prompt.submit({ text: 'and tests', wait: false, origin: { kind: 'composer' } })
+
+  expect(writes.filter(w => w.path === '/repo/.git/info/exclude').map(w => w.text)).toEqual([
+    '# git ls-files --others --exclude-from=.git/info/exclude\n.claude/plans/\n',
+  ])
+})
+
+test('the exclude is left alone when it already has .claude/plans/', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  ghAnswers.push({ match: argv => argv.join(' ') === 'git rev-parse --git-common-dir', stdout: '.git\n' })
+  fileTexts.set('/tmp/project/.git/info/exclude', 'node_modules\n.claude/plans/\n')
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'add caching', wait: false, origin: { kind: 'composer' } })
+  expect(writes.filter(w => w.path.endsWith('/info/exclude'))).toEqual([])
+})
+
+test('outside a Git repo the first prompt still goes through and writes no exclude', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  const context =
+    (await $.prompt.submit({ text: 'add caching', wait: false, origin: { kind: 'composer' } })).context ?? []
+  expect(context.at(-1)).toContain('.claude/plans/session-1.md')
+  expect(writes.filter(w => w.path.endsWith('/info/exclude'))).toEqual([])
 })
