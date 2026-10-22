@@ -39,6 +39,7 @@ import {
   applyFilePress,
   fileActions,
   fileKind,
+  hasScheme,
   isDocument,
   isUrl,
   mergeFiles,
@@ -1186,6 +1187,7 @@ async function openTopRow($: EngineInterface) {
 
 async function showInbox($: EngineInterface) {
   await openPane($)
+  if ((await readTab($)) === 'files') await refreshMissing($)
   await followNewRows($, true)
   await openTopRow($)
 }
@@ -1197,6 +1199,7 @@ async function openInbox($: EngineInterface) {
   const { view } = await drawnState($)
   if (view.needsYou.count > 0) await update($, TAB, () => 'now' as const)
   else if ((await readTab($)) === 'prs') await findPrs($)
+  else if ((await readTab($)) === 'files') await refreshMissing($)
   await followNewRows($, true)
   await openTopRow($)
 }
@@ -1600,6 +1603,11 @@ function tabWaits(
       : shownFiles(files).open.map(r => ({ id: r.id, isWaiting: true }))
 }
 
+/** As Now's `isTabEmpty`: dismissed rows count only while their fold is open. */
+function isFilesTabEmpty(files: FileRow[], isUnfolded: boolean): boolean {
+  return fileRowIds(files, isUnfolded).length === 0
+}
+
 /** The Files tab's rows, in the order it draws them: the open rows, then the dismissed ones while their fold is open. */
 function fileRowIds(files: FileRow[], isUnfolded: boolean): string[] {
   const { open, dismissed } = shownFiles(files)
@@ -1696,7 +1704,7 @@ async function followNewRows($: EngineInterface, isOpening = false) {
     tab === 'prs'
       ? isPrsTabEmpty(prs.length, prState.isFetching)
       : tab === 'files'
-        ? files.length === 0
+        ? isFilesTabEmpty(files, isFilesUnfolded)
         : isListEmpty('needsYou') && isListEmpty('findings') && drawnPlanLines(plan, isDemo).length === 0
   const open = openRowIds(view)
   const to = followTo(
@@ -1820,7 +1828,7 @@ async function wakeForDone($: EngineInterface) {
  */
 async function refreshMissing($: EngineInterface) {
   const { files } = await read($, SESSION)
-  const paths = files.filter(f => !isUrl(f.target)).map(f => f.target)
+  const paths = files.filter(f => !hasScheme(f.target)).map(f => f.target)
   const gone = await Promise.all(
     paths.map(p =>
       $.fs.exists(p).then(
@@ -1877,7 +1885,7 @@ async function runFilePress($: EngineInterface, id: string, action: FileAction, 
     return
   }
   if (!effect) return
-  const part = FILE_PARTS[action](fileName(row, plan), isUrl(row.target))
+  const part = FILE_PARTS[action](fileName(row, plan), hasScheme(row.target))
   const label = fileActions(row).find(a => a.id === action)?.label ?? action
   const pending: LocalResult = { state: 'pending', parts: [part], at: now }
   await commit($, owner, s => ({
@@ -2501,6 +2509,8 @@ async function restore($: EngineInterface, saved: SavedRecord) {
     })),
     forgetRowState($),
   ])
+  // forgetRowState emptied the missing list, and the restored rows need it.
+  await refreshMissing($)
 }
 
 async function forgetRowState($: EngineInterface) {
@@ -2567,6 +2577,7 @@ async function fileRow(
     isAdded = files !== s.files
     return isAdded ? { ...s, files } : s
   })
+  if (isAdded) await refreshMissing($).catch(() => undefined)
 
   return isAdded
 }
@@ -2628,13 +2639,27 @@ function isParsedUrl(text: string): boolean {
   }
 }
 
+/** The local path of a `file://` URL on this machine, or null for any other URL. */
+function fileUrlPath(raw: string): string | null {
+  try {
+    const url = new URL(raw)
+    if (url.protocol !== 'file:' || (url.hostname !== '' && url.hostname !== 'localhost')) return null
+    const path = decodeURIComponent(url.pathname)
+    return path.startsWith('/') ? path : null
+  } catch {
+    return null
+  }
+}
+
 /** The `show` tool: adds a link or file Claude names to Files. The answer is what Claude reads back. */
 async function showFile($: EngineInterface, input: Record<string, unknown>): Promise<string> {
   const raw = typeof input.target === 'string' ? input.target.trim() : ''
   if (raw === '') return 'Not added: show needs a target, a URL or a file path.'
-  const isLink = isUrl(raw)
-  const target = isLink ? raw : absolutePath(raw)
-  if (isLink && !isParsedUrl(target)) return `Not added: ${target} is not a URL the inbox can open.`
+  const local = hasScheme(raw) ? fileUrlPath(raw) : absolutePath(raw)
+  const isLink = local === null && isUrl(raw) && isParsedUrl(raw)
+  if (local === null && !isLink)
+    return `Not added: ${raw} is not a link the inbox opens. Give an http or https URL, or a file path.`
+  const target = local ?? raw
   const isPlan = target === planPath(conversation.root, conversation.id)
   const given = typeof input.name === 'string' ? input.name.trim() : ''
   const name = given || (isLink ? target : baseName(target))

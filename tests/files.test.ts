@@ -5,7 +5,9 @@ import {
   applyFilePress,
   fileActions,
   fileKind,
+  hasScheme,
   isDocument,
+  isUrl,
   mergeFiles,
   setDismissed,
   shownFiles,
@@ -151,5 +153,25 @@ describe('applyFilePress', () => {
     expect(applyFilePress(rows, '/w/gone.md', 'open')).toEqual({ rows, effect: null })
     expect(applyFilePress(rows, 'https://x.dev/p', 'finder')).toEqual({ rows, effect: null })
     expect(applyFilePress(rows, '/w/c.md', 'open')).toEqual({ rows, effect: null })
+  })
+})
+
+describe('isUrl', () => {
+  test('takes only http and https links', () => {
+    expect(isUrl('http://localhost:5/x')).toBe(true)
+    expect(isUrl('HTTPS://claude.ai/a')).toBe(true)
+    for (const t of ['file:///Applications/Calculator.app', 'vnc://host', 'smb://host/share', 'ssh://host', '/w/a.md'])
+      expect(isUrl(t)).toBe(false)
+  })
+
+  test('hasScheme still names any scheme', () => {
+    expect(hasScheme('vnc://host')).toBe(true)
+    expect(hasScheme('/w/a.md')).toBe(false)
+  })
+})
+
+describe('fileActions on a saved row with another scheme', () => {
+  test('reads as a link, with no Finder', () => {
+    expect(fileActions({ ...row('vnc://host', 1), kind: 'link' }).map(a => a.id)).toEqual(['open', 'copy', 'dismiss'])
   })
 })

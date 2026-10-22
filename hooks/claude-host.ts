@@ -10,6 +10,7 @@ import { CLAUDE_CODE, systemText } from './model-text'
 import { SETTLED_MS } from './view'
 import { localPath, openCommands, withArrival, withRewrite, withUnconfirmed } from './presses'
 import type { Effect } from './presses'
+import { hasScheme, isUrl } from './files'
 import type { FileEffect } from './files'
 import { emptySession, upgradeSession } from './session'
 import type { SavedSession, SendOutcome, SentBy, Session } from './session'
@@ -486,6 +487,9 @@ export async function performFileEffect(
   effect: NonNullable<FileEffect>,
   surface: UiPressArgument['surface'],
 ): Promise<string | null> {
+  // A row an earlier build saved may hold any scheme. Only http and https links reach `open` as links.
+  if (effect.kind === 'open' && hasScheme(effect.target) && !isUrl(effect.target))
+    return 'the inbox opens only http and https links'
   if (effect.kind === 'open') return perform($, { kind: 'open', target: effect.target, name: '' }, surface)
   if (effect.kind === 'copy')
     return perform($, { kind: 'copy', text: effect.text, name: '', isCommand: false }, surface)

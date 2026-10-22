@@ -4221,7 +4221,8 @@ async function startFilesTab(
   files = ['/tmp/project/a.md', '/tmp/project/b.md']
   await clock.settle()
   const pane = await $.ui.mount(PANE)
-  await pane.press({ key: 'tab-files' })
+  // A shown pane on an empty Now has already moved to Files with the first new row.
+  if (await pane.find({ key: 'tab-files' })) await pane.press({ key: 'tab-files' })
   await clock.settle()
   await clock.advance(PRESS_GUARD_MS)
   return pane
@@ -4391,6 +4392,7 @@ test("the plan's row reads Plan, or the plan's first heading, and keeps its path
 test('a new Needs you row keeps the person on a Files tab that has rows', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])
+  on('ui.panes', () => ({ value: [{ id: 'inbox', title: 'Inbox', isShown: true, isFocused: true, isPlaced: true }] }))
   const pane = await startFilesTab($, on, clock)
   await $.tool.call({
     tool: 'mcp__inbox__record',
@@ -4414,4 +4416,131 @@ test('the desktop pane draws the Files row buttons in fileActions order, and oth
   expect(keys).toEqual([`file-open-${B}`, `file-finder-${B}`, `file-copy-${B}`, `file-dismiss-${B}`])
   const row = (await pane.find({ key: `select-${A}` }))?.props.props as RowProps
   expect([row.before.trim(), row.title, row.after]).toEqual(['md', 'a.md', 'repo'])
+})
+
+test('show turns a file:// URL into its path, and Open goes through the guard, never a bare open of the URL', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const session = watchSession(on)
+  await startFilesSession($)
+  files = ['/x.app']
+  const shown = await $.tool.call({ tool: 'mcp__inbox__show', target: 'file:///x.app' } as never)
+  expect(shown.result).toBe('Added to Files: x.app')
+  expect(session().files.map(f => [f.kind, f.target])).toEqual([['file', '/x.app']])
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  await pane.press({ key: 'tab-files' })
+  await clock.settle()
+  await clock.advance(PRESS_GUARD_MS)
+  const before = ran.length
+  await pane.press({ key: 'file-open-/x.app' })
+  await clock.settle()
+  const runs = ran.slice(before)
+  expect(runs).toContainEqual(['open', '-R', '/x.app'])
+  expect(runs.some(r => r[0] === 'open' && r.some(a => a.startsWith('file:')))).toBe(false)
+  expect(runs.some(r => r[0] === 'open' && r.length === 2)).toBe(false)
+})
+
+test('show refuses a link that is not http or https', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const session = watchSession(on)
+  await startFilesSession($)
+  for (const target of ['vnc://host', 'smb://host/share', 'file://other-host/x.app']) {
+    const shown = await $.tool.call({ tool: 'mcp__inbox__show', target } as never)
+    expect(shown.result).toMatch(/^Not added: /)
+  }
+  expect(session().files).toEqual([])
+})
+
+test('Open on a saved link row with another scheme reads a refusal in red and runs nothing', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const saved: FileRow = {
+    id: 'vnc://host',
+    kind: 'link',
+    name: 'vnc://host',
+    target: 'vnc://host',
+    where: 'host',
+    at: 1,
+    isDismissed: false,
+  }
+  on('state.set', { plugin: 'inbox', key: 'session' } as const, ($, e, next) =>
+    next(
+      e.value.files.some(f => f.id === saved.id)
+        ? e
+        : { ...e, value: { ...e.value, files: [...e.value.files, saved] } },
+    ),
+  )
+  await startFilesSession($)
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  await pane.press({ key: 'tab-files' })
+  await clock.settle()
+  await clock.advance(PRESS_GUARD_MS)
+  const before = ran.length
+  await pane.press({ key: 'file-open-vnc://host' })
+  await clock.settle()
+  expect(ran.slice(before).filter(r => r[0] === 'open')).toEqual([])
+  const refusal = await pane.find({ type: 'Text', text: /^Could not open vnc:\/\/host: / })
+  expect(refusal).toBeDefined()
+  const muted = (await pane.find({ type: 'Text', text: /^link\u2007·/ }))?.props.color
+  expect(muted).toBeDefined()
+  expect(refusal?.props.color).not.toBe(muted)
+})
+
+test('a Files tab holding only folded dismissed rows moves the person to Now when a new row arrives', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  on('ui.panes', () => ({ value: [{ id: 'inbox', title: 'Inbox', isShown: true, isFocused: true, isPlaced: true }] }))
+  const pane = await startFilesTab($, on, clock)
+  await pane.press({ key: `file-dismiss-${B}` })
+  await clock.settle()
+  await clock.advance(PRESS_GUARD_MS)
+  await pane.press({ key: `file-dismiss-${A}` })
+  await clock.settle()
+  expect((await pane.find({ key: 'files-fold' }))?.props.label).toBe('▸ Dismissed (2)')
+  await $.tool.call({
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
+    title: 'README is stale',
+    detail: 'x',
+  })
+  await clock.settle()
+  expect(await pane.find({ key: 'tab-files' })).toBeDefined()
+  expect(await pane.find({ text: /README is stale/ })).toBeDefined()
+})
+
+test('a Files tab with its Dismissed fold open keeps the person when a new row arrives', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  on('ui.panes', () => ({ value: [{ id: 'inbox', title: 'Inbox', isShown: true, isFocused: true, isPlaced: true }] }))
+  const pane = await startFilesTab($, on, clock)
+  await pane.press({ key: `file-dismiss-${B}` })
+  await clock.settle()
+  await clock.advance(PRESS_GUARD_MS)
+  await pane.press({ key: `file-dismiss-${A}` })
+  await clock.settle()
+  await pane.press({ key: 'files-fold' })
+  await clock.settle()
+  await $.tool.call({
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
+    title: 'README is stale',
+    detail: 'x',
+  })
+  await clock.settle()
+  expect(await pane.find({ key: 'tab-files' })).toBeUndefined()
+})
+
+test('a row added while the Files tab shows reads missing at once when its file is gone', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const pane = await startFilesTab($, on, clock)
+  await $.tool.call({ tool: 'mcp__inbox__show', target: '/tmp/gone.html' } as never)
+  await clock.settle()
+  const texts = (await pane.findAll({ type: 'Text' })).map(t => t.text ?? '')
+  expect(texts.filter(t => /missing/.test(t))).toHaveLength(1)
 })

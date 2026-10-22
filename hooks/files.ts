@@ -38,8 +38,17 @@ function extension(path: string): string {
   return dot <= 0 ? '' : name.slice(dot + 1).toLowerCase()
 }
 
-export function isUrl(target: string): boolean {
+/** Whether the target names a scheme, as `vnc://host` does. A row saved by an earlier build may hold any scheme. */
+export function hasScheme(target: string): boolean {
   return /^[a-z][a-z0-9+.-]*:\/\//i.test(target)
+}
+
+/**
+ * The links Files opens: http and https only. `open` starts a program for other schemes, such as `vnc:`, `smb:` or
+ * `file:` on an app, which would skip the guard that shows an executable in Finder.
+ */
+export function isUrl(target: string): boolean {
+  return /^https?:\/\//i.test(target)
 }
 
 /** A new file of one of these kinds goes into Files on its own. A new source file does not. */
@@ -49,12 +58,12 @@ export function isDocument(path: string): boolean {
 
 export function fileKind(target: string, isPlan: boolean): FileKind {
   if (isPlan) return 'plan'
-  if (isUrl(target)) return 'link'
+  if (hasScheme(target)) return 'link'
   return DOCUMENT_KINDS[extension(target)] ?? 'file'
 }
 
 export function whereLabel(target: string, worktree: string): string {
-  if (isUrl(target)) {
+  if (hasScheme(target)) {
     const host = new URL(target).hostname
     return host === '127.0.0.1' ? 'localhost' : host
   }
@@ -93,7 +102,7 @@ export type FileEffect =
 /** The row's buttons, in the order each look draws them. A link or an artifact has no file to show in Finder. */
 export function fileActions(row: FileRow): { id: FileAction; label: string; kind: PressKind }[] {
   if (row.isDismissed) return [{ id: 'restore', label: 'Restore', kind: 'mark' }]
-  const isLink = isUrl(row.target)
+  const isLink = hasScheme(row.target)
 
   return [
     { id: 'open', label: 'Open', kind: 'local' },
