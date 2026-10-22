@@ -10,6 +10,7 @@ import { CLAUDE_CODE, systemText } from './model-text'
 import { SETTLED_MS } from './view'
 import { localPath, openCommands, withArrival, withRewrite, withUnconfirmed } from './presses'
 import type { Effect } from './presses'
+import type { FileEffect } from './files'
 import { emptySession, upgradeSession } from './session'
 import type { SavedSession, SendOutcome, SentBy, Session } from './session'
 import { exclusiveKeys } from './session-host'
@@ -471,6 +472,27 @@ async function perform(
         : openPath($, effect.target))
     const r = await $.ui.copy({ text: effect.text, surface })
     return r.isCopied ? null : COPY_FAILURES[r.reason]
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err)
+  }
+}
+
+/**
+ * Runs a Files press's effect. Open goes through the same path as a row's Open, so an executable or an app is shown
+ * in Finder and never run. Finder runs `open -R` on the path. Returns why it could not, or null.
+ */
+export async function performFileEffect(
+  $: EngineInterface,
+  effect: NonNullable<FileEffect>,
+  surface: UiPressArgument['surface'],
+): Promise<string | null> {
+  if (effect.kind === 'open') return perform($, { kind: 'open', target: effect.target, name: '' }, surface)
+  if (effect.kind === 'copy')
+    return perform($, { kind: 'copy', text: effect.text, name: '', isCommand: false }, surface)
+  try {
+    if (!(await $.fs.exists(effect.path))) return 'it no longer exists'
+    const r = await $.process.run(['open', '-R', effect.path])
+    return r.exitCode === 0 ? null : r.stderr.trim() || `open exited ${r.exitCode}`
   } catch (err) {
     return err instanceof Error ? err.message : String(err)
   }

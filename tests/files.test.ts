@@ -2,6 +2,8 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import {
   addFile,
+  applyFilePress,
+  fileActions,
   fileKind,
   isDocument,
   mergeFiles,
@@ -90,5 +92,64 @@ describe('fileKind', () => {
     expect(fileKind('/w/a.md', false)).toBe('md')
     expect(fileKind('/w/a.png', false)).toBe('image')
     expect(fileKind('/w/a.svg', false)).toBe('image')
+  })
+})
+
+describe('fileKind for other files', () => {
+  test('names a file with no document extension a file', () => {
+    expect(fileKind('/w/out.log', false)).toBe('file')
+    expect(fileKind('/w/Makefile', false)).toBe('file')
+  })
+})
+
+describe('fileActions', () => {
+  const kinds = (r: FileRow) => fileActions(r).map(a => [a.id, a.label, a.kind])
+
+  test('a file opens, shows in Finder, copies its path and dismisses', () => {
+    expect(kinds(row('/w/a.md', 1))).toEqual([
+      ['open', 'Open', 'local'],
+      ['finder', 'Finder', 'local'],
+      ['copy', 'Copy path', 'local'],
+      ['dismiss', 'Dismiss', 'mark'],
+    ])
+  })
+
+  test('a link or artifact opens, copies its link and dismisses', () => {
+    for (const kind of ['link', 'artifact'] as const)
+      expect(kinds({ ...row('https://claude.ai/code/artifact/1', 1), kind })).toEqual([
+        ['open', 'Open', 'local'],
+        ['copy', 'Copy link', 'local'],
+        ['dismiss', 'Dismiss', 'mark'],
+      ])
+  })
+
+  test('a dismissed row only restores', () => {
+    expect(kinds(row('/w/a.md', 1, true))).toEqual([['restore', 'Restore', 'mark']])
+  })
+})
+
+describe('applyFilePress', () => {
+  const rows = [row('/w/a.md', 1), row('https://x.dev/p', 2), row('/w/c.md', 3, true)]
+
+  test('dismiss and restore change the row and have no effect', () => {
+    const dismissed = applyFilePress(rows, '/w/a.md', 'dismiss')
+    expect(dismissed.effect).toBeNull()
+    expect(dismissed.rows.find(r => r.id === '/w/a.md')?.isDismissed).toBe(true)
+    const restored = applyFilePress(rows, '/w/c.md', 'restore')
+    expect(restored.effect).toBeNull()
+    expect(restored.rows.find(r => r.id === '/w/c.md')?.isDismissed).toBe(false)
+  })
+
+  test('open, finder and copy leave the rows and return their effect', () => {
+    expect(applyFilePress(rows, '/w/a.md', 'open')).toEqual({ rows, effect: { kind: 'open', target: '/w/a.md' } })
+    expect(applyFilePress(rows, '/w/a.md', 'finder')).toEqual({ rows, effect: { kind: 'reveal', path: '/w/a.md' } })
+    expect(applyFilePress(rows, '/w/a.md', 'copy')).toEqual({ rows, effect: { kind: 'copy', text: '/w/a.md' } })
+    expect(applyFilePress(rows, 'https://x.dev/p', 'copy').effect).toEqual({ kind: 'copy', text: 'https://x.dev/p' })
+  })
+
+  test('a press on a row that is gone, or an action the row does not offer, does nothing', () => {
+    expect(applyFilePress(rows, '/w/gone.md', 'open')).toEqual({ rows, effect: null })
+    expect(applyFilePress(rows, 'https://x.dev/p', 'finder')).toEqual({ rows, effect: null })
+    expect(applyFilePress(rows, '/w/c.md', 'open')).toEqual({ rows, effect: null })
   })
 })

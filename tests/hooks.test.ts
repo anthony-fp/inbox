@@ -4074,7 +4074,8 @@ test('Now lists Needs you, then the plan, then Findings, and its label counts bo
       const bar = (await pane.find({ key: 'tabs' }))?.props.props as TabsProps
       expect(bar.tabs.map(t => [t.id, t.label, t.count])).toEqual([
         ['now', 'Now', 3],
-        ['files', 'Files', 0],
+        // The plan file the test wrote is in Files.
+        ['files', 'Files', 1],
         ['prs', 'PRs', 0],
       ])
     }
@@ -4196,3 +4197,221 @@ for (const saved of ['needsYou', 'findings'] as const)
         expect(await pane.find({ text: /^Questions/ })).toBeDefined()
       }
     })
+
+/** The drawn session, as last written. */
+function watchSession(on: On): () => { files: FileRow[]; lastActions: Record<string, unknown> } {
+  let latest: { files: FileRow[]; lastActions: Record<string, unknown> } = { files: [], lastActions: {} }
+  on('state.set', { plugin: 'inbox', key: 'session' } as const, ($, e, next) => {
+    latest = e.value
+    return next(e)
+  })
+  return () => latest
+}
+
+/** A session with two new documents in Files, b.md the newer, and the pane on the Files tab. */
+async function startFilesTab(
+  $: Engine,
+  on: On,
+  clock: { settle(): Promise<void>; advance(ms: number): Promise<void> },
+) {
+  await startFilesSession($)
+  await write($, '/tmp/project/a.md')
+  await clock.advance(1000)
+  await write($, '/tmp/project/b.md')
+  files = ['/tmp/project/a.md', '/tmp/project/b.md']
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  await pane.press({ key: 'tab-files' })
+  await clock.settle()
+  await clock.advance(PRESS_GUARD_MS)
+  return pane
+}
+
+const A = '/tmp/project/a.md'
+const B = '/tmp/project/b.md'
+
+test('the Files tab lists rows newest first with kind, name and where, counts them, and opens the top row', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const pane = await startFilesTab($, on, clock)
+
+  const texts = (await pane.findAll({ type: 'Text' })).map(t => t.text ?? '')
+  expect(texts.some(t => /Nothing yet/.test(t))).toBe(false)
+  expect((await pane.find({ key: `file-open-${B}-key` }))?.props.label).toBe('Open')
+  expect((await pane.find({ key: `file-finder-${B}-key` }))?.props.label).toBe('Finder')
+  expect((await pane.find({ key: `file-copy-${B}-key` }))?.props.label).toBe('Copy path')
+  expect((await pane.find({ key: `file-dismiss-${B}-key` }))?.props.label).toBe('Dismiss')
+  expect(await pane.find({ key: `file-open-${A}` })).toBeUndefined()
+  expect((await pane.find({ key: `title-${A}` }))?.props.label).toBe('a.md')
+  expect(texts.some(t => /^md\s/.test(t))).toBe(true)
+  expect(texts.some(t => /repo/.test(t))).toBe(true)
+  expect(texts.some(t => /missing/.test(t))).toBe(false)
+  // The shown tab draws its count beside its label; Now has none here.
+  expect(texts.slice(0, 8)).toEqual(expect.arrayContaining(['Files', ' 2']))
+})
+
+test('Dismiss moves a row into Dismissed (n) and leaves the file, and Restore brings it back', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const session = watchSession(on)
+  const pane = await startFilesTab($, on, clock)
+  const before = ran.length
+
+  await pane.press({ key: `file-dismiss-${B}` })
+  await clock.settle()
+  expect(session().files.find(f => f.id === B)?.isDismissed).toBe(true)
+  expect(ran.slice(before)).toEqual([])
+  expect(files).toContain(B)
+  expect((await pane.find({ key: 'files-fold' }))?.props.label).toBe('▸ Dismissed (1)')
+  expect(await pane.find({ key: `title-${B}` })).toBeUndefined()
+  // The next open row opens in its place.
+  expect(await pane.find({ key: `file-open-${A}` })).toBeDefined()
+
+  await pane.press({ key: 'files-fold' })
+  await clock.settle()
+  expect((await pane.find({ key: 'files-fold' }))?.props.label).toBe('▾ Dismissed (1)')
+  await pane.press({ key: `title-${B}` })
+  await clock.settle()
+  await clock.advance(PRESS_GUARD_MS)
+  expect((await pane.find({ key: `file-restore-${B}-key` }))?.props.label).toBe('Restore')
+  expect(await pane.find({ key: `file-open-${B}` })).toBeUndefined()
+  await pane.press({ key: `file-restore-${B}` })
+  await clock.settle()
+  expect(session().files.find(f => f.id === B)?.isDismissed).toBe(false)
+  expect(await pane.find({ key: 'files-fold' })).toBeUndefined()
+  expect(await pane.find({ key: `file-open-${B}` })).toBeDefined()
+})
+
+test('Open shows "Opening x…" on its row, then "✓ Opened x", and runs open on the path', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const pane = await startFilesTab($, on, clock)
+  let opened = () => {}
+  ghAnswers.push({ match: argv => argv[0] === 'open', stdout: '', hold: () => new Promise(r => (opened = r)) })
+  const pressing = pane.press({ key: `file-open-${B}` })
+  await clock.settle()
+  expect(ran.at(-1)).toEqual(['open', B])
+  expect(await pane.find({ text: 'Opening b.md…' })).toBeDefined()
+  opened()
+  await pressing
+  await clock.settle()
+  expect(await pane.find({ text: '✓ Opened b.md' })).toBeDefined()
+  expect(toasts).toEqual([])
+  ghAnswers.pop()
+})
+
+test('Finder runs open -R on the path, and a failed open reads why in red', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const pane = await startFilesTab($, on, clock)
+  await pane.press({ key: `file-finder-${B}` })
+  await clock.settle()
+  expect(ran.at(-1)).toEqual(['open', '-R', B])
+  expect(await pane.find({ text: '✓ Opened b.md in Finder' })).toBeDefined()
+
+  ghAnswers.push({ match: argv => argv[0] === 'open', stdout: '', fails: 'no app' })
+  await pane.press({ key: `file-open-${B}` })
+  await clock.settle()
+  const failed = await pane.find({ type: 'Text', text: /^Could not open b\.md: / })
+  expect(failed).toBeDefined()
+  expect(failed?.props.color).not.toBe((await pane.find({ type: 'Text', text: /repo/ }))?.props.color)
+  ghAnswers.pop()
+})
+
+test("a missing file's row reads missing, and Open on it says it no longer exists", async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const pane = await startFilesTab($, on, clock)
+  files = [A]
+  await pane.press({ key: 'tab-now' })
+  await clock.settle()
+  await pane.press({ key: 'tab-files' })
+  await clock.settle()
+  const texts = (await pane.findAll({ type: 'Text' })).map(t => t.text ?? '')
+  expect(texts.filter(t => /missing/.test(t))).toHaveLength(1)
+  await clock.advance(PRESS_GUARD_MS)
+  await pane.press({ key: `file-open-${B}` })
+  await clock.settle()
+  expect(await pane.find({ text: 'Could not open b.md: it no longer exists' })).toBeDefined()
+})
+
+test('a key press and a click on a Files action record the same result', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const session = watchSession(on)
+  const pane = await startFilesTab($, on, clock)
+  await pane.press({ key: `file-copy-${B}` })
+  await clock.settle()
+  await pane.press({ key: 'next' })
+  await clock.settle()
+  await clock.advance(PRESS_GUARD_MS)
+  expect((await pane.find({ key: `file-copy-${A}-key` }))?.props.hotkey).toBe('c')
+  await pane.press({ key: `file-copy-${A}-key` })
+  await clock.settle()
+  expect(copied).toEqual([B, A])
+  type Saved = { kind: string; action: string; text: string; result?: { state: string; parts: unknown[] } }
+  const shape = (id: string) => {
+    const last = session().lastActions[id] as Saved
+    return {
+      kind: last.kind,
+      action: last.action,
+      text: last.text,
+      state: last.result?.state,
+      parts: last.result?.parts,
+    }
+  }
+  expect(shape(A)).toEqual(shape(B))
+  expect(shape(A)).toMatchObject({ kind: 'local', state: 'done' })
+})
+
+test("the plan's row reads Plan, or the plan's first heading, and keeps its path", async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const plan = '/tmp/project/.inbox/plans/session-1.md'
+  await startFilesSession($)
+  await write($, plan)
+  files = [plan]
+  fileTexts.set(plan, 'no steps yet')
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  await pane.press({ key: 'tab-files' })
+  await clock.settle()
+  expect((await pane.find({ key: `file-open-${plan}-key` }))?.props.label).toBe('Open')
+  let texts = (await pane.findAll({ type: 'Text' })).map(t => t.text ?? '')
+  expect(texts).toContain('Plan')
+  expect(texts.some(t => t.includes('session-1.md'))).toBe(true)
+
+  fileTexts.set(plan, '## Cache\n- [~] Wire the reads')
+  await $.tool.call({ tool: 'Edit', file_path: plan, old_string: 'a', new_string: 'b' } as never)
+  await clock.settle()
+  texts = (await pane.findAll({ type: 'Text' })).map(t => t.text ?? '')
+  expect(texts).toContain('Cache')
+})
+
+test('a new Needs you row keeps the person on a Files tab that has rows', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const pane = await startFilesTab($, on, clock)
+  await $.tool.call({
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
+    title: 'README is stale',
+    detail: 'x',
+  })
+  await clock.settle()
+  expect(await pane.find({ key: `file-open-${B}` })).toBeDefined()
+  expect(await pane.find({ key: 'tab-files' })).toBeUndefined()
+})
+
+test('the desktop pane draws the Files row buttons in fileActions order, and other rows as row Clients', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const terminal = await startFilesTab($, on, clock)
+  await terminal.unmount()
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 120 } })
+  const keys = (await pane.findAll({ type: 'Button' })).map(b => String(b.key ?? '')).filter(k => k.startsWith('file-'))
+  expect(keys).toEqual([`file-open-${B}`, `file-finder-${B}`, `file-copy-${B}`, `file-dismiss-${B}`])
+  const row = (await pane.find({ key: `select-${A}` }))?.props.props as RowProps
+  expect([row.before.trim(), row.title, row.after]).toEqual(['md', 'a.md', 'repo'])
+})

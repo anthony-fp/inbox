@@ -1,4 +1,5 @@
-export type FileKind = 'md' | 'html' | 'pdf' | 'image' | 'csv' | 'link' | 'plan' | 'artifact'
+/** `file` is a file of no document kind, which only the `show` tool adds. */
+export type FileKind = 'md' | 'html' | 'pdf' | 'image' | 'csv' | 'file' | 'link' | 'plan' | 'artifact'
 
 /** One thing in Files. `target` is an absolute path or a URL, and is also the row's id. */
 export type FileRow = {
@@ -404,6 +405,10 @@ declare module 'claude-code' {
       notes: Record<string, RowNote>
       /** The Needs you groups and the kinds of finding whose closed items show. Each starts folded. */
       unfolded: FoldKind[]
+      /** Whether the Files tab's Dismissed fold is open. */
+      filesUnfolded: boolean
+      /** The Files rows' paths found gone at the last look, so their rows read "missing". */
+      missingFiles: string[]
       foldHover: FoldKind | null
       /** The questions whose every option shows, by the row's id. */
       optionsShown: string[]

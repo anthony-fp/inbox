@@ -1,6 +1,6 @@
 /** The Files tab: what a session made for the person to look at, as documents, artifacts and links. */
 
-import type { FileKind, FileRow } from '../types'
+import type { FileKind, FileRow, PressKind } from '../types'
 
 export type { FileKind, FileRow }
 
@@ -50,7 +50,7 @@ export function isDocument(path: string): boolean {
 export function fileKind(target: string, isPlan: boolean): FileKind {
   if (isPlan) return 'plan'
   if (isUrl(target)) return 'link'
-  return DOCUMENT_KINDS[extension(target)] ?? 'md'
+  return DOCUMENT_KINDS[extension(target)] ?? 'file'
 }
 
 export function whereLabel(target: string, worktree: string): string {
@@ -83,4 +83,48 @@ export function mergeFiles(saved: FileRow[], current: FileRow[]): FileRow[] {
 export function shownFiles(rows: FileRow[]): { open: FileRow[]; dismissed: FileRow[] } {
   const newest = [...rows].sort((a, b) => b.at - a.at)
   return { open: newest.filter(r => !r.isDismissed), dismissed: newest.filter(r => r.isDismissed) }
+}
+
+export type FileAction = 'open' | 'finder' | 'copy' | 'dismiss' | 'restore'
+
+export type FileEffect =
+  { kind: 'open'; target: string } | { kind: 'reveal'; path: string } | { kind: 'copy'; text: string } | null
+
+/** The row's buttons, in the order each look draws them. A link or an artifact has no file to show in Finder. */
+export function fileActions(row: FileRow): { id: FileAction; label: string; kind: PressKind }[] {
+  if (row.isDismissed) return [{ id: 'restore', label: 'Restore', kind: 'mark' }]
+  const isLink = isUrl(row.target)
+
+  return [
+    { id: 'open', label: 'Open', kind: 'local' },
+    ...(isLink ? [] : [{ id: 'finder' as const, label: 'Finder', kind: 'local' as const }]),
+    { id: 'copy', label: isLink ? 'Copy link' : 'Copy path', kind: 'local' },
+    { id: 'dismiss', label: 'Dismiss', kind: 'mark' },
+  ]
+}
+
+/**
+ * A press on a Files row. Dismiss and Restore change the rows and never touch the file; the other actions leave the
+ * rows and return what the host runs. A press on a row that is gone, or with an action the row does not offer, does
+ * nothing.
+ */
+export function applyFilePress(
+  rows: FileRow[],
+  id: string,
+  action: FileAction,
+): { rows: FileRow[]; effect: FileEffect } {
+  const row = rows.find(r => r.id === id)
+  if (!row || !fileActions(row).some(a => a.id === action)) return { rows, effect: null }
+  switch (action) {
+    case 'dismiss':
+      return { rows: setDismissed(rows, id, true), effect: null }
+    case 'restore':
+      return { rows: setDismissed(rows, id, false), effect: null }
+    case 'open':
+      return { rows, effect: { kind: 'open', target: row.target } }
+    case 'finder':
+      return { rows, effect: { kind: 'reveal', path: row.target } }
+    case 'copy':
+      return { rows, effect: { kind: 'copy', text: row.target } }
+  }
 }
