@@ -2,7 +2,16 @@ import { expect, test } from 'claude-code/testing'
 
 import { flattenConversation } from '../hooks/conversation'
 import { CLAUDE_CODE } from '../hooks/model-text'
-import { emptySession, endTurn, noteCommandOutput, notePrompt, recorded, sessionView } from '../hooks/session'
+import {
+  emptySession,
+  endTurn,
+  noteCommandOutput,
+  notePrompt,
+  recorded,
+  sessionView,
+  upgradeSession,
+} from '../hooks/session'
+import type { FileRow } from '../hooks/files'
 import type { Session } from '../hooks/session'
 import { press, runUpdates, wakeForDone } from '../hooks/session-host'
 import type { CatchUpReply } from '../hooks/session-host'
@@ -162,4 +171,19 @@ test('the conversation keeps its newest lines when it is too long, and leaves ou
   expect(text.startsWith('(earlier conversation left out)')).toBe(true)
   expect(text.endsWith('Agent ran: step 19')).toBe(true)
   expect(text).not.toContain('inbox: nothing waits')
+})
+
+test('a session saved before Files existed has no Files rows, and one saved with rows keeps them', () => {
+  const row: FileRow = {
+    id: '/w/a.md',
+    kind: 'md',
+    name: 'a.md',
+    target: '/w/a.md',
+    where: 'repo',
+    at: 1,
+    isDismissed: true,
+  }
+
+  expect(upgradeSession({}).files).toEqual([])
+  expect(upgradeSession({ files: [row] }).files).toEqual([row])
 })

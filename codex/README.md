@@ -9,7 +9,7 @@ buttons send your answer to Codex as your own message.
 ## Install
 
 ```sh
-codex plugin marketplace add petekp/inbox
+codex plugin marketplace add anthony-fp/inbox
 codex plugin add inbox@inbox
 ```
 

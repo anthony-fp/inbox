@@ -1,3 +1,17 @@
+/** `file` is a file of no document kind, which only the `show` tool adds. */
+export type FileKind = 'md' | 'html' | 'pdf' | 'image' | 'csv' | 'file' | 'link' | 'plan' | 'artifact'
+
+/** One thing in Files. `target` is an absolute path or a URL, and is also the row's id. */
+export type FileRow = {
+  id: string
+  kind: FileKind
+  name: string
+  target: string
+  where: string
+  at: number
+  isDismissed: boolean
+}
+
 export type Card = {
   goal: string
   done: string[]
@@ -239,6 +253,25 @@ export type OldPresence = Away & {
 export type Tab = 'needsYou' | 'findings' | 'prs'
 
 /**
+ * The Claude Code pane's tabs. Now holds Needs you, the plan and Findings; Codex and omp keep `Tab`. Declared here
+ * for `PluginState`; `hooks/register.tsx` exports it with its labels in `MOD_TABS`.
+ */
+export type ModTab = 'now' | 'files' | 'prs'
+
+export type StepMark = 'waiting' | 'current' | 'done'
+
+export type PlanStep = { text: string; mark: StepMark }
+
+/** A heading and its steps. A task is open while one of its steps is current. */
+export type PlanTask = { title: string; steps: PlanStep[]; isOpen: boolean }
+
+/** A session's plan, as `parsePlan` in `hooks/plan.ts` reads it. */
+export type PlanView = { tasks: PlanTask[]; done: number; total: number; current: PlanStep[] }
+
+/** The last read of the session's plan file. `error` is the path of a plan file that is there but cannot be read. */
+export type PlanState = { sessionId: string; view: PlanView | null; error: string | null }
+
+/**
  * A tab's open row: its id, its position, and when a click or key opened it.
  * `id: null` with `openedAt: 0` means no row was opened in this conversation, so
  * the pane draws the tab's top row open. `openedAt: 0` with an id means the row
@@ -345,6 +378,8 @@ export type Session = {
   prViews: PrViews
   /** Why the last turn stopped, until the next turn starts. */
   stop: Stop | null
+  /** The Files tab's rows: what the session made for the person to look at. */
+  files: FileRow[]
 }
 
 declare module 'claude-code' {
@@ -355,8 +390,10 @@ declare module 'claude-code' {
       /** The drawn conversation's session. `revision` counts its writes. */
       session: Session & { revision: number }
       away: Away
-      tab: Tab
-      selection: Record<Tab, Cursor>
+      tab: ModTab
+      selection: Record<ModTab, Cursor>
+      /** The plan the Now tab draws, read after each write to the plan file and at each turn's end. */
+      plan: PlanState
       dialogs: Dialog[]
       /** The row whose free-text field is open, if any. */
       typing: string | null
@@ -368,6 +405,10 @@ declare module 'claude-code' {
       notes: Record<string, RowNote>
       /** The Needs you groups and the kinds of finding whose closed items show. Each starts folded. */
       unfolded: FoldKind[]
+      /** Whether the Files tab's Dismissed fold is open. */
+      filesUnfolded: boolean
+      /** The Files rows' paths found gone at the last look, so their rows read "missing". */
+      missingFiles: string[]
       foldHover: FoldKind | null
       /** The questions whose every option shows, by the row's id. */
       optionsShown: string[]

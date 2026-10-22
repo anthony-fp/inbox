@@ -2,6 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On, PromptOrigin, RenderSurface } from 'claude-code'
 
+import type { FileRow } from '../types'
 import type { FoldProps } from '../hooks/fold-client'
 import type { LinksProps } from '../hooks/links-client'
 import type { RowProps } from '../hooks/row-client'
@@ -96,6 +97,8 @@ const PANE = {
 let surfaces: RenderSurface[] = []
 
 let files: string[] = []
+let fileTexts = new Map<string, string>()
+let writes: { path: string; text: string }[] = []
 
 let copied: string[] = []
 let toasts: string[] = []
@@ -110,6 +113,13 @@ let storeHold: (() => Promise<void>) | undefined
 let storeSetHold: ((key: string, value: unknown) => Promise<void>) | undefined
 let storeSetRefusal: string | undefined
 let toolRefusal: string | undefined
+/** What a tool call answers, by tool name, in place of the default `ok`. */
+let toolAnswers = new Map<string, object>()
+/**
+ * Each tool the engine ran, by name, in order. A hook that throws after `next` is skipped and its last `next` result
+ * stands (claude-code.d.ts, EngineEventOf), so the tool runs once either way.
+ */
+let toolsRun: string[] = []
 let commandRefusal: string | undefined
 let panesOpened: string[] = []
 
@@ -156,6 +166,8 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   sessionId = 'session-1'
   surfaces = []
   files = []
+  fileTexts = new Map()
+  writes = []
   copied = []
   toasts = []
   theme = ''
@@ -166,6 +178,8 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   storeSetHold = undefined
   storeSetRefusal = undefined
   toolRefusal = undefined
+  toolAnswers = new Map()
+  toolsRun = []
   commandRefusal = undefined
   panesOpened = []
   on('store.get', async ($, e) => {
@@ -222,8 +236,15 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   })
   on('fs.exists', ($, e) => ({ value: files.includes(e.path) }))
   on('fs.read', ($, e) => {
+    const text = fileTexts.get(e.path)
+    if (text !== undefined) return { value: text }
     if (!e.path.endsWith('/.claude-plugin/plugin.json')) throw new Error(`ENOENT: ${e.path}`)
     return { value: JSON.stringify({ name: 'inbox', version: '1.2.3' }) }
+  })
+  on('fs.write', ($, e) => {
+    writes.push({ path: e.path, text: e.text })
+    fileTexts.set(e.path, e.text)
+    return { value: undefined }
   })
   on('fs.stat', () => ({ value: { kind: 'file' as const, size: 1, mtimeMs: 1, isLink: false } }))
   on('process.run', async ($, e) => {
@@ -286,6 +307,9 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
     return {}
   })
   on('tool.call', (_$, e) => {
+    toolsRun.push(String(e.tool))
+    const answer = toolAnswers.get(String(e.tool))
+    if (answer) return answer as never
     if (e.tool !== 'AskUserQuestion') return { result: 'ok', text: 'ok' } as never
     return dialogAnswer as never
   })
@@ -797,8 +821,8 @@ test('last actions an earlier build saved convert once by the table, and a task 
   savingOpen = null
   const openConverted = {
     selection: {
-      needsYou: { ...oldCursor, openedAt: 0 },
-      findings: { id: null, index: 0, openedAt: 0 },
+      now: { ...oldCursor, openedAt: 0 },
+      files: { id: null, index: 0, openedAt: 0 },
       prs: { id: null, index: 0, openedAt: 0 },
     },
   }
@@ -820,7 +844,7 @@ test('last actions an earlier build saved convert once by the table, and a task 
   expect(await pane.find({ text: /Run load script/ })).toBeDefined()
   expect(await band.find({ text: /Needs you/ })).toBeUndefined()
   await clock.advance(SETTLED_MS)
-  await pane.press({ key: 'tab-findings' })
+  await showNow(pane)
   expect((await pane.find({ key: 'fold-issue' }))?.props.label).toBe('▾ 1 closed')
 })
 
@@ -870,7 +894,7 @@ test('the band is [Open inbox] and the counts, the same while working and after 
 
   const pane = await $.ui.mount(PANE)
   await pane.press({ key: 'select-i2' })
-  await pane.press({ key: 'tab-findings' })
+  await showNow(pane)
   panesOpened = []
   await standing.press({ key: 'open-inbox' })
   expect(panesOpened).toEqual(['inbox'])
@@ -981,7 +1005,7 @@ test('after a failed update, the next reply catches up over the whole conversati
   expect(await pane.find({ text: /Name the command greet\?/ })).toBeDefined()
   expect(await pane.find({ text: /Review the welcome copy/ })).toBeDefined()
   expect(await pane.find({ text: /update failed/ })).toBeUndefined()
-  await pane.press({ key: 'tab-findings' })
+  await showNow(pane)
   expect(await pane.find({ key: 'row-f3' })).toBeUndefined()
   expect(await pane.find({ key: 'settled-f3' })).toBeDefined()
   expect(await pane.find({ key: 'undo-f3' })).toBeUndefined()
@@ -1071,7 +1095,7 @@ test('a finding Claude records while the pane shows an empty tab brings the pane
   await $.turn.complete({ answer: 'Added a backoff.', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
   await clock.settle()
   expect(await band.find({ text: /Findings 1/ })).toBeUndefined()
-  await pane.press({ key: 'tab-findings' })
+  await showNow(pane)
   await clock.settle()
   expect(await pane.find({ key: 'address-f1-key' })).toBeUndefined()
   expect(await pane.find({ text: /1 closed/ })).toBeDefined()
@@ -1225,7 +1249,8 @@ test('t opens a field for the person’s own words: a question’s words go to C
   await clock.settle()
   expect(await pane.find({ key: 'row-i1' })).toBeUndefined()
 
-  await pane.press({ key: 'tab-findings' })
+  await pane.press({ key: 'title-f3' })
+  await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'typekey-f3' })
   await pane.input({ key: 'type-f3', text: 'Fix it after the CLI ships.' })
   expect(sent.at(-1)).toBe(
@@ -1723,14 +1748,16 @@ test('Claude closes an item or finding that no longer applies, by the id it read
   const pane = await $.ui.mount(PANE)
   const band = await $.ui.mount({ plugin: 'inbox', surface: 'terminal', ...BAND })
 
-  await pane.press({ key: 'tab-findings' })
+  await pane.press({ key: 'title-f3' })
+  await clock.advance(PRESS_GUARD_MS)
   await pane.press({ key: 'discuss-f3' })
   await clock.settle()
   expect(sent.at(-1)).toContain("Let's talk through this finding you recorded")
   expect(await pane.find({ text: /Discussing…/ })).toBeDefined()
   expect((await pane.find({ key: 'discuss-f3-key' }))?.props.label).toBe('Discuss again')
   expect(await band.find({ text: /Findings 1/ })).toBeDefined()
-  await pane.press({ key: 'tab-needsYou' })
+  await pane.press({ key: 'select-i1' })
+  await clock.advance(PRESS_GUARD_MS)
   submitAnswer = 'hold'
   await pane.press({ key: 'explain-i1-key' })
   await clock.settle()
@@ -1762,7 +1789,7 @@ test('Claude closes an item or finding that no longer applies, by the id it read
   expect(await pane.find({ text: /^Deno$/ })).toBeDefined()
   expect(await pane.find({ text: /^Closed by Claude: no longer applies$/ })).toBeDefined()
 
-  await pane.press({ key: 'tab-findings' })
+  await showNow(pane)
   expect(await pane.find({ key: 'row-f3' })).toBeUndefined()
   expect(await pane.find({ text: 'No open issues' })).toBeDefined()
   expect(await pane.find({ text: 'No open opportunities' })).toBeDefined()
@@ -2051,7 +2078,7 @@ test('a PR linked in a reply shows in the PRs tab, a task naming it opens it, it
   expect(await pane.find({ text: '✓ Opened the comment' })).toBeDefined()
   expect(await pane.find({ text: /^ 1$/ })).toBeDefined()
   hasReply = true
-  await pane.press({ key: 'tab-findings' })
+  await showNow(pane)
   await pane.press({ key: 'tab-prs' })
   await clock.settle()
   expect(await pane.find({ text: /Still unquoted/ })).toBeDefined()
@@ -2133,7 +2160,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await pane.find({ text: notice })).toBeDefined()
 
     isGhMissing = false
-    await show(0, 'needsYou')
+    await show(0, 'now')
     await clock.settle()
     await show(2, 'prs')
     await clock.settle()
@@ -2238,7 +2265,7 @@ test('a PR’s Dismiss settles its block with Undo, which brings it back, a read
 
   branchFails = 'HTTP 502'
   isSlow = true
-  await pane.press({ key: 'tab-needsYou' })
+  await showNow(pane)
   await pane.press({ key: 'tab-prs' })
   await pane.press({ key: 'dismiss-pr-acme/greet#12' })
   isSlow = false
@@ -2726,7 +2753,7 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   expect(await pane.find({ text: doneTask })).toBeUndefined()
   expect(sent).toEqual([])
 
-  await pane.press({ key: 'tab-findings' })
+  await showNow(pane)
   expect(await pane.find({ text: literal(demo.ledger.findings[0]!.title) })).toBeDefined()
   await pane.press({ key: 'tab-prs' })
   expect(await pane.find({ text: literal(demo.prViews.views[branchRef]!.title) })).toBeDefined()
@@ -2744,7 +2771,7 @@ test('/inbox demo shows sample entries in every tab, presses change only its cop
   expect(await pane.find({ text: /Real linked work/ })).toBeDefined()
   expect(await pane.find({ text: /Real branch work/ })).toBeDefined()
 
-  await pane.press({ key: 'tab-needsYou' })
+  await showNow(pane)
   expect(await pane.find({ text: /Use Node or Python/ })).toBeDefined()
   expect(await pane.find({ key: 'explain-i1-key' })).toBeDefined()
   expect(await pane.find({ text: /Sample entries\./ })).toBeUndefined()
@@ -2968,7 +2995,7 @@ test('resuming a session waits for its in-flight save before loading it', async 
   await Promise.all([loading, adding])
   await clock.settle()
   const pane = await $.ui.mount(PANE)
-  await pane.press({ key: 'tab-findings' })
+  await showNow(pane)
   expect(await pane.find({ text: /New finding/ })).toBeDefined()
 })
 
@@ -3157,7 +3184,7 @@ test('tools the engine refuses turn the status line red on every tab, and the mo
   const red = (await pane.find({ type: 'Text', text: refused }))?.props.color
   expect(red).toBeDefined()
   expect(await pane.find({ text: /Use Node or Python\?/ })).toBeDefined()
-  await pane.press({ key: 'tab-findings' })
+  await showNow(pane)
   expect((await pane.find({ type: 'Text', text: refused }))?.props.color).toBe(red)
 })
 
@@ -3227,6 +3254,208 @@ test('a saved session the store cannot read shows as unreadable, not empty, unti
   expect(await pane.find({ text: /Could not read the inbox/ })).toBeUndefined()
   expect(await pane.find({ text: /Use Node or Python\?/ })).toBeDefined()
   expect(stored.get('s:session-1')).toContain('Use Node or Python?')
+})
+
+/** The Files rows of the drawn session, as last written. */
+function watchFiles(on: On): () => FileRow[] {
+  let latest: FileRow[] = []
+  on('state.set', { plugin: 'inbox', key: 'session' } as const, ($, e, next) => {
+    latest = e.value.files
+    return next(e)
+  })
+  return () => latest
+}
+
+/** Shows the Now tab. Its button is drawn only while another tab shows. */
+async function showNow(pane: {
+  find(q: { key: string }): Promise<unknown>
+  press(q: { key: string }): Promise<unknown>
+}) {
+  if (await pane.find({ key: 'tab-now' })) await pane.press({ key: 'tab-now' })
+}
+
+function write($: Engine, path: string) {
+  return $.tool.call({ tool: 'Write', file_path: path, content: 'x' } as never)
+}
+
+const FILE_ROW = (target: string, isDismissed: boolean): FileRow => ({
+  id: target,
+  kind: 'md',
+  name: target.split('/').pop() ?? target,
+  target,
+  where: 'repo',
+  at: 1,
+  isDismissed,
+})
+
+test('Files rows saved with the session come back on a late store read, and a saved dismissal stays', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const rows = watchFiles(on)
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'add a greeting cli', wait: false, origin: { kind: 'composer' } })
+  await $.turn.complete({ answer: 'ok', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.settle()
+
+  await $.session.end({ reason: 'clear', sessionId: 'session-1', resume: { id: 'session-1' } })
+  await $.classic.SessionStart({ source: 'clear', session_id: 'session-2' })
+  await clock.settle()
+  storeRefusal = 'the store is busy'
+  await $.session.end({ reason: 'resume', sessionId: 'session-2', resume: { id: 'session-2' } })
+  await $.classic.SessionStart({ source: 'resume', session_id: 'session-1' })
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  await $.prompt.submit({ text: 'keep going', wait: false, origin: { kind: 'composer' } })
+  await write($, '/w/shared.md')
+  await write($, '/w/new.md')
+  await $.turn.complete({ answer: 'ok', durationMs: 5, isAborted: false, turnId: 't2', reason: 'answer' })
+  await clock.settle()
+
+  stored.set(
+    's:session-1',
+    JSON.stringify({
+      ...SAVED_SESSION,
+      files: [FILE_ROW('/w/shared.md', true), FILE_ROW('/w/old.md', false)],
+    }),
+  )
+  storeRefusal = undefined
+  await pane.press({ key: 'read-again' })
+  await clock.settle()
+
+  expect(
+    rows()
+      .map(f => [f.target, f.isDismissed])
+      .sort(),
+  ).toEqual([
+    ['/w/new.md', false],
+    ['/w/old.md', false],
+    ['/w/shared.md', true],
+  ])
+})
+
+test('after /clear, a conversation with no saved record shows no Files rows', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const rows = watchFiles(on)
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'add a greeting cli', wait: false, origin: { kind: 'composer' } })
+  await write($, '/w/a.md')
+  await $.turn.complete({ answer: 'ok', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.settle()
+  expect(rows()).toHaveLength(1)
+
+  await $.session.end({ reason: 'clear', sessionId: 'session-1', resume: { id: 'session-1' } })
+  await $.classic.SessionStart({ source: 'clear', session_id: 'session-2' })
+  await clock.settle()
+  expect(rows()).toEqual([])
+})
+
+async function startFilesSession($: Engine) {
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'write it up', wait: false, origin: { kind: 'composer' } })
+  await $.turn.start({ text: 'write it up', turnId: 't1' })
+}
+
+test('a Write that makes a new document adds it to Files, and other Writes add nothing', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const rows = watchFiles(on)
+  files = ['/tmp/project/old.md']
+  await startFilesSession($)
+
+  await write($, '/tmp/project/notes.md')
+  await write($, '/tmp/project/old.md')
+  await write($, '/tmp/project/src/cli.ts')
+  toolAnswers.set('Write', { result: 'could not write', isError: true })
+  await write($, '/tmp/project/failed.md')
+
+  expect(rows().map(f => [f.kind, f.name, f.target, f.where])).toEqual([
+    ['md', 'notes.md', '/tmp/project/notes.md', 'repo'],
+  ])
+})
+
+test("a Write to the session's plan path adds a plan row", async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const rows = watchFiles(on)
+  await startFilesSession($)
+
+  await write($, '/tmp/project/.inbox/plans/session-1.md')
+
+  expect(rows().map(f => [f.kind, f.target, f.where])).toEqual([
+    ['plan', '/tmp/project/.inbox/plans/session-1.md', '.inbox'],
+  ])
+})
+
+test('a published artifact adds a row for its URL', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const rows = watchFiles(on)
+  await startFilesSession($)
+  toolAnswers.set('Artifact', {
+    result: { url: 'https://claude.ai/code/artifact/abc', path: '/tmp/project/report.html', title: 'Cache report' },
+  })
+
+  await $.tool.call({ tool: 'Artifact', file_path: '/tmp/project/report.html' } as never)
+  await $.tool.call({ tool: 'Artifact', action: 'list' } as never)
+
+  expect(rows().map(f => [f.kind, f.name, f.target, f.where])).toEqual([
+    ['artifact', 'Cache report', 'https://claude.ai/code/artifact/abc', 'claude.ai'],
+  ])
+})
+
+test('show adds a link once, and says so when it is already there', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const rows = watchFiles(on)
+  await startFilesSession($)
+  const show = () => $.tool.call({ tool: 'mcp__inbox__show', target: 'http://localhost:51655/?key=x' } as never)
+
+  expect((await show()).result).toBe('Added to Files: http://localhost:51655/?key=x')
+  expect((await show()).result).toBe('Already in Files: http://localhost:51655/?key=x')
+  expect(rows().map(f => [f.kind, f.target, f.where])).toEqual([['link', 'http://localhost:51655/?key=x', 'localhost']])
+})
+
+test('the same new document written twice makes one row', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const rows = watchFiles(on)
+  await startFilesSession($)
+
+  await write($, '/tmp/project/notes.md')
+  files = ['/tmp/project/notes.md']
+  await write($, '/tmp/project/notes.md')
+
+  expect(rows().map(f => f.target)).toEqual(['/tmp/project/notes.md'])
+})
+
+test('a Write or Artifact call keeps its result when saving the Files row fails, and show says it did not add', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  await startFilesSession($)
+  toolAnswers.set('Write', { result: 'wrote it' })
+  toolAnswers.set('Artifact', { result: { url: 'https://claude.ai/code/artifact/abc', path: '/tmp/project/r.html' } })
+  storeSetRefusal = 'store unavailable'
+
+  // This pins only the result Claude gets. A hook that threw would be skipped with its `next` result kept, and the
+  // engine hides a skipped hook's report from the test, so the result alone cannot show the hook did not throw.
+  expect((await write($, '/tmp/project/notes.md')).result).toBe('wrote it')
+  const published = await $.tool.call({ tool: 'Artifact', file_path: '/tmp/project/r.html' } as never)
+  expect((published.result as { url?: string }).url).toBe('https://claude.ai/code/artifact/abc')
+  expect(toolsRun).toEqual(['Write', 'Artifact'])
+  const shown = await $.tool.call({ tool: 'mcp__inbox__show', target: 'http://localhost:5173/' } as never)
+  expect(shown.result).toMatch(/^Not added: /)
+})
+
+test("a subagent's Write of a new document still adds it to Files", async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const rows = watchFiles(on)
+  await startFilesSession($)
+
+  await $.tool.call({ tool: 'Write', file_path: '/tmp/project/agent.md', content: 'x', agentId: 'a1' } as never)
+
+  expect(rows().map(f => f.target)).toEqual(['/tmp/project/agent.md'])
 })
 
 for (const origin of [{ kind: 'sdk' }, { kind: 'plugin', name: 'test-plugin' }] satisfies PromptOrigin[]) {
@@ -3408,13 +3637,16 @@ test('the desktop pane draws each action as one button and the tabs as one click
 
   const tabBar = async () => (await pane.find({ key: 'tabs' }))?.props.props as TabsProps
   const { tabs, gap } = await tabBar()
-  expect(tabs.map(t => t.id)).toEqual(['needsYou', 'findings', 'prs'])
+  expect(tabs.map(t => t.id)).toEqual(['now', 'files', 'prs'])
   await pane.pointer({ type: 'down', x: tabs[0]!.width + gap + tabs[1]!.width - 1, y: 1.1, button: 'left', in: 'tabs' })
   await clock.settle()
-  expect((await tabBar()).shown).toBe('findings')
+  expect((await tabBar()).shown).toBe('files')
   await pane.pointer({ type: 'down', x: tabs[0]!.width, y: 1, button: 'left', in: 'tabs' })
   await clock.settle()
-  expect((await tabBar()).shown).toBe('findings')
+  expect((await tabBar()).shown).toBe('files')
+  await pane.pointer({ type: 'down', x: 0, y: 1, button: 'left', in: 'tabs' })
+  await clock.settle()
+  expect((await tabBar()).shown).toBe('now')
 
   await $.tool.call({
     tool: 'mcp__inbox__record',
@@ -3445,6 +3677,11 @@ test('the desktop pane draws each action as one button and the tabs as one click
     title: 'Retry loop never backs off',
     detail: 'Hot.',
   })
+  await clock.settle()
+  // On Now, a finding that arrives leaves the open question open; a click opens the finding.
+  expect(await pane.find({ text: 'Hot.' })).toBeUndefined()
+  await clock.advance(PRESS_GUARD_MS)
+  await pane.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: 'select-f4' })
   await clock.settle()
   expect(await pane.find({ text: 'Hot.' })).toBeDefined()
 
@@ -3556,14 +3793,16 @@ test('every row in the demo, on every tab, draws its plan’s buttons in the pla
       return [k.action.label]
     })
   }
+  // Now holds Needs you and then Findings.
   const tabs = [
     {
-      id: 'needsYou',
-      rows: [...view.needsYou.questions, ...view.needsYou.tasks].filter(r => r.state.is !== 'settled'),
+      id: 'now',
+      rows: [...view.needsYou.questions, ...view.needsYou.tasks, ...view.findings.rows].filter(
+        r => r.state.is !== 'settled',
+      ),
     },
-    { id: 'findings', rows: view.findings.rows.filter(r => r.state.is !== 'settled') },
   ] as const
-  expect(tabs.map(t => t.rows.length > 0)).toEqual([true, true])
+  expect(tabs.map(t => t.rows.some(r => r.finding) && t.rows.some(r => r.item))).toEqual([true])
 
   for (const look of ['terminal', 'desktop'] as const) {
     const pane =
@@ -3676,9 +3915,9 @@ test('a forked conversation keeps the parent’s findings and closed records, an
   await clock.settle()
   const pane = await $.ui.mount(PANE)
   expect(await pane.find({ text: /Add a backoff to the retry loop\?/ })).toBeDefined()
-  await pane.press({ key: 'tab-findings' })
+  await showNow(pane)
   expect((await pane.find({ key: 'settled-f1' }))?.text).toContain('Now a question in Needs you')
-  await pane.press({ key: 'tab-needsYou' })
+  await showNow(pane)
   const contextOf = async () =>
     ((await $.prompt.submit({ text: 'where are we?', wait: false, origin: { kind: 'composer' } })).context ?? []).join(
       '\n',
@@ -3694,4 +3933,770 @@ test('a forked conversation keeps the parent’s findings and closed records, an
   await clock.settle()
   await clock.advance(SETTLED_MS)
   expect(await contextOf()).toContain('- issue: Retry loop never backs off (close id: f1)')
+})
+
+test("each of the person's prompts tells Claude its plan path, after the inbox text", async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  const context =
+    (await $.prompt.submit({ text: 'add caching', wait: false, origin: { kind: 'composer' } })).context ?? []
+  expect(context.at(-1)).toContain('/tmp/project/.inbox/plans/session-1.md')
+  expect(context.at(-1)).toContain('three or more steps')
+})
+
+test('after a compaction, Claude is told its plan path and the steps in progress', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  fileTexts.set(
+    '/tmp/project/.inbox/plans/session-1.md',
+    '## Cache\n- [x] Add the store\n- [~] Wire the reads\n- [ ] Test it',
+  )
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  const r = await $.classic.SessionStart({ source: 'compact', session_id: 'session-1' })
+  const context = (r.additionalContext ?? []).join('\n')
+  expect(context).toContain('/tmp/project/.inbox/plans/session-1.md')
+  expect(context).toContain('Wire the reads')
+  expect(context).not.toContain('Test it')
+})
+
+test("the first prompt adds .inbox/ to the repo's info/exclude once", async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  ghAnswers.push({ match: argv => argv.join(' ') === 'git rev-parse --git-common-dir', stdout: '/repo/.git\n' })
+  fileTexts.set('/repo/.git/info/exclude', '# git ls-files --others --exclude-from=.git/info/exclude\n')
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'add caching', wait: false, origin: { kind: 'composer' } })
+  await $.prompt.submit({ text: 'and tests', wait: false, origin: { kind: 'composer' } })
+
+  expect(writes.filter(w => w.path === '/repo/.git/info/exclude').map(w => w.text)).toEqual([
+    '# git ls-files --others --exclude-from=.git/info/exclude\n.inbox/\n',
+  ])
+})
+
+test('the exclude is left alone when it already has .inbox/', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  ghAnswers.push({ match: argv => argv.join(' ') === 'git rev-parse --git-common-dir', stdout: '.git\n' })
+  fileTexts.set('/tmp/project/.git/info/exclude', 'node_modules\n.inbox/\n')
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'add caching', wait: false, origin: { kind: 'composer' } })
+  expect(writes.filter(w => w.path.endsWith('/info/exclude'))).toEqual([])
+})
+
+test('outside a Git repo the first prompt still goes through and writes no exclude', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  const context =
+    (await $.prompt.submit({ text: 'add caching', wait: false, origin: { kind: 'composer' } })).context ?? []
+  expect(context.at(-1)).toContain('.inbox/plans/session-1.md')
+  expect(writes.filter(w => w.path.endsWith('/info/exclude'))).toEqual([])
+})
+
+test("an old build's Needs you or Findings tab opens as Now, with its open row", async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  let savingTab: string | null = null
+  let savedTab: unknown = null
+  let savingSelection: unknown = null
+  let savedSelection: unknown = null
+  on('state.set', { plugin: 'inbox', key: 'tab' } as const, ($, e, next) => {
+    const write = savingTab ? { ...e, value: savingTab as never } : e
+    savedTab = write.value
+    return next(write)
+  })
+  on('state.set', { plugin: 'inbox', key: 'selection' } as const, ($, e, next) => {
+    const write = savingSelection ? { ...e, value: savingSelection as never } : e
+    savedSelection = write.value
+    return next(write)
+  })
+  for (const old of ['needsYou', 'findings', 'waiting', 'notes']) {
+    savingTab = old
+    savingSelection = {
+      needsYou: { id: null, index: 0, openedAt: 0 },
+      findings: { id: 'f1', index: 0, openedAt: 5 },
+      prs: { id: null, index: 0, openedAt: 0 },
+    }
+    await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+    savingTab = null
+    savingSelection = null
+    await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    expect(savedTab, old).toBe('now')
+    expect(savedSelection, old).toEqual({
+      now: { id: 'f1', index: 0, openedAt: 5 },
+      files: { id: null, index: 0, openedAt: 0 },
+      prs: { id: null, index: 0, openedAt: 0 },
+    })
+  }
+})
+
+async function startNowSession($: Engine, clock: { settle(): Promise<void> }) {
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'add a greeting cli', wait: false, origin: { kind: 'composer' } })
+  await $.turn.start({ text: 'add a greeting cli', turnId: 't1' })
+  await $.turn.complete({ answer: 'Plan ready.', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.settle()
+  await $.tool.call({
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
+    title: 'README is stale',
+    detail: 'It names the old command.',
+  })
+  await clock.settle()
+}
+
+test('Now lists Needs you, then the plan, then Findings, and its label counts both lists', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  await startNowSession($, clock)
+  const plan = '/tmp/project/.inbox/plans/session-1.md'
+  fileTexts.set(plan, '## Cache\n- [x] Add the store\n- [~] Wire the reads\n## Docs\n- [ ] Write it up')
+  await $.tool.call({ tool: 'Write', file_path: plan, content: 'x' } as never)
+  await clock.settle()
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const pane = await $.ui.mount({ ...PANE, surface, props: { ...PANE.props, bodyColumns: 120 } })
+    const texts = (await pane.findAll({ type: 'Text' })).map(t => t.text ?? '')
+    const at = (pattern: RegExp) => texts.findIndex(t => pattern.test(t))
+    // Group titles mark where each list draws: Needs you's last group is Tasks, and Findings' first is Issues.
+    expect(at(/^Tasks/), surface).toBeGreaterThan(at(/^Questions/))
+    expect(at(/^PLAN {2}1 of 3 steps$/), surface).toBeGreaterThan(at(/^Tasks/))
+    expect(at(/^Issues/), surface).toBeGreaterThan(at(/^PLAN {2}1 of 3 steps$/))
+    expect(at(/^◐ Wire the reads$/), surface).toBeGreaterThan(0)
+    expect(at(/^▸ Docs {2}0\/1$/), surface).toBeGreaterThan(0)
+    if (surface === 'terminal') {
+      // The shown tab draws as text, raised, with its count.
+      expect(texts.slice(0, 6)).toEqual(expect.arrayContaining(['Now', ' 3']))
+    } else {
+      const bar = (await pane.find({ key: 'tabs' }))?.props.props as TabsProps
+      expect(bar.tabs.map(t => [t.id, t.label, t.count])).toEqual([
+        ['now', 'Now', 3],
+        // The plan file the test wrote is in Files.
+        ['files', 'Files', 1],
+        ['prs', 'PRs', 0],
+      ])
+    }
+    await pane.unmount()
+  }
+})
+
+test('Down from the last Needs you row opens the first finding, past the plan', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  await startNowSession($, clock)
+  fileTexts.set('/tmp/project/.inbox/plans/session-1.md', '## Cache\n- [~] Wire the reads')
+  await $.turn.complete({ answer: 'Still on it.', durationMs: 5, isAborted: false, turnId: 't2', reason: 'answer' })
+  await clock.settle()
+
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: /^◐ Wire the reads$/ })).toBeDefined()
+  expect(await pane.find({ key: 'explain-i1-key' })).toBeDefined()
+  await pane.press({ key: 'next' })
+  await clock.advance(PRESS_GUARD_MS)
+  expect(await pane.find({ key: 'explain-i2-key' })).toBeDefined()
+  await pane.press({ key: 'next' })
+  await clock.advance(PRESS_GUARD_MS)
+  expect(await pane.find({ key: 'address-f3-key' })).toBeDefined()
+  await pane.press({ key: 'next' })
+  await clock.advance(PRESS_GUARD_MS)
+  expect(await pane.find({ key: 'address-f3-key' })).toBeDefined()
+})
+
+test('an Edit to the plan file redraws the plan, and a missing plan draws nothing', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  await startNowSession($, clock)
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: /^PLAN/ })).toBeUndefined()
+
+  const plan = '/tmp/project/.inbox/plans/session-1.md'
+  fileTexts.set(plan, '## Cache\n- [x] Add the store\n- [x] Wire the reads')
+  await $.tool.call({ tool: 'Edit', file_path: plan, old_string: '~', new_string: 'x' } as never)
+  await clock.settle()
+  expect(await pane.find({ text: /^PLAN {2}2 of 2 steps$/ })).toBeDefined()
+  expect(await pane.find({ text: /^✓ Cache {2}2\/2$/ })).toBeDefined()
+})
+
+test('the plan says so when its file is there but cannot be read', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  await startNowSession($, clock)
+  files = ['/tmp/project/.inbox/plans/session-1.md']
+  await $.turn.complete({ answer: 'Done.', durationMs: 5, isAborted: false, turnId: 't2', reason: 'answer' })
+  await clock.settle()
+
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: 'Could not read the plan: /tmp/project/.inbox/plans/session-1.md' })).toBeDefined()
+})
+
+test('hotkey 2 opens the Files tab, empty for now, and 1 goes back to Now', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  await startNowSession($, clock)
+  const pane = await $.ui.mount(PANE)
+
+  expect((await pane.find({ key: 'tab-key-files' }))?.props.hotkey).toBe('2')
+  await pane.press({ key: 'tab-key-files' })
+  await clock.settle()
+  expect(await pane.find({ text: /^Nothing yet\.$/ })).toBeDefined()
+  expect(await pane.find({ text: /Files this session makes show here\./ })).toBeDefined()
+  expect(await pane.find({ text: /README is stale/ })).toBeUndefined()
+
+  expect((await pane.find({ key: 'tab-key-now' }))?.props.hotkey).toBe('1')
+  await pane.press({ key: 'tab-key-now' })
+  await clock.settle()
+  expect(await pane.find({ text: /README is stale/ })).toBeDefined()
+})
+
+test('a MultiEdit to the plan file redraws the plan', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  await startNowSession($, clock)
+  const pane = await $.ui.mount(PANE)
+  const plan = '/tmp/project/.inbox/plans/session-1.md'
+  fileTexts.set(plan, '## Cache\n- [x] Add the store\n- [~] Wire the reads')
+  await $.tool.call({ tool: 'MultiEdit', file_path: plan, edits: [] } as never)
+  await clock.settle()
+  expect(await pane.find({ text: /^PLAN {2}1 of 2 steps$/ })).toBeDefined()
+})
+
+test("where classic.SessionStart is skipped, a /resume through the first prompt copies no other conversation's plan", async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const previous = '/tmp/project/.inbox/plans/session-1.md'
+  files = [previous]
+  fileTexts.set(previous, '## Cache\n- [x] Add the store\n- [~] Wire the reads')
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+
+  await $.session.end({ reason: 'resume', sessionId: 'session-1', resume: { id: 'session-1' } })
+  sessionId = 'session-2'
+  const prompt = await $.prompt.submit({ text: 'where were we?', wait: false, origin: { kind: 'composer' } })
+  await clock.settle()
+  const context = (prompt.context ?? []).join('\n')
+  expect(writes.filter(w => w.path === '/tmp/project/.inbox/plans/session-2.md')).toEqual([])
+  expect(context).toContain('/tmp/project/.inbox/plans/session-2.md')
+  expect(context).not.toContain('Wire the reads')
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: /^PLAN/ })).toBeUndefined()
+})
+
+test('a plan file with text but no checkbox step names its path, and an empty one draws nothing', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  await startNowSession($, clock)
+  const plan = '/tmp/project/.inbox/plans/session-1.md'
+  files = [plan]
+  fileTexts.set(plan, '# Ideas\nSome notes, no steps yet.')
+  await $.turn.complete({ answer: 'Done.', durationMs: 5, isAborted: false, turnId: 't2', reason: 'answer' })
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: `Could not read the plan: ${plan}` })).toBeDefined()
+
+  fileTexts.set(plan, '  \n')
+  await $.turn.complete({ answer: 'Done.', durationMs: 5, isAborted: false, turnId: 't3', reason: 'answer' })
+  await clock.settle()
+  expect(await pane.find({ text: /Could not read the plan/ })).toBeUndefined()
+  expect(await pane.find({ text: /^PLAN/ })).toBeUndefined()
+})
+
+test('a session started with its plan on disk draws the plan before any prompt', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  fileTexts.set('/tmp/project/.inbox/plans/session-1.md', '## Cache\n- [x] Add the store\n- [~] Wire the reads')
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: /^PLAN {2}1 of 2 steps$/ })).toBeDefined()
+})
+
+test("/resume draws the resumed conversation's plan before any prompt", async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: /^PLAN/ })).toBeUndefined()
+
+  fileTexts.set('/tmp/project/.inbox/plans/session-2.md', '## Docs\n- [~] Write it up\n- [ ] Link it')
+  await $.session.end({ reason: 'resume', sessionId: 'session-1', resume: { id: 'session-1' } })
+  await $.classic.SessionStart({ source: 'resume', session_id: 'session-2' })
+  await clock.settle()
+  expect(await pane.find({ text: /^PLAN {2}0 of 2 steps$/ })).toBeDefined()
+  expect(await pane.find({ text: /^◐ Write it up$/ })).toBeDefined()
+})
+
+test("/branch copies the parent's plan to the fork's plan path and draws it, and keeps a plan the fork has", async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const parent = '/tmp/project/.inbox/plans/session-1.md'
+  const text = '## Cache\n- [x] Add the store\n- [~] Wire the reads'
+  files = [parent]
+  fileTexts.set(parent, text)
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+
+  await $.session.end({ reason: 'resume', sessionId: 'session-1', resume: { id: 'session-1' } })
+  await $.classic.SessionStart({ source: 'fork', session_id: 'session-2' })
+  await clock.settle()
+  expect(writes).toContainEqual({ path: '/tmp/project/.inbox/plans/session-2.md', text })
+  expect(await pane.find({ text: /^PLAN {2}1 of 2 steps$/ })).toBeDefined()
+
+  const own = '/tmp/project/.inbox/plans/session-3.md'
+  files = [parent, own]
+  fileTexts.set(own, '## Docs\n- [ ] Write it up')
+  await $.session.end({ reason: 'resume', sessionId: 'session-2', resume: { id: 'session-2' } })
+  await $.classic.SessionStart({ source: 'fork', session_id: 'session-3' })
+  await clock.settle()
+  expect(writes.filter(w => w.path === own)).toEqual([])
+  expect(await pane.find({ text: /^PLAN {2}0 of 1 steps$/ })).toBeDefined()
+})
+
+for (const saved of ['needsYou', 'findings'] as const)
+  for (const surface of ['terminal', 'desktop'] as const)
+    test(`a ${surface} pane drawn while an old build's ${saved} tab is still saved draws Now`, async ($, on) => {
+      const clock = mock.clock(on, { now: 1_000_000 })
+      world($, on, [])
+      // Every write keeps the values an older build saved, so the pane draws them as it does before upgradeState.
+      const oldSelection = {
+        needsYou: { id: 'i2', index: 1, openedAt: 0 },
+        findings: { id: null, index: 0, openedAt: 0 },
+        prs: { id: null, index: 0, openedAt: 0 },
+      }
+      on('state.set', { plugin: 'inbox', key: 'tab' } as const, ($, e, next) => next({ ...e, value: saved as never }))
+      on('state.set', { plugin: 'inbox', key: 'selection' } as const, ($, e, next) =>
+        next({ ...e, value: oldSelection as never }),
+      )
+      await startNowSession($, clock)
+      const pane = await $.ui.mount({ ...PANE, surface, props: { ...PANE.props, bodyColumns: 120 } })
+      const texts = (await pane.findAll({ type: 'Text' })).map(t => t.text ?? '')
+      expect(texts.some(t => /^Questions/.test(t))).toBe(true)
+      expect(texts.some(t => /^Issues/.test(t))).toBe(true)
+      if (surface === 'desktop') {
+        const bar = (await pane.find({ key: 'tabs' }))?.props.props as TabsProps
+        expect(bar.shown).toBe('now')
+      } else {
+        expect(await pane.find({ key: 'tab-now' })).toBeUndefined()
+      }
+      // The old Needs you cursor is Now's, and a key press reads the old tab without a throw.
+      if (surface === 'terminal') {
+        expect(await pane.find({ key: 'explain-i2-key' })).toBeDefined()
+        await pane.press({ key: 'previous' })
+        await clock.settle()
+        expect(await pane.find({ text: /^Questions/ })).toBeDefined()
+      }
+    })
+
+/** The drawn session, as last written. */
+function watchSession(on: On): () => { files: FileRow[]; lastActions: Record<string, unknown> } {
+  let latest: { files: FileRow[]; lastActions: Record<string, unknown> } = { files: [], lastActions: {} }
+  on('state.set', { plugin: 'inbox', key: 'session' } as const, ($, e, next) => {
+    latest = e.value
+    return next(e)
+  })
+  return () => latest
+}
+
+/** A session with two new documents in Files, b.md the newer, and the pane on the Files tab. */
+async function startFilesTab(
+  $: Engine,
+  on: On,
+  clock: { settle(): Promise<void>; advance(ms: number): Promise<void> },
+) {
+  await startFilesSession($)
+  await write($, '/tmp/project/a.md')
+  await clock.advance(1000)
+  await write($, '/tmp/project/b.md')
+  files = ['/tmp/project/a.md', '/tmp/project/b.md']
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  // A shown pane on an empty Now has already moved to Files with the first new row.
+  if (await pane.find({ key: 'tab-files' })) await pane.press({ key: 'tab-files' })
+  await clock.settle()
+  await clock.advance(PRESS_GUARD_MS)
+  return pane
+}
+
+const A = '/tmp/project/a.md'
+const B = '/tmp/project/b.md'
+
+test('the Files tab lists rows newest first with kind, name and where, counts them, and opens the top row', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const pane = await startFilesTab($, on, clock)
+
+  const texts = (await pane.findAll({ type: 'Text' })).map(t => t.text ?? '')
+  expect(texts.some(t => /Nothing yet/.test(t))).toBe(false)
+  expect((await pane.find({ key: `file-open-${B}-key` }))?.props.label).toBe('Open')
+  expect((await pane.find({ key: `file-finder-${B}-key` }))?.props.label).toBe('Finder')
+  expect((await pane.find({ key: `file-copy-${B}-key` }))?.props.label).toBe('Copy path')
+  expect((await pane.find({ key: `file-dismiss-${B}-key` }))?.props.label).toBe('Dismiss')
+  expect(await pane.find({ key: `file-open-${A}` })).toBeUndefined()
+  expect((await pane.find({ key: `title-${A}` }))?.props.label).toBe('a.md')
+  expect(texts.some(t => /^md\s/.test(t))).toBe(true)
+  expect(texts.some(t => /repo/.test(t))).toBe(true)
+  expect(texts.some(t => /missing/.test(t))).toBe(false)
+  // The shown tab draws its count beside its label; Now has none here.
+  expect(texts.slice(0, 8)).toEqual(expect.arrayContaining(['Files', ' 2']))
+})
+
+test('Dismiss moves a row into Dismissed (n) and leaves the file, and Restore brings it back', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const session = watchSession(on)
+  const pane = await startFilesTab($, on, clock)
+  const before = ran.length
+
+  await pane.press({ key: `file-dismiss-${B}` })
+  await clock.settle()
+  expect(session().files.find(f => f.id === B)?.isDismissed).toBe(true)
+  expect(ran.slice(before)).toEqual([])
+  expect(files).toContain(B)
+  expect((await pane.find({ key: 'files-fold' }))?.props.label).toBe('▸ Dismissed (1)')
+  expect(await pane.find({ key: `title-${B}` })).toBeUndefined()
+  // The next open row opens in its place.
+  expect(await pane.find({ key: `file-open-${A}` })).toBeDefined()
+
+  await pane.press({ key: 'files-fold' })
+  await clock.settle()
+  expect((await pane.find({ key: 'files-fold' }))?.props.label).toBe('▾ Dismissed (1)')
+  await pane.press({ key: `title-${B}` })
+  await clock.settle()
+  await clock.advance(PRESS_GUARD_MS)
+  expect((await pane.find({ key: `file-restore-${B}-key` }))?.props.label).toBe('Restore')
+  expect(await pane.find({ key: `file-open-${B}` })).toBeUndefined()
+  await pane.press({ key: `file-restore-${B}` })
+  await clock.settle()
+  expect(session().files.find(f => f.id === B)?.isDismissed).toBe(false)
+  expect(await pane.find({ key: 'files-fold' })).toBeUndefined()
+  expect(await pane.find({ key: `file-open-${B}` })).toBeDefined()
+})
+
+test('Open shows "Opening x…" on its row, then "✓ Opened x", and runs open on the path', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const pane = await startFilesTab($, on, clock)
+  let opened = () => {}
+  ghAnswers.push({ match: argv => argv[0] === 'open', stdout: '', hold: () => new Promise(r => (opened = r)) })
+  const pressing = pane.press({ key: `file-open-${B}` })
+  await clock.settle()
+  expect(ran.at(-1)).toEqual(['open', B])
+  expect(await pane.find({ text: 'Opening b.md…' })).toBeDefined()
+  opened()
+  await pressing
+  await clock.settle()
+  expect(await pane.find({ text: '✓ Opened b.md' })).toBeDefined()
+  expect(toasts).toEqual([])
+  ghAnswers.pop()
+})
+
+test('Finder runs open -R on the path, and a failed open reads why in red', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const pane = await startFilesTab($, on, clock)
+  await pane.press({ key: `file-finder-${B}` })
+  await clock.settle()
+  expect(ran.at(-1)).toEqual(['open', '-R', B])
+  expect(await pane.find({ text: '✓ Opened b.md in Finder' })).toBeDefined()
+
+  ghAnswers.push({ match: argv => argv[0] === 'open', stdout: '', fails: 'no app' })
+  await pane.press({ key: `file-open-${B}` })
+  await clock.settle()
+  const failed = await pane.find({ type: 'Text', text: /^Could not open b\.md: / })
+  expect(failed).toBeDefined()
+  expect(failed?.props.color).not.toBe((await pane.find({ type: 'Text', text: /repo/ }))?.props.color)
+  ghAnswers.pop()
+})
+
+test("a missing file's row reads missing, and Open on it says it no longer exists", async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const pane = await startFilesTab($, on, clock)
+  files = [A]
+  await pane.press({ key: 'tab-now' })
+  await clock.settle()
+  await pane.press({ key: 'tab-files' })
+  await clock.settle()
+  const texts = (await pane.findAll({ type: 'Text' })).map(t => t.text ?? '')
+  expect(texts.filter(t => /missing/.test(t))).toHaveLength(1)
+  await clock.advance(PRESS_GUARD_MS)
+  await pane.press({ key: `file-open-${B}` })
+  await clock.settle()
+  expect(await pane.find({ text: 'Could not open b.md: it no longer exists' })).toBeDefined()
+})
+
+test('a key press and a click on a Files action record the same result', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const session = watchSession(on)
+  const pane = await startFilesTab($, on, clock)
+  await pane.press({ key: `file-copy-${B}` })
+  await clock.settle()
+  await pane.press({ key: 'next' })
+  await clock.settle()
+  await clock.advance(PRESS_GUARD_MS)
+  expect((await pane.find({ key: `file-copy-${A}-key` }))?.props.hotkey).toBe('c')
+  await pane.press({ key: `file-copy-${A}-key` })
+  await clock.settle()
+  expect(copied).toEqual([B, A])
+  type Saved = { kind: string; action: string; text: string; result?: { state: string; parts: unknown[] } }
+  const shape = (id: string) => {
+    const last = session().lastActions[id] as Saved
+    return {
+      kind: last.kind,
+      action: last.action,
+      text: last.text,
+      state: last.result?.state,
+      parts: last.result?.parts,
+    }
+  }
+  expect(shape(A)).toEqual(shape(B))
+  expect(shape(A)).toMatchObject({ kind: 'local', state: 'done' })
+})
+
+test("the plan's row reads Plan, or the plan's first heading, and keeps its path", async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const plan = '/tmp/project/.inbox/plans/session-1.md'
+  await startFilesSession($)
+  await write($, plan)
+  files = [plan]
+  fileTexts.set(plan, 'no steps yet')
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  await pane.press({ key: 'tab-files' })
+  await clock.settle()
+  expect((await pane.find({ key: `file-open-${plan}-key` }))?.props.label).toBe('Open')
+  let texts = (await pane.findAll({ type: 'Text' })).map(t => t.text ?? '')
+  expect(texts).toContain('Plan')
+  expect(texts.some(t => t.includes('session-1.md'))).toBe(true)
+
+  fileTexts.set(plan, '## Cache\n- [~] Wire the reads')
+  await $.tool.call({ tool: 'Edit', file_path: plan, old_string: 'a', new_string: 'b' } as never)
+  await clock.settle()
+  texts = (await pane.findAll({ type: 'Text' })).map(t => t.text ?? '')
+  expect(texts).toContain('Cache')
+})
+
+test('a new Needs you row keeps the person on a Files tab that has rows', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  on('ui.panes', () => ({ value: [{ id: 'inbox', title: 'Inbox', isShown: true, isFocused: true, isPlaced: true }] }))
+  const pane = await startFilesTab($, on, clock)
+  await $.tool.call({
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
+    title: 'README is stale',
+    detail: 'x',
+  })
+  await clock.settle()
+  expect(await pane.find({ key: `file-open-${B}` })).toBeDefined()
+  expect(await pane.find({ key: 'tab-files' })).toBeUndefined()
+})
+
+test('the desktop pane draws the Files row buttons in fileActions order, and other rows as row Clients', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const terminal = await startFilesTab($, on, clock)
+  await terminal.unmount()
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 120 } })
+  const keys = (await pane.findAll({ type: 'Button' })).map(b => String(b.key ?? '')).filter(k => k.startsWith('file-'))
+  expect(keys).toEqual([`file-open-${B}`, `file-finder-${B}`, `file-copy-${B}`, `file-dismiss-${B}`])
+  const row = (await pane.find({ key: `select-${A}` }))?.props.props as RowProps
+  expect([row.before.trim(), row.title, row.after]).toEqual(['md', 'a.md', 'repo'])
+})
+
+test('show turns a file:// URL into its path, and Open goes through the guard, never a bare open of the URL', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const session = watchSession(on)
+  await startFilesSession($)
+  files = ['/x.app']
+  const shown = await $.tool.call({ tool: 'mcp__inbox__show', target: 'file:///x.app' } as never)
+  expect(shown.result).toBe('Added to Files: x.app')
+  expect(session().files.map(f => [f.kind, f.target])).toEqual([['file', '/x.app']])
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  await pane.press({ key: 'tab-files' })
+  await clock.settle()
+  await clock.advance(PRESS_GUARD_MS)
+  const before = ran.length
+  await pane.press({ key: 'file-open-/x.app' })
+  await clock.settle()
+  const runs = ran.slice(before)
+  expect(runs).toContainEqual(['open', '-R', '/x.app'])
+  expect(runs.some(r => r[0] === 'open' && r.some(a => a.startsWith('file:')))).toBe(false)
+  expect(runs.some(r => r[0] === 'open' && r.length === 2)).toBe(false)
+})
+
+test('show refuses a link that is not http or https', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const session = watchSession(on)
+  await startFilesSession($)
+  for (const target of ['vnc://host', 'smb://host/share', 'file://other-host/x.app']) {
+    const shown = await $.tool.call({ tool: 'mcp__inbox__show', target } as never)
+    expect(shown.result).toMatch(/^Not added: /)
+  }
+  expect(session().files).toEqual([])
+})
+
+for (const target of ['/tmp/project/tool.jar', '/tmp/project/Do It.shortcut', '/tmp/project/Waves.saver'])
+  test(`Open on ${target.split('/').pop()} shows it in Finder instead of running it`, async ($, on) => {
+    const clock = mock.clock(on, { now: 1_000_000 })
+    world($, on, [])
+    await startFilesSession($)
+    files = [target]
+    await $.tool.call({ tool: 'mcp__inbox__show', target } as never)
+    await clock.settle()
+    const pane = await $.ui.mount(PANE)
+    if (await pane.find({ key: 'tab-files' })) await pane.press({ key: 'tab-files' })
+    await clock.settle()
+    await clock.advance(PRESS_GUARD_MS)
+    const before = ran.length
+    await pane.press({ key: `file-open-${target}` })
+    await clock.settle()
+    expect(ran.slice(before).filter(r => r[0] === 'open')).toEqual([['open', '-R', target]])
+  })
+
+test('show puts a path that starts with ~/ under the home folder', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [], { HOME: '/Users/me' })
+  const session = watchSession(on)
+  await startFilesSession($)
+  const shown = await $.tool.call({ tool: 'mcp__inbox__show', target: '~/Desktop/report.pdf' } as never)
+  expect(shown.result).toBe('Added to Files: report.pdf')
+  expect(session().files.map(f => f.target)).toEqual(['/Users/me/Desktop/report.pdf'])
+})
+
+test("/clear drops the Files presses' records, and /resume keeps only those of the loaded session's rows", async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const session = watchSession(on)
+  const pane = await startFilesTab($, on, clock)
+  await pane.press({ key: `file-copy-${B}` })
+  await clock.settle()
+  expect(Object.keys(session().lastActions)).toContain(B)
+
+  await $.session.end({ reason: 'clear', sessionId: 'session-1', resume: { id: 'session-1' } })
+  await $.classic.SessionStart({ source: 'clear', session_id: 'session-2' })
+  await clock.settle()
+  expect(session().lastActions).toEqual({})
+
+  const row = { id: A, kind: 'md', name: 'a.md', target: A, where: 'repo', at: 1, isDismissed: false }
+  const press = (at: number) => ({ kind: 'local', action: 'file-copy', text: 'Copy path', at })
+  stored.set(
+    's:session-3',
+    JSON.stringify({
+      ...SAVED_SESSION,
+      files: [row],
+      lastActions: { [A]: press(1), '/tmp/project/gone.md': press(2), 'pr:o/r#1': { ...press(3), action: 'pr-mark' } },
+    }),
+  )
+  await $.session.end({ reason: 'resume', sessionId: 'session-2', resume: { id: 'session-2' } })
+  await $.classic.SessionStart({ source: 'resume', session_id: 'session-3' })
+  await clock.settle()
+  expect(Object.keys(session().lastActions).sort()).toEqual([A, 'pr:o/r#1'])
+})
+
+test('Open on a saved link row with another scheme reads a refusal in red and runs nothing', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const saved: FileRow = {
+    id: 'vnc://host',
+    kind: 'link',
+    name: 'vnc://host',
+    target: 'vnc://host',
+    where: 'host',
+    at: 1,
+    isDismissed: false,
+  }
+  on('state.set', { plugin: 'inbox', key: 'session' } as const, ($, e, next) =>
+    next(
+      e.value.files.some(f => f.id === saved.id)
+        ? e
+        : { ...e, value: { ...e.value, files: [...e.value.files, saved] } },
+    ),
+  )
+  await startFilesSession($)
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  await pane.press({ key: 'tab-files' })
+  await clock.settle()
+  await clock.advance(PRESS_GUARD_MS)
+  const before = ran.length
+  await pane.press({ key: 'file-open-vnc://host' })
+  await clock.settle()
+  expect(ran.slice(before).filter(r => r[0] === 'open')).toEqual([])
+  const refusal = await pane.find({ type: 'Text', text: /^Could not open vnc:\/\/host: / })
+  expect(refusal).toBeDefined()
+  const muted = (await pane.find({ type: 'Text', text: /^link\u2007·/ }))?.props.color
+  expect(muted).toBeDefined()
+  expect(refusal?.props.color).not.toBe(muted)
+})
+
+test('a Files tab holding only folded dismissed rows moves the person to Now when a new row arrives', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  on('ui.panes', () => ({ value: [{ id: 'inbox', title: 'Inbox', isShown: true, isFocused: true, isPlaced: true }] }))
+  const pane = await startFilesTab($, on, clock)
+  await pane.press({ key: `file-dismiss-${B}` })
+  await clock.settle()
+  await clock.advance(PRESS_GUARD_MS)
+  await pane.press({ key: `file-dismiss-${A}` })
+  await clock.settle()
+  expect((await pane.find({ key: 'files-fold' }))?.props.label).toBe('▸ Dismissed (2)')
+  await $.tool.call({
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
+    title: 'README is stale',
+    detail: 'x',
+  })
+  await clock.settle()
+  expect(await pane.find({ key: 'tab-files' })).toBeDefined()
+  expect(await pane.find({ text: /README is stale/ })).toBeDefined()
+})
+
+test('a Files tab with its Dismissed fold open keeps the person when a new row arrives', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  on('ui.panes', () => ({ value: [{ id: 'inbox', title: 'Inbox', isShown: true, isFocused: true, isPlaced: true }] }))
+  const pane = await startFilesTab($, on, clock)
+  await pane.press({ key: `file-dismiss-${B}` })
+  await clock.settle()
+  await clock.advance(PRESS_GUARD_MS)
+  await pane.press({ key: `file-dismiss-${A}` })
+  await clock.settle()
+  await pane.press({ key: 'files-fold' })
+  await clock.settle()
+  await $.tool.call({
+    tool: 'mcp__inbox__record',
+    kind: 'finding',
+    finding_kind: 'issue',
+    title: 'README is stale',
+    detail: 'x',
+  })
+  await clock.settle()
+  expect(await pane.find({ key: 'tab-files' })).toBeUndefined()
+})
+
+test('a row added while the Files tab shows reads missing at once when its file is gone', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const pane = await startFilesTab($, on, clock)
+  await $.tool.call({ tool: 'mcp__inbox__show', target: '/tmp/gone.html' } as never)
+  await clock.settle()
+  const texts = (await pane.findAll({ type: 'Text' })).map(t => t.text ?? '')
+  expect(texts.filter(t => /missing/.test(t))).toHaveLength(1)
 })

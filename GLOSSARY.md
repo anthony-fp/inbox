@@ -110,6 +110,23 @@ An exchange whose update failed twice, so its reply never reached the ledger.
 covers it. A host that cannot read its conversation has no catch-up, so the
 warning stays until a clear.
 
+**Now tab**:
+The first tab in Claude Code. It holds Needs you, the session's Plan and
+Findings in one list. Codex and omp keep Needs you and Findings as separate
+tabs.
+
+**Plan**:
+The checklist Claude keeps for work of three or more steps, in
+`.inbox/plans/<session-id>.md` in the worktree. Each step is `- [ ]` waiting,
+`- [~]` in progress or `- [x]` done. The Now tab draws it, and Git ignores
+`.inbox/`.
+
+**Files**:
+The second tab in Claude Code. It lists the documents Claude wrote, the plan
+file, Artifact publishes, and files or links Claude adds with the `show` tool.
+A row opens, shows in Finder, copies its path or link, or is dismissed. Only
+http and https links open.
+
 **Parity record**:
 `hooks/clients.ts`. It lists, for each host, whether each feature is `full`,
 `different` or `unsupported`, with a reason for the last two. Each such entry

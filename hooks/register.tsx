@@ -25,11 +25,33 @@ import type {
   PrView,
   PrViews,
   LastAction,
+  LocalPart,
+  LocalResult,
+  ModTab,
+  PlanState,
   PressKind,
   RowNote,
   Stop,
   Tab,
 } from '../types'
+import {
+  addFile,
+  applyFilePress,
+  fileActions,
+  fileKind,
+  hasScheme,
+  isDocument,
+  isParsedUrl,
+  mergeFiles,
+  notShownText,
+  SHOW,
+  showTarget,
+  shownFiles,
+  whereLabel,
+} from './files'
+import type { FileAction, FileKind, FileRow } from './files'
+import { parsePlan, planLines, planNote, planPath } from './plan'
+import type { PlanView } from './plan'
 import {
   NO_SESSION,
   PRESENT,
@@ -42,6 +64,7 @@ import {
   forgetStored,
   isCurrent,
   noteStored,
+  performFileEffect,
   readSaved,
   readSettled,
   replaceDrawn,
@@ -153,6 +176,7 @@ import {
   demoAfterPress,
   demoTurns,
   doneWake,
+  finishedResult,
   localPath,
   markSentToAgent,
   refuseDoneNotification,
@@ -163,6 +187,7 @@ import {
   withArrival,
   withDeliveryId,
   withRewrite,
+  withResult,
   withUnconfirmed,
 } from './presses'
 import type { Effect, EffectHost, RowPress } from './presses'
@@ -177,7 +202,6 @@ import {
   drawnLists,
   emptyText,
   ROW_TABS,
-  TABS,
   CLOSED_MARKS,
   DEMO_NOTICE,
   groupEmptyText,
@@ -214,7 +238,17 @@ import {
   rowAfterClose,
   shortAgo,
 } from './view'
-import type { ActionEmphasis, ActionIcon, DrawnEntry, InboxView, ModLook, PlannedKey, RowView, RowWait } from './view'
+import type {
+  ActionEmphasis,
+  ActionIcon,
+  DrawnEntry,
+  DrawnLists,
+  InboxView,
+  ModLook,
+  PlannedKey,
+  RowView,
+  RowWait,
+} from './view'
 import { agentTools, recordClose, recordItem } from './tools'
 import type { UndoProps } from './undo-client'
 import {
@@ -238,10 +272,87 @@ import type { LinksProps } from './links-client'
 import type { RowProps } from './row-client'
 import { TAB_COUNT_GAP, TAB_HEIGHT, type TabsProps } from './tabs-client'
 
-const TAB = atom({ plugin: 'inbox', key: 'tab' } as const, 'needsYou' as Tab)
+export type { ModTab }
+
+/** The Claude Code pane's tabs, in order. Codex and omp keep the shared `TABS`. */
+export const MOD_TABS: readonly { id: ModTab; label: string; hotkey: string }[] = [
+  { id: 'now', label: 'Now', hotkey: '1' },
+  { id: 'files', label: 'Files', hotkey: '2' },
+  { id: 'prs', label: 'PRs', hotkey: '3' },
+]
+
+/** Each Files row's kind, as its tag before the name, and the hotkey of each Files action. */
+const FILE_TAGS: Record<FileKind, string> = {
+  md: 'md',
+  html: 'html',
+  pdf: 'pdf',
+  image: 'image',
+  csv: 'csv',
+  file: 'file',
+  link: 'link',
+  plan: 'plan',
+  artifact: 'artifact',
+}
+const FILE_TAG_CELLS = Math.max(...Object.values(FILE_TAGS).map(t => t.length)) + 1
+const FILE_KEYS: Record<FileAction, string> = { open: 'o', finder: 'f', copy: 'c', dismiss: 'x', restore: 'r' }
+
+/** The Now tab's rows, in the order it draws them: Needs you, then Findings. The plan between them takes no row. */
+export function nowRows<R>(lists: DrawnLists<R>): R[] {
+  return [...lists.byTab.needsYou, ...lists.byTab.findings]
+}
+
+function nowWaits(view: InboxView): RowWait[] {
+  const waits = listWaits(view)
+
+  return [...waits.needsYou, ...waits.findings]
+}
+
+function modTabLabel(tab: ModTab): string {
+  return MOD_TABS.find(t => t.id === tab)?.label ?? tab
+}
+
+const TAB = atom({ plugin: 'inbox', key: 'tab' } as const, 'now' as ModTab)
 const NO_CURSOR: Cursor = { id: null, index: 0, openedAt: 0 }
-const NO_SELECTION: Record<Tab, Cursor> = { needsYou: NO_CURSOR, findings: NO_CURSOR, prs: NO_CURSOR }
+const NO_SELECTION: Record<ModTab, Cursor> = { now: NO_CURSOR, files: NO_CURSOR, prs: NO_CURSOR }
+const NO_PLAN: PlanState = { sessionId: '', view: null, error: null }
+const PLAN = atom({ plugin: 'inbox', key: 'plan' } as const, NO_PLAN)
 const SELECTION = atom({ plugin: 'inbox', key: 'selection' } as const, NO_SELECTION)
+
+/**
+ * The saved tab as a `ModTab`. An older build saved `needsYou` or `findings` (or `waiting` or `notes`), and a draw or a
+ * key press can run before `upgradeState` converts it, so every read goes through this.
+ */
+function modTab(saved: string): ModTab {
+  return MOD_TABS.find(m => m.id === saved)?.id ?? 'now'
+}
+
+/**
+ * The saved cursors by `ModTab`. The old Needs you and Findings cursors become Now's: the one with an open row, Needs
+ * you's first. A cursor saved before `openedAt` existed: no click opened its row in a way that still guards it.
+ */
+function modSelection(saved: Partial<Record<ModTab | Tab | 'waiting', Cursor>>): Record<ModTab, Cursor> {
+  const { now, files, prs, needsYou, findings, waiting } = saved
+  const old = [needsYou, waiting, findings].find(c => c && c.id !== null)
+  const guarded = (c: Cursor) => ({ ...c, openedAt: c.openedAt ?? 0 })
+
+  return {
+    now: guarded(now ?? old ?? NO_CURSOR),
+    files: guarded(files ?? NO_CURSOR),
+    prs: guarded(prs ?? NO_CURSOR),
+  }
+}
+
+async function readTab($: EngineInterface): Promise<ModTab> {
+  return modTab(await read($, TAB))
+}
+
+async function readSelection($: EngineInterface): Promise<Record<ModTab, Cursor>> {
+  return modSelection(await read($, SELECTION))
+}
+
+function updateSelection($: EngineInterface, change: (s: Record<ModTab, Cursor>) => Record<ModTab, Cursor>) {
+  return update($, SELECTION, s => change(modSelection(s)))
+}
 const THEME = atom({ plugin: 'inbox', key: 'theme' } as const, '')
 const DIALOGS = atom({ plugin: 'inbox', key: 'dialogs' } as const, [] as Dialog[])
 const TYPING = atom({ plugin: 'inbox', key: 'typing' } as const, null as string | null)
@@ -253,6 +364,8 @@ const SESSION = atom({ plugin: 'inbox', key: 'session' } as const, NO_SESSION)
 const AWAY = atom({ plugin: 'inbox', key: 'away' } as const, PRESENT)
 const UNREADABLE = atom({ plugin: 'inbox', key: 'unreadable' } as const, null as string | null)
 const UNFOLDED = atom({ plugin: 'inbox', key: 'unfolded' } as const, [] as FoldKind[])
+const FILES_UNFOLDED = atom({ plugin: 'inbox', key: 'filesUnfolded' } as const, false)
+const MISSING_FILES = atom({ plugin: 'inbox', key: 'missingFiles' } as const, [] as string[])
 const FOLD_HOVER = atom({ plugin: 'inbox', key: 'foldHover' } as const, null as FoldKind | null)
 const OPTIONS_SHOWN = atom({ plugin: 'inbox', key: 'optionsShown' } as const, [] as string[])
 const IS_KEY_LIST_SHOWN = atom({ plugin: 'inbox', key: 'isKeyListShown' } as const, false)
@@ -269,6 +382,7 @@ const PR_POLL_MS = 2 * 60_000
 
 const RECORD_TOOL = 'mcp__inbox__record'
 const CLOSE_TOOL = 'mcp__inbox__close'
+const SHOW_TOOL = 'mcp__inbox__show'
 
 const PANE = 'inbox'
 const REPLY_ROWS = 3
@@ -558,6 +672,8 @@ const AWAY_MS = 15 * 60_000
 let isTurnRunning = false
 /** The conversation whose first prompt has had the card carried beside it. */
 let carriedFor: string | null = null
+/** The worktree whose Git exclude has been checked for the `.inbox/` folder in this process. */
+let excludedRoot: string | null = null
 /** Why the last conversation ended, until the next conversation loads. */
 let endReason: string | null = null
 let isOn = false
@@ -576,14 +692,14 @@ let hasPermissionRequestHook = false
 const askedCalls = new Map<string, string>()
 let fetchingPrs: Promise<void> = Promise.resolve()
 let nextFetchFindsBranchPr: boolean | null = null
-let recordedRows: { isDemo: boolean; ids: RowRecord<Tab> } | null = null
+let recordedRows: { isDemo: boolean; ids: RowRecord<ModTab> } | null = null
 let isInlinePane = false
 let isInlineTerminalPane = false
 let terminalInlineSize: string | null = null
 let inlineSize: string | null = null
 type PendingUndoScroll = {
   key: string
-  tab: Tab
+  tab: ModTab
   cursor: Cursor
   block: UiScrollBlock
   expiresAt: number
@@ -1008,20 +1124,15 @@ async function notePrompt(
 
 /**
  * A reload keeps $.state, so a running session can still hold its parts in the separate fields of an older build,
- * `notes` as its tab, and the Needs you tab as `waiting`, and drafts saved as bare text.
+ * one of the old Needs you and Findings tabs (or their older names `waiting` and `notes`) where Now is, and drafts
+ * saved as bare text.
  */
 async function upgradeState($: EngineInterface): Promise<Ledger> {
   const now = await $.clock.now()
   const [session] = await Promise.all([
     upgradeDrawn($),
-    update($, TAB, t => ((t as string) === 'notes' ? 'findings' : (t as string) === 'waiting' ? 'needsYou' : t)),
-    update($, SELECTION, ({ waiting, ...s }: Record<Tab, Cursor> & { waiting?: Cursor }) => {
-      const cursors: Record<Tab, Cursor> = { ...NO_SELECTION, ...(waiting ? { needsYou: waiting } : {}), ...s }
-      // A cursor saved before `openedAt` existed: no click opened its row in a way that still guards it.
-      return Object.fromEntries(
-        Object.entries(cursors).map(([t, c]) => [t, { ...c, openedAt: c.openedAt ?? 0 }]),
-      ) as Record<Tab, Cursor>
-    }),
+    update($, TAB, modTab),
+    update($, SELECTION, modSelection),
     // Old builds saved the group kinds as `decide` and `do`, and Findings' one fold as `finding`, now one per kind.
     update($, UNFOLDED, u =>
       u.flatMap((k: string): FoldKind[] =>
@@ -1062,18 +1173,23 @@ function openPane($: EngineInterface) {
 }
 
 async function openTopRow($: EngineInterface) {
-  const [{ view, ledger, prViews: prState, lastActions, now }, tab] = await Promise.all([drawnState($), read($, TAB)])
+  const [{ view, ledger, prViews: prState, lastActions, files, now }, tab, isFilesUnfolded] = await Promise.all([
+    drawnState($),
+    readTab($),
+    read($, FILES_UNFOLDED),
+  ])
   const prViews = drawnPrs(prState, ledger.prs, lastActions, now)
     .filter(x => !x.isSettled)
     .map(x => x.pr)
-  const ids = tabRowIds(view, prViews)[tab]
-  const top = firstWaiting(tabWaits(tab, view, prViews, lastActions))
-  if (top === null) await update($, SELECTION, s => ({ ...s, [tab]: NO_CURSOR }))
+  const ids = tabRowIds(view, prViews, fileRowIds(files, isFilesUnfolded))[tab]
+  const top = firstWaiting(tabWaits(tab, view, prViews, lastActions, files))
+  if (top === null) await updateSelection($, s => ({ ...s, [tab]: NO_CURSOR }))
   else await select($, tab, top, ids.indexOf(top))
 }
 
 async function showInbox($: EngineInterface) {
   await openPane($)
+  if ((await readTab($)) === 'files') await refreshMissing($)
   await followNewRows($, true)
   await openTopRow($)
 }
@@ -1083,8 +1199,9 @@ async function openInbox($: EngineInterface) {
   // asking for the pane, and below 144 columns, once the person has closed it, leaves it unplaced.
   await openPane($)
   const { view } = await drawnState($)
-  if (view.needsYou.count > 0) await update($, TAB, () => 'needsYou' as const)
-  else if ((await read($, TAB)) === 'prs') await findPrs($)
+  if (view.needsYou.count > 0) await update($, TAB, () => 'now' as const)
+  else if ((await readTab($)) === 'prs') await findPrs($)
+  else if ((await readTab($)) === 'files') await refreshMissing($)
   await followNewRows($, true)
   await openTopRow($)
 }
@@ -1127,9 +1244,10 @@ async function focusField($: EngineInterface, id: string) {
   await $.ui.focus({ requestId: PANE, key: `type-${id}` }).catch(() => undefined)
 }
 
-async function showTab($: EngineInterface, tab: Tab) {
+async function showTab($: EngineInterface, tab: ModTab) {
   cancelUndoScroll()
   if (tab === 'prs') await findPrs($)
+  if (tab === 'files') await refreshMissing($)
   await update($, TAB, () => tab)
   await scrollToOpenRow($, tab)
 }
@@ -1246,16 +1364,16 @@ function wrapped(text: string, width: number): string[] {
   return lines
 }
 
-async function select($: EngineInterface, tab: Tab, id: string, index: number, scroll = true) {
+async function select($: EngineInterface, tab: ModTab, id: string, index: number, scroll = true) {
   if (scroll) {
     if (pendingUndoScroll && pendingUndoScroll.tab === tab) suspendUndoReveal()
     else cancelUndoScroll()
   }
   const openedAt = await $.clock.now()
-  await update($, SELECTION, s => ({ ...s, [tab]: { id, index, openedAt } }))
+  await updateSelection($, s => ({ ...s, [tab]: { id, index, openedAt } }))
   await update($, TYPING, t => (t === id ? t : null))
   // The row's buttons draw dim while guarded. A render cannot write state, so a fresh value redraws them once the guard ends.
-  later($, PRESS_GUARD_MS, () => update($, SELECTION, s => ({ ...s })))
+  later($, PRESS_GUARD_MS, () => updateSelection($, s => ({ ...s })))
   if (scroll) await scrollToRow($, id)
 }
 
@@ -1285,7 +1403,7 @@ function sameCursor(a: Cursor, b: Cursor): boolean {
 }
 
 function settledLayoutId(
-  tab: Tab,
+  tab: ModTab,
   view: InboxView,
   prs: { pr: PrView; isSettled: boolean }[],
   lastActions: Record<string, LastAction>,
@@ -1293,12 +1411,7 @@ function settledLayoutId(
   now: number,
   size: string | null,
 ): string {
-  const rows =
-    tab === 'needsYou'
-      ? [...view.needsYou.questions, ...view.needsYou.tasks]
-      : tab === 'findings'
-        ? view.findings.rows
-        : []
+  const rows = tab === 'now' ? [...view.needsYou.questions, ...view.needsYou.tasks, ...view.findings.rows] : []
   return JSON.stringify([
     size,
     ...rows.map(r => r.id),
@@ -1318,7 +1431,7 @@ function settledScrollKey(key: string, layout: string): string {
 async function revealPendingUndo($: EngineInterface): Promise<boolean> {
   const pending = pendingUndoScroll
   if (!pending || !pending.revealUndo || !isInlineTerminalPane || pending.sessionId !== conversation.id) return false
-  const [tab, selection, drawn] = await Promise.all([read($, TAB), read($, SELECTION), drawnState($)])
+  const [tab, selection, drawn] = await Promise.all([readTab($), readSelection($), drawnState($)])
   if (pendingUndoScroll !== pending) return false
   if (tab !== pending.tab || !sameCursor(selection[tab], pending.cursor) || drawn.now >= pending.expiresAt) return false
   const prs = drawnPrs(drawn.prViews, drawn.ledger.prs, drawn.lastActions, drawn.now)
@@ -1331,7 +1444,7 @@ async function revealPendingUndo($: EngineInterface): Promise<boolean> {
 
 async function keepUndoVisible($: EngineInterface, key: string, block: UiScrollBlock, at: number, revision: number) {
   if (revision !== undoScrollRevision) return
-  const [tab, selection] = await Promise.all([read($, TAB), read($, SELECTION)])
+  const [tab, selection] = await Promise.all([readTab($), readSelection($)])
   if (revision !== undoScrollRevision) return
   const pending: PendingUndoScroll = {
     key,
@@ -1350,7 +1463,7 @@ async function finishPendingUndoScroll($: EngineInterface) {
   const pending = pendingUndoScroll
   if (!pending) return
   const revision = undoScrollRevision
-  const [tab, selection, drawn] = await Promise.all([read($, TAB), read($, SELECTION), drawnState($)])
+  const [tab, selection, drawn] = await Promise.all([readTab($), readSelection($), drawnState($)])
   if (pendingUndoScroll !== pending || revision !== undoScrollRevision) return
   const cursor = selection[tab]
   if (tab === pending.tab && isInlineTerminalPane && conversation.id === pending.sessionId) {
@@ -1364,6 +1477,7 @@ async function finishPendingUndoScroll($: EngineInterface) {
               drawn.view,
               prs.filter(x => !x.isSettled).map(x => x.pr),
               drawn.lastActions,
+              drawn.files,
             ),
           )
         : null)
@@ -1382,20 +1496,21 @@ async function finishPendingUndoScroll($: EngineInterface) {
     pendingUndoScroll = null
 }
 
-async function scrollToOpenRow($: EngineInterface, tab: Tab, surface?: RenderSurface) {
+async function scrollToOpenRow($: EngineInterface, tab: ModTab, surface?: RenderSurface) {
   const revision = undoScrollRevision
   if (surface !== 'desktop' && (await revealPendingUndo($))) return
   if (revision !== undoScrollRevision) return
   if (isInlinePane) {
-    const [selection, { view, ledger, prViews: prState, lastActions, now }] = await Promise.all([
-      read($, SELECTION),
+    const [selection, { view, ledger, prViews: prState, lastActions, files, now }] = await Promise.all([
+      readSelection($),
       drawnState($),
     ])
     const prViews = drawnPrs(prState, ledger.prs, lastActions, now)
       .filter(x => !x.isSettled)
       .map(x => x.pr)
     const cursor = selection[tab]
-    const id = cursor.id ?? (cursor.openedAt === 0 ? firstWaiting(tabWaits(tab, view, prViews, lastActions)) : null)
+    const id =
+      cursor.id ?? (cursor.openedAt === 0 ? firstWaiting(tabWaits(tab, view, prViews, lastActions, files)) : null)
     if (revision !== undoScrollRevision) return
     if (id !== null) {
       await scrollToKey($, `view-${id}`, 'start', () => revision === undoScrollRevision)
@@ -1407,15 +1522,12 @@ async function scrollToOpenRow($: EngineInterface, tab: Tab, surface?: RenderSur
 }
 
 async function selectClicked($: EngineInterface, id: string) {
-  const [{ ledger, prViews: prState, lastActions, view, now }, tab, selection] = await Promise.all([
-    drawnState($),
-    read($, TAB),
-    read($, SELECTION),
-  ])
+  const [{ ledger, prViews: prState, lastActions, view, files, now }, tab, selection, isFilesUnfolded] =
+    await Promise.all([drawnState($), readTab($), readSelection($), read($, FILES_UNFOLDED)])
   const prViews = drawnPrs(prState, ledger.prs, lastActions, now)
     .filter(x => !x.isSettled)
     .map(x => x.pr)
-  const index = tabRowIds(view, prViews)[tab].indexOf(id)
+  const index = tabRowIds(view, prViews, fileRowIds(files, isFilesUnfolded))[tab].indexOf(id)
   if (index < 0 || isGuarded(selection[tab].openedAt, now)) return
   // The Client leaves the drawing as its row opens, so the focus repair moves the focus to the row's first action.
   focusedKey = `select-${id}`
@@ -1452,16 +1564,19 @@ function selectedIndex(ids: string[], cursor: Cursor, top: string | null, isSett
 }
 
 async function openLeftRows($: EngineInterface) {
-  const { ledger, prViews: prState, lastActions, view, now } = await drawnState($)
+  const [{ ledger, prViews: prState, lastActions, view, files, now }, isFilesUnfolded] = await Promise.all([
+    drawnState($),
+    read($, FILES_UNFOLDED),
+  ])
   const prViews = drawnPrs(prState, ledger.prs, lastActions, now)
     .filter(x => !x.isSettled)
     .map(x => x.pr)
-  const ids = tabRowIds(view, prViews)
+  const ids = tabRowIds(view, prViews, fileRowIds(files, isFilesUnfolded))
   const settled = new Set(settledRowIds(allRows(view)))
   let isMoved = false
-  await update($, SELECTION, s => {
+  await updateSelection($, s => {
     const moved = Object.fromEntries(
-      (Object.keys(s) as Tab[]).map(t => {
+      (Object.keys(s) as ModTab[]).map(t => {
         const c = s[t]
         const list = ids[t]
         if (c.id === null || list.includes(c.id) || settled.has(c.id)) return [t, c]
@@ -1469,52 +1584,76 @@ async function openLeftRows($: EngineInterface) {
         const index = Math.min(c.index, list.length - 1)
         return [t, index < 0 ? NO_CURSOR : { id: list[index]!, index, openedAt: now }]
       }),
-    ) as Record<Tab, Cursor>
+    ) as Record<ModTab, Cursor>
     return isMoved ? moved : s
   })
   // The opened row's buttons draw dim while guarded; a fresh value redraws them once the guard ends.
-  if (isMoved) later($, PRESS_GUARD_MS, () => update($, SELECTION, s => ({ ...s })))
+  if (isMoved) later($, PRESS_GUARD_MS, () => updateSelection($, s => ({ ...s })))
 }
 
-function tabWaits(tab: Tab, view: InboxView, prViews: PrView[], lastActions: Record<string, LastAction>): RowWait[] {
-  return tab === 'prs' ? prRowWaits(prViews, lastActions) : listWaits(view)[tab]
+function tabWaits(
+  tab: ModTab,
+  view: InboxView,
+  prViews: PrView[],
+  lastActions: Record<string, LastAction>,
+  files: FileRow[],
+): RowWait[] {
+  return tab === 'prs'
+    ? prRowWaits(prViews, lastActions)
+    : tab === 'now'
+      ? nowWaits(view)
+      : shownFiles(files).open.map(r => ({ id: r.id, isWaiting: true }))
+}
+
+/** As Now's `isTabEmpty`: dismissed rows count only while their fold is open. */
+function isFilesTabEmpty(files: FileRow[], isUnfolded: boolean): boolean {
+  return fileRowIds(files, isUnfolded).length === 0
+}
+
+/** The Files tab's rows, in the order it draws them: the open rows, then the dismissed ones while their fold is open. */
+function fileRowIds(files: FileRow[], isUnfolded: boolean): string[] {
+  const { open, dismissed } = shownFiles(files)
+
+  return [...open, ...(isUnfolded ? dismissed : [])].map(r => r.id)
 }
 
 async function unlessGuarded($: EngineInterface, rowId: string, press: UiPressArgument, onPress: Action['onPress']) {
-  const [selection, tab, now] = await Promise.all([read($, SELECTION), read($, TAB), $.clock.now()])
+  const [selection, tab, now] = await Promise.all([readSelection($), readTab($), $.clock.now()])
   const cursor = selection[tab]
   if (cursor.id !== rowId || !isGuarded(cursor.openedAt, now)) await onPress(press)
 }
 
 async function keepPressedOpen($: EngineInterface, id: string) {
-  const tab = await read($, TAB)
-  await update($, SELECTION, s =>
+  const tab = await readTab($)
+  await updateSelection($, s =>
     s[tab].id === null && s[tab].openedAt === 0 ? { ...s, [tab]: { id, index: 0, openedAt: 0 } } : s,
   )
 }
 
-function newRows(isDemo: boolean, current: Record<Tab, string[] | null>): Record<Tab, string[]> {
+function newRows(isDemo: boolean, current: Record<ModTab, string[] | null>): Record<ModTab, string[]> {
   const { seen, added } = recordRows(recordedRows?.isDemo === isDemo ? recordedRows.ids : {}, current)
   recordedRows = { isDemo, ids: seen }
 
   return added
 }
 
-async function jumpTo($: EngineInterface, tab: Tab) {
+async function jumpTo($: EngineInterface, tab: ModTab) {
   cancelUndoScroll()
   await update($, TAB, () => tab)
-  await update($, SELECTION, s => ({ ...s, [tab]: NO_CURSOR }))
+  await updateSelection($, s => ({ ...s, [tab]: NO_CURSOR }))
   await scrollToOpenRow($, tab)
 }
 
-function tabRowIds(view: InboxView, prViews: PrView[]): Record<Tab, string[]> {
-  const listed = drawnLists(
-    view,
-    () => false,
-    r => r.id,
-  ).byTab
+function tabRowIds(view: InboxView, prViews: PrView[], files: string[]): Record<ModTab, string[]> {
+  const now = nowRows(
+    drawnLists(
+      view,
+      () => false,
+      r => r.id,
+    ),
+  )
 
-  return { ...listed, prs: prRowWaits(prViews, {}).map(r => r.id) }
+  return { now, files, prs: prRowWaits(prViews, {}).map(r => r.id) }
 }
 
 /**
@@ -1522,28 +1661,32 @@ function tabRowIds(view: InboxView, prViews: PrView[]): Record<Tab, string[]> {
  * that can add a row calls this.
  */
 async function followNewRows($: EngineInterface, isOpening = false) {
-  const [drawn, tab, unfolded, isShown] = await Promise.all([
+  const [drawn, tab, unfolded, isShown, plan, isFilesUnfolded] = await Promise.all([
     drawnState($),
-    read($, TAB),
+    readTab($),
     read($, UNFOLDED),
     isPaneShown($),
+    read($, PLAN),
+    read($, FILES_UNFOLDED),
   ])
-  const { ledger, prViews: prState, lastActions, stop, isDemo, isUnread, view, now } = drawn
+  const { ledger, prViews: prState, lastActions, stop, isDemo, isUnread, view, files, now } = drawn
   const prs = drawnPrs(prState, ledger.prs, lastActions, now)
   const prViews = prs.filter(x => !x.isSettled).map(x => x.pr)
-  const ids = tabRowIds(view, prViews)
+  const ids = tabRowIds(view, prViews, fileRowIds(files, isFilesUnfolded))
   if (isOpening) recordedRows = null
+  const listed = listedRowIds(view)
   const added = newRows(isDemo, {
-    ...listedRowIds(view),
+    now: [...listed.needsYou, ...listed.findings],
+    files: shownFiles(files).open.map(r => r.id),
     prs: prState.isFetching ? null : prRowIds(prs),
   })
   if (!isShown) return
-  const keeps = (['needsYou', 'findings'] as const).flatMap(t => {
-    const id = added[t].length > 0 ? keptOpen(tabWaits(t, view, prViews, lastActions), added[t]) : null
+  const keeps = (['now'] as const).flatMap(t => {
+    const id = added[t].length > 0 ? keptOpen(tabWaits(t, view, prViews, lastActions, files), added[t]) : null
     return id === null ? [] : [{ t, cursor: { id, index: ids[t].indexOf(id), openedAt: 0 } }]
   })
   if (keeps.length > 0) {
-    await update($, SELECTION, s => {
+    await updateSelection($, s => {
       const kept = { ...s }
       for (const { t, cursor } of keeps) if (s[t].id === null && s[t].openedAt === 0) kept[t] = cursor
       return kept
@@ -1551,20 +1694,28 @@ async function followNewRows($: EngineInterface, isOpening = false) {
     if (isInlinePane && keeps.some(k => k.t === tab)) void scrollToOpenRow($, tab)
   }
   const settled = new Set(settledRowIds(allRows(view)))
+  const isListEmpty = (list: 'needsYou' | 'findings') =>
+    isTabEmpty({
+      rows: list === 'needsYou' ? [...view.needsYou.questions, ...view.needsYou.tasks] : view.findings.rows,
+      settled,
+      closed: closedGroups(view, list, kind => unfolded.includes(kind)),
+      hasBlocker: list === 'needsYou' && (!!stop || isUnread),
+    })
+  // Now shows a plan as content, so a tab with only the plan is not empty. Files with only dismissed rows shows their fold.
   const isEmpty =
     tab === 'prs'
       ? isPrsTabEmpty(prs.length, prState.isFetching)
-      : isTabEmpty({
-          rows: tab === 'needsYou' ? [...view.needsYou.questions, ...view.needsYou.tasks] : view.findings.rows,
-          settled,
-          closed: closedGroups(view, tab, kind => unfolded.includes(kind)),
-          hasBlocker: tab === 'needsYou' && (!!stop || isUnread),
-        })
+      : tab === 'files'
+        ? isFilesTabEmpty(files, isFilesUnfolded)
+        : isListEmpty('needsYou') && isListEmpty('findings') && drawnPlanLines(plan, isDemo).length === 0
+  const open = openRowIds(view)
   const to = followTo(
-    TABS.map(t => t.id),
+    MOD_TABS.map(t => t.id),
     tab,
     isEmpty,
-    isOpening ? { ...openRowIds(view), prs: [] } : added,
+    isOpening
+      ? { now: [...open.needsYou, ...open.findings], files: shownFiles(files).open.map(r => r.id), prs: [] }
+      : added,
   )
   if (to) await jumpTo($, to)
 }
@@ -1574,13 +1725,13 @@ async function isPaneShown($: EngineInterface) {
 }
 
 async function isPrsTabShown($: EngineInterface) {
-  return (await read($, TAB)) === 'prs' && (await isPaneShown($))
+  return (await readTab($)) === 'prs' && (await isPaneShown($))
 }
 
 async function screen($: EngineInterface) {
-  const tab = await read($, TAB)
+  const tab = await readTab($)
 
-  return screenText(CLAUDE_CODE, await isPaneShown($), TABS.find(t => t.id === tab)?.label ?? tab)
+  return screenText(CLAUDE_CODE, await isPaneShown($), modTabLabel(tab))
 }
 
 async function closeTasksRunBy($: EngineInterface, command: string) {
@@ -1671,6 +1822,87 @@ function pressRowId(p: RowPress | PrPress): string {
 /** Tells Claude about rows closed with Done once their settle window has passed, unless a turn runs. */
 async function wakeForDone($: EngineInterface) {
   await wakeSessionForDone(hostOf($, currentOwner()))
+}
+
+/**
+ * Checks which Files rows' paths are gone, so their rows read "missing". The tab cannot read files while it draws,
+ * so showing the tab and each Files press check again.
+ */
+async function refreshMissing($: EngineInterface) {
+  const { files } = await read($, SESSION)
+  const paths = files.filter(f => !hasScheme(f.target)).map(f => f.target)
+  const gone = await Promise.all(
+    paths.map(p =>
+      $.fs.exists(p).then(
+        isThere => !isThere,
+        () => false,
+      ),
+    ),
+  )
+  const missing = paths.filter((_p, n) => gone[n])
+  await update($, MISSING_FILES, m =>
+    m.length === missing.length && m.every((p, n) => p === missing[n]) ? m : missing,
+  )
+}
+
+/** The name a Files row shows: the plan reads "Plan", or the plan's first heading. */
+function fileName(row: FileRow, plan: PlanState): string {
+  if (row.kind !== 'plan') return row.name
+  const heading = plan.sessionId === conversation.id ? plan.view?.tasks[0]?.title : undefined
+
+  return heading || 'Plan'
+}
+
+const FILE_PARTS: Record<Exclude<FileAction, 'dismiss' | 'restore'>, (name: string, isLink: boolean) => LocalPart> = {
+  open: name => ({ kind: 'open', name, isCommand: false, error: null }),
+  finder: name => ({ kind: 'open', name: `${name} in Finder`, isCommand: false, error: null }),
+  copy: (_name, isLink) => ({ kind: 'copy', name: isLink ? 'the link' : 'the path', isCommand: false, error: null }),
+}
+
+/**
+ * A press on a Files row, from a click or a key alike. Dismiss and Restore move the row, which shows the press. Open,
+ * Finder and Copy record a pending result on the row, run, and record how it went, as a row's Local press does.
+ */
+async function runFilePress($: EngineInterface, id: string, action: FileAction, surface: UiPressArgument['surface']) {
+  const owner = currentOwner()
+  const [{ files }, plan, now] = await Promise.all([read($, SESSION), read($, PLAN), $.clock.now()])
+  const row = files.find(f => f.id === id)
+  const { effect } = applyFilePress(files, id, action)
+  if (!row) return
+  if (action === 'dismiss' || action === 'restore') {
+    const { open } = shownFiles(files)
+    const at = open.findIndex(r => r.id === id)
+    const following = action === 'dismiss' ? (open[at + 1] ?? open[at - 1] ?? null) : row
+    await commit($, owner, s => {
+      const { [id]: _was, ...lastActions } = s.lastActions
+      return { ...s, files: applyFilePress(s.files, id, action).rows, lastActions }
+    })
+    const tab = await readTab($)
+    if (tab !== 'files') return
+    const [selection, isUnfolded, drawn] = await Promise.all([readSelection($), read($, FILES_UNFOLDED), drawnState($)])
+    if (selection.files.id !== id && selection.files.id !== null) return
+    const ids = fileRowIds(drawn.files, isUnfolded)
+    if (following && ids.includes(following.id)) await select($, 'files', following.id, ids.indexOf(following.id))
+    else await updateSelection($, s => ({ ...s, files: { ...NO_CURSOR, index: s.files.index } }))
+    return
+  }
+  if (!effect) return
+  const part = FILE_PARTS[action](fileName(row, plan), hasScheme(row.target))
+  const label = fileActions(row).find(a => a.id === action)?.label ?? action
+  const pending: LocalResult = { state: 'pending', parts: [part], at: now }
+  await commit($, owner, s => ({
+    ...s,
+    lastActions: {
+      ...s.lastActions,
+      [id]: { kind: 'local', action: `file-${action}`, text: label, at: now, result: pending },
+    },
+  }))
+  const error = await performFileEffect($, effect, surface)
+  const result = finishedResult(pending, [error], await $.clock.now())
+  await commit($, owner, s => ({ ...s, lastActions: withResult(s.lastActions, id, now, result) }))
+  await refreshMissing($)
+  // A success note clears after SETTLED_MS. A fresh value is what redraws the pane then.
+  later($, SETTLED_MS, () => redraw($))
 }
 
 async function runPress($: EngineInterface, p: RowPress | PrPress, surface: UiPressArgument['surface']) {
@@ -1777,15 +2009,19 @@ async function undoKeyAfterPress(
 }
 
 async function shownWaits($: EngineInterface) {
-  const [{ ledger, prViews: prState, lastActions, view, now }, tab] = await Promise.all([drawnState($), read($, TAB)])
+  const [{ ledger, prViews: prState, lastActions, view, files, now }, tab, isFilesUnfolded] = await Promise.all([
+    drawnState($),
+    readTab($),
+    read($, FILES_UNFOLDED),
+  ])
   const prViews = drawnPrs(prState, ledger.prs, lastActions, now)
     .filter(x => !x.isSettled)
     .map(x => x.pr)
 
   return {
     tab,
-    rows: tabWaits(tab, view, prViews, lastActions),
-    ids: tabRowIds(view, prViews)[tab],
+    rows: tabWaits(tab, view, prViews, lastActions, files),
+    ids: tabRowIds(view, prViews, fileRowIds(files, isFilesUnfolded))[tab],
   }
 }
 
@@ -1795,13 +2031,13 @@ async function openAfterClose(
   wasWaiting: boolean,
   skipScroll = false,
 ): Promise<{ isMoved: boolean; undoBlock: UiScrollBlock }> {
-  const [{ tab, rows, ids }, selection] = await Promise.all([shownWaits($), read($, SELECTION)])
+  const [{ tab, rows, ids }, selection] = await Promise.all([shownWaits($), readSelection($)])
   if (!wasWaiting || selection[tab].id !== id || rows.find(r => r.id === id)?.isWaiting)
     return { isMoved: false, undoBlock: 'nearest' }
   const following = rowAfterClose(rows, id)
   const index = following === null ? -1 : ids.indexOf(following)
   if (following !== null && index >= 0) await select($, tab, following, index, !skipScroll)
-  else await update($, SELECTION, s => ({ ...s, [tab]: { ...NO_CURSOR, index: s[tab].index } }))
+  else await updateSelection($, s => ({ ...s, [tab]: { ...NO_CURSOR, index: s[tab].index } }))
 
   return {
     isMoved: true,
@@ -1815,15 +2051,14 @@ async function openAfterClose(
 }
 
 async function reopenPressed($: EngineInterface, id: string) {
-  const tab = await read($, TAB)
-  await update($, SELECTION, s => ({ ...s, [tab]: { id, index: s[tab].index, openedAt: 0 } }))
+  const tab = await readTab($)
+  await updateSelection($, s => ({ ...s, [tab]: { id, index: s[tab].index, openedAt: 0 } }))
 }
 
 async function selectRestored($: EngineInterface, id: string) {
-  const ids = tabRowIds((await drawnState($)).view, [])
-  const tab: Tab = ids.findings.includes(id) ? 'findings' : 'needsYou'
-  const index = ids[tab].indexOf(id)
-  if (index >= 0) await select($, tab, id, index)
+  const ids = tabRowIds((await drawnState($)).view, [], [])
+  const index = ids.now.indexOf(id)
+  if (index >= 0) await select($, 'now', id, index)
 }
 
 async function runDemoPress(
@@ -2032,9 +2267,16 @@ function desktopTabSizes(
   )
 }
 
-async function drawnState(
-  $: EngineInterface,
-): Promise<DemoCopy & { view: InboxView; isDemo: boolean; showsDemoNotices: boolean; isUnread: boolean; now: number }> {
+async function drawnState($: EngineInterface): Promise<
+  DemoCopy & {
+    view: InboxView
+    files: FileRow[]
+    isDemo: boolean
+    showsDemoNotices: boolean
+    isUnread: boolean
+    now: number
+  }
+> {
   const [session, notes, demo, isDemoRecording, unreadable, typing, drafts, discarded, now] = await Promise.all([
     read($, SESSION),
     read($, NOTES),
@@ -2062,6 +2304,8 @@ async function drawnState(
     ...drawn,
     lastActions: view.lastActions,
     view,
+    // The demo's samples have no Files rows.
+    files: demo === null ? session.files : [],
     isDemo: demo !== null,
     showsDemoNotices: demo !== null && !isDemoRecording,
     isUnread,
@@ -2076,9 +2320,9 @@ async function setDemo($: EngineInterface, isShown: boolean, isRecording = false
     update($, DEMO, () => (isShown ? demoView(now) : null)),
     update($, DEMO_RECORDING, () => isShown && isRecording),
   ])
-  await Promise.all([update($, SELECTION, () => NO_SELECTION), update($, TYPING, () => null)])
+  await Promise.all([updateSelection($, () => NO_SELECTION), update($, TYPING, () => null)])
   if (isShown) redrawWhileLeaving($, now + SETTLED_MS)
-  if ((await read($, TAB)) === 'prs') await findPrs($)
+  if ((await readTab($)) === 'prs') await findPrs($)
   await followNewRows($, true)
 }
 
@@ -2124,6 +2368,8 @@ async function initializeInbox($: EngineInterface) {
     registerInboxCommand($),
     readVersion($),
     ...agentTools(CLAUDE_CODE).map(tool => $.tool.register(tool).catch(refused)),
+    // A refused `show` costs only the Files rows Claude would add by hand, so it does not count as refused tools.
+    $.tool.register(SHOW).catch(() => undefined),
   ])
   // A pane kept across a hot reload is already drawn.
   if (toolsRefused) await redrawPane($)
@@ -2146,12 +2392,23 @@ async function initializeInbox($: EngineInterface) {
  * /clear, /resume or /branch, which switch conversations under a new session
  * id without a session.start.
  */
-function loadConversation($: EngineInterface, id: string, forkedFrom?: string): Promise<void> {
+function loadConversation($: EngineInterface, id: string, forkedFrom?: string, isFork = false): Promise<void> {
   const revision = ++loadRevision
-  return prepareConversation($, id, revision, forkedFrom)
+  return prepareConversation($, id, revision, forkedFrom, isFork)
 }
 
-async function prepareConversation($: EngineInterface, id: string, revision: number, forkedFrom?: string) {
+/**
+ * `isFork` is true only for a classic.SessionStart that names a fork. The prompt fallback cannot tell /branch from
+ * /resume, so it passes the previous conversation for the ledger but copies no plan: a resumed conversation's plan path
+ * must never take another conversation's steps.
+ */
+async function prepareConversation(
+  $: EngineInterface,
+  id: string,
+  revision: number,
+  forkedFrom?: string,
+  isFork = false,
+) {
   const savedWrites = savedWriteCount()
   const [sessionRoot, saved] = await Promise.all([$.session.root(), readSettled($, id)])
   if (revision !== loadRevision) return
@@ -2161,7 +2418,9 @@ async function prepareConversation($: EngineInterface, id: string, revision: num
     const latest = savedWrites === savedWriteCount() ? saved : await readSettled($, id)
     // A fork continues its parent's inbox, so a new id with no saved state starts from the parent's.
     const parent = latest?.session || !forkedFrom ? null : await readSettled($, forkedFrom)
-    await applyConversation($, id, revision, sessionRoot, latest, parent?.session)
+    // A fork with no saved state of its own continues its parent's plan too.
+    const planParent = isFork && !latest?.session && forkedFrom ? forkedFrom : undefined
+    await applyConversation($, id, revision, sessionRoot, latest, parent?.session, planParent)
   })
   applyingConversation = applying.catch(() => undefined)
   return applying
@@ -2174,6 +2433,7 @@ async function applyConversation(
   sessionRoot: string,
   saved: { session: SavedRecord | undefined } | null,
   parent?: SavedRecord,
+  planParent?: string,
 ) {
   if (revision !== loadRevision) return
   const isLoading = () => revision === loadRevision && conversation.id === id
@@ -2198,6 +2458,13 @@ async function applyConversation(
   if (!isLoading()) return
   if (saved !== null) await bringBack($, parent ?? saved.session, isLoading, parent !== undefined)
   if (!isLoading()) return
+  if (planParent) await copyPlan($, planPath(sessionRoot, planParent), planPath(sessionRoot, id)).catch(() => undefined)
+  if (!isLoading()) return
+  // $.state starts over after /resume, `claude --resume` and /branch, so the loaded conversation's plan is read now
+  // rather than at its next prompt or turn end, and before a catch-up's model call.
+  void refreshPlan($)
+    .then(() => followNewRows($))
+    .catch(() => undefined)
   const { ledger, presence } = await read($, SESSION)
   const isEmpty = !ledger.card && ledger.items.length === 0
   const needsCatchUp =
@@ -2210,14 +2477,30 @@ async function applyConversation(
   if (ledger.prs.length > 0) void fetchPrs($, false)
 }
 
+/** Copies a forked conversation's plan from its parent's plan file, unless the fork has one already. */
+async function copyPlan($: EngineInterface, from: string, to: string): Promise<void> {
+  if (from === to || (await $.fs.exists(to)) || !(await $.fs.exists(from))) return
+  await $.fs.write(to, await $.fs.read(from))
+}
+
 /** An update a reload cut off reads as failed, so the next one catches up. */
 function cutOffUpdate<S extends Session>(s: S): S {
   return s.presence.isUpdating ? { ...s, presence: { ...s.presence, isUpdating: false, ledgerState: 'failed' } } : s
 }
 
-/** Row presses keep only their PR records, whose rows outlive a conversation's items. */
-function withoutRowActions(lastActions: Record<string, LastAction>): Record<string, LastAction> {
-  return Object.fromEntries(Object.entries(lastActions).filter(([k]) => !/^[if]\d+$/.test(k)))
+/**
+ * Row presses keep only their PR records, whose rows outlive a conversation's items, and the Files presses of rows in
+ * `files`. A Files press is keyed by its row's target, so without this its record would outlive the row.
+ */
+function withoutRowActions(lastActions: Record<string, LastAction>, files: FileRow[]): Record<string, LastAction> {
+  const fileIds = new Set(files.map(f => f.id))
+  return Object.fromEntries(
+    Object.entries(lastActions).filter(([k, a]) => (isFileAction(a) ? fileIds.has(k) : !/^[if]\d+$/.test(k))),
+  )
+}
+
+function isFileAction(action: LastAction): boolean {
+  return action.action.startsWith('file-')
 }
 
 /**
@@ -2239,11 +2522,15 @@ async function bringBack(
     if (!isLoading() || s.ledger.turn !== 0 || s.ledger.card) return s
     isBrought = true
     if (isFork) return forkedFrom(s, loaded)
+    // A saved session from an earlier build may hold Files presses of rows it no longer has.
+    const fileIds = new Set(loaded.files.map(f => f.id))
     const lastActions = Object.fromEntries(
-      Object.entries(loaded.lastActions).map(([id, a]) => [
-        id,
-        a.delivery?.state === 'queued' ? { ...a, delivery: { ...a.delivery, state: 'unconfirmed' as const } } : a,
-      ]),
+      Object.entries(loaded.lastActions)
+        .filter(([id, a]) => !isFileAction(a) || fileIds.has(id))
+        .map(([id, a]) => [
+          id,
+          a.delivery?.state === 'queued' ? { ...a, delivery: { ...a.delivery, state: 'unconfirmed' as const } } : a,
+        ]),
     )
     // The stop and the running turn belong to the process that saved them.
     return cutOffUpdate({ ...loaded, lastActions, sent: [], stop: null, turn: emptySession().turn })
@@ -2255,22 +2542,27 @@ async function bringBack(
 /** Brings back a saved ledger once the store reads it again, under the turns the session ran meanwhile. */
 async function restore($: EngineInterface, saved: SavedRecord) {
   conversation.generation += 1
-  const loaded = upgradeSession(saved).ledger
+  const { ledger: loaded, files } = upgradeSession(saved)
   await Promise.all([
     replaceDrawn($, s => ({
       ...s,
       ledger: { ...loaded, turn: loaded.turn + s.ledger.turn },
-      lastActions: withoutRowActions(s.lastActions),
+      files: mergeFiles(files, s.files),
+      lastActions: withoutRowActions(s.lastActions, mergeFiles(files, s.files)),
     })),
     forgetRowState($),
   ])
+  // forgetRowState emptied the missing list, and the restored rows need it.
+  await refreshMissing($)
 }
 
 async function forgetRowState($: EngineInterface) {
   await Promise.all([
-    update($, SELECTION, () => NO_SELECTION),
+    updateSelection($, () => NO_SELECTION),
     update($, TYPING, () => null),
     update($, UNFOLDED, () => []),
+    update($, FILES_UNFOLDED, () => false),
+    update($, MISSING_FILES, () => []),
     update($, OPTIONS_SHOWN, () => []),
     update($, DRAFTS, () => ({})),
     update($, DISCARDED, () => ({})),
@@ -2310,8 +2602,163 @@ async function readAgain($: EngineInterface) {
   await redrawPane($)
 }
 
+function absolutePath(path: string): string {
+  return path.startsWith('/') ? path : `${conversation.root}/${path}`
+}
+
+/** Adds a row to `owner`'s Files. Returns false when one with the same target was there already. */
+async function fileRow(
+  $: EngineInterface,
+  owner: Owner,
+  row: { kind: FileKind; name: string; target: string },
+): Promise<boolean> {
+  const at = await $.clock.now()
+  const where = whereLabel(row.target, conversation.root)
+  let isAdded = false
+  await commit($, owner, s => {
+    const files = addFile(s.files, { ...row, where, at })
+    isAdded = files !== s.files
+    return isAdded ? { ...s, files } : s
+  })
+  if (isAdded) await refreshMissing($).catch(() => undefined)
+
+  return isAdded
+}
+
+function isAnswered(ran: { deny?: string; isError?: boolean }): boolean {
+  return ran.deny === undefined && ran.isError !== true
+}
+
+/**
+ * Runs a Write, and adds the file to Files when it made a new document or wrote the session's plan. A file that was
+ * there before is the person's own, or source, so it stays out.
+ */
+async function runWrite<R extends { deny?: string; isError?: boolean }>(
+  $: EngineInterface,
+  input: Record<string, unknown>,
+  run: () => Promise<R>,
+): Promise<R> {
+  const owner = currentOwner()
+  const path = typeof input.file_path === 'string' && input.file_path ? absolutePath(input.file_path) : ''
+  const isPlan = path !== '' && path === planPath(conversation.root, conversation.id)
+  const wasThere = path === '' || (await $.fs.exists(path).catch(() => true))
+  const ran = await run()
+  if (isAnswered(ran) && (isPlan || (!wasThere && isDocument(path))))
+    // The file is written whether or not its row saves, so a failed save leaves the tool's answer alone.
+    await fileRow($, owner, { kind: fileKind(path, isPlan), name: baseName(path), target: path }).catch(() => undefined)
+
+  return ran
+}
+
+/**
+ * Runs an Artifact call, and adds a page it published to Files under its claude.ai URL. The engine types (2.1.308)
+ * name the tool `Artifact`, with `action` "publish" or left out for a publish, `asset: true` for an upload into an
+ * existing page, and a result that carries the page's `url` and `title`. Task 11's live check confirms the shape.
+ */
+async function runArtifact<R extends { deny?: string; isError?: boolean; result?: unknown }>(
+  $: EngineInterface,
+  input: Record<string, unknown>,
+  run: () => Promise<R>,
+): Promise<R> {
+  const owner = currentOwner()
+  const ran = await run()
+  const isPublish = (input.action === undefined || input.action === 'publish') && input.asset !== true
+  const result = (typeof ran.result === 'object' && ran.result !== null ? ran.result : {}) as Record<string, unknown>
+  if (isAnswered(ran) && isPublish && typeof result.url === 'string' && isParsedUrl(result.url)) {
+    const path = typeof input.file_path === 'string' ? baseName(input.file_path) : ''
+    const name = (typeof result.title === 'string' && result.title) || path || result.url
+    await fileRow($, owner, { kind: 'artifact', name, target: result.url }).catch(() => undefined)
+  }
+
+  return ran
+}
+
+/** The `show` tool: adds a link or file Claude names to Files. The answer is what Claude reads back. */
+async function showFile($: EngineInterface, input: Record<string, unknown>): Promise<string> {
+  const raw = typeof input.target === 'string' ? input.target.trim() : ''
+  if (raw === '') return 'Not added: show needs a target, a URL or a file path.'
+  const home = raw.startsWith('~/') ? ((await $.env.get('HOME').catch(() => undefined)) ?? '') : ''
+  const shown = showTarget(raw, conversation.root, home)
+  if (!shown) return notShownText(raw)
+  const { target, isLink } = shown
+  const isPlan = target === planPath(conversation.root, conversation.id)
+  const given = typeof input.name === 'string' ? input.name.trim() : ''
+  const name = given || (isLink ? target : baseName(target))
+  try {
+    const isAdded = await fileRow($, currentOwner(), { kind: fileKind(target, isPlan), name, target })
+    return `${isAdded ? 'Added to' : 'Already in'} Files: ${name}`
+  } catch (error) {
+    return `Not added: the inbox could not save ${name}: ${error instanceof Error ? error.message : String(error)}`
+  }
+}
+
+/**
+ * Reads the conversation's plan file. A file that is missing or empty is no plan; one that is there but unreadable, or
+ * that has no checkbox step, is an error.
+ */
+async function readPlan($: EngineInterface, path: string): Promise<{ view: PlanView | null; error: string | null }> {
+  const text = await $.fs.read(path).catch(() => null)
+  // A file with text but no checkbox step says so in one line, as one that cannot be read does. An empty file is no plan.
+  if (text !== null) {
+    const view = parsePlan(text)
+    return { view, error: view === null && text.trim() !== '' ? path : null }
+  }
+
+  return { view: null, error: (await $.fs.exists(path).catch(() => false)) ? path : null }
+}
+
+/** Reads the plan file again and keeps the result for the Now tab, which cannot read files while it draws. */
+async function refreshPlan($: EngineInterface): Promise<PlanView | null> {
+  const sessionId = conversation.id
+  const read = await readPlan($, planPath(conversation.root, sessionId))
+  if (sessionId === conversation.id) await update($, PLAN, () => ({ sessionId, ...read }))
+
+  return read.view
+}
+
+/** The plan lines the Now tab draws: none in the demo, or for a plan kept from another conversation. */
+function drawnPlanLines(plan: PlanState, isDemo: boolean) {
+  return isDemo || plan.sessionId !== conversation.id ? [] : planLines(plan.view, plan.error)
+}
+
+function isPlanCall(tool: string, input: Record<string, unknown>): boolean {
+  return (
+    (tool === 'Write' || tool === 'Edit' || tool === 'MultiEdit') &&
+    typeof input.file_path === 'string' &&
+    input.file_path !== '' &&
+    absolutePath(input.file_path) === planPath(conversation.root, conversation.id)
+  )
+}
+
+/** What Claude reads about the current conversation's plan: its path, the rule and the steps in progress. */
+async function currentPlanNote($: EngineInterface): Promise<string> {
+  return planNote(planPath(conversation.root, conversation.id), await refreshPlan($))
+}
+
+/**
+ * Keeps the mod's `.inbox/` folder, where plan files live, out of `git status` with a line in the repo's own
+ * `info/exclude`, which nobody commits. A worktree shares the main checkout's, so the common dir is the one to change.
+ * Outside a Git repo it does nothing.
+ */
+export async function ensurePlanExcluded($: EngineInterface): Promise<void> {
+  const root = conversation.root
+  if (excludedRoot === root) return
+  excludedRoot = root
+  try {
+    const r = await $.process.run(['git', 'rev-parse', '--git-common-dir'], { cwd: root, timeoutMs: 5_000 })
+    const dir = r.stdout.trim()
+    if (r.exitCode !== 0 || !dir) return
+    const path = `${dir.startsWith('/') ? dir : `${root}/${dir}`}/info/exclude`
+    const text = await $.fs.read(path).catch(() => '')
+    if (text.split('\n').some(line => line.trim() === '.inbox/')) return
+    await $.fs.write(path, `${text}${text === '' || text.endsWith('\n') ? '' : '\n'}.inbox/\n`)
+  } catch {
+    // A missing git or an unwritable exclude leaves plan files showing in git status, nothing worse.
+  }
+}
+
 function redrawPane($: EngineInterface) {
-  return update($, SELECTION, s => ({ ...s }))
+  return updateSelection($, s => ({ ...s }))
 }
 
 export const register: Register = on => {
@@ -2331,13 +2778,16 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
+  on('classic.SessionStart', { source: ['clear', 'resume', 'fork', 'compact'] }, async ($, e, next) => {
     const r = await next(e)
+    // A compaction drops the prompts that named the plan file, so Claude is told again where it is and what is in progress.
+    if (e.source === 'compact')
+      return isOn ? { ...r, additionalContext: [...(r.additionalContext ?? []), await currentPlanNote($)] } : r
     // $.session.id() still names the previous conversation here, so the new id comes
     // from the event. A start with --resume also raises this, for the conversation
     // session.start already loaded.
     if (isOn && e.session_id !== conversation.id)
-      await loadConversation($, e.session_id, e.source === 'fork' ? conversation.id : undefined)
+      await loadConversation($, e.session_id, e.source === 'fork' ? conversation.id : undefined, e.source === 'fork')
 
     return r
   })
@@ -2365,7 +2815,7 @@ export const register: Register = on => {
 
           return {
             ...empty,
-            lastActions: withoutRowActions(s.lastActions),
+            lastActions: withoutRowActions(s.lastActions, empty.files),
             sent: [],
             heldRows: [],
             presence: { ...empty.presence, isUpdating: false },
@@ -2409,8 +2859,11 @@ export const register: Register = on => {
       const carry = cardCarryText((await read($, SESSION)).ledger)
       if (carry) notes.unshift(carry)
     }
+    await ensurePlanExcluded($)
+    // Claude Code only, and after the shared inbox text, which Codex and omp also read.
+    notes.push(await currentPlanNote($))
 
-    return notes.length === 0 ? next(e) : next({ ...e, context: [...(e.context ?? []), ...notes] })
+    return next({ ...e, context: [...(e.context ?? []), ...notes] })
   })
 
   on('turn.start', async ($, e, next) => {
@@ -2446,17 +2899,38 @@ export const register: Register = on => {
     result: await runTool($, 'close', e as unknown as Record<string, unknown>),
   }))
 
+  on('tool.describe', { tool: SHOW_TOOL }, async ($, e, next) => ({ ...(await next(e)), isDeferred: false }))
+  on('tool.call', { tool: SHOW_TOOL }, async ($, e) => ({
+    result: await showFile($, e as unknown as Record<string, unknown>),
+  }))
+
   on('tool.call', async ($, e, next) => {
     if (!isOn) return next(e)
     const { tool: _tool, tool_use_id: _id, agentId: _agent, ...input } = e as unknown as Record<string, unknown>
     const key = callKey(String(e.tool), input)
+    const isPlan = isPlanCall(String(e.tool), input)
     const run = () =>
-      clearingDialog($, key, () => next(e)).finally(() => {
-        if (e.tool_use_id) askedCalls.delete(e.tool_use_id)
-      })
+      clearingDialog($, key, () => next(e))
+        .finally(() => {
+          if (e.tool_use_id) askedCalls.delete(e.tool_use_id)
+        })
+        .then(async ran => {
+          // The Now tab draws the plan as the file stands, so a write to it reads the file again.
+          if (isPlan) await refreshPlan($).catch(() => undefined)
+          return ran
+        })
+    const noteCall = async () => {
+      const line = toolActivity(String(e.tool), input)
+      if (line) await noteActivity($, line)
+    }
+    // A subagent's new document is the person's to see too, so Files watches its calls. The activity notes stay the
+    // main agent's.
+    if (e.tool === 'Write' || e.tool === 'Artifact') {
+      if (!e.agentId) await noteCall()
+      return e.tool === 'Write' ? runWrite($, input, run) : runArtifact($, input, run)
+    }
     if (e.agentId) return run()
-    const line = toolActivity(String(e.tool), input)
-    if (line) await noteActivity($, line)
+    await noteCall()
     if (String(e.tool) === TURN_BOX_TOOL) turnBox = turnBoxText(input) ?? turnBox
     if (e.tool === 'Bash') {
       const ran = await run()
@@ -2552,23 +3026,23 @@ export const register: Register = on => {
     if (!isOn) return r
     if (e.reason === 'error' && !hasStopFromError) await setStopFromLastReply($)
     void wakeForDone($).catch(() => undefined)
-    void followNewRows($).catch(() => undefined)
+    // A turn's end reads the plan again, for a change the tool calls did not show, such as one made by hand.
+    void refreshPlan($)
+      .then(() => followNewRows($))
+      .catch(() => undefined)
+    // And checks the Files rows' paths, for a file a command removed.
+    void refreshMissing($).catch(() => undefined)
     const hasReply = e.answer.trim() !== '' || turnBox !== null
     const isAnswered = e.reason === 'answer' && hasReply
     if (!isAnswered && !isDialogDismissed) return r
 
-    const [tab, isShown, now, before] = await Promise.all([
-      read($, TAB),
-      isPaneShown($),
-      $.clock.now(),
-      read($, SESSION),
-    ])
+    const [tab, isShown, now, before] = await Promise.all([readTab($), isPaneShown($), $.clock.now(), read($, SESSION)])
     const reply = [...sentBack, e.answer, turnBox ?? ''].filter(text => text.trim() !== '').join('\n\n')
     const queuesEmptyReply = isDialogDismissed
     resetTurn()
     await update($, AWAY, a => ({ ...a, lastActiveAt: now }))
     await commit($, currentOwner(), s =>
-      endTurn(CLAUDE_CODE, s, reply, isShown, { tab: TABS.find(t => t.id === tab)?.label ?? tab, queuesEmptyReply }),
+      endTurn(CLAUDE_CODE, s, reply, isShown, { tab: modTabLabel(tab), queuesEmptyReply }),
     )
     updateLedger($)
     if (prRefs(reply).some(ref => !before.ledger.prs.includes(ref))) void fetchPrs($, await isPrsTabShown($))
@@ -2617,7 +3091,7 @@ export const register: Register = on => {
     const isShown = (await read($, DEMO)) !== null
     const args = e.args.trim().split(/\s+/).join(' ')
     if (args === 'demo' || args === 'demo recording') await setDemo($, !isShown, args === 'demo recording')
-    else if ((await read($, TAB)) === 'prs') await findPrs($)
+    else if ((await readTab($)) === 'prs') await findPrs($)
     const [isDemo, isDemoRecording] = await Promise.all([read($, DEMO).then(d => d !== null), read($, DEMO_RECORDING)])
     await showInbox($)
 
@@ -2651,7 +3125,7 @@ export const register: Register = on => {
     const r = await next(e)
     if (e.requestId !== PANE) return r
     const data = e.data as { tab?: unknown; isUnfolded?: unknown; hover?: unknown; key?: unknown } | null
-    const shown = TABS.find(t => t.id === data?.tab)
+    const shown = MOD_TABS.find(t => t.id === data?.tab)
     const followUp = typeof data?.key === 'string' ? followUpPresses.get(data.key) : undefined
     if (e.element === 'tabs' && shown) await showTab($, shown.id)
     else if (e.element.startsWith('undo-') && followUp && typeof data?.key === 'string')
@@ -2824,7 +3298,20 @@ export const register: Register = on => {
         ? { rowPad: 2 * DESKTOP_ROW_PAD, settledPad: 2 * DESKTOP_ROW_PAD, buttonGap: 1, isFoldGapped: false }
         : { rowPad: blankLine, settledPad: 0, buttonGap: 2, isFoldGapped: true }
     const [
-      { ledger, prViews: prState, lastActions, notes, turns, stop, view, showsDemoNotices, isUnread, now },
+      {
+        ledger,
+        prViews: prState,
+        lastActions,
+        notes,
+        turns,
+        stop,
+        view,
+        files,
+        showsDemoNotices,
+        isDemo,
+        isUnread,
+        now,
+      },
       tab,
       selection,
       theme,
@@ -2834,10 +3321,13 @@ export const register: Register = on => {
       isKeyListShown,
       optionsShown,
       termProgram,
+      plan,
+      isFilesUnfolded,
+      missingFiles,
     ] = await Promise.all([
       drawnState($),
-      read($, TAB),
-      read($, SELECTION),
+      readTab($),
+      readSelection($),
       read($, THEME),
       read($, TYPING),
       read($, UNFOLDED),
@@ -2845,6 +3335,9 @@ export const register: Register = on => {
       read($, IS_KEY_LIST_SHOWN),
       read($, OPTIONS_SHOWN),
       $.env.get('TERM_PROGRAM'),
+      read($, PLAN),
+      read($, FILES_UNFOLDED),
+      read($, MISSING_FILES),
     ])
     // A hot reload keeps TYPING but empties fieldSeeds, so an open field takes its seed again here.
     if (typing !== null && !fieldSeeds.has(typing)) fieldSeeds.set(typing, (await read($, DRAFTS))[typing]?.text ?? '')
@@ -3066,6 +3559,42 @@ export const register: Register = on => {
       }
     }
 
+    const fileRow = (f: FileRow): Row => {
+      const name = fileName(f, plan)
+      const where = `${f.where}${missingFiles.includes(f.target) ? `${DOT}missing` : ''}`
+
+      return {
+        id: f.id,
+        handle: '◦',
+        title: name,
+        titleAfter: `${DOT}${ago(now - f.at)}`,
+        at: f.at,
+        line: { before: FILE_TAGS[f.kind].padEnd(FILE_TAG_CELLS), text: name, after: `${DOT}${where}` },
+        subtitle: (
+          <Box flexDirection="column">
+            <Text color={pal.muted} wrap="wrap">{`${FILE_TAGS[f.kind]}${DOT}${where}`}</Text>
+            <Text color={pal.muted} wrap="wrap">
+              {f.target}
+            </Text>
+          </Box>
+        ),
+        body: null,
+        keys: () =>
+          fileActions(f).map(a => ({
+            key: `file-${a.id}-${f.id}`,
+            label: a.label,
+            kind: a.kind,
+            hotkey: FILE_KEYS[a.id],
+            onPress: (press: UiPressArgument) => runFilePress($, f.id, a.id, press.surface),
+          })),
+      }
+    }
+    const shownFileRows = shownFiles(files)
+    const fileRows = {
+      open: shownFileRows.open.map(fileRow),
+      dismissed: shownFileRows.dismissed.map(fileRow),
+    }
+
     type Entry = DrawnEntry<Row>
     const lists = drawnLists(
       view,
@@ -3082,19 +3611,29 @@ export const register: Register = on => {
         threads: isSettled ? [] : waitingThreads(pr).map(t => threadRow(pr, t)),
       }))
       .map(g => ({ ...g, rows: [...g.threads, ...g.checks] }))
-    const rows: Record<Tab, Row[]> = {
-      needsYou: lists.byTab.needsYou,
-      findings: lists.byTab.findings,
+    const rows: Record<ModTab, Row[]> = {
+      now: nowRows(lists),
+      files: [...fileRows.open, ...(isFilesUnfolded ? fileRows.dismissed : [])],
       prs: prGroups.flatMap(g => g.rows),
     }
-    const tabCounts: Record<Tab, number> = {
-      needsYou: view.needsYou.count,
-      findings: view.findings.count,
+    const tabCounts: Record<ModTab, number> = {
+      now: view.needsYou.count + view.findings.count,
+      files: fileRows.open.length,
       prs: prGroups.filter(g => !g.isSettled && prNeedsYou(g.pr, isThreadSent)).length,
     }
-    const tabText = (id: Tab, label: string) => `${label}${tabCounts[id] > 0 ? ` ${tabCounts[id]}` : ''}`
+    // Now's count takes the Needs you color. Files has no tone of its own, so its count is dim.
+    const TAB_TONES: Record<ModTab, Tone | null> = { now: 'needsYou', files: null, prs: 'prs' }
+    const countTone = (id: ModTab) => {
+      const tone = TAB_TONES[id]
+      return tone ? pal.tone[tone] : pal.muted
+    }
+    const countMark = (id: ModTab) => {
+      const tone = TAB_TONES[id]
+      return tone ? (pal.tone[tone] ?? pal.mark[tone]) : pal.muted
+    }
+    const tabText = (id: ModTab, label: string) => `${label}${tabCounts[id] > 0 ? ` ${tabCounts[id]}` : ''}`
     const hasRail = isInline && look === 'terminal' && e.props.bodyColumns >= INLINE_RAIL_AT
-    const railWidth = Math.max(...TABS.map(t => tabText(t.id, t.label).length)) + 2 * TAB_PAD.length
+    const railWidth = Math.max(...MOD_TABS.map(t => tabText(t.id, t.label).length)) + 2 * TAB_PAD.length
     const listColumns = e.props.bodyColumns - 2 - (hasRail ? railWidth + RAIL_GUTTER : 0)
     const ids = rows[tab].map(r => r.id)
     const indexOf = new Map(ids.map((id, n) => [id, n]))
@@ -3106,6 +3645,7 @@ export const register: Register = on => {
         view,
         shownPrs.filter(x => !x.isSettled).map(x => x.pr),
         lastActions,
+        files,
       ),
     )
     const at = selectedIndex(ids, cursor, top, id => settledIds.has(id))
@@ -3793,23 +4333,23 @@ export const register: Register = on => {
       .sort((a, b) => b.at - a.at)[0]
 
     const keyList = [
-      { keys: TABS.map(t => t.hotkey).join(' '), does: 'Switch tabs' },
+      { keys: MOD_TABS.map(t => t.hotkey).join(' '), does: 'Switch tabs' },
       { keys: 'j k', does: 'Select the next or previous row' },
       { keys: 'ctrl+x tab', does: 'Move focus to the line above the prompt, then the pane, then the prompt' },
     ]
     const keyColumn = Math.max(...keyList.map(k => k.keys.length)) + 2
 
     const tabSizes = desktopTabSizes(
-      TABS.map(({ id, label }) => ({ label, count: tabCounts[id] })),
+      MOD_TABS.map(({ id, label }) => ({ label, count: tabCounts[id] })),
       e.props.bodyColumns - 2,
     )
     const tabProps: TabsProps | null = hasClient
       ? {
-          tabs: TABS.map(({ id, label }, n) => ({
+          tabs: MOD_TABS.map(({ id, label }, n) => ({
             id,
             label,
             count: tabSizes.hasCounts ? tabCounts[id] : 0,
-            countColor: pal.tone[id] ?? pal.mark[id],
+            countColor: countMark(id),
             width: tabSizes.widths[n]!,
           })),
           shown: tab,
@@ -3839,7 +4379,10 @@ export const register: Register = on => {
         </Text>
       ) : null,
     ]
-    const terminalTabsWidth = TABS.reduce((sum, t) => sum + tabText(t.id, t.label).length + 2 * TAB_PAD.length + 1, 1)
+    const terminalTabsWidth = MOD_TABS.reduce(
+      (sum, t) => sum + tabText(t.id, t.label).length + 2 * TAB_PAD.length + 1,
+      1,
+    )
     const pad = terminalTabsWidth <= e.props.bodyColumns ? TAB_PAD : ' '
     const hasTabLine = !isInline && look !== 'desktop'
     const tabLine = pal.tab ?? pal.divider
@@ -3866,7 +4409,7 @@ export const register: Register = on => {
           ) : null}
           {tabProps
             ? null
-            : TABS.map(({ id, label }) => {
+            : MOD_TABS.map(({ id, label }) => {
                 const count = tabCounts[id]
 
                 if (isInline)
@@ -3880,7 +4423,7 @@ export const register: Register = on => {
                         <Button plain key={`tab-${id}`} label={label} onPress={() => void showTab($, id)} />
                       )}
                       {count > 0 ? (
-                        <Text bold={tab === id} color={pal.tone[id]}>
+                        <Text bold={tab === id} color={countTone(id)}>
                           {' '}
                           {count}
                         </Text>
@@ -3915,7 +4458,7 @@ export const register: Register = on => {
                           {label}
                         </Text>
                         {count > 0 ? (
-                          <Text bold color={pal.tone[id] ?? pal.raisedText} backgroundColor={pal.raised}>
+                          <Text bold color={countTone(id) ?? pal.raisedText} backgroundColor={pal.raised}>
                             {' '}
                             {count}
                           </Text>
@@ -3949,7 +4492,7 @@ export const register: Register = on => {
                       <Button plain key={`tab-${id}-before`} label={pad} hover={raise} onPress={show} />
                       <Button plain key={`tab-${id}`} label={label} hover={raise} onPress={show} />
                       {count > 0 ? (
-                        <Text color={pal.tone[id]} hover={raise}>
+                        <Text color={countTone(id)} hover={raise}>
                           {' '}
                           {count}
                         </Text>
@@ -3977,7 +4520,7 @@ export const register: Register = on => {
     const versionText = version ? faint(`v${version}`) : null
     const rail = (
       <Box flexDirection="column" flexShrink={0} paddingLeft={1} marginRight={RAIL_GUTTER}>
-        {TABS.map(({ id, label }) => {
+        {MOD_TABS.map(({ id, label }) => {
           const count = tabCounts[id]
           const fill = ' '.repeat(railWidth - tabText(id, label).length - TAB_PAD.length)
           if (tab === id)
@@ -3988,7 +4531,7 @@ export const register: Register = on => {
                   {label}
                 </Text>
                 {count > 0 ? (
-                  <Text bold color={pal.tone[id] ?? pal.raisedText} backgroundColor={pal.raised}>
+                  <Text bold color={countTone(id) ?? pal.raisedText} backgroundColor={pal.raised}>
                     {' '}
                     {count}
                   </Text>
@@ -4004,7 +4547,7 @@ export const register: Register = on => {
               <Button plain key={`tab-${id}`} label={label} hover={raise} onPress={show} />
               {count > 0 ? (
                 <Button plain key={`tab-${id}-count`} hover={raise} onPress={show}>
-                  <Text color={pal.tone[id]}> {count}</Text>
+                  <Text color={countTone(id)}> {count}</Text>
                 </Button>
               ) : null}
               <Button plain key={`tab-${id}-after`} label={fill} hover={raise} onPress={show} />
@@ -4383,7 +4926,7 @@ export const register: Register = on => {
         </Box>
       )
     }
-    const needsYouView = () => {
+    const needsYouSections = (): JSX.Element[] => {
       const groups = needsYouGroups.flatMap(g => {
         const { entries } = g
         const closed = closedShown(view.needsYou.closed[g.list], settledIn(entries))
@@ -4430,7 +4973,7 @@ export const register: Register = on => {
             ),
           ]
         : []
-      if (isNothing && !stop && unread.length === 0) return emptyState(emptyText('needsYou', 'Claude'))
+      if (isNothing && !stop && unread.length === 0) return []
       const outside = stop
         ? [
             section(
@@ -4470,13 +5013,12 @@ export const register: Register = on => {
           ]
         : []
 
-      return sections([...outside, ...unread, ...groups])
+      return [...outside, ...unread, ...groups]
     }
 
-    const findingsView = () => {
+    const findingSections = (): JSX.Element[] => {
       const settled = settledIn(findingEntries)
-      if (findingEntries.length === 0 && closedTotal(view.findings.closed, settled) === 0)
-        return emptyState(emptyText('findings', 'Claude'))
+      if (findingEntries.length === 0 && closedTotal(view.findings.closed, settled) === 0) return []
       const groups = lists.findingGroups.map(g => {
         const closedOf = view.findings.closed.filter(f => f.kind === g.kind)
         const closed = closedShown(closedOf, settled).map(f => ({
@@ -4503,7 +5045,80 @@ export const register: Register = on => {
         ])
       })
 
-      return sections(groups)
+      return groups
+    }
+
+    // The plan draws as plain lines, so it takes no selection and j and k pass over it. Its colors come from the
+    // look's tones; on desktop, where dimColor's paint is not documented, dim text takes the age color.
+    const planSection = (): JSX.Element[] => {
+      const lines = drawnPlanLines(plan, isDemo)
+      if (lines.length === 0) return []
+      const drawnLines = lines.map((line, n) => (
+        <Box key={`plan-${n}`} paddingLeft={line.indent}>
+          <Text
+            wrap="wrap"
+            bold={line.isBold}
+            {...(line.tone === 'dim'
+              ? look === 'desktop'
+                ? { color: pal.age }
+                : { dimColor: true }
+              : line.tone
+                ? { color: pal.tone[line.tone] ?? pal.mark[line.tone] }
+                : {})}
+          >
+            {line.text}
+          </Text>
+        </Box>
+      ))
+
+      return [
+        section(
+          look === 'desktop' ? (
+            desktopFrame({ key: 'plan', padY: 0, children: drawnLines })
+          ) : (
+            <Box flexDirection="column" paddingLeft={TREE_LINE_AT}>
+              {drawnLines}
+            </Box>
+          ),
+        ),
+      ]
+    }
+    const nowView = () => {
+      const list = [...needsYouSections(), ...planSection(), ...findingSections()]
+
+      return list.length === 0 ? emptyState(emptyText('needsYou', 'Claude')) : sections(list)
+    }
+    const filesFold = () => {
+      const label = `${isFilesUnfolded ? '▾' : '▸'} Dismissed (${fileRows.dismissed.length})`
+      const button = (
+        <Box flexDirection="row">
+          <Button
+            plain
+            dimColor
+            key="files-fold"
+            label={label}
+            onPress={() => void update($, FILES_UNFOLDED, u => !u)}
+          />
+        </Box>
+      )
+
+      return look === 'desktop'
+        ? desktopFrame({ key: 'files-fold-row', padY: DESKTOP_ROW_PAD, children: button })
+        : treeRow(null, null, button, 'files-fold-row')
+    }
+    const filesView = () => {
+      if (files.length === 0) return emptyState({ title: 'Nothing yet.', hint: 'Files this session makes show here.' })
+      const rowsOf = (group: Row[], key: string) =>
+        divided(
+          group.map((r, n) => listRow(r, childPos(n, group.length))),
+          key,
+        )
+      const dismissed =
+        fileRows.dismissed.length === 0
+          ? []
+          : [section([filesFold(), ...(isFilesUnfolded ? rowsOf(fileRows.dismissed, 'files-dismissed') : [])])]
+
+      return sections([...(fileRows.open.length > 0 ? [section(rowsOf(fileRows.open, 'files'))] : []), ...dismissed])
     }
 
     const settledPrBlock = (pr: PrView) =>
@@ -4685,7 +5300,7 @@ export const register: Register = on => {
         onPress: () => (canMove ? move(-1) : undefined),
       },
     ]
-    const tabKeys: KeyAction[] = TABS.map(({ id, label, hotkey }) => ({
+    const tabKeys: KeyAction[] = MOD_TABS.map(({ id, label, hotkey }) => ({
       key: `tab-key-${id}`,
       label,
       hotkey,
@@ -4707,7 +5322,7 @@ export const register: Register = on => {
     // A pane takes a key
     // only as a Button's hotkey, so the tab keys, j, k and the selected row's keys
     // are Buttons in a hidden Box.
-    const tabView = tab === 'findings' ? findingsView() : tab === 'prs' ? prsView() : needsYouView()
+    const tabView = tab === 'files' ? filesView() : tab === 'prs' ? prsView() : nowView()
     const drawn = (
       <Box flexDirection="column" minHeight={e.props.scroll.bodyRows} backgroundColor={pal.body}>
         {showsDemoNotices ? (

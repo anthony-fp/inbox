@@ -30,6 +30,7 @@ import { CODEX } from '../codex/src/texts'
 import { OMP } from '../omp/src/texts'
 import { MODEL } from '../codex/src/update'
 import { agentTools } from '../hooks/tools'
+import { parsePlan, planNote, planPath } from '../hooks/plan'
 import { codexCli } from './codex-cli'
 import {
   earlierRuns,
@@ -51,7 +52,8 @@ type Agent = 'claude' | 'codex' | 'omp'
 /** Patterns are case-insensitive regular expressions. */
 type Check =
   | {
-      calls: 'record' | 'close'
+      /** `show` is offered to Claude Code only. */
+      calls: 'record' | 'close' | 'show'
       /** Matches the call's `kind`, as a whole. */
       kind?: string
       /** Matches each named argument. */
@@ -69,6 +71,12 @@ type Check =
   | { notReply: string }
   /** No inbox id, such as i3 or f112, in the reply. Ids are lowercase, so "F1" is not one. */
   | { noIds: true }
+  /** The plan file at the end of the run matches. Only in a case with `plan`. */
+  | { plan: string }
+  /** No plan file at the end of the run. Only in a case with `plan`. */
+  | { noPlan: true }
+  /** A file at this path, within the folder the agent runs in, at the end of the run. Only in a case with `fileTools`. */
+  | { exists: string }
 
 type Case = {
   name: string
@@ -80,6 +88,13 @@ type Case = {
   /** Files to put in the folder the agent runs in, by path within it. */
   files?: Record<string, string>
   prompt: string
+  /**
+   * Claude Code only: the run tells Claude its plan path, as the mod does beside each prompt, and gives it Read, Write
+   * and Edit in its folder. A plan already there comes from `files`, at `.inbox/plans/<PLAN_SESSION>.md`.
+   */
+  plan?: true
+  /** Claude Code only: gives Claude Read, Write and Edit in its folder, as a plan case does, without the plan note. */
+  fileTools?: true
   checks: Check[]
   min?: Partial<Record<Agent, number>>
   /** The agents that run the case, when not all of them do. */
@@ -90,6 +105,9 @@ type Call = { tool: string; args: Record<string, unknown>; result: string }
 
 const MIN = 0.75
 const PROBE = 'probe'
+/** The session id in a plan case's plan path. -p runs have no session the mod could name. */
+const PLAN_SESSION = 'eval-plan'
+const PLAN_TOOLS = ['Read', 'Write', 'Edit']
 const OMP_MODEL = 'anthropic/claude-opus-5-5'
 
 const { values } = parseArgs({
@@ -143,13 +161,26 @@ function guidance(host: Host): string {
   return text
 }
 
-function message(c: Case, host: Host): string {
-  if (!c.ledger) return c.prompt
-  const ledger = { ...EMPTY, ...c.ledger } as Ledger
-  const carry = host === CLAUDE_CODE ? cardCarryText(ledger) : null
-  const notes = [carry, inboxText(host, ledger, false), closedText(ledger.closed)].filter(Boolean)
+function message(c: Case, host: Host, work: string): string {
+  const ledger = c.ledger ? ({ ...EMPTY, ...c.ledger } as Ledger) : null
+  const carry = ledger && host === CLAUDE_CODE ? cardCarryText(ledger) : null
+  const inbox = ledger ? [inboxText(host, ledger, false), closedText(ledger.closed)] : []
+  // The mod puts the plan note after the shared inbox text.
+  const plan = c.plan && host === CLAUDE_CODE ? planNoteIn(work) : null
+  const notes = [carry, ...inbox, plan].filter(Boolean)
 
-  return `${notes.join('\n')}\n\n${c.prompt}`
+  return notes.length === 0 ? c.prompt : `${notes.join('\n')}\n\n${c.prompt}`
+}
+
+/** The plan path as Claude sees it, under the real path of the folder it runs in. */
+function planPathIn(work: string): string {
+  return planPath(realpathSync(work), PLAN_SESSION)
+}
+
+function planNoteIn(work: string): string {
+  const path = planPathIn(work)
+
+  return planNote(path, existsSync(path) ? parsePlan(readFileSync(path, 'utf8')) : null)
 }
 
 function exec(args: string[], opts: { cwd: string; env?: NodeJS.ProcessEnv; input?: string }) {
@@ -180,7 +211,17 @@ function lines(stdout: string): Record<string, any>[] {
  * `error`: why the run could not be graded. `model`: the model that answered, as the agent reported it. `raw`: the
  * agent's own output, kept in the results as the evidence for each verdict.
  */
-type Outcome = { reply: string; calls: Call[]; error: string | null; model: string | null; raw: string }
+type Outcome = {
+  reply: string
+  calls: Call[]
+  error: string | null
+  model: string | null
+  raw: string
+  /** A plan case's plan file at the end of the run, or null when there is none. */
+  plan?: string | null
+  /** The `exists` checks' paths that were files at the end of the run. */
+  existing?: string[]
+}
 
 /** A fresh folder for one run: the stand-in server's state and log, and an empty working folder. */
 function sandbox(c: Case, agent: Agent) {
@@ -206,14 +247,16 @@ function sandbox(c: Case, agent: Agent) {
 }
 
 const PROBE_TOOLS = [`mcp__${PROBE}__record`, `mcp__${PROBE}__close`]
+/** The probe offers `show` to Claude Code only, as the mod registers it only there. */
+const CLAUDE_PROBE_TOOLS = [...PROBE_TOOLS, `mcp__${PROBE}__show`]
 
-/** Throws unless the session has exactly the connected probe server and no tool besides its two. */
-function assertOnlyProbe(init: Record<string, any>) {
+/** Throws unless the session has exactly the connected probe server and no tool besides its two and `allowed`. */
+function assertOnlyProbe(init: Record<string, any>, allowed: string[]) {
   const servers: { name: string; status: string }[] = init.mcp_servers ?? []
   const tools: string[] = init.tools ?? []
   if (servers.length !== 1 || servers[0]!.name !== PROBE || servers[0]!.status !== 'connected')
     throw new IsolationError(`MCP servers are not just a connected ${PROBE}: ${JSON.stringify(servers)}`)
-  const extra = tools.filter(t => !PROBE_TOOLS.includes(t))
+  const extra = tools.filter(t => !PROBE_TOOLS.includes(t) && !allowed.includes(t))
   if (extra.length > 0) throw new IsolationError(`unexpected tools: ${extra.join(', ')}`)
 }
 
@@ -228,6 +271,8 @@ async function runClaude(c: Case): Promise<Outcome> {
 
 async function claudeIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome> {
   const config = join(s.dir, 'mcp.json')
+  // A plan case writes its plan file, so it gets the file tools. Without --add-dir they reach only its own folder.
+  const fileTools = c.plan || c.fileTools ? PLAN_TOOLS : []
   writeFileSync(config, JSON.stringify({ mcpServers: { [PROBE]: { command: process.execPath, args: s.serverArgs } } }))
   // stream-json carries every assistant message. --output-format json returns only the text after the last tool call.
   const r = await exec(
@@ -242,9 +287,9 @@ async function claudeIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome
       '--mcp-config',
       config,
       '--tools',
-      '',
+      fileTools.join(','),
       '--allowedTools',
-      `mcp__${PROBE}__record,mcp__${PROBE}__close`,
+      [...CLAUDE_PROBE_TOOLS, ...fileTools].join(','),
       '--output-format',
       'stream-json',
       '--verbose',
@@ -252,7 +297,7 @@ async function claudeIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome
     {
       cwd: s.work,
       env: { ...process.env, CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH: String(MAX_TOOL_DESCRIPTION) },
-      input: message(c, CLAUDE_CODE),
+      input: message(c, CLAUDE_CODE, s.work),
     },
   )
   const events = lines(r.stdout)
@@ -275,7 +320,11 @@ async function claudeIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome
       model: init.model ?? null,
       raw: r.stdout,
     }
-  assertOnlyProbe(init)
+  assertOnlyProbe(init, [`mcp__${PROBE}__show`, ...fileTools])
+  // The plan file on disk once the run ends, read before the sandbox is removed.
+  const planFile = planPathIn(s.work)
+  const plan = c.plan ? (existsSync(planFile) ? readFileSync(planFile, 'utf8') : null) : undefined
+  const existing = c.checks.flatMap(k => ('exists' in k && existsSync(join(s.work, k.exists)) ? [k.exists] : []))
   const reply = events
     .filter(e => e.type === 'assistant')
     .flatMap(e => e.message.content as { type: string; text?: string }[])
@@ -290,6 +339,8 @@ async function claudeIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome
     error: failed ? `claude exited ${r.code}: ${r.stderr.slice(0, 300)}` : null,
     model: init?.model ?? null,
     raw: r.stdout,
+    plan,
+    existing,
   }
 }
 
@@ -343,7 +394,7 @@ async function codexIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome>
       'read-only',
       '-C',
       s.work,
-      message(c, CODEX),
+      message(c, CODEX, s.work),
     ],
     { cwd: s.work, env: { ...process.env, CODEX_HOME: home } },
   )
@@ -510,6 +561,15 @@ function failures(o: Outcome, checks: Check[]): string[] {
     } else if ('notReply' in c) {
       const m = o.reply.match(new RegExp(c.notReply, 'i'))
       if (m) out.push(`reply has "${m[0]}"`)
+    } else if ('plan' in c) {
+      if (o.plan === undefined) out.push('the case has no plan path')
+      else if (o.plan === null) out.push('no plan file')
+      else if (!has(c.plan, o.plan)) out.push(`plan lacks /${c.plan}/: ${o.plan}`)
+    } else if ('noPlan' in c) {
+      if (o.plan === undefined) out.push('the case has no plan path')
+      else if (o.plan !== null) out.push(`a plan file was written: ${o.plan}`)
+    } else if ('exists' in c) {
+      if (!o.existing?.includes(c.exists)) out.push(`no file at ${c.exists}`)
     } else if ('noIds' in c) {
       const m = o.reply.match(/\b[if]\d+\b/)
       if (m) out.push(`reply has the id "${m[0]}"`)
@@ -607,6 +667,7 @@ const about = provenance(
       ]),
     ),
     'close description Claude': guidedCloseDescription(CLAUDE_CODE, ''),
+    'planNote Claude': planNote('<path>', parsePlan('- [~] <step>')),
     cases: readFileSync(values.cases, 'utf8'),
     models: JSON.stringify(REQUESTED),
     runner: readFileSync(process.argv[1]!, 'utf8'),

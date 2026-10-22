@@ -103,3 +103,6 @@ Each item names what it would catch. Remove an item when the change that does it
 - **`task-about-finding-replaces-it` back to its 0.2.9 rate.** It passes 16 of 20 on Sonnet, against 46 of 48 on 0.2.9's NEW rule. The live pass saw the miss: the inbox model added the question but wrote no ASKED line, so the finding stayed open.
 - **omp's inbox model,** and its fallback to omp's `@smol` model.
 - **Agent cases showing the closed, carried-over and answer notes,** and Codex's guidance delivered as the plugin delivers it, at session start.
+- **`show-server-url` is simulated.** Claude has no Bash in the case and is told a server is running, so it does not test calling `show` after really starting one. A real server start would catch an agent that starts a server and never calls `show` with its URL.
+- **`plan-continued-after-compaction` puts the compaction note in the prompt.** It does not use the `additionalContext` of `classic.SessionStart`, so it does not test the live compaction path. A case through that hook would catch a compaction note that never reaches Claude.
+- **`evals/probe.ts` re-implements the answers of `showFile`.** The copy can drift from `hooks/files.ts`, and a `show` case would then pass on answers the mod never gives. Sharing the answers, or a test that compares the two, would catch the drift.
