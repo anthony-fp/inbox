@@ -131,10 +131,13 @@ its record. Open rows, settled rows and Closed folds preserve that status
 without a success mark.
 
 The mod keeps sent-prompt records in its live plugin state across reloads.
+A saved session brought back into a new process starts with none. Its pending
+messages may never arrive, and their rows already read unconfirmed. A kept
+record would take the arrival of the same text sent again.
 Older state can lack the history needed to distinguish identical messages;
-those message texts remain unconfirmed in that session. Unmatched records are
-retained because discarding one could make its late arrival acknowledge a newer
-press. Exact reconciliation and bounded retention need host queue identity or
+those message texts remain unconfirmed in that session. Within one process,
+unmatched records are retained because discarding one could make its late
+arrival acknowledge a newer press. Exact reconciliation and bounded retention need host queue identity or
 queue status that the current arrival APIs do not provide.
 
 ## Differences on purpose
