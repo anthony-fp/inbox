@@ -2392,12 +2392,23 @@ async function initializeInbox($: EngineInterface) {
  * /clear, /resume or /branch, which switch conversations under a new session
  * id without a session.start.
  */
-function loadConversation($: EngineInterface, id: string, forkedFrom?: string): Promise<void> {
+function loadConversation($: EngineInterface, id: string, forkedFrom?: string, isFork = false): Promise<void> {
   const revision = ++loadRevision
-  return prepareConversation($, id, revision, forkedFrom)
+  return prepareConversation($, id, revision, forkedFrom, isFork)
 }
 
-async function prepareConversation($: EngineInterface, id: string, revision: number, forkedFrom?: string) {
+/**
+ * `isFork` is true only for a classic.SessionStart that names a fork. The prompt fallback cannot tell /branch from
+ * /resume, so it passes the previous conversation for the ledger but copies no plan: a resumed conversation's plan path
+ * must never take another conversation's steps.
+ */
+async function prepareConversation(
+  $: EngineInterface,
+  id: string,
+  revision: number,
+  forkedFrom?: string,
+  isFork = false,
+) {
   const savedWrites = savedWriteCount()
   const [sessionRoot, saved] = await Promise.all([$.session.root(), readSettled($, id)])
   if (revision !== loadRevision) return
@@ -2408,7 +2419,7 @@ async function prepareConversation($: EngineInterface, id: string, revision: num
     // A fork continues its parent's inbox, so a new id with no saved state starts from the parent's.
     const parent = latest?.session || !forkedFrom ? null : await readSettled($, forkedFrom)
     // A fork with no saved state of its own continues its parent's plan too.
-    const planParent = !latest?.session && forkedFrom ? forkedFrom : undefined
+    const planParent = isFork && !latest?.session && forkedFrom ? forkedFrom : undefined
     await applyConversation($, id, revision, sessionRoot, latest, parent?.session, planParent)
   })
   applyingConversation = applying.catch(() => undefined)
@@ -2776,7 +2787,7 @@ export const register: Register = on => {
     // from the event. A start with --resume also raises this, for the conversation
     // session.start already loaded.
     if (isOn && e.session_id !== conversation.id)
-      await loadConversation($, e.session_id, e.source === 'fork' ? conversation.id : undefined)
+      await loadConversation($, e.session_id, e.source === 'fork' ? conversation.id : undefined, e.source === 'fork')
 
     return r
   })

@@ -4168,6 +4168,27 @@ test('a MultiEdit to the plan file redraws the plan', async ($, on) => {
   expect(await pane.find({ text: /^PLAN {2}1 of 2 steps$/ })).toBeDefined()
 })
 
+test("where classic.SessionStart is skipped, a /resume through the first prompt copies no other conversation's plan", async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const previous = '/tmp/project/.inbox/plans/session-1.md'
+  files = [previous]
+  fileTexts.set(previous, '## Cache\n- [x] Add the store\n- [~] Wire the reads')
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+
+  await $.session.end({ reason: 'resume', sessionId: 'session-1', resume: { id: 'session-1' } })
+  sessionId = 'session-2'
+  const prompt = await $.prompt.submit({ text: 'where were we?', wait: false, origin: { kind: 'composer' } })
+  await clock.settle()
+  const context = (prompt.context ?? []).join('\n')
+  expect(writes.filter(w => w.path === '/tmp/project/.inbox/plans/session-2.md')).toEqual([])
+  expect(context).toContain('/tmp/project/.inbox/plans/session-2.md')
+  expect(context).not.toContain('Wire the reads')
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: /^PLAN/ })).toBeUndefined()
+})
+
 test('a plan file with text but no checkbox step names its path, and an empty one draws nothing', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])
