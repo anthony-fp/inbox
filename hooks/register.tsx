@@ -4592,13 +4592,19 @@ export const register: Register = on => {
       const to = Math.min(Math.max(at + step, 0), ids.length - 1)
       void select($, tab, ids[to] ?? '', to)
     }
-    const moveKeys: KeyAction[] =
-      ids.length > 1 || (at < 0 && ids.length > 0)
-        ? [
-            { key: 'next', label: 'Next', hotkey: 'j', kind: 'view', onPress: () => move(1) },
-            { key: 'previous', label: 'Previous', hotkey: 'k', kind: 'view', onPress: () => move(-1) },
-          ]
-        : []
+    const canMove = ids.length > 1 || (at < 0 && ids.length > 0)
+    // Claude Code sends a key no Button binds to the prompt and gives it the keyboard, so the keys
+    // stay bound when there is nothing to move to or close.
+    const moveKeys: KeyAction[] = [
+      { key: 'next', label: 'Next', hotkey: 'j', kind: 'view', onPress: () => (canMove ? move(1) : undefined) },
+      {
+        key: 'previous',
+        label: 'Previous',
+        hotkey: 'k',
+        kind: 'view',
+        onPress: () => (canMove ? move(-1) : undefined),
+      },
+    ]
     const tabKeys: KeyAction[] = TABS.map(({ id, label, hotkey }) => ({
       key: `tab-key-${id}`,
       label,
@@ -4609,7 +4615,14 @@ export const register: Register = on => {
 
     const selectedRow = rows[tab][at]
     const selectedActions = selectedRow ? rowActions(selectedRow) : null
-    const rowKeys = selectedActions ? [...selectedActions.keys, ...selectedActions.more] : []
+    const closeKeysWithoutRow: KeyAction[] = ['d', 'x'].map(hotkey => ({
+      key: `no-row-${hotkey}`,
+      label: 'Close',
+      hotkey,
+      kind: 'view',
+      onPress: () => undefined,
+    }))
+    const rowKeys = selectedActions ? [...selectedActions.keys, ...selectedActions.more] : closeKeysWithoutRow
 
     // A pane takes a key
     // only as a Button's hotkey, so the tab keys, j, k and the selected row's keys

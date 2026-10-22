@@ -719,6 +719,7 @@ Sources: [R#render-sites; IF#change-what-claude-code-already-draws; T: render-si
   - In the same runs, a click on an `Input` gave it the keys, also with text in the prompt.
   - So a press that opens a field can give it the keys only through `open({ focus })`. With text in the prompt that is refused: the inbox's Reply drew its field, and the letters typed next went to the prompt.
 - Keys while focused: Tab next control; Up and Down move between controls "while your drawing fits", else scroll; Enter presses; a hotkey presses its button ("While an `Input` has the focus, every printable key goes to the field"); PgUp, PgDn, Home, End scroll; ctrl+x then an arrow resizes; ctrl+x x closes the pane "even while one of its fields has the focus"; Esc returns to the prompt and closes a `closeOnEscape` pane. "A mod can't bind Tab or the arrow keys to anything else". [IF#know-which-keys-your-mod-can-receive]
+  - Live, 2026-10-21, terminal 2.1.307, inline and docked: a printable key that no `Button` in the focused pane binds goes to the prompt, and the prompt takes the keyboard. The next key, even a bound one, goes there too. No `ui.focus` event fires. A pane that must keep the keys has to bind every key the person may press.
 - Keybindings: `~/.claude/keybindings.json`, opened with `/keybindings`, applied without restart. [KB#configuration-file]
 
 | Context | When active [KB#contexts] |
