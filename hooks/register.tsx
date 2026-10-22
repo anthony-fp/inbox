@@ -30,7 +30,7 @@ import type {
   Stop,
   Tab,
 } from '../types'
-import { addFile, fileKind, isDocument, mergeFiles, whereLabel } from './files'
+import { addFile, fileKind, isDocument, isUrl, mergeFiles, whereLabel } from './files'
 import type { FileKind } from './files'
 import { parsePlan, planNote, planPath } from './plan'
 import {
@@ -2374,7 +2374,8 @@ async function runWrite<R extends { deny?: string; isError?: boolean }>(
   const wasThere = path === '' || (await $.fs.exists(path).catch(() => true))
   const ran = await run()
   if (isAnswered(ran) && (isPlan || (!wasThere && isDocument(path))))
-    await fileRow($, owner, { kind: fileKind(path, isPlan), name: baseName(path), target: path })
+    // The file is written whether or not its row saves, so a failed save leaves the tool's answer alone.
+    await fileRow($, owner, { kind: fileKind(path, isPlan), name: baseName(path), target: path }).catch(() => undefined)
 
   return ran
 }
@@ -2396,7 +2397,7 @@ async function runArtifact<R extends { deny?: string; isError?: boolean; result?
   if (isAnswered(ran) && isPublish && typeof result.url === 'string' && isParsedUrl(result.url)) {
     const path = typeof input.file_path === 'string' ? baseName(input.file_path) : ''
     const name = (typeof result.title === 'string' && result.title) || path || result.url
-    await fileRow($, owner, { kind: 'artifact', name, target: result.url })
+    await fileRow($, owner, { kind: 'artifact', name, target: result.url }).catch(() => undefined)
   }
 
   return ran
@@ -2415,15 +2416,18 @@ function isParsedUrl(text: string): boolean {
 async function showFile($: EngineInterface, input: Record<string, unknown>): Promise<string> {
   const raw = typeof input.target === 'string' ? input.target.trim() : ''
   if (raw === '') return 'Not added: show needs a target, a URL or a file path.'
-  const isUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw)
-  const target = isUrl ? raw : absolutePath(raw)
-  if (isUrl && !isParsedUrl(target)) return `Not added: ${target} is not a URL the inbox can open.`
+  const isLink = isUrl(raw)
+  const target = isLink ? raw : absolutePath(raw)
+  if (isLink && !isParsedUrl(target)) return `Not added: ${target} is not a URL the inbox can open.`
   const isPlan = target === planPath(conversation.root, conversation.id)
   const given = typeof input.name === 'string' ? input.name.trim() : ''
-  const name = given || (isUrl ? target : baseName(target))
-  const isAdded = await fileRow($, currentOwner(), { kind: fileKind(target, isPlan), name, target })
-
-  return `${isAdded ? 'Added to' : 'Already in'} Files: ${name}`
+  const name = given || (isLink ? target : baseName(target))
+  try {
+    const isAdded = await fileRow($, currentOwner(), { kind: fileKind(target, isPlan), name, target })
+    return `${isAdded ? 'Added to' : 'Already in'} Files: ${name}`
+  } catch (error) {
+    return `Not added: the inbox could not save ${name}: ${error instanceof Error ? error.message : String(error)}`
+  }
 }
 
 /** What Claude reads about the current conversation's plan: its path, the rule and the steps in progress. */

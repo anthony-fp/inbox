@@ -20,7 +20,7 @@ function extension(path: string): string {
   return dot <= 0 ? '' : name.slice(dot + 1).toLowerCase()
 }
 
-function isUrl(target: string): boolean {
+export function isUrl(target: string): boolean {
   return /^[a-z][a-z0-9+.-]*:\/\//i.test(target)
 }
 

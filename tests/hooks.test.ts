@@ -115,6 +115,8 @@ let storeSetRefusal: string | undefined
 let toolRefusal: string | undefined
 /** What a tool call answers, by tool name, in place of the default `ok`. */
 let toolAnswers = new Map<string, object>()
+/** Each tool the engine ran, by name, in order. A hook that throws after `next` makes the engine run its tool again. */
+let toolsRun: string[] = []
 let commandRefusal: string | undefined
 let panesOpened: string[] = []
 
@@ -174,6 +176,7 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   storeSetRefusal = undefined
   toolRefusal = undefined
   toolAnswers = new Map()
+  toolsRun = []
   commandRefusal = undefined
   panesOpened = []
   on('store.get', async ($, e) => {
@@ -301,6 +304,7 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
     return {}
   })
   on('tool.call', (_$, e) => {
+    toolsRun.push(String(e.tool))
     const answer = toolAnswers.get(String(e.tool))
     if (answer) return answer as never
     if (e.tool !== 'AskUserQuestion') return { result: 'ok', text: 'ok' } as never
@@ -3396,6 +3400,35 @@ test('show adds a link once, and says so when it is already there', async ($, on
   expect((await show()).result).toBe('Added to Files: http://localhost:51655/?key=x')
   expect((await show()).result).toBe('Already in Files: http://localhost:51655/?key=x')
   expect(rows().map(f => [f.kind, f.target, f.where])).toEqual([['link', 'http://localhost:51655/?key=x', 'localhost']])
+})
+
+test('the same new document written twice makes one row', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const rows = watchFiles(on)
+  await startFilesSession($)
+
+  await write($, '/tmp/project/notes.md')
+  files = ['/tmp/project/notes.md']
+  await write($, '/tmp/project/notes.md')
+
+  expect(rows().map(f => f.target)).toEqual(['/tmp/project/notes.md'])
+})
+
+test('a Write or Artifact call keeps its result when saving the Files row fails, and show says it did not add', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  await startFilesSession($)
+  toolAnswers.set('Write', { result: 'wrote it' })
+  toolAnswers.set('Artifact', { result: { url: 'https://claude.ai/code/artifact/abc', path: '/tmp/project/r.html' } })
+  storeSetRefusal = 'store unavailable'
+
+  expect((await write($, '/tmp/project/notes.md')).result).toBe('wrote it')
+  const published = await $.tool.call({ tool: 'Artifact', file_path: '/tmp/project/r.html' } as never)
+  expect((published.result as { url?: string }).url).toBe('https://claude.ai/code/artifact/abc')
+  expect(toolsRun).toEqual(['Write', 'Artifact'])
+  const shown = await $.tool.call({ tool: 'mcp__inbox__show', target: 'http://localhost:5173/' } as never)
+  expect(shown.result).toMatch(/^Not added: /)
 })
 
 test("a subagent's Write of a new document still adds it to Files", async ($, on) => {
