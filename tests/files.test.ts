@@ -72,6 +72,7 @@ describe('whereLabel', () => {
   test('names where a target lives', () => {
     expect(whereLabel('/w/docs/a.md', '/w')).toBe('repo')
     expect(whereLabel('/w/.claude/plans/a.md', '/w')).toBe('.claude')
+    expect(whereLabel('/w/.inbox/plans/a.md', '/w')).toBe('.inbox')
     expect(whereLabel('/tmp/x/a.html', '/w')).toBe('scratch')
     expect(whereLabel('http://localhost:5/x', '/w')).toBe('localhost')
     expect(whereLabel('https://claude.ai/artifact/1', '/w')).toBe('claude.ai')
@@ -85,7 +86,7 @@ describe('whereLabel', () => {
 describe('fileKind', () => {
   test('names the kind from the target', () => {
     expect(fileKind('http://localhost:5/x', false)).toBe('link')
-    expect(fileKind('/w/.claude/plans/a.md', true)).toBe('plan')
+    expect(fileKind('/w/.inbox/plans/a.md', true)).toBe('plan')
     expect(fileKind('/w/a.md', false)).toBe('md')
     expect(fileKind('/w/a.png', false)).toBe('image')
     expect(fileKind('/w/a.svg', false)).toBe('image')

@@ -2,6 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On, PromptOrigin, RenderSurface } from 'claude-code'
 
+import type { FileRow } from '../types'
 import type { FoldProps } from '../hooks/fold-client'
 import type { LinksProps } from '../hooks/links-client'
 import type { RowProps } from '../hooks/row-client'
@@ -3240,10 +3241,10 @@ test('a saved session the store cannot read shows as unreadable, not empty, unti
   expect(stored.get('s:session-1')).toContain('Use Node or Python?')
 })
 
-const FILE_ROW = (target: string, isDismissed: boolean) => ({
+const FILE_ROW = (target: string, isDismissed: boolean): FileRow => ({
   id: target,
   kind: 'md',
-  name: target.split('/').pop(),
+  name: target.split('/').pop() ?? target,
   target,
   where: 'repo',
   at: 1,
@@ -3253,8 +3254,8 @@ const FILE_ROW = (target: string, isDismissed: boolean) => ({
 test('Files rows saved with the session come back on a late store read, and a saved dismissal stays', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])
-  let latest: { files?: { target: string; isDismissed: boolean }[] } = {}
-  let extra: unknown[] = []
+  let latest: { files?: FileRow[] } = {}
+  let extra: FileRow[] = []
   on('state.set', { plugin: 'inbox', key: 'session' } as const, ($, e, next) => {
     const value = extra.length > 0 ? { ...e.value, files: extra } : e.value
     latest = value
@@ -3300,8 +3301,8 @@ test('Files rows saved with the session come back on a late store read, and a sa
 test('after /clear, a conversation with no saved record shows no Files rows', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])
-  let latest: { files?: unknown[] } = {}
-  let extra: unknown[] = [FILE_ROW('/w/a.md', false)]
+  let latest: { files?: FileRow[] } = {}
+  let extra: FileRow[] = [FILE_ROW('/w/a.md', false)]
   on('state.set', { plugin: 'inbox', key: 'session' } as const, ($, e, next) => {
     const value = extra.length > 0 ? { ...e.value, files: extra } : e.value
     latest = value
@@ -3794,7 +3795,7 @@ test("each of the person's prompts tells Claude its plan path, after the inbox t
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   const context =
     (await $.prompt.submit({ text: 'add caching', wait: false, origin: { kind: 'composer' } })).context ?? []
-  expect(context.at(-1)).toContain('/tmp/project/.claude/plans/session-1.md')
+  expect(context.at(-1)).toContain('/tmp/project/.inbox/plans/session-1.md')
   expect(context.at(-1)).toContain('three or more steps')
 })
 
@@ -3802,19 +3803,19 @@ test('after a compaction, Claude is told its plan path and the steps in progress
   mock.clock(on, { now: 1_000_000 })
   world($, on, [])
   fileTexts.set(
-    '/tmp/project/.claude/plans/session-1.md',
+    '/tmp/project/.inbox/plans/session-1.md',
     '## Cache\n- [x] Add the store\n- [~] Wire the reads\n- [ ] Test it',
   )
 
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   const r = await $.classic.SessionStart({ source: 'compact', session_id: 'session-1' })
   const context = (r.additionalContext ?? []).join('\n')
-  expect(context).toContain('/tmp/project/.claude/plans/session-1.md')
+  expect(context).toContain('/tmp/project/.inbox/plans/session-1.md')
   expect(context).toContain('Wire the reads')
   expect(context).not.toContain('Test it')
 })
 
-test("the first prompt adds .claude/plans/ to the repo's info/exclude once", async ($, on) => {
+test("the first prompt adds .inbox/ to the repo's info/exclude once", async ($, on) => {
   mock.clock(on, { now: 1_000_000 })
   world($, on, [])
   ghAnswers.push({ match: argv => argv.join(' ') === 'git rev-parse --git-common-dir', stdout: '/repo/.git\n' })
@@ -3825,15 +3826,15 @@ test("the first prompt adds .claude/plans/ to the repo's info/exclude once", asy
   await $.prompt.submit({ text: 'and tests', wait: false, origin: { kind: 'composer' } })
 
   expect(writes.filter(w => w.path === '/repo/.git/info/exclude').map(w => w.text)).toEqual([
-    '# git ls-files --others --exclude-from=.git/info/exclude\n.claude/plans/\n',
+    '# git ls-files --others --exclude-from=.git/info/exclude\n.inbox/\n',
   ])
 })
 
-test('the exclude is left alone when it already has .claude/plans/', async ($, on) => {
+test('the exclude is left alone when it already has .inbox/', async ($, on) => {
   mock.clock(on, { now: 1_000_000 })
   world($, on, [])
   ghAnswers.push({ match: argv => argv.join(' ') === 'git rev-parse --git-common-dir', stdout: '.git\n' })
-  fileTexts.set('/tmp/project/.git/info/exclude', 'node_modules\n.claude/plans/\n')
+  fileTexts.set('/tmp/project/.git/info/exclude', 'node_modules\n.inbox/\n')
 
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   await $.prompt.submit({ text: 'add caching', wait: false, origin: { kind: 'composer' } })
@@ -3847,6 +3848,6 @@ test('outside a Git repo the first prompt still goes through and writes no exclu
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   const context =
     (await $.prompt.submit({ text: 'add caching', wait: false, origin: { kind: 'composer' } })).context ?? []
-  expect(context.at(-1)).toContain('.claude/plans/session-1.md')
+  expect(context.at(-1)).toContain('.inbox/plans/session-1.md')
   expect(writes.filter(w => w.path.endsWith('/info/exclude'))).toEqual([])
 })

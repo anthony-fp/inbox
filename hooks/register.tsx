@@ -560,7 +560,7 @@ const AWAY_MS = 15 * 60_000
 let isTurnRunning = false
 /** The conversation whose first prompt has had the card carried beside it. */
 let carriedFor: string | null = null
-/** The worktree whose Git exclude has been checked for the plans folder in this process. */
+/** The worktree whose Git exclude has been checked for the `.inbox/` folder in this process. */
 let excludedRoot: string | null = null
 /** Why the last conversation ended, until the next conversation loads. */
 let endReason: string | null = null
@@ -2324,8 +2324,9 @@ async function currentPlanNote($: EngineInterface): Promise<string> {
 }
 
 /**
- * Keeps plan files out of `git status` with a line in the repo's own `info/exclude`, which nobody commits. A
- * worktree shares the main checkout's, so the common dir is the one to change. Outside a Git repo it does nothing.
+ * Keeps the mod's `.inbox/` folder, where plan files live, out of `git status` with a line in the repo's own
+ * `info/exclude`, which nobody commits. A worktree shares the main checkout's, so the common dir is the one to change.
+ * Outside a Git repo it does nothing.
  */
 export async function ensurePlanExcluded($: EngineInterface): Promise<void> {
   const root = conversation.root
@@ -2337,8 +2338,8 @@ export async function ensurePlanExcluded($: EngineInterface): Promise<void> {
     if (r.exitCode !== 0 || !dir) return
     const path = `${dir.startsWith('/') ? dir : `${root}/${dir}`}/info/exclude`
     const text = await $.fs.read(path).catch(() => '')
-    if (text.split('\n').some(line => line.trim() === '.claude/plans/')) return
-    await $.fs.write(path, `${text}${text === '' || text.endsWith('\n') ? '' : '\n'}.claude/plans/\n`)
+    if (text.split('\n').some(line => line.trim() === '.inbox/')) return
+    await $.fs.write(path, `${text}${text === '' || text.endsWith('\n') ? '' : '\n'}.inbox/\n`)
   } catch {
     // A missing git or an unwritable exclude leaves plan files showing in git status, nothing worse.
   }

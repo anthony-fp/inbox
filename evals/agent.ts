@@ -87,7 +87,7 @@ type Case = {
   prompt: string
   /**
    * Claude Code only: the run tells Claude its plan path, as the mod does beside each prompt, and gives it Read, Write
-   * and Edit in its folder. A plan already there comes from `files`, at `.claude/plans/<PLAN_SESSION>.md`.
+   * and Edit in its folder. A plan already there comes from `files`, at `.inbox/plans/<PLAN_SESSION>.md`.
    */
   plan?: true
   checks: Check[]
@@ -170,29 +170,6 @@ function message(c: Case, host: Host, work: string): string {
 /** The plan path as Claude sees it, under the real path of the folder it runs in. */
 function planPathIn(work: string): string {
   return planPath(realpathSync(work), PLAN_SESSION)
-}
-
-/**
- * The plan file as Claude's Write and Edit calls on it leave it, or null when there is none. Claude Code counts a file
- * under `.claude/` as sensitive and asks before each write to it, even under acceptEdits and a path allow rule, and -p
- * refuses what it would ask. So the run replays the calls Claude made on the plan path, refused or not, from the
- * file the case started with.
- */
-function attemptedPlan(events: Record<string, any>[], path: string, start: string | undefined): string | null {
-  let text = start ?? null
-  const uses = events
-    .filter(e => e.type === 'assistant')
-    .flatMap(e => e.message.content as { type: string; name?: string; input?: Record<string, any> }[])
-    .filter(b => b.type === 'tool_use' && b.input?.file_path === path)
-  for (const { name, input = {} } of uses) {
-    if (name === 'Write') text = String(input.content ?? '')
-    else if (name === 'Edit' && text !== null && text.includes(input.old_string))
-      text = input.replace_all
-        ? text.split(input.old_string).join(input.new_string)
-        : text.replace(input.old_string, () => input.new_string)
-  }
-
-  return text
 }
 
 function planNoteIn(work: string): string {
@@ -335,9 +312,9 @@ async function claudeIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome
       raw: r.stdout,
     }
   assertOnlyProbe(init, fileTools)
-  const plan = c.plan
-    ? attemptedPlan(events, planPathIn(s.work), c.files?.[`.claude/plans/${PLAN_SESSION}.md`])
-    : undefined
+  // The plan file on disk once the run ends, read before the sandbox is removed.
+  const planFile = planPathIn(s.work)
+  const plan = c.plan ? (existsSync(planFile) ? readFileSync(planFile, 'utf8') : null) : undefined
   const reply = events
     .filter(e => e.type === 'assistant')
     .flatMap(e => e.message.content as { type: string; text?: string }[])

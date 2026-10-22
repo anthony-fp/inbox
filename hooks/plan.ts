@@ -49,7 +49,7 @@ export function parsePlan(text: string): PlanView | null {
 
 /** Where a session's plan lives: one file per session, so sessions in one worktree never share a plan. */
 export function planPath(worktree: string, sessionId: string): string {
-  return `${worktree}/.claude/plans/${sessionId}.md`
+  return `${worktree}/.inbox/plans/${sessionId}.md`
 }
 
 /**

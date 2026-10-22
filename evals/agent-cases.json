@@ -770,7 +770,7 @@
     "agents": ["claude"],
     "plan": true,
     "files": {
-      ".claude/plans/eval-plan.md": "## Add a --verbose flag\n- [x] Add --verbose to the flags in src/cli.ts\n- [~] Add --verbose to the usage text in src/help.ts\n- [ ] Document --verbose in README.md\n",
+      ".inbox/plans/eval-plan.md": "## Add a --verbose flag\n- [x] Add --verbose to the flags in src/cli.ts\n- [~] Add --verbose to the usage text in src/help.ts\n- [ ] Document --verbose in README.md\n",
       "src/cli.ts": "export const flags = {\n  quick: { name: '--quick', describe: 'Skip the slow checks' },\n  verbose: { name: '--verbose', describe: 'Print each step' },\n}\n",
       "src/help.ts": "export const usage = 'Usage: tool [--quick] <file>'\n",
       "README.md": "# tool\n\nRun `tool --quick <file>` to skip the slow checks.\n"

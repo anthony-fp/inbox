@@ -41,6 +41,7 @@ export function whereLabel(target: string, worktree: string): string {
     return host === '127.0.0.1' ? 'localhost' : host
   }
   if (target.startsWith(`${worktree}/.claude/`)) return '.claude'
+  if (target.startsWith(`${worktree}/.inbox/`)) return '.inbox'
   if (target.startsWith(`${worktree}/`)) return 'repo'
   return 'scratch'
 }

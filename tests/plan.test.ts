@@ -42,13 +42,13 @@ describe('parsePlan', () => {
 })
 
 describe('planPath', () => {
-  test('puts the plan under .claude/plans by session id', () => {
-    expect(planPath('/w', 'abc')).toBe('/w/.claude/plans/abc.md')
+  test('puts the plan under .inbox/plans by session id', () => {
+    expect(planPath('/w', 'abc')).toBe('/w/.inbox/plans/abc.md')
   })
 })
 
 describe('planNote', () => {
-  const path = '/w/.claude/plans/abc.md'
+  const path = '/w/.inbox/plans/abc.md'
 
   test('names the path, the three-step rule, the marks and when to change them', () => {
     const note = planNote(path, null)
