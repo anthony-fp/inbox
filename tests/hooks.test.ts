@@ -113,6 +113,8 @@ let storeHold: (() => Promise<void>) | undefined
 let storeSetHold: ((key: string, value: unknown) => Promise<void>) | undefined
 let storeSetRefusal: string | undefined
 let toolRefusal: string | undefined
+/** What a tool call answers, by tool name, in place of the default `ok`. */
+let toolAnswers = new Map<string, object>()
 let commandRefusal: string | undefined
 let panesOpened: string[] = []
 
@@ -171,6 +173,7 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
   storeSetHold = undefined
   storeSetRefusal = undefined
   toolRefusal = undefined
+  toolAnswers = new Map()
   commandRefusal = undefined
   panesOpened = []
   on('store.get', async ($, e) => {
@@ -298,6 +301,8 @@ function world($: Engine, on: On, prompts: string[], vars: Record<string, string
     return {}
   })
   on('tool.call', (_$, e) => {
+    const answer = toolAnswers.get(String(e.tool))
+    if (answer) return answer as never
     if (e.tool !== 'AskUserQuestion') return { result: 'ok', text: 'ok' } as never
     return dialogAnswer as never
   })
@@ -3241,6 +3246,20 @@ test('a saved session the store cannot read shows as unreadable, not empty, unti
   expect(stored.get('s:session-1')).toContain('Use Node or Python?')
 })
 
+/** The Files rows of the drawn session, as last written. */
+function watchFiles(on: On): () => FileRow[] {
+  let latest: FileRow[] = []
+  on('state.set', { plugin: 'inbox', key: 'session' } as const, ($, e, next) => {
+    latest = e.value.files
+    return next(e)
+  })
+  return () => latest
+}
+
+function write($: Engine, path: string) {
+  return $.tool.call({ tool: 'Write', file_path: path, content: 'x' } as never)
+}
+
 const FILE_ROW = (target: string, isDismissed: boolean): FileRow => ({
   id: target,
   kind: 'md',
@@ -3254,13 +3273,7 @@ const FILE_ROW = (target: string, isDismissed: boolean): FileRow => ({
 test('Files rows saved with the session come back on a late store read, and a saved dismissal stays', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])
-  let latest: { files?: FileRow[] } = {}
-  let extra: FileRow[] = []
-  on('state.set', { plugin: 'inbox', key: 'session' } as const, ($, e, next) => {
-    const value = extra.length > 0 ? { ...e.value, files: extra } : e.value
-    latest = value
-    return next({ ...e, value })
-  })
+  const rows = watchFiles(on)
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   await $.prompt.submit({ text: 'add a greeting cli', wait: false, origin: { kind: 'composer' } })
   await $.turn.complete({ answer: 'ok', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
@@ -3274,11 +3287,11 @@ test('Files rows saved with the session come back on a late store read, and a sa
   await $.classic.SessionStart({ source: 'resume', session_id: 'session-1' })
   await clock.settle()
   const pane = await $.ui.mount(PANE)
-  extra = [FILE_ROW('/w/shared.md', false), FILE_ROW('/w/new.md', false)]
   await $.prompt.submit({ text: 'keep going', wait: false, origin: { kind: 'composer' } })
+  await write($, '/w/shared.md')
+  await write($, '/w/new.md')
   await $.turn.complete({ answer: 'ok', durationMs: 5, isAborted: false, turnId: 't2', reason: 'answer' })
   await clock.settle()
-  extra = []
 
   stored.set(
     's:session-1',
@@ -3291,7 +3304,11 @@ test('Files rows saved with the session come back on a late store read, and a sa
   await pane.press({ key: 'read-again' })
   await clock.settle()
 
-  expect(latest.files?.map(f => [f.target, f.isDismissed]).sort()).toEqual([
+  expect(
+    rows()
+      .map(f => [f.target, f.isDismissed])
+      .sort(),
+  ).toEqual([
     ['/w/new.md', false],
     ['/w/old.md', false],
     ['/w/shared.md', true],
@@ -3301,24 +3318,95 @@ test('Files rows saved with the session come back on a late store read, and a sa
 test('after /clear, a conversation with no saved record shows no Files rows', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])
-  let latest: { files?: FileRow[] } = {}
-  let extra: FileRow[] = [FILE_ROW('/w/a.md', false)]
-  on('state.set', { plugin: 'inbox', key: 'session' } as const, ($, e, next) => {
-    const value = extra.length > 0 ? { ...e.value, files: extra } : e.value
-    latest = value
-    return next({ ...e, value })
-  })
+  const rows = watchFiles(on)
   await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
   await $.prompt.submit({ text: 'add a greeting cli', wait: false, origin: { kind: 'composer' } })
+  await write($, '/w/a.md')
   await $.turn.complete({ answer: 'ok', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
   await clock.settle()
-  expect(latest.files).toHaveLength(1)
+  expect(rows()).toHaveLength(1)
 
-  extra = []
   await $.session.end({ reason: 'clear', sessionId: 'session-1', resume: { id: 'session-1' } })
   await $.classic.SessionStart({ source: 'clear', session_id: 'session-2' })
   await clock.settle()
-  expect(latest.files).toEqual([])
+  expect(rows()).toEqual([])
+})
+
+async function startFilesSession($: Engine) {
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'write it up', wait: false, origin: { kind: 'composer' } })
+  await $.turn.start({ text: 'write it up', turnId: 't1' })
+}
+
+test('a Write that makes a new document adds it to Files, and other Writes add nothing', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const rows = watchFiles(on)
+  files = ['/tmp/project/old.md']
+  await startFilesSession($)
+
+  await write($, '/tmp/project/notes.md')
+  await write($, '/tmp/project/old.md')
+  await write($, '/tmp/project/src/cli.ts')
+  toolAnswers.set('Write', { result: 'could not write', isError: true })
+  await write($, '/tmp/project/failed.md')
+
+  expect(rows().map(f => [f.kind, f.name, f.target, f.where])).toEqual([
+    ['md', 'notes.md', '/tmp/project/notes.md', 'repo'],
+  ])
+})
+
+test("a Write to the session's plan path adds a plan row", async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const rows = watchFiles(on)
+  await startFilesSession($)
+
+  await write($, '/tmp/project/.inbox/plans/session-1.md')
+
+  expect(rows().map(f => [f.kind, f.target, f.where])).toEqual([
+    ['plan', '/tmp/project/.inbox/plans/session-1.md', '.inbox'],
+  ])
+})
+
+test('a published artifact adds a row for its URL', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const rows = watchFiles(on)
+  await startFilesSession($)
+  toolAnswers.set('Artifact', {
+    result: { url: 'https://claude.ai/code/artifact/abc', path: '/tmp/project/report.html', title: 'Cache report' },
+  })
+
+  await $.tool.call({ tool: 'Artifact', file_path: '/tmp/project/report.html' } as never)
+  await $.tool.call({ tool: 'Artifact', action: 'list' } as never)
+
+  expect(rows().map(f => [f.kind, f.name, f.target, f.where])).toEqual([
+    ['artifact', 'Cache report', 'https://claude.ai/code/artifact/abc', 'claude.ai'],
+  ])
+})
+
+test('show adds a link once, and says so when it is already there', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const rows = watchFiles(on)
+  await startFilesSession($)
+  const show = () => $.tool.call({ tool: 'mcp__inbox__show', target: 'http://localhost:51655/?key=x' } as never)
+
+  expect((await show()).result).toBe('Added to Files: http://localhost:51655/?key=x')
+  expect((await show()).result).toBe('Already in Files: http://localhost:51655/?key=x')
+  expect(rows().map(f => [f.kind, f.target, f.where])).toEqual([['link', 'http://localhost:51655/?key=x', 'localhost']])
+})
+
+test("a subagent's Write of a new document still adds it to Files", async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const rows = watchFiles(on)
+  await startFilesSession($)
+
+  await $.tool.call({ tool: 'Write', file_path: '/tmp/project/agent.md', content: 'x', agentId: 'a1' } as never)
+
+  expect(rows().map(f => f.target)).toEqual(['/tmp/project/agent.md'])
 })
 
 for (const origin of [{ kind: 'sdk' }, { kind: 'plugin', name: 'test-plugin' }] satisfies PromptOrigin[]) {

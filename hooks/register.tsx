@@ -30,7 +30,8 @@ import type {
   Stop,
   Tab,
 } from '../types'
-import { mergeFiles } from './files'
+import { addFile, fileKind, isDocument, mergeFiles, whereLabel } from './files'
+import type { FileKind } from './files'
 import { parsePlan, planNote, planPath } from './plan'
 import {
   NO_SESSION,
@@ -271,6 +272,21 @@ const PR_POLL_MS = 2 * 60_000
 
 const RECORD_TOOL = 'mcp__inbox__record'
 const CLOSE_TOOL = 'mcp__inbox__close'
+const SHOW_TOOL = 'mcp__inbox__show'
+/** Claude Code only: Codex and omp have no Files tab, so this is not among the shared `agentTools`. */
+const SHOW = {
+  name: 'show',
+  description:
+    'Add a link or file you made for the person to the Files tab, when the inbox did not add it: a server URL, or a file a shell command wrote. Files you create with Write are added for you.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      target: { type: 'string', description: 'The URL, or the absolute path of the file.' },
+      name: { type: 'string', description: 'A short name for the row. Leave it out to use the file name or the URL.' },
+    },
+    required: ['target'],
+  },
+}
 
 const PANE = 'inbox'
 const REPLY_ROWS = 3
@@ -2128,6 +2144,8 @@ async function initializeInbox($: EngineInterface) {
     registerInboxCommand($),
     readVersion($),
     ...agentTools(CLAUDE_CODE).map(tool => $.tool.register(tool).catch(refused)),
+    // A refused `show` costs only the Files rows Claude would add by hand, so it does not count as refused tools.
+    $.tool.register(SHOW).catch(() => undefined),
   ])
   // A pane kept across a hot reload is already drawn.
   if (toolsRefused) await redrawPane($)
@@ -2315,6 +2333,99 @@ async function readAgain($: EngineInterface) {
   await redrawPane($)
 }
 
+function absolutePath(path: string): string {
+  return path.startsWith('/') ? path : `${conversation.root}/${path}`
+}
+
+/** Adds a row to `owner`'s Files. Returns false when one with the same target was there already. */
+async function fileRow(
+  $: EngineInterface,
+  owner: Owner,
+  row: { kind: FileKind; name: string; target: string },
+): Promise<boolean> {
+  const at = await $.clock.now()
+  const where = whereLabel(row.target, conversation.root)
+  let isAdded = false
+  await commit($, owner, s => {
+    const files = addFile(s.files, { ...row, where, at })
+    isAdded = files !== s.files
+    return isAdded ? { ...s, files } : s
+  })
+
+  return isAdded
+}
+
+function isAnswered(ran: { deny?: string; isError?: boolean }): boolean {
+  return ran.deny === undefined && ran.isError !== true
+}
+
+/**
+ * Runs a Write, and adds the file to Files when it made a new document or wrote the session's plan. A file that was
+ * there before is the person's own, or source, so it stays out.
+ */
+async function runWrite<R extends { deny?: string; isError?: boolean }>(
+  $: EngineInterface,
+  input: Record<string, unknown>,
+  run: () => Promise<R>,
+): Promise<R> {
+  const owner = currentOwner()
+  const path = typeof input.file_path === 'string' && input.file_path ? absolutePath(input.file_path) : ''
+  const isPlan = path !== '' && path === planPath(conversation.root, conversation.id)
+  const wasThere = path === '' || (await $.fs.exists(path).catch(() => true))
+  const ran = await run()
+  if (isAnswered(ran) && (isPlan || (!wasThere && isDocument(path))))
+    await fileRow($, owner, { kind: fileKind(path, isPlan), name: baseName(path), target: path })
+
+  return ran
+}
+
+/**
+ * Runs an Artifact call, and adds a page it published to Files under its claude.ai URL. The engine types (2.1.308)
+ * name the tool `Artifact`, with `action` "publish" or left out for a publish, `asset: true` for an upload into an
+ * existing page, and a result that carries the page's `url` and `title`. Task 11's live check confirms the shape.
+ */
+async function runArtifact<R extends { deny?: string; isError?: boolean; result?: unknown }>(
+  $: EngineInterface,
+  input: Record<string, unknown>,
+  run: () => Promise<R>,
+): Promise<R> {
+  const owner = currentOwner()
+  const ran = await run()
+  const isPublish = (input.action === undefined || input.action === 'publish') && input.asset !== true
+  const result = (typeof ran.result === 'object' && ran.result !== null ? ran.result : {}) as Record<string, unknown>
+  if (isAnswered(ran) && isPublish && typeof result.url === 'string' && isParsedUrl(result.url)) {
+    const path = typeof input.file_path === 'string' ? baseName(input.file_path) : ''
+    const name = (typeof result.title === 'string' && result.title) || path || result.url
+    await fileRow($, owner, { kind: 'artifact', name, target: result.url })
+  }
+
+  return ran
+}
+
+function isParsedUrl(text: string): boolean {
+  try {
+    new URL(text)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** The `show` tool: adds a link or file Claude names to Files. The answer is what Claude reads back. */
+async function showFile($: EngineInterface, input: Record<string, unknown>): Promise<string> {
+  const raw = typeof input.target === 'string' ? input.target.trim() : ''
+  if (raw === '') return 'Not added: show needs a target, a URL or a file path.'
+  const isUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw)
+  const target = isUrl ? raw : absolutePath(raw)
+  if (isUrl && !isParsedUrl(target)) return `Not added: ${target} is not a URL the inbox can open.`
+  const isPlan = target === planPath(conversation.root, conversation.id)
+  const given = typeof input.name === 'string' ? input.name.trim() : ''
+  const name = given || (isUrl ? target : baseName(target))
+  const isAdded = await fileRow($, currentOwner(), { kind: fileKind(target, isPlan), name, target })
+
+  return `${isAdded ? 'Added to' : 'Already in'} Files: ${name}`
+}
+
 /** What Claude reads about the current conversation's plan: its path, the rule and the steps in progress. */
 async function currentPlanNote($: EngineInterface): Promise<string> {
   const path = planPath(conversation.root, conversation.id)
@@ -2487,6 +2598,11 @@ export const register: Register = on => {
     result: await runTool($, 'close', e as unknown as Record<string, unknown>),
   }))
 
+  on('tool.describe', { tool: SHOW_TOOL }, async ($, e, next) => ({ ...(await next(e)), isDeferred: false }))
+  on('tool.call', { tool: SHOW_TOOL }, async ($, e) => ({
+    result: await showFile($, e as unknown as Record<string, unknown>),
+  }))
+
   on('tool.call', async ($, e, next) => {
     if (!isOn) return next(e)
     const { tool: _tool, tool_use_id: _id, agentId: _agent, ...input } = e as unknown as Record<string, unknown>
@@ -2495,9 +2611,18 @@ export const register: Register = on => {
       clearingDialog($, key, () => next(e)).finally(() => {
         if (e.tool_use_id) askedCalls.delete(e.tool_use_id)
       })
+    const noteCall = async () => {
+      const line = toolActivity(String(e.tool), input)
+      if (line) await noteActivity($, line)
+    }
+    // A subagent's new document is the person's to see too, so Files watches its calls. The activity notes stay the
+    // main agent's.
+    if (e.tool === 'Write' || e.tool === 'Artifact') {
+      if (!e.agentId) await noteCall()
+      return e.tool === 'Write' ? runWrite($, input, run) : runArtifact($, input, run)
+    }
     if (e.agentId) return run()
-    const line = toolActivity(String(e.tool), input)
-    if (line) await noteActivity($, line)
+    await noteCall()
     if (String(e.tool) === TURN_BOX_TOOL) turnBox = turnBoxText(input) ?? turnBox
     if (e.tool === 'Bash') {
       const ran = await run()
