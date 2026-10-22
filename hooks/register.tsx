@@ -30,7 +30,7 @@ import type {
   Stop,
   Tab,
 } from '../types'
-import { addFile, fileKind, isDocument, isUrl, mergeFiles, whereLabel } from './files'
+import { addFile, fileKind, isDocument, isUrl, mergeFiles, SHOW, whereLabel } from './files'
 import type { FileKind } from './files'
 import { parsePlan, planNote, planPath } from './plan'
 import {
@@ -273,20 +273,6 @@ const PR_POLL_MS = 2 * 60_000
 const RECORD_TOOL = 'mcp__inbox__record'
 const CLOSE_TOOL = 'mcp__inbox__close'
 const SHOW_TOOL = 'mcp__inbox__show'
-/** Claude Code only: Codex and omp have no Files tab, so this is not among the shared `agentTools`. */
-const SHOW = {
-  name: 'show',
-  description:
-    'Add a link or file you made for the person to the Files tab, when the inbox did not add it: a server URL, or a file a shell command wrote. Files you create with Write are added for you.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      target: { type: 'string', description: 'The URL, or the absolute path of the file.' },
-      name: { type: 'string', description: 'A short name for the row. Leave it out to use the file name or the URL.' },
-    },
-    required: ['target'],
-  },
-}
 
 const PANE = 'inbox'
 const REPLY_ROWS = 3

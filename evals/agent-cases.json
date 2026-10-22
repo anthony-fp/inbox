@@ -781,5 +781,40 @@
         "plan": "- \\[x\\] Add --verbose to the usage text"
       }
     ]
+  },
+  {
+    "name": "show-server-url",
+    "about": "Claude Code, holding the URL of a dev server it started, adds the link to Files with one show call.",
+    "agents": ["claude"],
+    "prompt": "Earlier in this session you started the docs site's dev server in the background with `npm run dev`. It printed `Local: http://localhost:5173/` and it is still running. I want to look at the site now: give me the link.",
+    "checks": [
+      {
+        "calls": "show",
+        "match": {
+          "target": "^http://localhost:5173/?$"
+        },
+        "count": 1
+      },
+      {
+        "calls": "show",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "name": "show-not-for-write",
+    "about": "Claude Code writes a Markdown file with Write and makes no show call, since the inbox adds a written file to Files itself.",
+    "agents": ["claude"],
+    "fileTools": true,
+    "prompt": "Write a short NOTES.md in this folder with three tips for naming Git branches. Keep it under ten lines.",
+    "checks": [
+      {
+        "exists": "NOTES.md"
+      },
+      {
+        "calls": "show",
+        "count": 0
+      }
+    ]
   }
 ]

@@ -52,7 +52,8 @@ type Agent = 'claude' | 'codex' | 'omp'
 /** Patterns are case-insensitive regular expressions. */
 type Check =
   | {
-      calls: 'record' | 'close'
+      /** `show` is offered to Claude Code only. */
+      calls: 'record' | 'close' | 'show'
       /** Matches the call's `kind`, as a whole. */
       kind?: string
       /** Matches each named argument. */
@@ -74,6 +75,8 @@ type Check =
   | { plan: string }
   /** No plan file at the end of the run. Only in a case with `plan`. */
   | { noPlan: true }
+  /** A file at this path, within the folder the agent runs in, at the end of the run. Only in a case with `fileTools`. */
+  | { exists: string }
 
 type Case = {
   name: string
@@ -90,6 +93,8 @@ type Case = {
    * and Edit in its folder. A plan already there comes from `files`, at `.inbox/plans/<PLAN_SESSION>.md`.
    */
   plan?: true
+  /** Claude Code only: gives Claude Read, Write and Edit in its folder, as a plan case does, without the plan note. */
+  fileTools?: true
   checks: Check[]
   min?: Partial<Record<Agent, number>>
   /** The agents that run the case, when not all of them do. */
@@ -214,6 +219,8 @@ type Outcome = {
   raw: string
   /** A plan case's plan file at the end of the run, or null when there is none. */
   plan?: string | null
+  /** The `exists` checks' paths that were files at the end of the run. */
+  existing?: string[]
 }
 
 /** A fresh folder for one run: the stand-in server's state and log, and an empty working folder. */
@@ -240,6 +247,8 @@ function sandbox(c: Case, agent: Agent) {
 }
 
 const PROBE_TOOLS = [`mcp__${PROBE}__record`, `mcp__${PROBE}__close`]
+/** The probe offers `show` to Claude Code only, as the mod registers it only there. */
+const CLAUDE_PROBE_TOOLS = [...PROBE_TOOLS, `mcp__${PROBE}__show`]
 
 /** Throws unless the session has exactly the connected probe server and no tool besides its two and `allowed`. */
 function assertOnlyProbe(init: Record<string, any>, allowed: string[]) {
@@ -263,7 +272,7 @@ async function runClaude(c: Case): Promise<Outcome> {
 async function claudeIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome> {
   const config = join(s.dir, 'mcp.json')
   // A plan case writes its plan file, so it gets the file tools. Without --add-dir they reach only its own folder.
-  const fileTools = c.plan ? PLAN_TOOLS : []
+  const fileTools = c.plan || c.fileTools ? PLAN_TOOLS : []
   writeFileSync(config, JSON.stringify({ mcpServers: { [PROBE]: { command: process.execPath, args: s.serverArgs } } }))
   // stream-json carries every assistant message. --output-format json returns only the text after the last tool call.
   const r = await exec(
@@ -280,7 +289,7 @@ async function claudeIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome
       '--tools',
       fileTools.join(','),
       '--allowedTools',
-      [`mcp__${PROBE}__record`, `mcp__${PROBE}__close`, ...fileTools].join(','),
+      [...CLAUDE_PROBE_TOOLS, ...fileTools].join(','),
       '--output-format',
       'stream-json',
       '--verbose',
@@ -311,10 +320,11 @@ async function claudeIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome
       model: init.model ?? null,
       raw: r.stdout,
     }
-  assertOnlyProbe(init, fileTools)
+  assertOnlyProbe(init, [`mcp__${PROBE}__show`, ...fileTools])
   // The plan file on disk once the run ends, read before the sandbox is removed.
   const planFile = planPathIn(s.work)
   const plan = c.plan ? (existsSync(planFile) ? readFileSync(planFile, 'utf8') : null) : undefined
+  const existing = c.checks.flatMap(k => ('exists' in k && existsSync(join(s.work, k.exists)) ? [k.exists] : []))
   const reply = events
     .filter(e => e.type === 'assistant')
     .flatMap(e => e.message.content as { type: string; text?: string }[])
@@ -330,6 +340,7 @@ async function claudeIn(c: Case, s: ReturnType<typeof sandbox>): Promise<Outcome
     model: init?.model ?? null,
     raw: r.stdout,
     plan,
+    existing,
   }
 }
 
@@ -557,6 +568,8 @@ function failures(o: Outcome, checks: Check[]): string[] {
     } else if ('noPlan' in c) {
       if (o.plan === undefined) out.push('the case has no plan path')
       else if (o.plan !== null) out.push(`a plan file was written: ${o.plan}`)
+    } else if ('exists' in c) {
+      if (!o.existing?.includes(c.exists)) out.push(`no file at ${c.exists}`)
     } else if ('noIds' in c) {
       const m = o.reply.match(/\b[if]\d+\b/)
       if (m) out.push(`reply has the id "${m[0]}"`)
