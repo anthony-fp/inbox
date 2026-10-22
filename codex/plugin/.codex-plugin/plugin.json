@@ -3,7 +3,7 @@
   "version": "0.2.10",
   "description": "Collects what waits on you in a Codex session: questions, tasks, findings and PRs, in a tab beside the conversation",
   "author": { "name": "Pete Petrash" },
-  "repository": "https://github.com/petekp/inbox",
+  "repository": "https://github.com/anthony-fp/inbox",
   "license": "MIT",
   "mcpServers": "./.mcp.json",
   "hooks": "./hooks/hooks.json",

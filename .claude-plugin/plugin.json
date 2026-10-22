@@ -3,11 +3,11 @@
   "version": "0.2.10",
   "description": "Gathers the questions, tasks, findings and PRs waiting on you in a session",
   "author": { "name": "Pete Petrash" },
-  "repository": "https://github.com/petekp/inbox",
-  "homepage": "https://github.com/petekp/inbox",
-  "documentationUrl": "https://github.com/petekp/inbox#readme",
-  "supportUrl": "https://github.com/petekp/inbox/issues",
-  "privacyPolicyUrl": "https://github.com/petekp/inbox#what-it-runs-sends-and-changes",
+  "repository": "https://github.com/anthony-fp/inbox",
+  "homepage": "https://github.com/anthony-fp/inbox",
+  "documentationUrl": "https://github.com/anthony-fp/inbox#readme",
+  "supportUrl": "https://github.com/anthony-fp/inbox/issues",
+  "privacyPolicyUrl": "https://github.com/anthony-fp/inbox#what-it-runs-sends-and-changes",
   "license": "MIT",
   "types": "./types/index.d.ts"
 }
