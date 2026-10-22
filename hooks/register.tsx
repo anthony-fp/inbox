@@ -2677,6 +2677,23 @@ export const register: Register = on => {
     return r
   })
 
+  // A running tool row means the permission step is over: the dialog was answered or the
+  // auto-mode classifier approved the call. Live, 2026-10-22: isRunning stayed false while a
+  // dialog was open and turned true when the tool started.
+  on('ui.render', { component: 'ToolUse' }, ($, e, next) => {
+    if (isOn && e.props.isRunning) {
+      const key = callKey(e.props.tool, (e.props.input ?? {}) as Record<string, unknown>)
+      askedCalls.delete(key)
+      // Drawing is pure, so the dialog closes after the render returns.
+      void $.clock
+        .sleep(0)
+        .then(() => closeDialogs($, key))
+        .catch(() => undefined)
+    }
+
+    return next(e)
+  })
+
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (!isOn || e.props.hasSurvey) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)

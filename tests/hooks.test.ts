@@ -2340,6 +2340,37 @@ test('where classic.PermissionRequest is skipped, an ask shows its row only if t
   expect(sidebarLines().at(-1)).toBe('')
 })
 
+test('a tool row that starts running ends the wait for a permission row, and clears one already shown', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [], { HERDR_PANE_ID: 'p1' })
+  const push = { command: 'git push', description: 'Push main to origin' }
+  const running = () =>
+    $.ui.mount({
+      plugin: 'inbox',
+      surface: 'terminal',
+      component: 'ToolUse',
+      props: { tool_use_id: 'u1', tool: 'Bash', input: push, isRunning: true, isErrored: false, isInterrupted: false },
+    } as never)
+
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  toolVerdict = 'ask'
+  await $.tool.check({ tool: 'Bash', input: push } as never)
+  await clock.advance(500)
+  await running()
+  const lines = sidebarLines().length
+  await clock.advance(PERMISSION_FALLBACK_DELAY_MS * 8)
+  await clock.settle()
+  expect(sidebarLines().slice(lines)).toEqual([])
+
+  await $.tool.check({ tool: 'Bash', input: push } as never)
+  await clock.advance(PERMISSION_FALLBACK_DELAY_MS + 1)
+  await clock.settle()
+  expect(sidebarLines().at(-1)).toBe('Allow push main to origin?')
+  await running()
+  await clock.settle()
+  expect(sidebarLines().at(-1)).toBe('')
+})
+
 test('where classic.PermissionRequest runs, it is the only source of the permission row', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [], { HERDR_PANE_ID: 'p1' })
