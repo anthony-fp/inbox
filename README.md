@@ -51,9 +51,9 @@ The fork adds to the Claude Code looks, in the terminal and the desktop app. Cod
 | ------------------------------------------------------------------------------------------- | -------------------------------- |
 | Install commands and links point to `anthony-fp/inbox`                                      | Done                             |
 | Open the inbox at launch with `claude "/inbox"`                                             | Done                             |
-| **Now** tab: what needs you, the session's plan, and findings, in one list                 | In progress                      |
-| **Plan**: Claude keeps a checklist for work of three or more steps, and the pane shows it   | In progress                      |
-| **Files** tab: the documents, artifacts and links the session made, with open and dismiss   | In progress                      |
+| **Now** tab: what needs you, the session's plan, and findings, in one list                 | Done                             |
+| **Plan**: Claude keeps a checklist for work of three or more steps, and the pane shows it   | Done                             |
+| **Files** tab: the documents, artifacts and links the session made, with open and dismiss   | Done                             |
 
 ## Install
 
@@ -153,6 +153,9 @@ or "no inbox model: set @inbox" when it has none.
 
 Type `/inbox` in Claude Code or omp, or open the Inbox tab in the ChatGPT app. The inbox has three tabs.
 
+In Claude Code the tabs are Now, Files and PRs. Now holds Needs you, the plan and Findings in one list. Codex and omp
+still have the tabs Needs you, Findings and PRs. They have no plan and no Files tab.
+
 ### Needs you
 
 Questions the agent asked you, and tasks only you can do.
@@ -174,6 +177,21 @@ its task, and you decide later which ones to act on.
 - **Reply** sends your own words about it.
 - **Explain** has the agent say why it matters and what fixing it would involve, without acting.
 - **Discuss** talks it through, and **Dismiss** drops it.
+
+### Plan
+
+For work of three or more steps, Claude Code keeps a checklist and Now shows it between Needs you and Findings. A step
+is waiting, in progress or done. The plan file lives in `.inbox/plans/` in your worktree, and Git ignores `.inbox/`.
+Claude sees the plan beside each of your prompts, and again after the conversation is compacted.
+
+### Files
+
+The documents, artifacts and links this session made (Claude Code only). It lists files Claude wrote (.md, .html, .pdf,
+.png, .jpg, .svg and .csv), the plan file, Artifact publishes, and files or links Claude adds for you to see.
+
+- **Open**, **Finder** and **Copy path** act on a file. A link has **Open** and **Copy link**.
+- **Dismiss** hides a row. Dismissed rows fold under "Dismissed", and **Restore** brings one back.
+- Only http and https links open.
 
 ### PRs
 

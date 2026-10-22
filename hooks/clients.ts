@@ -24,6 +24,9 @@ export type FeatureId =
   | 'exchange-trigger'
   | 'settle-window'
   | 'version-label'
+  | 'plan-panel'
+  | 'files-tab'
+  | 'now-tab'
 
 export type Support = { kind: 'full' } | { kind: 'different' | 'unsupported'; reason: string }
 
@@ -46,6 +49,9 @@ export const CLIENTS: Record<ClientId, Client> = {
       'exchange-trigger': { kind: 'full' },
       'settle-window': { kind: 'full' },
       'version-label': { kind: 'full' },
+      'plan-panel': { kind: 'full' },
+      'files-tab': { kind: 'full' },
+      'now-tab': { kind: 'full' },
     },
   },
   codex: {
@@ -101,6 +107,9 @@ export const CLIENTS: Record<ClientId, Client> = {
         reason: 'The tab only learns of a close at its next poll, so the settle window adds two polls.',
       },
       'version-label': { kind: 'full' },
+      'plan-panel': { kind: 'unsupported', reason: 'Not built in this fork; the fork owner chose Claude Code only.' },
+      'files-tab': { kind: 'unsupported', reason: 'Not built in this fork; the fork owner chose Claude Code only.' },
+      'now-tab': { kind: 'unsupported', reason: 'Not built in this fork; the fork owner chose Claude Code only.' },
     },
   },
   omp: {
@@ -134,6 +143,9 @@ export const CLIENTS: Record<ClientId, Client> = {
         kind: 'different',
         reason: "omp's panel footer ends with the inbox model's name, so the version follows it there.",
       },
+      'plan-panel': { kind: 'unsupported', reason: 'Not built in this fork; the fork owner chose Claude Code only.' },
+      'files-tab': { kind: 'unsupported', reason: 'Not built in this fork; the fork owner chose Claude Code only.' },
+      'now-tab': { kind: 'unsupported', reason: 'Not built in this fork; the fork owner chose Claude Code only.' },
     },
   },
 }
