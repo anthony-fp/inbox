@@ -51,6 +51,49 @@ export function isUrl(target: string): boolean {
   return /^https?:\/\//i.test(target)
 }
 
+export function isParsedUrl(text: string): boolean {
+  try {
+    new URL(text)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** The local path of a `file://` URL on this machine, or null for any other URL. */
+export function fileUrlPath(raw: string): string | null {
+  try {
+    const url = new URL(raw)
+    if (url.protocol !== 'file:' || (url.hostname !== '' && url.hostname !== 'localhost')) return null
+    const path = decodeURIComponent(url.pathname)
+    return path.startsWith('/') ? path : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * What the `show` tool adds for the target Claude names: a local path, made absolute under `root` with a leading `~/`
+ * under `home`, or an http or https link. A `file://` URL on this machine becomes its path. Null for a target the
+ * inbox does not open, such as `vnc://host`, or `~/x` with no home known.
+ */
+export function showTarget(raw: string, root: string, home: string): { target: string; isLink: boolean } | null {
+  if (hasScheme(raw)) {
+    const local = fileUrlPath(raw)
+    if (local !== null) return { target: local, isLink: false }
+    return isUrl(raw) && isParsedUrl(raw) ? { target: raw, isLink: true } : null
+  }
+  if (raw.startsWith('~/'))
+    return home === '' ? null : { target: `${home.replace(/\/$/, '')}${raw.slice(1)}`, isLink: false }
+
+  return { target: raw.startsWith('/') ? raw : `${root}/${raw}`, isLink: false }
+}
+
+/** What `show` answers for a target `showTarget` refused. */
+export function notShownText(raw: string): string {
+  return `Not added: ${raw} is not a link the inbox opens. Give an http or https URL, or a file path.`
+}
+
 /** A new file of one of these kinds goes into Files on its own. A new source file does not. */
 export function isDocument(path: string): boolean {
   return extension(path) in DOCUMENT_KINDS

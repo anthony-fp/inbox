@@ -115,7 +115,10 @@ let storeSetRefusal: string | undefined
 let toolRefusal: string | undefined
 /** What a tool call answers, by tool name, in place of the default `ok`. */
 let toolAnswers = new Map<string, object>()
-/** Each tool the engine ran, by name, in order. A hook that throws after `next` makes the engine run its tool again. */
+/**
+ * Each tool the engine ran, by name, in order. A hook that throws after `next` is skipped and its last `next` result
+ * stands (claude-code.d.ts, EngineEventOf), so the tool runs once either way.
+ */
 let toolsRun: string[] = []
 let commandRefusal: string | undefined
 let panesOpened: string[] = []
@@ -3434,6 +3437,8 @@ test('a Write or Artifact call keeps its result when saving the Files row fails,
   toolAnswers.set('Artifact', { result: { url: 'https://claude.ai/code/artifact/abc', path: '/tmp/project/r.html' } })
   storeSetRefusal = 'store unavailable'
 
+  // This pins only the result Claude gets. A hook that threw would be skipped with its `next` result kept, and the
+  // engine hides a skipped hook's report from the test, so the result alone cannot show the hook did not throw.
   expect((await write($, '/tmp/project/notes.md')).result).toBe('wrote it')
   const published = await $.tool.call({ tool: 'Artifact', file_path: '/tmp/project/r.html' } as never)
   expect((published.result as { url?: string }).url).toBe('https://claude.ai/code/artifact/abc')
@@ -4163,6 +4168,78 @@ test('a MultiEdit to the plan file redraws the plan', async ($, on) => {
   expect(await pane.find({ text: /^PLAN {2}1 of 2 steps$/ })).toBeDefined()
 })
 
+test('a plan file with text but no checkbox step names its path, and an empty one draws nothing', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  await startNowSession($, clock)
+  const plan = '/tmp/project/.inbox/plans/session-1.md'
+  files = [plan]
+  fileTexts.set(plan, '# Ideas\nSome notes, no steps yet.')
+  await $.turn.complete({ answer: 'Done.', durationMs: 5, isAborted: false, turnId: 't2', reason: 'answer' })
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: `Could not read the plan: ${plan}` })).toBeDefined()
+
+  fileTexts.set(plan, '  \n')
+  await $.turn.complete({ answer: 'Done.', durationMs: 5, isAborted: false, turnId: 't3', reason: 'answer' })
+  await clock.settle()
+  expect(await pane.find({ text: /Could not read the plan/ })).toBeUndefined()
+  expect(await pane.find({ text: /^PLAN/ })).toBeUndefined()
+})
+
+test('a session started with its plan on disk draws the plan before any prompt', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  fileTexts.set('/tmp/project/.inbox/plans/session-1.md', '## Cache\n- [x] Add the store\n- [~] Wire the reads')
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: /^PLAN {2}1 of 2 steps$/ })).toBeDefined()
+})
+
+test("/resume draws the resumed conversation's plan before any prompt", async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+  expect(await pane.find({ text: /^PLAN/ })).toBeUndefined()
+
+  fileTexts.set('/tmp/project/.inbox/plans/session-2.md', '## Docs\n- [~] Write it up\n- [ ] Link it')
+  await $.session.end({ reason: 'resume', sessionId: 'session-1', resume: { id: 'session-1' } })
+  await $.classic.SessionStart({ source: 'resume', session_id: 'session-2' })
+  await clock.settle()
+  expect(await pane.find({ text: /^PLAN {2}0 of 2 steps$/ })).toBeDefined()
+  expect(await pane.find({ text: /^◐ Write it up$/ })).toBeDefined()
+})
+
+test("/branch copies the parent's plan to the fork's plan path and draws it, and keeps a plan the fork has", async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const parent = '/tmp/project/.inbox/plans/session-1.md'
+  const text = '## Cache\n- [x] Add the store\n- [~] Wire the reads'
+  files = [parent]
+  fileTexts.set(parent, text)
+  await $.session.start({ cwd: '/tmp/project', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const pane = await $.ui.mount(PANE)
+
+  await $.session.end({ reason: 'resume', sessionId: 'session-1', resume: { id: 'session-1' } })
+  await $.classic.SessionStart({ source: 'fork', session_id: 'session-2' })
+  await clock.settle()
+  expect(writes).toContainEqual({ path: '/tmp/project/.inbox/plans/session-2.md', text })
+  expect(await pane.find({ text: /^PLAN {2}1 of 2 steps$/ })).toBeDefined()
+
+  const own = '/tmp/project/.inbox/plans/session-3.md'
+  files = [parent, own]
+  fileTexts.set(own, '## Docs\n- [ ] Write it up')
+  await $.session.end({ reason: 'resume', sessionId: 'session-2', resume: { id: 'session-2' } })
+  await $.classic.SessionStart({ source: 'fork', session_id: 'session-3' })
+  await clock.settle()
+  expect(writes.filter(w => w.path === own)).toEqual([])
+  expect(await pane.find({ text: /^PLAN {2}0 of 1 steps$/ })).toBeDefined()
+})
+
 for (const saved of ['needsYou', 'findings'] as const)
   for (const surface of ['terminal', 'desktop'] as const)
     test(`a ${surface} pane drawn while an old build's ${saved} tab is still saved draws Now`, async ($, on) => {
@@ -4451,6 +4528,64 @@ test('show refuses a link that is not http or https', async ($, on) => {
     expect(shown.result).toMatch(/^Not added: /)
   }
   expect(session().files).toEqual([])
+})
+
+for (const target of ['/tmp/project/tool.jar', '/tmp/project/Do It.shortcut', '/tmp/project/Waves.saver'])
+  test(`Open on ${target.split('/').pop()} shows it in Finder instead of running it`, async ($, on) => {
+    const clock = mock.clock(on, { now: 1_000_000 })
+    world($, on, [])
+    await startFilesSession($)
+    files = [target]
+    await $.tool.call({ tool: 'mcp__inbox__show', target } as never)
+    await clock.settle()
+    const pane = await $.ui.mount(PANE)
+    if (await pane.find({ key: 'tab-files' })) await pane.press({ key: 'tab-files' })
+    await clock.settle()
+    await clock.advance(PRESS_GUARD_MS)
+    const before = ran.length
+    await pane.press({ key: `file-open-${target}` })
+    await clock.settle()
+    expect(ran.slice(before).filter(r => r[0] === 'open')).toEqual([['open', '-R', target]])
+  })
+
+test('show puts a path that starts with ~/ under the home folder', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  world($, on, [], { HOME: '/Users/me' })
+  const session = watchSession(on)
+  await startFilesSession($)
+  const shown = await $.tool.call({ tool: 'mcp__inbox__show', target: '~/Desktop/report.pdf' } as never)
+  expect(shown.result).toBe('Added to Files: report.pdf')
+  expect(session().files.map(f => f.target)).toEqual(['/Users/me/Desktop/report.pdf'])
+})
+
+test("/clear drops the Files presses' records, and /resume keeps only those of the loaded session's rows", async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  world($, on, [])
+  const session = watchSession(on)
+  const pane = await startFilesTab($, on, clock)
+  await pane.press({ key: `file-copy-${B}` })
+  await clock.settle()
+  expect(Object.keys(session().lastActions)).toContain(B)
+
+  await $.session.end({ reason: 'clear', sessionId: 'session-1', resume: { id: 'session-1' } })
+  await $.classic.SessionStart({ source: 'clear', session_id: 'session-2' })
+  await clock.settle()
+  expect(session().lastActions).toEqual({})
+
+  const row = { id: A, kind: 'md', name: 'a.md', target: A, where: 'repo', at: 1, isDismissed: false }
+  const press = (at: number) => ({ kind: 'local', action: 'file-copy', text: 'Copy path', at })
+  stored.set(
+    's:session-3',
+    JSON.stringify({
+      ...SAVED_SESSION,
+      files: [row],
+      lastActions: { [A]: press(1), '/tmp/project/gone.md': press(2), 'pr:o/r#1': { ...press(3), action: 'pr-mark' } },
+    }),
+  )
+  await $.session.end({ reason: 'resume', sessionId: 'session-2', resume: { id: 'session-2' } })
+  await $.classic.SessionStart({ source: 'resume', session_id: 'session-3' })
+  await clock.settle()
+  expect(Object.keys(session().lastActions).sort()).toEqual([A, 'pr:o/r#1'])
 })
 
 test('Open on a saved link row with another scheme reads a refusal in red and runs nothing', async ($, on) => {

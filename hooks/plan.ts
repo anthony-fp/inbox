@@ -73,7 +73,8 @@ const STEP_TONES: Record<StepMark, PlanLine['tone']> = { done: 'done', current: 
 
 /**
  * The Now tab's plan section: the done count and a bar, then each task. A task with a current step lists its steps;
- * every other task takes one line with its count. `error` is the path of a plan file that is there but cannot be read.
+ * every other task takes one line with its count. `error` is the path of a plan file that is there
+ * but cannot be read, or that has text and no checkbox step.
  */
 export function planLines(view: PlanView | null, error: string | null): PlanLine[] {
   if (error !== null) return [{ text: `Could not read the plan: ${error}`, tone: 'error', isBold: false, indent: 0 }]

@@ -41,9 +41,11 @@ import {
   fileKind,
   hasScheme,
   isDocument,
-  isUrl,
+  isParsedUrl,
   mergeFiles,
+  notShownText,
   SHOW,
+  showTarget,
   shownFiles,
   whereLabel,
 } from './files'
@@ -2405,7 +2407,9 @@ async function prepareConversation($: EngineInterface, id: string, revision: num
     const latest = savedWrites === savedWriteCount() ? saved : await readSettled($, id)
     // A fork continues its parent's inbox, so a new id with no saved state starts from the parent's.
     const parent = latest?.session || !forkedFrom ? null : await readSettled($, forkedFrom)
-    await applyConversation($, id, revision, sessionRoot, latest, parent?.session)
+    // A fork with no saved state of its own continues its parent's plan too.
+    const planParent = !latest?.session && forkedFrom ? forkedFrom : undefined
+    await applyConversation($, id, revision, sessionRoot, latest, parent?.session, planParent)
   })
   applyingConversation = applying.catch(() => undefined)
   return applying
@@ -2418,6 +2422,7 @@ async function applyConversation(
   sessionRoot: string,
   saved: { session: SavedRecord | undefined } | null,
   parent?: SavedRecord,
+  planParent?: string,
 ) {
   if (revision !== loadRevision) return
   const isLoading = () => revision === loadRevision && conversation.id === id
@@ -2442,6 +2447,13 @@ async function applyConversation(
   if (!isLoading()) return
   if (saved !== null) await bringBack($, parent ?? saved.session, isLoading, parent !== undefined)
   if (!isLoading()) return
+  if (planParent) await copyPlan($, planPath(sessionRoot, planParent), planPath(sessionRoot, id)).catch(() => undefined)
+  if (!isLoading()) return
+  // $.state starts over after /resume, `claude --resume` and /branch, so the loaded conversation's plan is read now
+  // rather than at its next prompt or turn end, and before a catch-up's model call.
+  void refreshPlan($)
+    .then(() => followNewRows($))
+    .catch(() => undefined)
   const { ledger, presence } = await read($, SESSION)
   const isEmpty = !ledger.card && ledger.items.length === 0
   const needsCatchUp =
@@ -2454,14 +2466,30 @@ async function applyConversation(
   if (ledger.prs.length > 0) void fetchPrs($, false)
 }
 
+/** Copies a forked conversation's plan from its parent's plan file, unless the fork has one already. */
+async function copyPlan($: EngineInterface, from: string, to: string): Promise<void> {
+  if (from === to || (await $.fs.exists(to)) || !(await $.fs.exists(from))) return
+  await $.fs.write(to, await $.fs.read(from))
+}
+
 /** An update a reload cut off reads as failed, so the next one catches up. */
 function cutOffUpdate<S extends Session>(s: S): S {
   return s.presence.isUpdating ? { ...s, presence: { ...s.presence, isUpdating: false, ledgerState: 'failed' } } : s
 }
 
-/** Row presses keep only their PR records, whose rows outlive a conversation's items. */
-function withoutRowActions(lastActions: Record<string, LastAction>): Record<string, LastAction> {
-  return Object.fromEntries(Object.entries(lastActions).filter(([k]) => !/^[if]\d+$/.test(k)))
+/**
+ * Row presses keep only their PR records, whose rows outlive a conversation's items, and the Files presses of rows in
+ * `files`. A Files press is keyed by its row's target, so without this its record would outlive the row.
+ */
+function withoutRowActions(lastActions: Record<string, LastAction>, files: FileRow[]): Record<string, LastAction> {
+  const fileIds = new Set(files.map(f => f.id))
+  return Object.fromEntries(
+    Object.entries(lastActions).filter(([k, a]) => (isFileAction(a) ? fileIds.has(k) : !/^[if]\d+$/.test(k))),
+  )
+}
+
+function isFileAction(action: LastAction): boolean {
+  return action.action.startsWith('file-')
 }
 
 /**
@@ -2483,11 +2511,15 @@ async function bringBack(
     if (!isLoading() || s.ledger.turn !== 0 || s.ledger.card) return s
     isBrought = true
     if (isFork) return forkedFrom(s, loaded)
+    // A saved session from an earlier build may hold Files presses of rows it no longer has.
+    const fileIds = new Set(loaded.files.map(f => f.id))
     const lastActions = Object.fromEntries(
-      Object.entries(loaded.lastActions).map(([id, a]) => [
-        id,
-        a.delivery?.state === 'queued' ? { ...a, delivery: { ...a.delivery, state: 'unconfirmed' as const } } : a,
-      ]),
+      Object.entries(loaded.lastActions)
+        .filter(([id, a]) => !isFileAction(a) || fileIds.has(id))
+        .map(([id, a]) => [
+          id,
+          a.delivery?.state === 'queued' ? { ...a, delivery: { ...a.delivery, state: 'unconfirmed' as const } } : a,
+        ]),
     )
     // The stop and the running turn belong to the process that saved them.
     return cutOffUpdate({ ...loaded, lastActions, sent: [], stop: null, turn: emptySession().turn })
@@ -2505,7 +2537,7 @@ async function restore($: EngineInterface, saved: SavedRecord) {
       ...s,
       ledger: { ...loaded, turn: loaded.turn + s.ledger.turn },
       files: mergeFiles(files, s.files),
-      lastActions: withoutRowActions(s.lastActions),
+      lastActions: withoutRowActions(s.lastActions, mergeFiles(files, s.files)),
     })),
     forgetRowState($),
   ])
@@ -2630,36 +2662,14 @@ async function runArtifact<R extends { deny?: string; isError?: boolean; result?
   return ran
 }
 
-function isParsedUrl(text: string): boolean {
-  try {
-    new URL(text)
-    return true
-  } catch {
-    return false
-  }
-}
-
-/** The local path of a `file://` URL on this machine, or null for any other URL. */
-function fileUrlPath(raw: string): string | null {
-  try {
-    const url = new URL(raw)
-    if (url.protocol !== 'file:' || (url.hostname !== '' && url.hostname !== 'localhost')) return null
-    const path = decodeURIComponent(url.pathname)
-    return path.startsWith('/') ? path : null
-  } catch {
-    return null
-  }
-}
-
 /** The `show` tool: adds a link or file Claude names to Files. The answer is what Claude reads back. */
 async function showFile($: EngineInterface, input: Record<string, unknown>): Promise<string> {
   const raw = typeof input.target === 'string' ? input.target.trim() : ''
   if (raw === '') return 'Not added: show needs a target, a URL or a file path.'
-  const local = hasScheme(raw) ? fileUrlPath(raw) : absolutePath(raw)
-  const isLink = local === null && isUrl(raw) && isParsedUrl(raw)
-  if (local === null && !isLink)
-    return `Not added: ${raw} is not a link the inbox opens. Give an http or https URL, or a file path.`
-  const target = local ?? raw
+  const home = raw.startsWith('~/') ? ((await $.env.get('HOME').catch(() => undefined)) ?? '') : ''
+  const shown = showTarget(raw, conversation.root, home)
+  if (!shown) return notShownText(raw)
+  const { target, isLink } = shown
   const isPlan = target === planPath(conversation.root, conversation.id)
   const given = typeof input.name === 'string' ? input.name.trim() : ''
   const name = given || (isLink ? target : baseName(target))
@@ -2671,10 +2681,17 @@ async function showFile($: EngineInterface, input: Record<string, unknown>): Pro
   }
 }
 
-/** Reads the conversation's plan file. A file that is missing is no plan; one that is there but unreadable is an error. */
+/**
+ * Reads the conversation's plan file. A file that is missing or empty is no plan; one that is there but unreadable, or
+ * that has no checkbox step, is an error.
+ */
 async function readPlan($: EngineInterface, path: string): Promise<{ view: PlanView | null; error: string | null }> {
   const text = await $.fs.read(path).catch(() => null)
-  if (text !== null) return { view: parsePlan(text), error: null }
+  // A file with text but no checkbox step says so in one line, as one that cannot be read does. An empty file is no plan.
+  if (text !== null) {
+    const view = parsePlan(text)
+    return { view, error: view === null && text.trim() !== '' ? path : null }
+  }
 
   return { view: null, error: (await $.fs.exists(path).catch(() => false)) ? path : null }
 }
@@ -2787,7 +2804,7 @@ export const register: Register = on => {
 
           return {
             ...empty,
-            lastActions: withoutRowActions(s.lastActions),
+            lastActions: withoutRowActions(s.lastActions, empty.files),
             sent: [],
             heldRows: [],
             presence: { ...empty.presence, isUpdating: false },

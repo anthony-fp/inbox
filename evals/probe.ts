@@ -2,7 +2,7 @@ import { appendFileSync, readFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { parseArgs } from 'node:util'
 
-import { isUrl, SHOW } from '../hooks/files'
+import { notShownText, SHOW, showTarget } from '../hooks/files'
 import { EMPTY } from '../hooks/ledger'
 import { CLAUDE_CODE, guidedCloseDescription } from '../hooks/model-text'
 import { agentTools, recordClose, recordItem } from '../hooks/tools'
@@ -35,10 +35,13 @@ const shown = new Set<string>()
 function show(args: Record<string, unknown>): string {
   const target = typeof args.target === 'string' ? args.target.trim() : ''
   if (target === '') return 'Not added: show needs a target, a URL or a file path.'
+  // The same decision as the mod's: a `file://` URL becomes its path, and a scheme other than http or https is refused.
+  const decided = showTarget(target, process.cwd(), process.env.HOME ?? '')
+  if (!decided) return notShownText(target)
   const given = typeof args.name === 'string' ? args.name.trim() : ''
-  const name = given || (isUrl(target) ? target : (target.split('/').pop() ?? target))
-  const isNew = !shown.has(target)
-  shown.add(target)
+  const name = given || (decided.isLink ? decided.target : (decided.target.split('/').pop() ?? decided.target))
+  const isNew = !shown.has(decided.target)
+  shown.add(decided.target)
 
   return `${isNew ? 'Added to' : 'Already in'} Files: ${name}`
 }

@@ -35,9 +35,10 @@ export function localPath(raw: string, root: string, home: string): string {
   return `${root.replace(/\/$/, '')}/${raw.replace(/^\.\//, '')}`
 }
 
-// Files macOS `open` would run or install instead of showing.
+// Files macOS `open` would run or install instead of showing: apps, scripts, Java archives, Automator workflows and
+// actions, Shortcuts, installers, screen savers, settings panes and profiles, and location files that open a URL.
 const LAUNCHES =
-  /\.(app|command|tool|terminal|workflow|scpt|scptd|applescript|pkg|mpkg|dmg|webloc|inetloc|fileloc|prefpane|kext)$/i
+  /\.(app|command|tool|terminal|workflow|action|shortcut|jar|scpt|scptd|applescript|pkg|mpkg|dmg|webloc|inetloc|fileloc|prefpane|saver|mobileconfig|kext)$/i
 
 /**
  * The commands that open a local path. A folder, an executable, or anything

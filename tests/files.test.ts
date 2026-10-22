@@ -11,6 +11,7 @@ import {
   mergeFiles,
   setDismissed,
   shownFiles,
+  showTarget,
   whereLabel,
   type FileRow,
 } from '../hooks/files'
@@ -173,5 +174,29 @@ describe('isUrl', () => {
 describe('fileActions on a saved row with another scheme', () => {
   test('reads as a link, with no Finder', () => {
     expect(fileActions({ ...row('vnc://host', 1), kind: 'link' }).map(a => a.id)).toEqual(['open', 'copy', 'dismiss'])
+  })
+})
+
+describe('showTarget, which the mod and the eval probe share', () => {
+  test('keeps an http or https link', () => {
+    expect(showTarget('http://localhost:5173/', '/w', '/h')).toEqual({ target: 'http://localhost:5173/', isLink: true })
+    expect(showTarget('https://example.com/a', '/w', '/h')).toEqual({ target: 'https://example.com/a', isLink: true })
+  })
+
+  test('turns a file:// URL on this machine into its path', () => {
+    expect(showTarget('file:///tmp/a%20b.md', '/w', '/h')).toEqual({ target: '/tmp/a b.md', isLink: false })
+    expect(showTarget('file://localhost/tmp/a.md', '/w', '/h')).toEqual({ target: '/tmp/a.md', isLink: false })
+  })
+
+  test('refuses other schemes and a file:// URL on another host', () => {
+    for (const raw of ['vnc://host', 'smb://host/share', 'file://other-host/x.app'])
+      expect(showTarget(raw, '/w', '/h')).toBeNull()
+  })
+
+  test('puts a relative path under the root and ~/ under the home folder', () => {
+    expect(showTarget('out/r.html', '/w', '/h')).toEqual({ target: '/w/out/r.html', isLink: false })
+    expect(showTarget('/abs/r.html', '/w', '/h')).toEqual({ target: '/abs/r.html', isLink: false })
+    expect(showTarget('~/r.html', '/w', '/Users/me/')).toEqual({ target: '/Users/me/r.html', isLink: false })
+    expect(showTarget('~/r.html', '/w', '')).toBeNull()
   })
 })

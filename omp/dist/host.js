@@ -1259,7 +1259,7 @@ function localPath(raw, root, home) {
     return raw;
   return `${root.replace(/\/$/, "")}/${raw.replace(/^\.\//, "")}`;
 }
-var LAUNCHES = /\.(app|command|tool|terminal|workflow|scpt|scptd|applescript|pkg|mpkg|dmg|webloc|inetloc|fileloc|prefpane|kext)$/i;
+var LAUNCHES = /\.(app|command|tool|terminal|workflow|action|shortcut|jar|scpt|scptd|applescript|pkg|mpkg|dmg|webloc|inetloc|fileloc|prefpane|saver|mobileconfig|kext)$/i;
 function openCommands(path, isFile, isExecutable) {
   if (!isFile || isExecutable || LAUNCHES.test(path))
     return { argv: ["open", "-R", path], fallback: null };
