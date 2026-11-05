@@ -3896,6 +3896,33 @@ test('every row in the demo, on every tab, draws its plan’s buttons in the pla
   }
 })
 
+test('a Fix sent for a finding a question had asked about reads the fix label on its closed row', () => {
+  const at = 1_000_000
+  const { ledger } = demoView(at)
+  const asked = {
+    id: 'f90',
+    kind: 'issue' as const,
+    title: 'Retry',
+    detail: 'No delay.',
+    path: null,
+    at,
+    askedAs: 'i2',
+  }
+  const view = inboxView({
+    ledger: { ...ledger, findings: [asked], closedFindings: [] },
+    lastActions: { f90: { kind: 'handoff', action: 'address', text: 'Fix', at } },
+    notes: {},
+    turns: [],
+    extraSteps: {},
+    settleWindowMs: SETTLED_MS,
+    status: perTurnStatus({ isUpdating: false, isFailed: false, retries: true }),
+    replies: {},
+    discarded: {},
+    now: at,
+  })
+  expect(view.findings.closed.map(f => [f.id, f.outcomeLabel])).toEqual([['f90', 'Fix']])
+})
+
 test('a forked conversation keeps the parent’s findings and closed records, and dismissing the question that replaced a finding brings the finding back', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   world($, on, [])

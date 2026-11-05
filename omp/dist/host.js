@@ -2223,7 +2223,7 @@ function inboxView({
       ...f,
       how: "answered",
       outcome,
-      outcomeLabel: outcomeLabel({ ...f, outcome }),
+      outcomeLabel: outcomeLabel({ outcome }),
       closedAt: lastActions[f.id].at,
       delivery: pendingDeliveryAt(lastActions[f.id], now)
     };
